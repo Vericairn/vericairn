@@ -24,6 +24,8 @@ internal sealed class EstateInitCommand : Command
         var githubOption = new Option<string?>("--github") { Description = "GitHub organization login, if any." };
         var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the Vericairn source to pin.", DefaultValueFactory = _ => "Vericairn/vericairn" };
         var commitOption = new Option<string?>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits). Defaults to the running build's recorded commit; required when the build records none.", Arity = ArgumentArity.ExactlyOne };
+        var releaseOption = new Option<bool>("--release") { Description = "Verify and pin the running published release, including its platform archive." };
+        var fromOption = new Option<string?>("--from") { Description = "With --release, verify downloaded release responses, SHA256SUMS and archive in this directory without network access." };
         var profileOption = new Option<string>("--profile") { Description = "Storage profile: repository-synced (records as files in a git repository) or local-only (records in this machine's live store).", DefaultValueFactory = _ => "repository-synced" };
         Options.Add(profileOption);
         Options.Add(nameOption);
@@ -34,6 +36,8 @@ internal sealed class EstateInitCommand : Command
         Options.Add(githubOption);
         Options.Add(repositoryOption);
         Options.Add(commitOption);
+        Options.Add(releaseOption);
+        Options.Add(fromOption);
         SetAction(parseResult => operations.Init(
             parseResult.GetValue(context.EstateOption)!,
             parseResult.GetValue(nameOption)!,
@@ -45,7 +49,9 @@ internal sealed class EstateInitCommand : Command
             parseResult.GetValue(repositoryOption)!,
             parseResult.GetValue(commitOption) ?? RecordedCommit(versionText),
             parseResult.GetValue(profileOption)!,
-            parseResult.GetValue(context.JsonOption)));
+            parseResult.GetValue(context.JsonOption),
+            parseResult.GetValue(releaseOption),
+            parseResult.GetValue(fromOption), versionText));
     }
 
     private static string? RecordedCommit(string versionText)

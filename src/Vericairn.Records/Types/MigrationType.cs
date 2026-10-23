@@ -3,6 +3,7 @@
 
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Updates;
 
 namespace Vericairn.Records.Types;
 
@@ -96,7 +97,12 @@ public sealed class MigrationType : IRecordType
 
         if (release is not null)
         {
-            context.RequireReference("release", release, "release");
+            if (context.Find(release) is { } observed && VericairnReleaseObservation.Is(observed))
+            {
+                if (context.Record.Subject != observed.Reference)
+                    body.Error("migration.release", "release", "A dependency upgrade pins its vericairn-release observation as the exact subject, including its hash.");
+            }
+            else context.RequireReference("release", release, "release");
         }
 
         if (context.Principal(context.Record.By) is null)

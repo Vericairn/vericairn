@@ -115,6 +115,32 @@ public sealed class UpdateNoticeJourneyTests : IDisposable
         finally { using (store.Acquire()) store.WriteState(prior); }
     }
 
+    [Fact]
+    public void SourcePinCheckWarnsFromCacheWithoutChangingItsCommitOrCanonicalStatus()
+    {
+        Init();
+        string path = Path.Combine(estate, "estate", "manifest.json");
+        byte[] pin = File.ReadAllBytes(path);
+        string before = CliHarness.Ok("--estate", estate, "status", "--json").Out;
+        var store = new ReleaseUpdateStore();
+        ReleaseCheckState prior = store.ReadState();
+        try
+        {
+            var clock = new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero));
+            using (store.Acquire()) store.WriteState(new(clock.GetUtcNow(), clock.GetUtcNow(), "v9.2.0"));
+            var source = new ReleaseUpdatesTests.Source { Answer = _ => throw new InvalidOperationException("Check must never call a source.") };
+            var updates = new ReleaseUpdates(store, source, clock);
+            CliHarness.Outcome check = CliHarness.RunWithUpdates(updates, "--estate", estate, "estate", "check");
+            Assert.Equal(0, check.Code);
+            Assert.Contains("manifest.release-behind", check.Out, StringComparison.Ordinal);
+            Assert.Contains("estate upgrade --to 9.2.0 --check", check.Out, StringComparison.Ordinal);
+            Assert.Equal(0, source.Calls);
+            Assert.Equal(pin, File.ReadAllBytes(path));
+            Assert.Equal(before, CliHarness.Ok("--estate", estate, "status", "--json").Out);
+        }
+        finally { using (store.Acquire()) store.WriteState(prior); }
+    }
+
     private void Init() => CliHarness.Ok("--estate", estate, "estate", "init", "--name", "Update fixture", "--slug", "update-fixture", "--purpose", "Test release notices.", "--operator-name", "Operator", "--organization", "Example", "--commit", new string('a', 40));
     public void Dispose() => CliHarness.Delete(home, estate);
 }

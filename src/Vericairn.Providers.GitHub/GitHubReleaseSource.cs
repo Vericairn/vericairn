@@ -27,4 +27,7 @@ public sealed class GitHubReleaseSource : IReleaseSource
 
     /// <inheritdoc />
     public Task<PublishedRelease?> LatestAsync(CancellationToken cancellationToken) => source.LatestAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<VerifiedRelease> VerifyAsync(ReleaseBuild build, string platform, CancellationToken cancellationToken = default) => source.VerifyAsync(build, platform, cancellationToken);
 }

@@ -75,6 +75,49 @@ public class ReleasePinWarningTests
         Assert.Empty(findings);
     }
 
+    [Theory]
+    [InlineData("0.8.2", "v0.8.3", true)]
+    [InlineData("0.8.3-dev", "v0.8.3", true)]
+    [InlineData("0.8.3", "v0.8.3", false)]
+    [InlineData("0.8.4", "v0.8.3", false)]
+    [InlineData("0.8.2", null, false)]
+    [InlineData("unknown", "v0.8.3", false)]
+    public void SourcePinsUseTheRunningBuildAndCachedKnowledgeWithoutGuessingCommitPrecedence(string running, string? cached, bool warn)
+    {
+        using var estate = new TestEstate();
+        byte[] before = File.ReadAllBytes(Path.Combine(estate.Root, EstateLayout.ManifestPath));
+        var findings = new FindingList();
+        ReleasePinWarning.Add(estate.Load(), findings, PublishedRelease.FromTag(cached), running);
+        if (warn)
+        {
+            Finding warning = Assert.Single(findings);
+            Assert.Equal("manifest.release-behind", warning.Code);
+            Assert.Contains("uses source", warning.Message, StringComparison.Ordinal);
+            Assert.Contains("vericairn estate upgrade --to 0.8.3 --check", warning.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("release record must be", warning.Message, StringComparison.Ordinal);
+        }
+        else Assert.Empty(findings);
+        Assert.Equal(before, File.ReadAllBytes(Path.Combine(estate.Root, EstateLayout.ManifestPath)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BothPinModesLearnFromPublishedDependencyObservations(bool releasePin)
+    {
+        using var estate = new TestEstate();
+        using var fixture = new PublishedReleaseFixture();
+        VerifiedRelease release = await fixture.VerifyAsync();
+        estate.Add("observation", estate.OperatorId, release.ObservationBody().GetRawText(), estate.Estate.Reference);
+        if (releasePin) Pin(estate, "1.0.0");
+        var findings = new FindingList();
+        ReleasePinWarning.Add(estate.Load(), findings, null, "1.0.0");
+        Finding warning = Assert.Single(findings);
+        Assert.Contains("newer published release 9.2.0", warning.Message, StringComparison.Ordinal);
+        Assert.Empty(estate.Load().OfType("release"));
+        Assert.Equal(5, fixture.Requests.Count);
+    }
+
     private static void Pin(TestEstate estate, string version, string repository = "Vericairn/vericairn") =>
         estate.WriteFile(EstateLayout.ManifestPath, CanonicalJson.SerializePretty(JsonSerializer.SerializeToElement(new
         {

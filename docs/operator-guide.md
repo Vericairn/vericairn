@@ -51,9 +51,18 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the manifest later pins a published release once the estate holds that release's record (section 9). `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.2 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.2 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
+
+The 0.8.3 development build also adds opt-in `estate init --release`. Run a published target build
+containing that option when available, adding `--release` to the command above. It verifies the
+GitHub release, tag commit, `SHA256SUMS` and the current platform archive before creating anything.
+It writes three records: operator, charter and a `vericairn-release` observation. The manifest starts
+in release mode and pins that observation by hash. It creates no product or product release record.
+`--profile local-only` works the same way. A different repository or commit override is refused with
+`--release`; omit `--release` to retain ordinary offline source initialization. `--from <download-directory>` supplies downloaded
+publication evidence and archive bytes for offline verification; see [offline inputs](install.md#offline-inputs).
 
 Optional charter signatures do not waive record-specific requirements. Policy and writing changes,
 duty results/reviews, strict generated declarations and the operator one-step action still require
@@ -422,16 +431,47 @@ running its previous release. Restart running workers with the new release after
 has settled. The upgrade command does not stop the daemon or workers itself.
 
 ```sh
-vericairn estate upgrade --to 0.8.2 --check
-vericairn estate upgrade --to 0.8.2 --by <principal id>
+vericairn estate upgrade --to <published-version> --check
+vericairn estate upgrade --to <published-version> --by <principal id>
 ```
 
-Run with the binary of the version you are upgrading to, once the published release record of that version is in the estate. The plan shows the migrations the new version applies; applying pins the manifest to the published release with its artifact hashes, applies the record-format migrations as one reviewable change, and writes a migration record; a failed migration leaves the repository untouched. Commit the change; the bootstrap then fetches that release by hash.
+Run with the binary of the version you are upgrading to. The 0.8.3 development path uses the
+estate's recorded Vericairn release when present. Otherwise it verifies the published Vericairn
+dependency: stable published GitHub metadata, tag commit equal to the running target build's commit,
+`SHA256SUMS`, and the platform archive's bytes. It resolves the tag again after hashing the archive
+and refuses a moved tag. Anonymous requests use no credentials, cookies, proxies or trace propagation.
+
+The plan shows the formats, migration steps and artifact hashes without writing anything. Applying
+writes the verified `vericairn-release` observation with the migration record, then moves the manifest
+to release mode and pins the observation's hash. A source pin moves through exactly the same command;
+the migration names both pins. The builds are unsigned developer builds: published hashes identify
+bytes, and this machine verifies only its own platform archive. Existing record bytes and the record
+format contract are unchanged. Review and commit the change; the bootstrap verifies the archive
+against the manifest's hash as before. Do not author a product release record for a dependency.
+
+Add `--from <download-directory>` to both check and apply to use the [offline inputs](install.md#offline-inputs).
+The directory belongs on the runtime's machine and holds downloaded release/tag responses,
+`SHA256SUMS` and the archive. Verification reads these inputs without network access or file changes.
+Offline tag evidence describes the saved snapshot, not later GitHub state.
+
+| Refusal | Next action; no observation, migration or pin change is written |
+| --- | --- |
+| Tag differs from the target commit or moves during verification | Investigate the tag and obtain a consistent target build and publication snapshot. |
+| Missing `SHA256SUMS`, missing platform entry or mismatched archive | Download the checksum file and platform archive again from the same complete release. |
+| Draft or prerelease | Choose a stable published release and run its command line. |
+| Target cannot read an estate format or writes an older format | Choose a forward-compatible target; downgrade does not rewrite historical records. |
+| Network unavailable | Retry with access to GitHub, or supply the downloaded offline inputs. |
+| Command line or daemon differs from the target | Install the target command line and restart the serving daemon with that exact build. |
+
+`estate check` reads release records, dependency observations and cached stable-release knowledge
+without making a release request. `manifest.release-behind` covers release pins and source pins;
+for source pins its comparison is to the build performing the check. It names the target's
+upgrade check command and leaves the pin unchanged. The cache is knowledge, not automatic approval.
 
 An estate running 0.8.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
 between the two resumes from that migration record when run again, and until then opening the estate
-warns `upgrade.incomplete`. A release pin with no migration record is refused.
+warns `upgrade.incomplete`. A legacy release pin with no migration record is refused; a fresh `init --release` pin has its exact dependency observation instead.
 
 An estate running 0.7.3 at format 2 applies `record-format-3`. The plan names that step, the
 published target and its artifact hashes. Applying it appends the migration record and changes the
@@ -1097,14 +1137,20 @@ installed client. They do not update an estate's manifest.
 
 `vericairn estate check` separately warns with `manifest.release-behind` when an estate is pinned below
 the newest published stable release it knows. It reads the estate's release records for the manifest's
-repository and, for `Vericairn/vericairn`, the local release cache. It makes no network request. Unrelated
-products, candidate releases and prereleases do not count. An equal or higher pin, a source pin, or no
-known release produces no warning. The finding is always a warning, so it does not fail the check.
+repository and, for `Vericairn/vericairn`, the local release cache. The **0.8.3 development build** also
+reads verified `vericairn-release` observations and warns for a source pin when the running build's
+version is older than a known published release; it does not infer an ordering of source commits.
+The check makes no network request. Unrelated products, candidate releases and prereleases do not
+count. An equal or newer version, or no known release, produces no warning. The finding is always a
+warning, so it does not fail the check.
 
-Once the target's published release record and required evidence are in the estate, use that release's
-CLI to review `vericairn estate upgrade --to <published-version> --check`, then apply it with
-`vericairn estate upgrade --to <published-version> --by <operator-id>`. The existing upgrade checks,
-authority rules and migration record still apply. A cached network answer grants no upgrade authority.
+Use a published target build containing the 0.8.3 dependency support to review
+`vericairn estate upgrade --to <published-version> --check`, then apply it with
+`vericairn estate upgrade --to <published-version> --by <operator-id>`. When the estate has no matching
+Vericairn product release record, the command verifies the published release metadata and tag, checks
+the platform archive against `SHA256SUMS`, then records a dependency observation and pins its hash.
+Add `--from <directory>` to verify downloaded release evidence offline. The existing upgrade checks,
+authority rules and record-format migrations still apply. A cached network answer grants no upgrade authority.
 
 
 ## 25. Current required attention

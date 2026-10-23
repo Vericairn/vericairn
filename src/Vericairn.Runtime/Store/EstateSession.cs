@@ -46,10 +46,23 @@ public sealed class EstateSession : IDisposable
     public string Profile => Manifest.Profile;
 
     /// <summary>The live store on this machine.</summary>
-    public LiveStore Live { get; }
+    public LiveStore Live { get; private set; }
 
     /// <summary>The object store: the repository's objects/ directory, or the live database.</summary>
-    public IObjectStore Objects { get; }
+    public IObjectStore Objects { get; private set; }
+
+    // Only the deferred upgrade host calls this, after verification, migration staging and record judgment.
+    // Ordinary read-only sessions are never promoted by their read operations.
+    internal void EnableWrites()
+    {
+        if (!readOnly) return;
+        EstateSession writable = Open(Root);
+        Live.Dispose();
+        Objects.Dispose();
+        Live = writable.Live;
+        Objects = writable.Objects;
+        readOnly = false;
+    }
 
     /// <summary>Where the live store of an estate opened from a root lives: under the per-user state, keyed by estate id and root path.</summary>
     public static string LiveStorePath(string root, string estateId, string profile) => EstateLocations.LiveStorePath(root, estateId, profile);

@@ -15,7 +15,8 @@ namespace Vericairn.Cli;
 
 internal sealed class EstateOperations(CommandContext context)
 {
-    public int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string? commit, string profile, bool json)
+    public int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string? commit, string profile, bool json,
+        bool release = false, string? from = null, string? buildIdentity = null)
     {
         if (commit is null)
         {
@@ -24,7 +25,20 @@ internal sealed class EstateOperations(CommandContext context)
 
         try
         {
+            if (from is not null && !release) return context.Fail("--from requires --release. Add --release to verify the downloaded published build, or omit --from to initialize a source pin.");
+            VerifiedRelease? verified = null;
+            if (release)
+            {
+                ReleaseBuild build = ReleaseBuild.Parse(buildIdentity ?? VersionText());
+                if (!string.Equals(repository, VerifiedRelease.Repository, StringComparison.OrdinalIgnoreCase) || commit != build.Commit)
+                    return context.Fail("--release pins the running published build's repository and commit. Remove the source override or omit --release to keep a source pin. Nothing changed.");
+                Composition.Register(Runtime.Providers.ProviderRegistry.Current);
+                verified = from is null
+                    ? Runtime.Providers.ProviderRegistry.Current.VericairnReleases!.VerifyAsync(build, ReleaseBuild.Platform, context.CancellationToken).GetAwaiter().GetResult()
+                    : PublishedReleaseVerifier.FromDirectoryAsync(from, build, ReleaseBuild.Platform, context.CancellationToken).GetAwaiter().GetResult();
+            }
             var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
+            initialization = initialization with { Release = verified };
             RecordEnvelope operatorRecord;
             RecordEnvelope estateRecord;
             if (profile == "local-only")
@@ -36,9 +50,11 @@ internal sealed class EstateOperations(CommandContext context)
                 using EstateSession session = EstateSession.Open(root);
                 session.Write(prepared.Operator);
                 session.Write(prepared.Estate);
+                if (prepared.Release is not null) session.Write(prepared.Release);
                 EstateModel model = session.Load();
                 if (model.Findings.HasErrors)
                 {
+                    if (prepared.Release is not null) session.Discard(prepared.Release);
                     session.Discard(prepared.Estate);
                     session.Discard(prepared.Operator);
                     File.Delete(manifestPath);
@@ -133,9 +149,9 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
-    public int Upgrade(string root, string version, string? by, bool check, bool json) => context.WithApi(root, api =>
+    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null) => context.WithApi(root, api =>
     {
-        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check));
+        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText() });
         if (plan is null)
         {
             if (problem is not null && problem.Findings.Count > 0)
@@ -171,7 +187,7 @@ internal sealed class EstateOperations(CommandContext context)
         }
 
         return Clean;
-    });
+    }, readOnly: check, upgrade: true);
 
     public int Reconcile(string root, bool json) => context.WithApi(root, api =>
     {
@@ -209,7 +225,7 @@ internal sealed class EstateOperations(CommandContext context)
             all.Add(finding);
         }
 
-        ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
+        ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease(), VersionText());
 
         return all;
     }

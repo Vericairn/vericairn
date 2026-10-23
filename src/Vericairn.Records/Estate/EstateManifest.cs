@@ -43,6 +43,9 @@ public sealed partial class EstateManifest
     /// <summary>Release mode: the hash of the distributable per platform, so the bootstrap verifies what it fetches against the estate, never against a tag name.</summary>
     public IReadOnlyDictionary<string, string>? Artifacts { get; init; }
 
+    /// <summary>Optional exact published dependency observation. Older release manifests remain readable.</summary>
+    public RecordReference? Release { get; init; }
+
     /// <summary>One-line description of the pin for status output.</summary>
     public string Describe() => Mode == "release" ? $"release {Version}" : $"source {Repository}@{(Commit is { Length: >= 12 } ? Commit[..12] : Commit)}";
 
@@ -121,6 +124,7 @@ public sealed partial class EstateManifest
             BodyReader? vericairn = reader.Nested("vericairn", true);
             string? mode = null, repository = null, commit = null, version = null;
             Dictionary<string, string>? artifacts = null;
+            RecordReference? release = null;
             if (vericairn is not null)
             {
                 mode = vericairn.Enum("mode", true, "source", "release");
@@ -128,6 +132,16 @@ public sealed partial class EstateManifest
                 commit = vericairn.Text("commit", mode == "source", 40, CommitPattern(), "a 40-character lower-case hex commit id");
                 version = vericairn.Text("version", mode == "release", 100, Patterns.SemanticVersion, "a semantic version");
                 BodyReader? artifactsReader = vericairn.Nested("artifacts", mode == "release");
+                BodyReader? releaseReader = vericairn.Nested("release", false);
+                if (releaseReader is not null)
+                {
+                    string? type = releaseReader.Enum("type", true, "observation");
+                    string? id = releaseReader.Ulid("id", true);
+                    string? hash = releaseReader.Hash("hash", true);
+                    releaseReader.NoOtherKeys();
+                    if (mode != "release") releaseReader.Error("manifest.release", "type", "Only a release-mode manifest pins a published dependency observation.");
+                    if (type is not null && id is not null && hash is not null) release = new(type, id, hash);
+                }
                 if (artifactsReader is not null)
                 {
                     var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -157,7 +171,7 @@ public sealed partial class EstateManifest
                 return null;
             }
 
-            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts };
+            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts, Release = release };
         }
     }
 

@@ -671,7 +671,14 @@ public sealed record RunsResponse(IReadOnlyList<RunRow> Runs, IReadOnlyList<Ledg
 /// <param name="Version">Target version.</param>
 /// <param name="By">Applying principal (unless check).</param>
 /// <param name="Check">Plan only.</param>
-public sealed record UpgradeRequest(string Version, string? By, bool Check);
+public sealed record UpgradeRequest(string Version, string? By, bool Check)
+{
+    /// <summary>Optional directory of downloaded release evidence on the runtime's machine; no path is recorded.</summary>
+    public string? From { get; init; }
+
+    /// <summary>The invoking command line's full build identity, checked against the runtime before observing a dependency.</summary>
+    public string? ClientBuild { get; init; }
+}
 
 /// <summary>An upgrade plan, and whether it was applied.</summary>
 /// <param name="FromPin">Pin before.</param>

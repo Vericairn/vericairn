@@ -204,7 +204,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 all.Add(finding);
             }
 
-            ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
+            ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease(), Version);
 
             return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
@@ -1386,16 +1386,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentNullException.ThrowIfNull(request);
         lock (gate)
         {
-            EstateModel model = session.Load();
+            EstateModel model = session.Read();
             if (model.Findings.HasErrors)
             {
                 return (null, new Problem("invalid", "The estate has errors; resolve them before upgrading.", ToFindings(model.Findings, "not upgraded").Findings));
             }
 
             UpgradePlan plan;
+            AuthoredRecord? dependency = null;
             try
             {
-                plan = EstateUpgrade.Plan(model, request.Version);
+                (plan, dependency) = PlanUpgrade(model, request);
             }
             catch (InvalidOperationException exception)
             {
@@ -1420,7 +1421,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 // Only an upgrade moves a manifest to a release, so a release pin that no migration record names was moved by a run
                 // that stopped before recording the move.
-                if (model.Manifest!.Mode == "release" && !model.OfType("migration").Any(m => EstateModel.BodyString(m, "toPin") == plan.ToPin))
+                if (model.Manifest!.Mode == "release" && model.Manifest.Release is null && !model.OfType("migration").Any(m => EstateModel.BodyString(m, "toPin") == plan.ToPin))
                 {
                     return (null, new Problem("refused", $"The manifest is pinned to {plan.ToPin}, and no migration record names that pin: an earlier upgrade stopped after it moved the manifest and before it recorded the move. Inspect the repository's last change to {EstateLayout.ManifestPath}, then record that migration with `vericairn records new migration`, naming its fromPin, toPin {plan.ToPin}, fromFormat, toFormat {plan.ToFormat}, the steps it ran and release {plan.Release.Id}. Nothing changed.", []));
                 }
@@ -1456,11 +1457,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, denied);
             }
 
+            if (dependency is not null)
+            {
+                (AuthoredRecord? signed, string? refusal) = AuthorLocked(new RecordDraft("observation", request.By, dependency.Envelope.Body,
+                    dependency.Envelope.Subject, At: dependency.Envelope.AtTime, Id: dependency.Envelope.Id, Format: dependency.Envelope.Format), model);
+                if (signed is null) return (null, new Problem("refused", refusal!, []));
+                dependency = signed;
+                plan = EstateUpgrade.Plan(model, signed.Envelope);
+            }
+
             if (pending is not null)
             {
                 // The steps' files and the migration record were written before the run stopped; only the manifest remains.
                 try
                 {
+                    EnableUpgradeWrites();
                     ReplaceManifest(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -1487,10 +1498,23 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
+            changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
+            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
+            var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
+                Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));
+            (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
+            if (migration is null) return (null, new Problem("refused", migrationRefusal!, []));
+            AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
+            if (JudgeProposedLocked(proposed) is Problem rejected) return (null, rejected);
+            DocumentChangePlan generated = PrepareDocuments(model, proposed);
+            if (generated.Status != DocumentGenerationStatus.Success)
+                return (null, new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
+
             var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
             var createdDirectories = new HashSet<string>(StringComparer.Ordinal);
             try
             {
+                EnableUpgradeWrites();
                 foreach ((string relative, byte[] bytes) in context.Staged.OrderBy(s => s.Key, StringComparer.Ordinal))
                 {
                     string full = Path.Combine(session.Root, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -1503,7 +1527,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     }
                     Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                     File.WriteAllBytes(full, bytes);
-                    changes.Add($"{relative} written by the migrations");
                 }
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -1515,11 +1538,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             UpgradeStage?.Invoke("staged");
             // The migration record comes before the manifest: a run that stops between them leaves a record that says what to finish,
             // never a moved manifest with nothing recording the move.
-            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
-            WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement, Format: Math.Min(plan.ToFormat, RecordFormats.Current)), model);
+            (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null);
+            RecordWritten? stored = written.FirstOrDefault(r => r.Id == migration.Envelope.Id);
+            var outcome = new WriteOutcome(stored, storageProblem);
             if (outcome.Written is null)
             {
                 RestoreFiles(session.Root, previousContents, createdDirectories);
+                if (written.Count > 0)
+                    return (null, new Problem("reconcile-required", $"Verified dependency observation {written[0].Id} was stored, but its migration was not. Inspect the interrupted batch with estate reconcile before retrying the upgrade; the manifest has not moved.", []));
                 return (null, outcome.Problem);
             }
 

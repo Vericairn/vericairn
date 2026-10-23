@@ -12,6 +12,10 @@ public interface IReleaseSource
 {
     /// <summary>Returns the latest stable published release, or null when no usable release was observed.</summary>
     Task<PublishedRelease?> LatestAsync(CancellationToken cancellationToken);
+
+    /// <summary>Verifies a specific published release and the running platform archive without writing files. Existing sources explicitly refuse until they support verification.</summary>
+    Task<VerifiedRelease> VerifyAsync(ReleaseBuild build, string platform, CancellationToken cancellationToken = default) =>
+        Task.FromException<VerifiedRelease>(new InvalidOperationException("This release source cannot verify published archives. Use a source that supports verification or supply --from <directory>. Nothing changed."));
 }
 
 /// <summary>A release source that replays a recorded stable tag without any transport; it qualifies no live release host.</summary>
