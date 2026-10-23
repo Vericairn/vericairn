@@ -101,7 +101,8 @@ public sealed class AcceptanceType : IRecordType
         }
 
         RecordEnvelope latest = context.Model.Latest(subject);
-        if (context.Model.IsCurrent(context.Record) && latest.Id != subject.Id && !ReleaseType.IsPublicationOf(subject, latest))
+        if (context.Model.IsCurrent(context.Record) && latest.Id != subject.Id &&
+            !WorkOrderRevisions.IsCurrentSubject(context.Model, context.Record.Subject, latest) && !ReleaseType.IsPublicationOf(subject, latest))
         {
             context.Warning("acceptance.unresolved", "The subject was superseded after this acceptance; it accepts an earlier revision and needs reconsideration.");
         }
