@@ -239,8 +239,11 @@ public class SoftwareJourneyTests
             Assert.Equal("known-failure", refused.Json.GetProperty("status").GetString());
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
             Assert.Equal(2, ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Code);
+            int beforeRetry = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
             CliHarness.Outcome retried = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "Logged in; the refused attempt had no effect.");
             Assert.Equal("dispatched", retried.Json.GetProperty("status").GetString());
+            Assert.Single(retried.Json.GetProperty("basisEvidence").EnumerateArray());
+            Assert.Equal(beforeRetry + 2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
 
             // An uncertain dispatch stays uncertain until reconciled; cancellation settles it once no effect is found.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.Uncertain;
@@ -250,6 +253,11 @@ public class SoftwareJourneyTests
             Assert.Contains("no run is identified", CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--cancel", "GitHub shows no run and no release for v0.4.0.");
             Assert.Contains("github-releases:Example/widget:v0.4.0  canceled", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+            int beforeCanceledRetry = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
+            CliHarness.Outcome canceledRetry = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "The canceled intent was confirmed to have no effect.");
+            Assert.Equal("dispatched", canceledRetry.Json.GetProperty("status").GetString());
+            Assert.Single(canceledRetry.Json.GetProperty("basisEvidence").EnumerateArray());
+            Assert.Equal(beforeCanceledRetry + 2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
         }
         finally

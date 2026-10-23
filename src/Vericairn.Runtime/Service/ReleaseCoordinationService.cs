@@ -270,6 +270,7 @@ internal sealed partial class ReleaseCoordinationService(
         string? releaseCommit = request.Commit ?? (settings.TryGetValue("ref", out string? exactRef) && Patterns.Commit.IsMatch(exactRef) ? exactRef : null);
         List<string> basisEvidence = [];
         List<RecordReference> excluded = [];
+        RecordEnvelope claimRevision;
         string previousId;
         JsonElement previousBody;
         ReleasePolicyAssessment admitted;
@@ -312,9 +313,9 @@ internal sealed partial class ReleaseCoordinationService(
             WriteOutcome claim = recordAccess.WriteLocked(new("operation", request.By, Element(claimBody), new("product", request.Product, null), current?.Id, now()), session.Load());
             if (!claim.Ok) return ReleaseProblem(identity, status ?? "not-started", claim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
             previousId = claim.Written!.Id;
-            RecordEnvelope stored = session.Load().ById[previousId];
-            excluded.Add(stored.Reference);
-            previousBody = stored.Body;
+            claimRevision = session.Load().ById[previousId];
+            excluded.Add(claimRevision.Reference);
+            previousBody = claimRevision.Body;
             releaseDispatches.Add(identity);
         }
 
@@ -336,7 +337,7 @@ internal sealed partial class ReleaseCoordinationService(
                     fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
                 if (probeRecord is not null) fresh.Objections.AddRange(recordAccess.LoadWith([probeRecord]).Findings.Where(f => f.Severity == Severity.Error).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
                 JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
-                if (!admitted.HasSameInputsAndFindings(fresh.Assessment) && !fresh.Objections.Any(f => f.Code is "release.basis-size" or "release.basis-file-size"))
+                if (!admitted.HasSameInputsAndFindings(fresh.Assessment, [claimRevision]) && !fresh.Objections.Any(f => f.Code is "release.basis-size" or "release.basis-file-size"))
                     Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
                 admitted = fresh.Assessment;
                 if (fresh.Objections.Count > 0)
