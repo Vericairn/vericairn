@@ -467,7 +467,11 @@ public sealed record ReleaseCheckDetails(string? Commit, string? Expected, strin
 /// <param name="Cancel">A reason that settles an intent never dispatched, or an outcome reconciled as having had no effect.</param>
 /// <param name="Product">The product, to find the operation by product and version.</param>
 /// <param name="Provider">The provider, to find the operation by provider and destination.</param>
-public sealed record ReleaseObserveRequest(string Version, string? Repository, string By, IReadOnlyList<string>? Qualified = null, IReadOnlyList<string>? Limitations = null, string Signing = "unsigned developer build", string? Cancel = null, string? Product = null, string? Provider = null);
+public sealed record ReleaseObserveRequest(string Version, string? Repository, string By, IReadOnlyList<string>? Qualified = null, IReadOnlyList<string>? Limitations = null, string Signing = "unsigned developer build", string? Cancel = null, string? Product = null, string? Provider = null)
+{
+    /// <summary>Draft-deletion intent id to observe after the operator records dispatch; observes no build or publication.</summary>
+    public string? Withdrawal { get; init; }
+}
 
 /// <summary>A setting a provider declares.</summary>
 /// <param name="Name">The setting's name.</param>

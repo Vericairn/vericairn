@@ -376,6 +376,11 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public RunStopResponse RunStop(string run, RunStopRequest request) => Post<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request)!;
 
     /// <inheritdoc />
+    public WorkMovePlanResponse WorkMovePlan(string key, WorkMovePlanRequest request) => Post<WorkMovePlanRequest, WorkMovePlanResponse>("/v1/work/" + Uri.EscapeDataString(key) + "/move-plan", request)!;
+
+    /// <inheritdoc />
+    public ReleaseResponse ReleaseWithdraw(ReleaseWithdrawRequest request) => Post<ReleaseWithdrawRequest, ReleaseResponse>("/v1/releases/withdraw", request)!;
+
     public ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/check", request)!;
 
     /// <inheritdoc />

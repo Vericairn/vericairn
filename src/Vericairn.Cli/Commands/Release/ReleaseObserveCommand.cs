@@ -21,6 +21,8 @@ internal sealed class ReleaseObserveCommand : Command
         var limitationOption = new Option<string[]>("--limitation") { Description = "A known limitation of the candidate; repeatable.", AllowMultipleArgumentsPerToken = true };
         var signingOption = new Option<string>("--signing") { Description = "Signing state recorded on the candidate.", DefaultValueFactory = _ => "unsigned developer build" };
         var cancelOption = new Option<string?>("--cancel") { Description = "Settle an intent that was never dispatched, or an outcome reconciled as having had no effect, with this reason." };
+        var withdrawalOption = new Option<string?>("--withdrawal") { Description = "Draft-deletion intent id; observe after the operator records dispatch." };
+        Options.Add(withdrawalOption);
         Options.Add(versionOption);
         Options.Add(byOption);
         Options.Add(observeProductOption);
@@ -41,9 +43,10 @@ internal sealed class ReleaseObserveCommand : Command
             parseResult.GetValue(limitationOption) ?? [],
             parseResult.GetValue(signingOption)!,
             parseResult.GetValue(cancelOption),
+            parseResult.GetValue(withdrawalOption),
             parseResult.GetValue(context.JsonOption)));
     }
 
-    private static int Execute(CommandContext context, string root, string version, string by, string? product, string? provider, string? repository, string[] qualified, string[] limitations, string signing, string? cancel, bool json) =>
-        context.WithApi(root, api => ReleaseOutput.Write(context, api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel, product, provider)), json));
+    private static int Execute(CommandContext context, string root, string version, string by, string? product, string? provider, string? repository, string[] qualified, string[] limitations, string signing, string? cancel, string? withdrawal, bool json) =>
+        context.WithApi(root, api => ReleaseOutput.Write(context, api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel, product, provider) { Withdrawal = withdrawal }), json));
 }

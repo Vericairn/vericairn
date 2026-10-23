@@ -522,6 +522,52 @@ of other unaccepted work appear under **Work recorded, not yet accepted**. Froze
 Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
+## Withdrawing a candidate and moving a release plan (0.8.3 additions)
+
+`release withdraw <candidate-id> --expected <hash> --provider <provider> --reason
+<reason> --by <principal>` records the withdrawn release revision and a separate
+`delete-release-draft` operation in `not-started` state. Both carry the reason and
+original candidate hash. Artifacts remain named in the withdrawal. The operation
+pins the withdrawn revision, the explicit provider and the candidate's repository,
+product and version; repeatable `--setting name=value` carries additional provider
+settings. It makes no provider call. The shared record validator judges both records
+before either is stored, including author authority, artifact requirements and
+operation identity uniqueness. A stale release hash refuses before any write.
+
+Deletion is the operator's manual step. Record its dispatch or uncertainty as a
+successor of the original deletion intent, preserving the intent's subject and
+destination, then use `release observe --version <version> --withdrawal <intent-id>
+--by <principal>`. This observes only the recorded provider's release at the tag.
+Absence after recorded dispatch settles the original identity; a still-present
+draft, a published release or an unavailable provider does not claim deletion.
+Observation refuses an intent still in `not-started` state. The runtime performs no
+deletion and ordinary publication observation never republishes a withdrawn record.
+The [operator's guide](operator-guide.md#withdrawal-and-moving-planned-work-083-additions)
+gives the dispatch-record steps.
+
+`work move-plan <carrier> --expected <carrier-hash> --expected-work <json-file>
+--to <other-carrier> --expected-target <target-hash> --by <principal>` moves all
+planned members to another typed carrier. Alternatively, use `--version <version>`
+in place of `--to` and `--expected-target` to revise the source carrier's typed
+version and its planned placements together. This changes no work content beyond
+the typed placement and, for the version form, the carrier's typed release plan.
+
+The prepared JSON maps **current work-order revision ids to hashes** for the complete
+set of planned members. Planned means no effective acceptance and either no work
+status or latest status `planned`. The runtime recomputes that set under its writer
+gate and compares all ids and hashes as well as the carrier hashes. A partial
+conflict, changed membership or any invalid proposed record writes nothing. Each
+new placement undergoes the same validation as an individual `work place`, including
+the destination's retirement and ended-release checks. Work in other states keeps
+its existing placement. The source and destination carrier identities stay stable.
+
+Both commands use the existing batch journal. Validation refusal is all-or-nothing;
+a disk failure or crash during storage can leave a partial batch, which the response
+and recovery journal identify. Reconcile that batch before issuing another write.
+The API v1 routes and synchronous, asynchronous and cancellation-bound SDK methods
+carry the same expected hashes, receipts and refusal findings; see
+[API compatibility for 0.8.3](api-compatibility-0.8.3.md).
+
 ## Retained build companions
 
 The software pack registers its readers with READ-01's `IDocumentGenerator`, `DocumentGenerators` and

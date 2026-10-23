@@ -317,6 +317,14 @@ public partial interface IEstateApi
     Task<RunStopResponse> RunStopAsync(string run, RunStopRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(RunStop), () => RunStop(run, request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable WorkMovePlan operation.</summary>
+    Task<WorkMovePlanResponse> WorkMovePlanAsync(string key, WorkMovePlanRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkMovePlan), () => WorkMovePlan(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable ReleaseWithdraw operation.</summary>
+    Task<ReleaseResponse> ReleaseWithdrawAsync(ReleaseWithdrawRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ReleaseWithdraw), () => ReleaseWithdraw(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable read-only release submission check.</summary>
     Task<ReleaseResponse> ReleaseCheckAsync(ReleaseSubmitRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(ReleaseCheck), () => ReleaseCheck(request), false, this as IClientOperationLifetime, cancellationToken);

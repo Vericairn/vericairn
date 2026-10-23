@@ -8,6 +8,7 @@ require 'set'
 # must receive the same check. Script bodies and comments are scalars, never workflow instructions.
 module WorkflowActions
   PIN = /\A[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-fA-F]{40}\z/
+  OWNER = /\A(?:actions\/|github\/|NuGet\/login@)/
   # A reusable workflow in this repository is checked like every other workflow here, so it needs no pin of its own.
   LOCAL_WORKFLOW = /\A\.\/\.github\/workflows\/([A-Za-z0-9_-]+\.ya?ml)\z/
 
@@ -22,6 +23,8 @@ module WorkflowActions
       next if action.empty?
       if !PIN.match?(action) || !allowed.add?(action)
         errors << "actions.allow:#{index + 1}: invalid or duplicate full-SHA action: #{action}"
+      elsif !OWNER.match?(action)
+        errors << "actions.allow:#{index + 1}: action owner is not permitted: #{action}"
       end
     end
     files = Dir.glob(File.join(directory, '*.{yml,yaml}')).sort
