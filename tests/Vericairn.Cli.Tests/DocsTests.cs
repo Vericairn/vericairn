@@ -223,7 +223,7 @@ public class DocsTests
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Contains("operator list", commands);
             Assert.Contains("GET /v1/operator/actions", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
-            Assert.Equal(13, manifest.RootElement.GetProperty("documents").GetArrayLength());
+            Assert.Equal(14, manifest.RootElement.GetProperty("documents").GetArrayLength());
 
             // The record formats of the build, which the release observer reads from the set as the release's own.
             JsonElement formats = manifest.RootElement.GetProperty("recordFormat");
