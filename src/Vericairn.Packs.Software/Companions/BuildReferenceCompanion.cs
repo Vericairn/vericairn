@@ -47,7 +47,17 @@ internal sealed class BuildReferenceCompanion(string name) : SoftwareCompanion(n
 
     private static string ClientOutcomes(JsonElement outcomes)
     {
-        var text = new StringBuilder("## Interrupted client requests\n\n");
+        var text = new StringBuilder();
+        // Older retained snapshots still render their recorded prose without inventing a recovery section.
+        if (outcomes.TryGetProperty("storedRecords", out JsonElement stored))
+        {
+            text.Append("## Stored records awaiting companion recovery\n\n")
+                .Append(DocumentMarkdown.Text(String(stored, "storage"))).Append("\n\n")
+                .Append(DocumentMarkdown.Text(String(stored, "clients"))).Append("\n\n")
+                .Append(DocumentMarkdown.Text(String(stored, "recovery")))
+                .Append(" See [API outcomes](api-v1.md#outcomes-and-problems).\n\n");
+        }
+        text.Append("## Interrupted client requests\n\n");
         text.Append(DocumentMarkdown.Text(String(outcomes, "introduction"))).Append("\n\n| Outcome | Exit code | Diagnostic |\n|---|---|---|\n");
         foreach (JsonElement row in Array(outcomes, "rows")) text.Append("| ").Append(Code(String(row, "code"))).Append(" | ").Append(Code(Recorded(row, "exitCode"))).Append(" | ").Append(Code(String(row, "diagnostic"))).Append(" |\n");
         text.Append("\nWhen an effect may have happened, the diagnostic also says: ").Append(Code(String(outcomes, "uncertain"))).Append("\n\n")
