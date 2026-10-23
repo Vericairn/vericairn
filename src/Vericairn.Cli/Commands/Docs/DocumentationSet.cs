@@ -240,6 +240,8 @@ internal static partial class Docs
             Covered(directory, "cli-reference.md", Strings(manifest, "commands"), c => $"`vericairn {c}`", "docs.command", findings);
             Covered(directory, "api-reference.md", Strings(manifest, "operations"), o => $"`{o}`", "docs.operation", findings);
             Covered(directory, "record-reference.md", Strings(manifest, "recordTypes"), t => $"`{t}`", "docs.record-type", findings);
+            if (required.Contains("cli-client-outcomes.md"))
+                Covered(directory, "cli-client-outcomes.md", ["Stored records awaiting companion recovery"], h => h, "docs.client-outcomes", findings);
             bool inventoryRequired = manifest.TryGetProperty("referenceInventory", out _) ||
                 manifest.TryGetProperty("recordFormat", out JsonElement format) && format.ValueKind == JsonValueKind.Object &&
                 format.TryGetProperty("writes", out JsonElement writes) && writes.ValueKind == JsonValueKind.Number && writes.TryGetInt32(out int recordFormat) && recordFormat >= 3 ||
