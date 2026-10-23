@@ -16,6 +16,7 @@ using Vericairn.Runtime.Policies;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
+using Vericairn.TestSupport;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -295,7 +296,7 @@ public sealed partial class ReleasePolicyGateTests
     }
 
     private static KeyValuePair<string, string>[] BytesOf(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-        .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(root, path), ContentHash.Sha256File(path))).OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
+        .Select(path => new KeyValuePair<string, string>(Path.GetRelativePath(root, path), SharedFileHash.Sha256(path))).OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
 
     private sealed class CheckedSource(bool clean, string head) : ISourceAdapter
     {

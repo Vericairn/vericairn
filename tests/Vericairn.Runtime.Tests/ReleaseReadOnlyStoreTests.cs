@@ -8,6 +8,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Store;
+using Vericairn.TestSupport;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -66,5 +67,5 @@ public sealed class ReleaseReadOnlyStoreTests
     }
 
     private static string[] Snapshot(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-        .Select(file => Path.GetRelativePath(root, file) + " " + ContentHash.Sha256File(file)).Order(StringComparer.Ordinal).ToArray();
+        .Select(file => Path.GetRelativePath(root, file) + " " + SharedFileHash.Sha256(file)).Order(StringComparer.Ordinal).ToArray();
 }
