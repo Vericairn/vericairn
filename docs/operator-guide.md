@@ -1,18 +1,28 @@
-# The operator's guide, Vericairn 0.8.2
+# The operator's guide, Vericairn 0.8.3
 
-This guide walks the journeys an operator and the agents working for them perform with the 0.8.2 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
+This guide walks the journeys an operator and the agents working for them perform with the 0.8.3 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
 
-0.8.2 follows published 0.8.0 and carries the work of 0.8.1, whose candidate was withdrawn before
+0.8.3 follows published 0.8.2 with `estate init` pinning the running build's exact source commit
+(FIX-47), work orders created from flags (CODE-07), candidate withdrawal and moving planned work
+(CODE-08), verified pins of a published Vericairn release, online or offline (FIX-52), a submission
+check that records nothing (FIX-55), the same library builds in every platform's archive (FIX-61), a
+warning when an older background runtime still serves the estate after an upgrade (FIX-62),
+corrections to living documents, work records, retried submissions, retained-basis diagnostics and the
+client-outcomes page (FIX-50 and FIX-56 through FIX-59), and CI that runs each platform's published
+command line and validates API compatibility against the published packages (CI-04). It also corrects
+how a checked push runs git (FIX-60), as the release notes' Security section describes.
+0.8.2 followed published 0.8.0 and carried the work of 0.8.1, whose candidate was withdrawn before
 publication, with the macOS and Linux single-file command lines able to start processes again (FIX-53)
-and a retained basis's record digest rechecked when it is read (FIX-54). That work is the corrections
+and a retained basis's record digest rechecked when it is read (FIX-54). That work was the corrections
 from 0.8.0's review (FIX-34 through FIX-38), the
 policy and adoption corrections (FIX-39 through FIX-46 and FIX-48), test timing and the release's packaging
 path in CI (FIX-29, FIX-32, FIX-49, CI-01 and CI-03), the release gate's retained basis by reference
 (FIX-51), package registry observations (DIST-02), the package icon
 (DIST-03), MCP Registry discovery (DIST-04) and exact-byte document pins (DOCS-07).
-It reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0 without a format step. The format-3 upgrade from 0.7.3 preserves historical records
-and requires explicit adoption afterwards. 0.8.0's features and earlier corrections remain. Earlier sets stay frozen.
+0.8.3 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0 or 0.8.2 without a format step. The format-3 upgrade from 0.7.3 preserves historical
+records and requires explicit adoption afterwards. 0.8.2's and 0.8.0's features and earlier corrections
+remain. Earlier sets stay frozen.
 
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
@@ -35,7 +45,7 @@ Three clients share one runtime. The command line is what this guide shows first
 ## 2. Create an estate
 
 From 0.8.3, `estate init` uses the running build's exact source commit, as reported by
-`vericairn --version`, when `--commit` is omitted. For published 0.8.2, add
+`vericairn --version`, when `--commit` is omitted. Earlier releases require `--commit`; with 0.8.2, add
 `--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` to the command below.
 
 ```sh
@@ -51,12 +61,12 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.2 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.3 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
-The 0.8.3 development build also adds opt-in `estate init --release`. Run a published target build
-containing that option when available, adding `--release` to the command above. It verifies the
+0.8.3 also adds opt-in `estate init --release`. Run the published target release's own command line,
+adding `--release` to the command above. It verifies the
 GitHub release, tag commit, `SHA256SUMS` and the current platform archive before creating anything.
 It writes three records: operator, charter and a `vericairn-release` observation. The manifest starts
 in release mode and pins that observation by hash. It creates no product or product release record.
@@ -146,7 +156,7 @@ Standing permission is an authority record based on a decision: a grantee, scope
 
 A work order states intent, scope, deliverables and the one question whose honest yes closes it.
 
-The **0.8.3 development build** accepts these fields directly, without a JSON file. The admitted device
+From 0.8.3, `work new` accepts these fields directly, without a JSON file. The admitted device
 of the principal named by `--by` signs it, just as it signs `records new`:
 
 ```sh
@@ -168,7 +178,7 @@ Missing fields, overlong text, malformed references, unknown predecessors, dupli
 refusals have the same messages. Success prints the record path, id and hash; `--json` prints the
 receipt as `{"path":"...","id":"...","hash":"sha256:..."}`.
 
-For published 0.8.2, or to supply the full record body, use the existing command:
+To supply the full record body, or with 0.8.2 or earlier, use the existing command:
 
 ```sh
 vericairn records new work-order --by <operator or builder id> --body order.json
@@ -248,18 +258,18 @@ vericairn check observe --resource <resource id> --repository owner/name --run <
 
 ## 8. Releases
 
-A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.8.2 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
+A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.8.3 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
 vericairn release submit --check --product <product id> --version 0.8.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
-vericairn release submit --product <product id> --version 0.8.2 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
-vericairn release observe --version 0.8.2 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
+vericairn release submit --product <product id> --version 0.8.3 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
+vericairn release observe --version 0.8.3 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
 ```
 
-In 0.8.3 development builds, `release submit --check` uses the intended submission's options and reports
+From 0.8.3, `release submit --check` uses the intended submission's options and reports
 every admission objection with its next action. This includes document and policy holds, current authority,
 signing-device availability, the exact product revision, unresolved release identities, and the size of the
 basis and source objects that submission would retain. Nothing is signed, recorded, retained or dispatched;
@@ -315,7 +325,7 @@ The retained basis is inspectable with `release basis <evidence-hash>`. A previe
 authority. An effect already dispatched remains under its original identity if later observation fails;
 a client cancellation does not roll it back. See [estate policies](policies.md).
 
-In the 0.8.3 development build (FIX-58), `release basis <evidence-hash>` distinguishes a wrong
+From 0.8.3 (FIX-58), `release basis <evidence-hash>` distinguishes a wrong
 identifier from lost retained sources. An unknown hash or unsupported object reports
 `No supported retained release basis has this hash`, followed by the requested hash. A retained
 basis whose references cannot resolve reports `Retained release basis <hash> cannot resolve`
@@ -346,8 +356,8 @@ The operator accepts the exact candidate before publishing:
 
 ```sh
 vericairn records new acceptance --by <operator id> --subject release:<candidate id>:<candidate hash> --body accept-release.json
-gh release edit v0.8.2 -R owner/name --draft=false --latest
-vericairn release observe --version 0.8.2 --product <product id> --by <builder id>
+gh release edit v0.8.3 -R owner/name --draft=false --latest
+vericairn release observe --version 0.8.3 --product <product id> --by <builder id>
 vericairn release list
 ```
 
@@ -358,7 +368,7 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
-### Withdrawal and moving planned work (0.8.3 additions)
+### Withdrawal and moving planned work (0.8.3)
 
 Withdraw a candidate at the exact revision you inspected:
 
@@ -435,7 +445,7 @@ vericairn estate upgrade --to <published-version> --check
 vericairn estate upgrade --to <published-version> --by <principal id>
 ```
 
-Run with the binary of the version you are upgrading to. The 0.8.3 development path uses the
+Run with the binary of the version you are upgrading to. From 0.8.3, the upgrade uses the
 estate's recorded Vericairn release when present. Otherwise it verifies the published Vericairn
 dependency: stable published GitHub metadata, tag commit equal to the running target build's commit,
 `SHA256SUMS`, and the platform archive's bytes. It resolves the tag again after hashing the archive
@@ -468,7 +478,7 @@ without making a release request. `manifest.release-behind` covers release pins 
 for source pins its comparison is to the build performing the check. It names the target's
 upgrade check command and leaves the pin unchanged. The cache is knowledge, not automatic approval.
 
-An estate running 0.8.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
+An estate running 0.8.0 or 0.8.2 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
 between the two resumes from that migration record when run again, and until then opening the estate
 warns `upgrade.incomplete`. A legacy release pin with no migration record is refused; a fresh `init --release` pin has its exact dependency observation instead.
@@ -593,7 +603,7 @@ Home shows attention: what needs a person, derived from status and waiting asks,
 
 The work screens: Products lists the product records with their editions and surfaces. A work order (open it by key with Ctrl+G, or from attention) is a page with its brief, its assignments with attempt counts and latest results, and its observation; an assignment is a page with the brief as delegated, the assigning note and every attempt with its result and state. The assignment composer (Ctrl+Shift+A on an open work order) takes the brief's fields, one list entry per line, and sends nothing until "Send the assignment" or Ctrl+Enter; the runtime validates and signs, and a refusal is shown with every finding. The result inbox (Ctrl+I) lists the results awaiting review across the estate; Enter opens one in the review and decision workspace, which shows the exact result (outcome, summary, outputs, evidence, checks, limitations, unresolved effects, next step), the reviews on record, a review draft (outcome, summary, findings) and an acceptance draft whose basis is the checked reviews. Both go through the API pinned to the subject's hash (Ctrl+Enter sends the review, Ctrl+Shift+Enter the acceptance); Workbench derives the independence and self flags it will declare from who authored the subject, shows them, and the runtime checks them. A prepared review or acceptance stays pinned to the subject revision and to the facts on record about it: checking or sending it reports reusable, needs review (new records about the subject; the draft is kept and nothing is sent) or withdrawn (the subject was superseded or is gone). A comparison view (Work menu) puts a record beside the revision it supersedes with the line difference between them.
 
-The release workspace (Ctrl+Shift+E) runs section 8 from the desktop. Enter the exact Commit; the request carries the product hash captured when it was loaded. A stale product requires fresh preparation, and format 3 requires an admitted held signing device. In 0.8.3 development builds, **Check submission (nothing recorded)** runs every admission check without signing, recording, retaining, dispatching or requiring presence. It displays every objection and next action, the exact checked inputs and the measured basis size. Submission checks again. The response also displays policy holds and retained-basis inspection commands after a submission. The existing flow follows: the providers the runtime can reach are listed and the product's declared provider is selected (for a product that declares none, nothing is selected until you choose); the form shows one field per setting the selected provider declares, filled with the product's declared values, where an empty field means the provider's default, which its label names; then "Submit the release" or Ctrl+Enter records the intent and dispatches; each destination shows its preparation, submission, external review and observed availability separately; "Observe" or Ctrl+Shift+Enter records the run's outcome, the candidate with every distributable by hash, and later the observed publication; Enter on a destination opens the candidate in the review workspace for the operator's acceptance at its exact hash; the manual publication command is shown and never run; a second submission under one identity is refused exactly as on the command line, and a retry needs a reconciliation.
+The release workspace (Ctrl+Shift+E) runs section 8 from the desktop. Enter the exact Commit; the request carries the product hash captured when it was loaded. A stale product requires fresh preparation, and format 3 requires an admitted held signing device. From 0.8.3, **Check submission (nothing recorded)** runs every admission check without signing, recording, retaining, dispatching or requiring presence. It displays every objection and next action, the exact checked inputs and the measured basis size. Submission checks again. The response also displays policy holds and retained-basis inspection commands after a submission. The existing flow follows: the providers the runtime can reach are listed and the product's declared provider is selected (for a product that declares none, nothing is selected until you choose); the form shows one field per setting the selected provider declares, filled with the product's declared values, where an empty field means the provider's default, which its label names; then "Submit the release" or Ctrl+Enter records the intent and dispatches; each destination shows its preparation, submission, external review and observed availability separately; "Observe" or Ctrl+Shift+Enter records the run's outcome, the candidate with every distributable by hash, and later the observed publication; Enter on a destination opens the candidate in the review workspace for the operator's acceptance at its exact hash; the manual publication command is shown and never run; a second submission under one identity is refused exactly as on the command line, and a retry needs a reconciliation.
 
 The theme binds the brand's roles, never values: Inter for titles, headings and body text and JetBrains Mono for identifiers, both bundled under the SIL Open Font License, one accent blue, one attention amber used only for the attention kinds, and neutral surfaces and outlines; the arrival page carries the cairn mark. The probe measures the contrast of every pair the roles form, in light and dark.
 
@@ -618,20 +628,20 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:
 
 ```sh
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.8.2 --documents docs/releases/documents.json
-vericairn docs check docs/releases/0.8.2
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.8.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.8.3 --documents docs/releases/documents.json
+vericairn docs check docs/releases/0.8.3
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.8.3
 ```
 
 The manifest names the exact reference build commit, distinct from the later documentation or release commit. Comparison checks version, record formats, public inventories, complete reference bytes and retained companion inputs. A later documentation-only commit can retain that build pin only when the build sources agree; both commits must be locally available. A structural docs check does not judge prose, note completeness or release acceptance. FIX-09's frozen-set checksum guard detects changed, missing or added files in earlier sets, including withdrawn 0.7.0; never repair an earlier set in place.
 
-The notes command renders the estate's records from 0.8.0 to 0.8.2:
+The notes command renders the estate's records from 0.8.2 to 0.8.3:
 
 ```sh
-vericairn --estate <root> docs notes --from 0.8.0 --to 0.8.2 --out docs/releases/0.8.2
+vericairn --estate <root> docs notes --from 0.8.2 --to 0.8.3 --out docs/releases/0.8.3
 ```
 
-`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.0's recorded end.
+`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.2's recorded end.
 FIX-13 gives accepted work one entry per work order, naming the latest accepted current result in the
 window by recorded time and then identifier, with its acceptance. Earlier results and attempts remain
 available through `work observe`; later unaccepted results remain separate. Superseded results are omitted.
@@ -855,7 +865,7 @@ The person must hold the operator role or an operator-granted `qualify` scope. `
 
 To revoke a qualification, an authorized human writes a superseding `harness-qualification` with the same launcher, version and probe digests and `status: "revoked"`, using `records new ... --supersedes <id> --body <file>`. `records describe harness-qualification` lists the fields. Requalification is a new record from fresh probes; revoking one cannot revoke a compiled baseline or rewrite historical run admissions. Section 19 describes the machine-local boundary for qualification.
 
-Run choices resolve through the local launcher configuration, roster defaults and role policy, goal defaults and role policy, assignment, then explicit run choices. Restrictions accumulate; later choices cannot relax a model/effort requirement, exact revision, destination, provider, data boundary or currency bound. `worker run` and `goal step` accept `--configuration`, repeated `--execution name=value`, `--input-tokens`, `--output-tokens`, `--context-bytes` and an optional `--context-package` identity assertion. Missing choices, unsupported effort, an unobservable required revision or an inventory mismatch refuse dispatch. There is no ambient model fallback. The intent pins choices, their sources and the admitted environment; observed execution stays separate, with discrepancies and unknowns retained. The efficiency Adapter is absent until EFF-01 in 0.8.3; enabling it is refused.
+Run choices resolve through the local launcher configuration, roster defaults and role policy, goal defaults and role policy, assignment, then explicit run choices. Restrictions accumulate; later choices cannot relax a model/effort requirement, exact revision, destination, provider, data boundary or currency bound. `worker run` and `goal step` accept `--configuration`, repeated `--execution name=value`, `--input-tokens`, `--output-tokens`, `--context-bytes` and an optional `--context-package` identity assertion. Missing choices, unsupported effort, an unobservable required revision or an inventory mismatch refuse dispatch. There is no ambient model fallback. The intent pins choices, their sources and the admitted environment; observed execution stays separate, with discrepancies and unknowns retained. The efficiency Adapter is absent until EFF-01 in 0.8.4; enabling it is refused.
 
 The worker creates or resumes an independent repository on `work/<work-order key>` unless `--branch` names another branch; `--base` chooses a new branch's base. The measured assignment brief is exported under an ignored `.vericairn` directory, with the complete machine context retained in local run custody. The intent reserves the run's cap before launch; observed usage settles it, and unreported units remain charged at their full cap. An exited harness is not an accepted result. Since 0.6.1, previously recorded settlement facts, including usage, scope and containment, cannot be rewritten. Evidence may be appended and missing facts added only under the record and chronology rules; the ledger retains the first settlement's usage and does not refund it through a later revision. An uncertain run cannot be retried for the same assignment until the original operation identity is reconciled; a new identity is not a bypass.
 
@@ -973,7 +983,7 @@ vericairn runtime rotate --compromised
 vericairn connections remove <connection id>
 ```
 
-Revocation is checked on the next request, including on an existing connection, and again under the write lock before an authenticated write. Rotation of a device key or withdrawal of its local-network profile also prevents a request authenticated under the old state from writing. Disconnecting or removing a saved connection revokes nothing and keeps the key in local custody. `runtime rotate` replaces the TLS certificate without changing the identity pin; `--compromised` also closes open connections and pending handshakes. If the runtime identity key may have leaked, `runtime rotate --identity` replaces that identity and every client must pair again. These commands are run on the runtime's machine. The Remote profile is not implemented in 0.8.2.
+Revocation is checked on the next request, including on an existing connection, and again under the write lock before an authenticated write. Rotation of a device key or withdrawal of its local-network profile also prevents a request authenticated under the old state from writing. Disconnecting or removing a saved connection revokes nothing and keeps the key in local custody. `runtime rotate` replaces the TLS certificate without changing the identity pin; `--compromised` also closes open connections and pending handshakes. If the runtime identity key may have leaked, `runtime rotate --identity` replaces that identity and every client must pair again. These commands are run on the runtime's machine. The Remote profile is not implemented in 0.8.3.
 
 FIX-21, retained from 0.7.3, corrects the concurrent certificate first-use race present since 0.6.1. Loaded and
 rotated certificates have their typed extension caches initialized before TLS listeners receive them,
@@ -1137,14 +1147,14 @@ installed client. They do not update an estate's manifest.
 
 `vericairn estate check` separately warns with `manifest.release-behind` when an estate is pinned below
 the newest published stable release it knows. It reads the estate's release records for the manifest's
-repository and, for `Vericairn/vericairn`, the local release cache. The **0.8.3 development build** also
+repository and, for `Vericairn/vericairn`, the local release cache. From 0.8.3, it also
 reads verified `vericairn-release` observations and warns for a source pin when the running build's
 version is older than a known published release; it does not infer an ordering of source commits.
 The check makes no network request. Unrelated products, candidate releases and prereleases do not
 count. An equal or newer version, or no known release, produces no warning. The finding is always a
 warning, so it does not fail the check.
 
-Use a published target build containing the 0.8.3 dependency support to review
+Use the target release's own command line to review
 `vericairn estate upgrade --to <published-version> --check`, then apply it with
 `vericairn estate upgrade --to <published-version> --by <operator-id>`. When the estate has no matching
 Vericairn product release record, the command verifies the published release metadata and tag, checks

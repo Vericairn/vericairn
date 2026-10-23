@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This document describes 0.8.2: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.2's corrections and
+This document describes 0.8.3: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with 0.8.2's and 0.8.3's corrections and
 additions described with their owning flows below. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
-0.8.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.8.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -373,7 +373,7 @@ A product that declares no artifacts is read by the generic rule: a platform ide
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
 archive is documentation, and a draft is complete when its checksum file names every other asset.
 
-Before submitting, 0.8.3 development builds offer the whole admission gate without an effect:
+Before submitting, 0.8.3 offers the whole admission gate without an effect:
 
 ```sh
 vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
@@ -491,9 +491,9 @@ The "Milestone and release acceptances" section includes every operator acceptan
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.8.2 notes from the estate's records, use
-`vericairn docs notes --from 0.8.0 --to 0.8.2 --out docs/releases/0.8.2`.
-The exclusive start follows 0.8.0's recorded end; the command writes its exact window to the manifest.
+To render the 0.8.3 notes from the estate's records, use
+`vericairn docs notes --from 0.8.2 --to 0.8.3 --out docs/releases/0.8.3`.
+The exclusive start follows 0.8.2's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against
@@ -522,7 +522,7 @@ of other unaccepted work appear under **Work recorded, not yet accepted**. Froze
 Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
-## Withdrawing a candidate and moving a release plan (0.8.3 additions)
+## Withdrawing a candidate and moving a release plan (0.8.3)
 
 `release withdraw <candidate-id> --expected <hash> --provider <provider> --reason
 <reason> --by <principal>` records the withdrawn release revision and a separate
@@ -542,7 +542,7 @@ Absence after recorded dispatch settles the original identity; a still-present
 draft, a published release or an unavailable provider does not claim deletion.
 Observation refuses an intent still in `not-started` state. The runtime performs no
 deletion and ordinary publication observation never republishes a withdrawn record.
-The [operator's guide](operator-guide.md#withdrawal-and-moving-planned-work-083-additions)
+The [operator's guide](operator-guide.md#withdrawal-and-moving-planned-work-083)
 gives the dispatch-record steps.
 
 `work move-plan <carrier> --expected <carrier-hash> --expected-work <json-file>
@@ -876,7 +876,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.8.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -1710,7 +1710,7 @@ still requires the builder's three-platform CI run. API v1 stays additive; harne
 record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
-refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.3. Remote is not
+refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.4. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
 
 ## Newer-release notices (0.7.3)
