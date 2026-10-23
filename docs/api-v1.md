@@ -13,10 +13,15 @@ with the retained original basis, bytes and findings, or 404 for a missing or un
 0.8.2 (FIX-51) the stored basis names its records, sources and objects by hash, and the response resolves
 them to the same complete evidence; a basis whose reference no longer resolves exactly answers 404. From
 0.8.2 (FIX-54) so does one whose records, signatures included, differ from those its record digest covers.
+From 0.8.3 (FIX-58) both answer HTTP 200 with null `evidence` and a `release-basis-unavailable` problem
+instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.8.2. It adds `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
+This document describes 0.8.3. It adds `POST /v1/work/new` (CODE-07), `POST /v1/releases/withdraw` and
+`POST /v1/work/{key}/move-plan` (CODE-08), `POST /v1/releases/check` (FIX-55), the upgrade request's `from`
+and `clientBuild` fields (FIX-52) and a diagnosable failure for a retained basis that cannot resolve
+(FIX-58), each described below. 0.8.2 added `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
 (DOCS-07) and `POST /v1/packages/observe`, `/unlist` and `/deprecate` (DIST-02), with their SDK methods
 and asynchronous counterparts, and over the daemon a record stored while its companion publication was
 interrupted answers as stored, with its recovery problem beside it (FIX-39). 0.8.0 added policy and
@@ -24,12 +29,12 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, and [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, and [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.8.2 package availability
+API route and ordinary SDK calls do not initiate the daily release check. 0.8.3 package availability
 requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
@@ -42,7 +47,7 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
-## Release-basis diagnostics (0.8.3 development)
+## Release-basis diagnostics (0.8.3)
 
 FIX-58 changes the failure response of `GET /v1/release-bases/{hash}`. An unknown hash or an
 object without a supported basis format still answers HTTP 404, and both SDK methods return null.
@@ -69,7 +74,7 @@ unavailable at admission keep that historical state and do not become new resolu
 The CLI and MCP show these same findings; SDK synchronous, asynchronous and cancellation-bound
 reads preserve the typed response. See [API compatibility for 0.8.3](api-compatibility-0.8.3.md#retained-release-basis-diagnostics-fix-58).
 
-## Work-order creation (0.8.3 development)
+## Work-order creation (0.8.3)
 
 `POST /v1/work/new` takes `WorkNewRequest`, the API counterpart of `vericairn work new`:
 
@@ -90,10 +95,10 @@ no record. Device-authenticated requests must name their own principal in `by`.
 
 The SDK exposes `WorkNew(request)` and `WorkNewAsync(request, cancellationToken)`;
 `CancellationBoundApi` exposes both. [API compatibility for 0.8.3](api-compatibility-0.8.3.md)
-lists the added interface members. This operation is a development addition and is not
-in published 0.8.2.
+lists the added interface members. This operation is new in 0.8.3 and is not
+in 0.8.2.
 
-## Release planning (0.8.3 additions)
+## Release planning (0.8.3)
 
 | POST route | Request | Response |
 | --- | --- | --- |
@@ -176,7 +181,7 @@ A warn-level document without a registered clone is reported as not compared.
 Provider I/O runs outside the service gate; this is not distributed
 exactly-once execution across independently running services.
 
-## Release submission check (0.8.3 development)
+## Release submission check (0.8.3)
 
 `POST /v1/releases/check` accepts `ReleaseSubmitRequest` and returns `ReleaseResponse` with `check`.
 It runs the same admission as submit at `commit` and `expected`, including the document gate's own
@@ -753,7 +758,7 @@ pairing does not qualify a Remote client.
 | `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused over the local network, and, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator, nor holds `local-engineering`, nor is the sponsor of the goal the run is charged to when the sponsor is a person (from 0.6.0), when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why) and the goal's sponsor recorded no custody exception in force for the goal (from 0.6.0; judged before the workspace is prepared and again when the intent is recorded, so an exception revised or expired meanwhile lifts nothing; a run launched under one names the exception in force when its intent was recorded, and the response says what it lifted; judged a last time immediately before the launch, when an exception that lapsed or a key that arrived after the intent launches nothing and the run's next revision is `canceled`, neither in flight nor charged, the response's status `canceled`), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
 | `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, whether its launcher is generic, optional event-stream `liveness` and settled workspace `scope`), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
 | `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The main observation wait is capped at 30 seconds, whatever grace the request names, with a bounded settlement wait after exit; the response reports what is observed so far, and clients poll for later facts. From 0.6.0 |
-| `POST /v1/releases/check` | Read-only submission admission at the exact commit and product hash, from 0.8.3 development. Returns `ReleaseResponse.check` with all objections and next actions; no presence, intent, signing, retention or dispatch. |
+| `POST /v1/releases/check` | Read-only submission admission at the exact commit and product hash, from 0.8.3. Returns `ReleaseResponse.check` with all objections and next actions; no presence, intent, signing, retention or dispatch. |
 | `POST /v1/releases/submit` | Submit a release as intent before effect, on the runtime's machine (refused over the local network, as observing is, since both use the provider's credentials there): the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it. From 0.6.0 a device-signed export names its device's principal as `by`, which must be an operator or hold the `administer` scope; over the local network it is refused |
@@ -824,7 +829,7 @@ FIX-12's credential scan still exempts only validated device `body.publicKey` an
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.8.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -1042,7 +1047,7 @@ whose principal is not the one the request names as acting is refused. Sign a de
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
 
-From the 0.8.3 development build, the existing upgrade request also accepts `from` (a downloaded
+From 0.8.3, the existing upgrade request also accepts `from` (a downloaded
 release directory on the runtime's machine) and `clientBuild` (the invoking full informational version).
 When no Vericairn release of the requested version is recorded, the runtime verifies the published
 Vericairn dependency and platform archive before authoring a `vericairn-release` observation with the

@@ -1,6 +1,6 @@
-# Record formats, Vericairn 0.8.2
+# Record formats, Vericairn 0.8.3
 
-Vericairn 0.8.2 reads record formats 1, 2 and 3. It writes an estate's own format,
+Vericairn 0.8.3 reads record formats 1, 2 and 3. It writes an estate's own format,
 at most 3; new estates start at 3. API version 1 remains the transport contract.
 Context, hand-over, reference inventories and readable renditions have their own
 artifact contracts and are not additional record formats.
@@ -35,7 +35,7 @@ reader's recognition of a format number alone does not prove that it implements
 every later additive field or behavior described here.
 
 
-## Published Vericairn dependency observations (0.8.3 development)
+## Published Vericairn dependency observations (0.8.3)
 
 An existing `observation` record may have kind `vericairn-release`. This additive kind uses the
 existing flat `facts` object in formats 1, 2 and 3; it adds no record type or format number. Its exact

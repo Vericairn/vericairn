@@ -133,7 +133,7 @@ the existing intent untouched. No registry act or dispatch time is inferred from
 These observations do not accept a release, verify package archive bytes or replace the release
 publication record. The workflow does not call the estate automatically: the post-publication
 observation is an operator step. See the [CLI reference](cli.md#vericairn-packages) for every option,
-JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-081) for the read bounds.
+JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-082) for the read bounds.
 
 ## Record and merge in one command
 
@@ -243,14 +243,14 @@ the release and NuGet workflows do not publish a registry entry.
    [nuget.org](https://www.nuget.org/packages/dotnet-vc). Download that release's `.nupkg` and
    `SHA256SUMS` and verify the package against its checksum. Use the accepted release's package,
    without rebuilding it or substituting a manifest from a checkout.
-2. In a fresh working directory containing that package, extract its manifest. For 0.8.2:
+2. In a fresh working directory containing that package, extract its manifest. For 0.8.3:
 
    ```sh
-   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.2.nupkg").read(".mcp/server.json"))'
+   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.3.nupkg").read(".mcp/server.json"))'
    ```
 
    Inspect `server.json`: the server name must be `io.github.vericairn/vericairn`, both versions
-   must be `0.8.2`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
+   must be `0.8.3`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
    principal inputs as placeholders. For a later release, use that release's version throughout.
 3. Install the registry's `mcp-publisher` from its
    [official release](https://github.com/modelcontextprotocol/registry/releases), following

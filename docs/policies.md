@@ -107,12 +107,12 @@ The evaluator loads each declared historical repository commit separately from t
 
 `release basis` reads an existing evidence object without writing a record. Its typed `ReleaseBasisResponse` contains the original record set, source and proof bytes, policy and duty findings, document comparisons and excluded operation revisions. The CLI's human view names the evidence hash, basis and findings; `--json`, API, SDK and MCP preserve the complete snapshot. Missing or unsupported objects return HTTP 404 and null through both SDK methods; the CLI and MCP report them as unavailable. This historical read does not re-authorize submission: every new submission still re-evaluates live sources and time.
 
-The 0.8.3 development build (FIX-58) distinguishes that absence from a retained basis that cannot
+From 0.8.3, FIX-58 distinguishes that absence from a retained basis that cannot
 resolve. The latter returns HTTP 200 with its hash, null `evidence` and a `release-basis-unavailable`
 problem naming every failed reference and whether it is missing or does not match its hash. The SDK
 preserves this response; the CLI exits 2, prints the findings and preserves the response under
 `--json`; MCP returns it with `isError`. Signature-digest failures remain unavailable and name the
-record-set digest. No partial evidence is returned. [API v1](api-v1.md#release-basis-diagnostics-083-development)
+record-set digest. No partial evidence is returned. [API v1](api-v1.md#release-basis-diagnostics-083)
 describes the diagnostic codes, and the [release guide](operator-guide.md) explains how to read them.
 
 The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).

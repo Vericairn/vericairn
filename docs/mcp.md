@@ -1,13 +1,13 @@
 # The MCP server
 
-In 0.8.3 development builds, `release_submit_check` is a read tool available without an admitted
+From 0.8.3, `release_submit_check` is a read tool available without an admitted
 signing device or presence. Required inputs are `product`, `version`, `by` (the intended submitter),
 `commit`, `expected` (the product hash) and `clientBuild` (the full submitting client build identity).
 Optional inputs are `provider`, `repository`, `ref`, `workflow`, `settings` and `reconciliation`, as on
 submission. It returns the API's `ReleaseResponse` with `check.objections`, each naming a reason and
 `nextAction`, and marks a refused check as a tool error. It reports all admission objections, signs
 nothing, creates no record or retained object, calls no release provider and never fetches. A passing
-check grants no authority; submission evaluates again. See [API v1](api-v1.md#release-submission-check-083-development).
+check grants no authority; submission evaluates again. See [API v1](api-v1.md#release-submission-check-083).
 
 Vericairn 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
 `policy_evaluate`, `writing_exceptions_list` and `writing_exception_show`.
@@ -27,7 +27,7 @@ and offer no release acceptance operation. See [Inspecting estate policies](poli
 
 ## Discovery and dnx
 
-The 0.8.2 `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
+From 0.8.2, the `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
 and an embedded `.mcp/server.json` for the official MCP Registry name
 `io.github.vericairn/vericairn`. The manifest's server and NuGet package versions are generated
 from the package version when packing. The package README carries the registry's `mcp-name`
@@ -42,7 +42,7 @@ Preparing these files does not establish that either public listing exists.
 With the .NET 10 SDK and published package version, the client's stdio command is:
 
 ```sh
-dnx dotnet-vc@0.8.2 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+dnx dotnet-vc@0.8.3 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
 ```
 
 The registry manifest requires `estate_root` (the existing estate's root directory) and
@@ -145,10 +145,10 @@ contracts; a companion does not replace required original evidence.
 
 ## Running it
 
-After 0.8.2 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.8.3 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.8.2
+dotnet tool install --global dotnet-vc --version 0.8.3
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 

@@ -1,9 +1,10 @@
 # API compatibility for 0.8.3
 
-This page lists the public interface additions in the 0.8.3 development build, work order by work order.
-It is an interface inventory, not a claim of publication or a completed package compatibility check against
-the published 0.8.2 packages. The API remains version 1, and no record format or existing method signature
-changes. Earlier interface changes remain documented in [API compatibility for 0.8.2](api-compatibility-0.8.2.md).
+This page lists the public interface additions in 0.8.3, work order by work order.
+It is an interface inventory, not a claim of publication. From CI-04, each change's package job validates
+the packages against the published 0.8.2 packages; the members added without a default implementation are
+listed in `.github/api-compatibility/Vericairn.Protocol.xml`. The API remains version 1, and no record format
+or existing method signature changes. FIX-60 changes no public interface. Earlier interface changes remain documented in [API compatibility for 0.8.2](api-compatibility-0.8.2.md).
 
 ## Published dependency release pins (FIX-52)
 
@@ -34,7 +35,7 @@ identify a `vericairn-release` observation. Dependency verification requires the
 client identity to match the target build. A `check` observes without writing; an apply pins the
 observation by hash and retains the existing forward migration and interrupted-manifest recovery.
 The `From` directory is input only and never enters a record. Local-network apply remains refused.
-See [the record-format guide](record-format.md#published-vericairn-dependency-observations-083-development)
+See [the record-format guide](record-format.md#published-vericairn-dependency-observations-083)
 for the additive observation kind and optional manifest reference, and [installation](install.md#offline-inputs)
 for the offline evidence contract.
 
@@ -61,7 +62,7 @@ are checked by the existing work-order validator, with the same refusal messages
 
 `VericairnClient` and `CancellationBoundApi` expose both members. The SDK calls
 `POST /v1/work/new`, which returns the existing `WriteOutcome` and signs as the
-author named by `By`, like `POST /v1/records`. [API v1](api-v1.md#work-order-creation-083-development)
+author named by `By`, like `POST /v1/records`. [API v1](api-v1.md#work-order-creation-083)
 describes the request and the command it matches.
 
 ## Daemon release diagnostics (FIX-62)
@@ -99,8 +100,8 @@ the client preserves the nullable result rather than guessing; the release warni
 
 ## Release planning (CODE-08)
 
-CODE-08's additions keep the record format and the existing release-submission admission checks unchanged. See [API v1](api-v1.md#release-planning-083-additions) and the
-[software guide](software.md#withdrawing-a-candidate-and-moving-a-release-plan-083-additions)
+CODE-08's additions keep the record format and the existing release-submission admission checks unchanged. See [API v1](api-v1.md#release-planning-083) and the
+[software guide](software.md#withdrawing-a-candidate-and-moving-a-release-plan-083)
 for behavior and refusal handling.
 
 ### Members added to `IEstateApi`
@@ -182,7 +183,7 @@ the ordinary `ok` and `problem`, and `check`. It is a read for presence, cancell
 purposes, including on authenticated local-network connections. Connection authentication and
 principal binding still apply. There is no fallback to `/v1/releases/submit` on an older server.
 The new MCP read tool is `release_submit_check`; the CLI option is `release submit --check`;
-Workbench offers **Check submission (nothing recorded)**. See [API v1](api-v1.md#release-submission-check-083-development).
+Workbench offers **Check submission (nothing recorded)**. See [API v1](api-v1.md#release-submission-check-083).
 
 ## Retained release-basis diagnostics (FIX-58)
 
@@ -211,4 +212,4 @@ the requested hash. For resolution failure, `--json` preserves the API response 
 error prints all findings. `release_basis_get` preserves the same response and sets `isError`
 when evidence cannot resolve. Successful CLI and MCP reads retain their existing behavior.
 See the [release guide](operator-guide.md#8-releases) and
-[API v1](api-v1.md#release-basis-diagnostics-083-development) for the read contract.
+[API v1](api-v1.md#release-basis-diagnostics-083) for the read contract.
