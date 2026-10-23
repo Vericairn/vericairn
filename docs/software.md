@@ -1710,7 +1710,7 @@ still requires the builder's three-platform CI run. API v1 stays additive; harne
 record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
-refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.3. Remote is not
+refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.4. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
 
 ## Newer-release notices (0.7.3)

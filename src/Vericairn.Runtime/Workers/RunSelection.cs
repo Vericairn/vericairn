@@ -166,7 +166,7 @@ public static class RunSelection
                 {
                     if (choice.Name == "adapter" && choice.Value.GetString() != "disabled")
                     {
-                        throw new ProviderRefusedException("The efficiency Adapter is unsupported; every run keeps it disabled. EFF-01 belongs to release 0.8.3.");
+                        throw new ProviderRefusedException("The efficiency Adapter is unsupported; every run keeps it disabled. EFF-01 belongs to release 0.8.4.");
                     }
                     requested[choice.Name] = choice.Value.GetString();
                 }
