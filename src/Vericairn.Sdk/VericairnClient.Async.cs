@@ -382,6 +382,14 @@ public sealed partial class VericairnClient
     public Task<RunStopResponse> RunStopAsync(string run, RunStopRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<RunStopResponse>(nameof(RunStop), async token => (await PostAsync<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(RunStop)), cancellationToken);
 
+    /// <summary>The cancellable WorkMovePlan operation, with a deadline covering the complete response.</summary>
+    public Task<WorkMovePlanResponse> WorkMovePlanAsync(string key, WorkMovePlanRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WorkMovePlanResponse>(nameof(WorkMovePlan), async token => (await PostAsync<WorkMovePlanRequest, WorkMovePlanResponse>("/v1/work/" + Uri.EscapeDataString(key) + "/move-plan", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WorkMovePlan)), cancellationToken);
+
+    /// <summary>The cancellable ReleaseWithdraw operation, with a deadline covering the complete response.</summary>
+    public Task<ReleaseResponse> ReleaseWithdrawAsync(ReleaseWithdrawRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<ReleaseResponse>(nameof(ReleaseWithdraw), async token => (await PostAsync<ReleaseWithdrawRequest, ReleaseResponse>("/v1/releases/withdraw", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReleaseWithdraw)), cancellationToken);
+
     /// <summary>The cancellable ReleaseSubmit operation, with a deadline covering the complete response.</summary>
     public Task<ReleaseResponse> ReleaseSubmitAsync(ReleaseSubmitRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ReleaseResponse>(nameof(ReleaseSubmit), async token => (await PostAsync<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReleaseSubmit)), cancellationToken);

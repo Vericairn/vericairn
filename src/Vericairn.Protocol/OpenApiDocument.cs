@@ -97,6 +97,8 @@ public static class OpenApiDocument
         ("GET", "/v1/runs"),
         ("POST", "/v1/runs"),
         ("POST", "/v1/runs/{id}/stop"),
+        ("POST", "/v1/work/{key}/move-plan"),
+        ("POST", "/v1/releases/withdraw"),
         ("POST", "/v1/releases/submit"),
         ("POST", "/v1/releases/observe"),
         ("POST", "/v1/changes/push"),
@@ -345,6 +347,15 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "ChangeResponse: recorded intent, observed effect and exact-head evidence; uncertainty never authorizes retry.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ChangeResponse" } } } };
         }
+        else if (method == "POST" && path is "/v1/releases/withdraw" or "/v1/work/{key}/move-plan")
+        {
+            string schema = path == "/v1/releases/withdraw" ? "ReleaseResponse" : "WorkMovePlanResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "The complete result, including refusal findings or receipts from an interrupted batch. No records are stored on a stale preparation or validation refusal.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
         else if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
@@ -538,8 +549,11 @@ public static class OpenApiDocument
             ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string")),
             ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
+            ["ReleaseWithdrawRequest"] = Object(("release", "string"), ("by", "string"), ("expected", "string"), ("provider", "string"), ("reason", "string"), ("settings", "object")),
+            ["WorkMovePlanRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedWork", "object"), ("to", "string"), ("expectedTarget", "string"), ("version", "string")),
+            ["WorkMovePlanResponse"] = Object(("written", "array"), ("problem", "object"), ("ok", "boolean")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string")),
-            ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
+            ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string"), ("withdrawal", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
             ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
             ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer")),
@@ -602,6 +616,8 @@ public static class OpenApiDocument
         "/v1/runs" => "RunStartRequest",
         "/v1/harness-qualifications" => "HarnessQualifyRequest",
         "/v1/runs/{id}/stop" => "RunStopRequest",
+        "/v1/work/{key}/move-plan" => "WorkMovePlanRequest",
+        "/v1/releases/withdraw" => "ReleaseWithdrawRequest",
         "/v1/releases/submit" => "ReleaseSubmitRequest",
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
@@ -641,6 +657,8 @@ public static class OpenApiDocument
         ("POST", "/v1/estate-policies/{key}/exceptions/{id}/revoke") => "PolicyRevokeException: validate the expected hash and all source evidence, then sign as the acting principal.",
         ("POST", "/v1/writing-exceptions") => "WritingExceptionAdd: validate the expected hash and all source evidence, then sign as the acting principal.",
         ("POST", "/v1/writing-exceptions/{id}/remove") => "WritingExceptionRemove: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/work/{key}/move-plan") => "WorkMovePlan: compare the complete expected planned-work membership and all hashes, validate every successor, then store the batch. No writes on a conflict or validation refusal.",
+        ("POST", "/v1/releases/withdraw") => "ReleaseWithdraw: validate the exact candidate withdrawal and draft-deletion intent together. Deletion remains the operator's step.",
         ("POST", "/v1/work/{key}/placement") => "WorkPlace: validate the expected hash and all source evidence, then sign as the acting principal.",
 
         ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
