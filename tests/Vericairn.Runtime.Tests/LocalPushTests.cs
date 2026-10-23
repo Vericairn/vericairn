@@ -44,12 +44,7 @@ public sealed class LocalPushTests : IDisposable
         Git(repository, "add", "addition.txt");
         Git(repository, "commit", "-m", "Add checked content");
         string head = Git(repository, "rev-parse", "HEAD");
-        var adapter = new GitPushAdapter(info =>
-        {
-            // Every remote access in this test is to the bare repository this test just created.
-            if (info.ArgumentList.Contains("ls-remote") || info.ArgumentList.Contains("push")) Assert.Contains(remote, info.ArgumentList);
-            return Run(info);
-        });
+        var adapter = Adapter();
         PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
         Assert.Equal(basis + ".." + head, plan.Range);
         Assert.Equal(existingBranch ? basis : null, plan.RemoteHead);
@@ -58,6 +53,60 @@ public sealed class LocalPushTests : IDisposable
         Assert.Equal(basis, adapter.Observe(repository, remote, "main"));
         Assert.Empty(Git(remote, "tag", "--list"));
     }
+
+    [Fact]
+    public void TheClonesAndTheUsersRewritesAndHooksDoNotChangeWhereOrHowACheckedPushGoes()
+    {
+        string decoy = Path.Combine(directory, "decoy.git");
+        string clientHooks = Path.Combine(directory, "client-hooks");
+        string marker = Path.Combine(directory, "hook-ran");
+        Git(repository, "init", "--initial-branch=main");
+        File.WriteAllText(Path.Combine(repository, "readme.txt"), "Initial content.\n");
+        Git(repository, "add", "readme.txt");
+        Git(repository, "commit", "-m", "Initial content");
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(directory, "clone", "--bare", "--", repository, decoy);
+        Git(repository, "checkout", "-b", "work/change");
+        File.WriteAllText(Path.Combine(repository, "addition.txt"), "Checked addition.\n");
+        Git(repository, "add", "addition.txt");
+        Git(repository, "commit", "-m", "Add checked content");
+        string head = Git(repository, "rev-parse", "HEAD");
+
+        // The clone's own configuration sends every fetch and push for the declared remote to the decoy and runs a hook that would
+        // refuse the push; the user's global configuration rewrites pushes too. None of it may apply to a checked push.
+        Directory.CreateDirectory(clientHooks);
+        string hook = Path.Combine(clientHooks, "pre-push");
+        File.WriteAllText(hook, "#!/bin/sh\necho ran > '" + marker.Replace('\\', '/') + "'\nexit 1\n");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Git(repository, "config", "url." + decoy + ".insteadOf", remote);
+        Git(repository, "config", "url." + decoy + ".pushInsteadOf", remote);
+        Git(repository, "config", "core.hooksPath", clientHooks);
+        Git(repository, "config", "--file", configuration, "url." + decoy + ".pushInsteadOf", remote);
+        Git(repository, "config", "--file", configuration, "credential.helper", "store --file=" + Path.Combine(directory, "unused").Replace('\\', '/'));
+
+        var adapter = Adapter();
+        PushPlan plan = adapter.Prepare(repository, remote, "work/change", "main", head);
+        Assert.Null(plan.RemoteHead);
+        adapter.Push(repository, remote, plan, new("test-scanner", "1.0.0", plan.Range, "passed", 0));
+        Assert.Equal(head, adapter.Observe(repository, remote, "work/change"));
+        Assert.Equal(head, Git(remote, "rev-parse", "refs/heads/work/change"));
+        Assert.Empty(Git(decoy, "for-each-ref", "refs/heads/work"));
+        Assert.False(File.Exists(marker));
+    }
+
+    // The adapter isolates its own git processes. Only its read of the user's credential settings sees this test's stand-in
+    // for the user's global configuration.
+    private GitPushAdapter Adapter() => new(info =>
+    {
+        // Every remote access in this test is to the bare repository this test just created.
+        if (info.ArgumentList.Contains("ls-remote") || info.ArgumentList.Contains("push")) Assert.Contains(remote, info.ArgumentList);
+        if (info.ArgumentList.Contains("config"))
+        {
+            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            info.Environment["GIT_CONFIG_GLOBAL"] = configuration;
+        }
+        return BoundedProcess.Run(info, TestTiming.HangTimeout);
+    });
 
     private string Git(string workingDirectory, params string[] args)
     {

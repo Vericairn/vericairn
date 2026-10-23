@@ -122,6 +122,52 @@ public sealed class PushProviderTests
         Assert.Contains("--force-with-lease=refs/heads/work/change:" + (newBranch ? string.Empty : Basis), push);
         Assert.Contains("--no-follow-tags", push);
         Assert.Contains("--recurse-submodules=no", push);
+        // Remote access runs from a private repository with only the remote's protocol, never in the clone itself.
+        Assert.All(scripted.Calls.Where(c => c.Contains("push") || c.Contains("ls-remote")), c =>
+        {
+            Assert.Contains(c, a => a.StartsWith("--git-dir=", StringComparison.Ordinal));
+            Assert.Contains("protocol.allow=never", c);
+            Assert.Contains("protocol.https.allow=always", c);
+        });
+    }
+
+    [Theory]
+    [InlineData("http://example.invalid/widget")]
+    [InlineData("ssh://example.invalid/widget")]
+    [InlineData("git@example.invalid:widget")]
+    [InlineData("ext::sh -c widget")]
+    [InlineData("widget")]
+    public void ACheckedPushGoesOnlyToAnHttpsRemoteOrALocalRepository(string remote)
+    {
+        var scripted = new RecordedGit();
+        var adapter = new GitPushAdapter(scripted.Run);
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(Path.GetTempPath(), remote, "work/change", "main", Head));
+        Assert.DoesNotContain(scripted.Calls, c => c.Contains("ls-remote") || c.Contains("push") || c.Contains("config"));
+    }
+
+    [Fact]
+    public void OnlyTheUsersCredentialAndTrustSettingsReachTheRemote()
+    {
+        var scripted = new RecordedGit
+        {
+            Settings = "unknown\0credential.helper\nosxkeychain\0global\0credential.https://example.invalid.helper\n\0"
+                + "global\0credential.https://example.invalid.helper\n!helper get\0command\0credential.helper\ninjected\0"
+                + "local\0credential.helper\nclone\0system\0http.sslcainfo\n/trust/bundle.pem\0global\0credential.usehttppath\0",
+        };
+        var adapter = new GitPushAdapter(scripted.Run);
+        PushPlan plan = adapter.Prepare(Path.GetTempPath(), "https://example.invalid/widget", "work/change", "main", Head);
+        adapter.Push(Path.GetTempPath(), "https://example.invalid/widget", plan, new("scanner", "1.0.0", plan.Range, "passed", 0));
+        Assert.Equal(5, scripted.Remote.Count);
+        Assert.All(scripted.Remote, environment =>
+        {
+            Assert.Equal("1", environment["GIT_CONFIG_NOSYSTEM"]);
+            Assert.Equal(string.Empty, environment["GIT_CONFIG_GLOBAL"]);
+            Assert.Equal("5", environment["GIT_CONFIG_COUNT"]);
+            Assert.Equal(
+                ["credential.helper=osxkeychain", "credential.https://example.invalid.helper=", "credential.https://example.invalid.helper=!helper get",
+                    "http.sslcainfo=/trust/bundle.pem", "credential.usehttppath=true"],
+                Enumerable.Range(0, 5).Select(i => environment["GIT_CONFIG_KEY_" + i] + "=" + environment["GIT_CONFIG_VALUE_" + i]));
+        });
     }
 
     [Theory]
@@ -166,12 +212,17 @@ public sealed class PushProviderTests
         internal bool Divergent { get; set; }
         internal bool Shallow { get; set; }
         internal string? Moved { get; set; }
+        internal string Settings { get; set; } = string.Empty;
+        internal List<Dictionary<string, string?>> Remote { get; } = [];
         internal ProcessResult Run(ProcessStartInfo info)
         {
             Assert.Equal("git", info.FileName);
             string[] args = info.ArgumentList.ToArray();
             Calls.Add(args);
+            if (args.Contains("ls-remote") || args.Contains("push")) Remote.Add(new(info.Environment));
             if (args.Contains("check-ref-format")) return Success();
+            if (args.Contains("config")) return Settings.Length == 0 ? new(ProcessOutcome.Exited, true, 1, string.Empty, string.Empty) : Success(Settings);
+            if (args.Contains("--git-common-dir")) return Success(Path.Combine(Path.GetTempPath(), "clone.git"));
             if (args.Contains("--is-shallow-repository")) return Success(Shallow ? "true" : "false");
             if (args.Contains("rev-parse")) return Success(Moved == "head" ? PushProviderTests.Moved : Head);
             if (args.Contains("ls-remote"))
