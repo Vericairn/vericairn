@@ -16,6 +16,87 @@ equal across platforms. This changes no frozen set and does not establish 0.8.3 
 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
+## Readiness disclosures
+
+Read these before relying on the current published release, 0.8.2. They moved here from the repository's
+README, which links to this section; the [limitations and platforms](../limitations-and-platforms.md) guide
+gives every current limit.
+
+- **Security.** 0.8.2's release notes open with a [Security](0.8.2/release-notes.md#security) section:
+  FIX-34 through FIX-38 harden the worker's command audit and settlement, the release gate, checked pushes
+  and merges, and the upgrade, and CI-03 builds releases with only the tokens each step needs. 0.7.2's
+  [Security](0.7.2/release-notes.md#security) section discloses F-01, which affected export restoration in
+  every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
+  The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
+- **Known issue.** Each platform's 0.8.2 archive carries a separately compiled build of the same libraries,
+  so a policy basis differs by platform ([issue 184](https://github.com/Vericairn/vericairn/issues/184));
+  0.8.3 fixes it.
+- **Interfaces.** [API compatibility](../api-compatibility-0.8.2.md) lists 0.8.2's two interface changes.
+- **Record format 3.** Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
+  refuses the upgraded estate, so every writer and clone moves to 0.8.0 or later together. The upgrade
+  declares no policy or duty; the operator adopts them explicitly, as the
+  [adoption guide](../policy-adoption.md) describes.
+- **Sources and guides.** Ordinary source builds retain `0.8.2-dev`. The maintained guides describe 0.8.2;
+  earlier release sets keep their original bytes.
+- **Release checks.** Release checks reach only GitHub, ignore system proxies, are disabled with
+  `vericairn updates configure --enabled false` and retain cached information when disabled.
+- **Signals and attention.** Command observations remain signals, not an enforcement boundary. Required
+  attention cannot infer closure from prose or missing evidence; its [rules](../required-attention.md) keep
+  undecidable items visible as unknown.
+- **Platforms and downloads.** For 0.8.2, the command line is qualified on `linux-x64`, `osx-arm64` and
+  `win-x64`, where the release's tests ran. The `linux-arm64`, `osx-x64` and `win-arm64` archives are
+  provided but unqualified. Workbench is not qualified on any platform. The archives are unsigned developer
+  builds, without code signing or notarization; verify downloads as the [install guide](0.8.2/install.md)
+  describes. 0.8.2's `SHA256SUMS` also lists `vericairn-0.8.2-companions.zip`, the readable build reports,
+  which the release run keeps in its CI artifact and does not attach; check the attached assets with
+  `--ignore-missing`, as the guide does.
+- **NuGet.** All eight command-line and library packages are available at 0.8.2 on nuget.org. The `dotnet-vc`
+  tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without
+  the SDK, and the macOS archives also carry the Secure Enclave helper. The NuGet tool does not bundle that
+  helper or Workbench. The worker's agent-side MCP command still resolves `vericairn`; keep the archive
+  executable on PATH for worker runs. A NuGet-only worker installation is not qualified by the package
+  installation checks. `Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`,
+  preserving their namespaces and assemblies; `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp`
+  are also available, and the SDK front door does not embed a runtime or daemon. The packages contain
+  Community code only. Commands written as `vericairn ...` in the archive documentation take the same
+  arguments as `dotnet vc ...`.
+- **Worker setup.** The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code
+  `2.1.296`; another exact version needs a person's authorized RUN-03 qualification. Generic worker dispatch
+  is refused. Before a native run, configure that machine's worker with
+  `vericairn worker configure --launcher codex --model <model> --effort <effort>` (or
+  `--launcher claude-code`); omit model and effort to show it. Repeated `--allow-model` and `--allow-effort`
+  options narrow the permitted choices and never widen the qualified harness inventory. FIX-18 adds Codex's
+  `max` effort in 0.7.2; the harness validates model/effort support at launch, and an observed refusal is
+  recorded as a failed run. Configuration is per machine and is never recorded in the estate. Its Vericairn
+  home must be outside every Git repository and estate; if your home directory is a repository, set
+  `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them. If your home holds `.claude` or
+  `.codex` settings, move workspaces outside it with
+  `vericairn worker configure --workspaces <absolute-directory>`; `vericairn worker configure` shows the
+  root. The root applies to every launcher, must be outside repositories, estates and configured ancestors,
+  and is reread by the CLI and daemon for each run. New roots are owner-only. The harness configuration scan
+  remains strict. Codex also refuses the user's own `~/.agents` customization, independently of workspace
+  placement or `CODEX_HOME`; use a worker account without that discovery root. An empty ordinary directory or
+  one containing only recognized instruction files is allowed by the native scan; skills, other entries and
+  uninspected links are refused. Harness qualification is machine-local too: paired local-network devices
+  are refused. The [software guide](../software.md#explicit-execution-and-environment-admission-run-01-070)
+  describes the setup and admission checks.
+- **Live qualification.** The seventh live Codex run committed the permitted file in its independent
+  workspace on macOS; settlement audited the commit and fetched its branch into the registered clone. Only
+  the workspace's own `.git` is added to Codex's writable roots. This live qualification covers the reported
+  macOS path, not other harness versions, accounts, platforms, provider billing or acceptance of the work.
+  0.8.2's worker changes, FIX-32 through FIX-35, are covered by tests only: the estate's own live runs have
+  used 0.8.0's worker, not yet 0.8.2's. The
+  [software guide](../software.md#native-inventory-qualification-run-02-and-run-03) retains all seven
+  observations.
+- **Limits.** Worker spending limits are soft, and unknown usage is charged at the reserved cap. The
+  launchers are tested with stand-in processes; live coding-agent sessions and sign-in are not qualified by
+  those tests. Process containment and the workspace audit have platform limits, detailed in the
+  [software guide](../software.md#launch-accounting-and-containment). The efficiency Adapter is absent until
+  the planned 0.8.4 work, Remote is not built, and context tokens remain unknown without a qualified local
+  tokenizer. Spending and containment limits remain as described in the guides.
+
+## Documentation sets
+
 The [0.8.2 set](0.8.2/README.md) documents the current published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
 FIX-53, which lets the macOS and Linux single-file command lines start processes again, and FIX-54, which rechecks a
 retained basis's record digest when it is read. That work is FIX-34 through FIX-38 and CI-03, the corrections from
