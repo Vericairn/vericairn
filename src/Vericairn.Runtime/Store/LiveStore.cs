@@ -14,6 +14,7 @@ namespace Vericairn.Runtime.Store;
 public sealed class LiveStore : IDisposable
 {
     private readonly SqliteConnection connection;
+    private readonly SqliteReadSnapshot? readSnapshot;
     private FileSnapshot? snapshot;
     private long snapshotVersion;
 
@@ -21,13 +22,18 @@ public sealed class LiveStore : IDisposable
     internal long FilesRead { get; private set; }
 
     /// <summary>Opens (creating when needed) the live store database.</summary>
-    public LiveStore(string databasePath)
+    public LiveStore(string databasePath) : this(databasePath, false) { }
+
+    internal LiveStore(string databasePath, bool readOnly, bool transient = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         Path = System.IO.Path.GetFullPath(databasePath);
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
-        connection.Open();
+        if (!readOnly) Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        readSnapshot = readOnly && !transient ? new SqliteReadSnapshot(Path) : null;
+        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = transient ? ":memory:" : readSnapshot?.Path ?? Path, Mode = transient ? SqliteOpenMode.Memory : readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+        try { connection.Open(); }
+        catch { connection.Dispose(); readSnapshot?.Dispose(); throw; }
+        if (readOnly && !transient) return;
         Execute("PRAGMA journal_mode = WAL;");
         Execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, bytes BLOB NOT NULL);");
         Execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
@@ -184,7 +190,11 @@ public sealed class LiveStore : IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose() => connection.Dispose();
+    public void Dispose()
+    {
+        connection.Dispose();
+        readSnapshot?.Dispose();
+    }
 
     private void Execute(string sql)
     {

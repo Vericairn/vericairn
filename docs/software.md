@@ -373,6 +373,33 @@ A product that declares no artifacts is read by the generic rule: a platform ide
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
 archive is documentation, and a draft is complete when its checksum file names every other asset.
 
+Before submitting, 0.8.3 development builds offer the whole admission gate without an effect:
+
+```sh
+vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
+```
+
+Use the same provider, settings and reconciliation options as the intended submission. The check
+reports every objection together with its next action, including document comparisons at their own
+repository commits, policy holds, authority and signing-device availability, unresolved identities,
+and the measured size of the basis and source objects a submission would retain. It creates no intent,
+signs nothing, retains nothing, dispatches nothing and asks for no presence. It does not recover or
+close interrupted journals. Exit status is 0 when admitted and 2 when refused; `--json` includes the
+commit, expected product hash, client and runtime build identities, basis size and structured objections.
+
+The same checks also guard submission. The release destination must identify a repository resource
+in format 3. The requested commit must equal the registered clone's locally known default branch
+head, resolved through `refs/remotes/origin/HEAD`; a missing default branch or commit is an objection.
+Every registered clone read by the gate must have no staged, modified or untracked files. Prepare or
+refresh those refs separately: neither check nor submission fetches, checks out or repairs a clone.
+The CLI supplies its full build identity automatically. Format 3 requires it to match the serving
+runtime exactly, including the source commit; a release-number match alone is insufficient. Older
+format requests that omit this identity keep their existing compatibility behavior.
+
+A passing check describes the inputs at that instant. It grants no authority and does not reserve
+the release identity. Submission repeats admission against current inputs before recording intent
+and again before dispatch; use a fresh check after changing the product, sources or reviews.
+
 The release as intent, then observed effect:
 
 1. `vericairn release submit --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash> [--provider <id>] [--repository ...] [--ref ...] [--workflow ...] [--setting name=value]...`

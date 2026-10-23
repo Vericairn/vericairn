@@ -962,10 +962,15 @@ public sealed class ReleaseWorkspace : Document
     public ReleaseResponse? LastResponse { get; private set; }
 
     /// <summary>Submits the release: the runtime records the intent, then dispatches; nothing is published.</summary>
-    public async Task SubmitAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default)
+    public Task SubmitAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default) => SendAsync(api, by, false, cancellationToken);
+
+    /// <summary>Checks the form's exact submission without signing, recording, retaining or dispatching.</summary>
+    public Task CheckAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default) => SendAsync(api, by, true, cancellationToken);
+
+    private async Task SendAsync(IEstateApi api, string? by, bool check, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(api);
-        if (string.IsNullOrWhiteSpace(by))
+        if (!check && string.IsNullOrWhiteSpace(by))
         {
             Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
             return;
@@ -977,7 +982,7 @@ public sealed class ReleaseWorkspace : Document
             return;
         }
 
-        if (SelectedProvider is null)
+        if (!check && SelectedProvider is null)
         {
             Status = Product.ReleaseProvider is null
                 ? "Choose the provider the release goes through; the product declares none, and nothing is selected for you."
@@ -986,15 +991,19 @@ public sealed class ReleaseWorkspace : Document
         }
 
         List<string> missing = Settings.Where(s => s.Required && s.Value.Trim().Length == 0 && Product.ReleaseSettings?.ContainsKey(s.Name) != true).Select(s => s.Name).ToList();
-        if (missing.Count > 0)
+        if (!check && missing.Count > 0)
         {
-            Status = $"The provider {SelectedProvider.Provider} needs {string.Join(", ", missing)} before anything is sent.";
+            Status = $"The provider {SelectedProvider!.Provider} needs {string.Join(", ", missing)} before anything is sent.";
             return;
         }
 
         var values = Settings.Where(s => s.Value.Trim().Length > 0).ToDictionary(s => s.Name, s => s.Value.Trim(), StringComparer.Ordinal);
-        await AnswerAsync(async () => (await api.ReleaseSubmitAsync(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values,
-            string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim(), Product.Hash), cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true);
+        var request = new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by ?? "", null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider?.Provider, values,
+            string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim(), Product.Hash)
+        {
+            ClientBuild = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(ReleaseWorkspace).Assembly)?.InformationalVersion,
+        };
+        await AnswerAsync(() => check ? api.ReleaseCheckAsync(request, cancellationToken) : api.ReleaseSubmitAsync(request, cancellationToken)).ConfigureAwait(true);
     }
 
     /// <summary>Observes the selected destination (or the form's product and version): the run, the draft, the publication; or cancels with the reason given.</summary>
@@ -1045,6 +1054,10 @@ public sealed class ReleaseWorkspace : Document
             ReleaseResponse response = await call().ConfigureAwait(true);
             LastResponse = response;
             Status = response.Problem is null ? response.Message : AssignmentComposer.Refusal(response.Problem);
+            if (response.Check is { } check)
+                Status += $"\nChecked commit: {check.Commit ?? "unavailable"}; product hash: {check.Expected ?? "unavailable"}." +
+                    $"\nClient build: {check.ClientBuild ?? "unavailable"}; runtime build: {check.RuntimeBuild}." +
+                    $"\nBasis size: {check.BasisBytes} bytes; nothing retained.";
             if (response.Policies is { } policies) Status += "\n" + policies.Text;
             foreach (string hash in response.BasisEvidence ?? []) Status += "\nRetained evidence: vericairn release basis " + hash;
             if (response.Publish is not null)

@@ -3,6 +3,7 @@
 
 using Microsoft.Data.Sqlite;
 using Vericairn.Records.Hashing;
+using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Objects;
 
@@ -10,14 +11,20 @@ namespace Vericairn.Runtime.Objects;
 public sealed class SqliteObjectStore : IObjectStore
 {
     private readonly SqliteConnection connection;
+    private readonly SqliteReadSnapshot? readSnapshot;
 
     /// <summary>Opens (creating when needed) the database file.</summary>
-    public SqliteObjectStore(string databasePath)
+    public SqliteObjectStore(string databasePath) : this(databasePath, false) { }
+
+    internal SqliteObjectStore(string databasePath, bool readOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
-        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
-        connection.Open();
+        if (!readOnly) Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        readSnapshot = readOnly ? new SqliteReadSnapshot(databasePath) : null;
+        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = readSnapshot?.Path ?? databasePath, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+        try { connection.Open(); }
+        catch { connection.Dispose(); readSnapshot?.Dispose(); throw; }
+        if (readOnly) return;
         Execute("PRAGMA journal_mode = WAL;");
         Execute("CREATE TABLE IF NOT EXISTS objects (hash TEXT PRIMARY KEY, size INTEGER NOT NULL, bytes BLOB NOT NULL);");
     }
@@ -87,7 +94,11 @@ public sealed class SqliteObjectStore : IObjectStore
     }
 
     /// <inheritdoc />
-    public void Dispose() => connection.Dispose();
+    public void Dispose()
+    {
+        connection.Dispose();
+        readSnapshot?.Dispose();
+    }
 
     private static string Check(string hash) => ContentHash.IsValid(hash) ? hash : throw new ArgumentException("Not a content hash.", nameof(hash));
 

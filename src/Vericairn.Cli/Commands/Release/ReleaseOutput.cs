@@ -19,6 +19,12 @@ internal static class ReleaseOutput
         }
         else
         {
+            if (response.Check is { } check)
+            {
+                context.Output.WriteLine($"Checked commit: {check.Commit ?? "unavailable"}; product hash: {check.Expected ?? "unavailable"}");
+                context.Output.WriteLine($"Client build: {check.ClientBuild ?? "unavailable"}; runtime build: {check.RuntimeBuild}");
+                context.Output.WriteLine($"Retained basis would be {check.BasisBytes} bytes; nothing retained.");
+            }
             foreach (RecordWritten? written in new[] { response.Operation, response.Candidate, response.Release })
             {
                 if (written is not null)

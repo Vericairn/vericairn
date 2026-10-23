@@ -219,6 +219,7 @@ public class DocsTests
                 Assert.Contains("POST /v1/packages/" + action, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             }
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("POST /v1/releases/check", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Contains("operator list", commands);
             Assert.Contains("GET /v1/operator/actions", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
@@ -251,6 +252,7 @@ public class DocsTests
             string submit = cli[cli.IndexOf("### `vericairn release submit`", StringComparison.Ordinal)..];
             submit = submit[..submit.IndexOf("\n### ", 5, StringComparison.Ordinal)];
             Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
+            Assert.Contains("--check", submit, StringComparison.Ordinal);
             Assert.DoesNotContain("--help", submit, StringComparison.Ordinal);
             string rootOptions = cli[..cli.IndexOf("## `vericairn ", StringComparison.Ordinal)];
             Assert.Contains("--recipient <recipient>", rootOptions, StringComparison.Ordinal);

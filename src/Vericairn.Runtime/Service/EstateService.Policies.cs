@@ -83,15 +83,15 @@ public sealed partial class EstateService
         return PolicyView(model, basis, evaluated, selected, problem);
     }
 
-    private PolicyResponse PolicyView(EstateModel model, PolicyBasis basis, PolicyEvaluation evaluated, RecordEnvelope? selected = null, Problem? problem = null)
+    private PolicyResponse PolicyView(EstateModel model, PolicyBasis basis, PolicyEvaluation evaluated, RecordEnvelope? selected = null, Problem? problem = null, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
     {
         PolicyFinding[] findings = evaluated.Findings.Where(f => selected is null || f.PolicyIdentity == PolicyWork.Identity(model, selected)).ToArray();
         RecordEnvelope[] policies = model.Current("estate-policy").Where(p => selected is null || p.Id == selected.Id)
             .OrderBy(p => EstateModel.BodyString(p, "key"), StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal).ToArray();
         HashSet<string> identities = policies.Select(p => PolicyWork.Identity(model, p)).ToHashSet(StringComparer.Ordinal);
         RecordResponse[] exceptions = model.OfType("policy-exception").Where(e => e.Subject is { } s && model.ById.TryGetValue(s.Id, out RecordEnvelope? p) && identities.Contains(PolicyWork.Identity(model, p)))
-            .OrderBy(e => e.At, StringComparer.Ordinal).ThenBy(e => e.Id, StringComparer.Ordinal).Select(e => PolicyRecord(model, e)).ToArray();
-        var response = new PolicyResponse("", BasisView(basis), policies.Select(p => PolicyRecord(model, p)).ToArray(), exceptions,
+            .OrderBy(e => e.At, StringComparer.Ordinal).ThenBy(e => e.Id, StringComparer.Ordinal).Select(e => PolicyRecord(model, e, sourceFiles)).ToArray();
+        var response = new PolicyResponse("", BasisView(basis), policies.Select(p => PolicyRecord(model, p, sourceFiles)).ToArray(), exceptions,
             findings.Select(ConvertPolicy<PolicyFindingDto>).ToArray(), evaluated.Rules.Where(r => policies.Any(p => p.Id == r.Policy.Id)).Select(ConvertPolicy<PolicyRuleSummaryDto>).ToArray(),
             evaluated.Diagnostics.Select(PolicyDiagnostic).ToArray(), evaluated.Complete && problem is null, findings.Count(f => f.ReleaseHold), problem)
         { Requirements = evaluated.Requirements?.Where(r => selected is null || r.Policy == EstateModel.BodyString(selected, "key") || identities.Contains(r.Policy))
@@ -198,9 +198,9 @@ public sealed partial class EstateService
         }
     }
 
-    private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record)
+    private RecordResponse PolicyRecord(EstateModel model, RecordEnvelope record, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
     {
-        using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)!.Bytes);
+        using JsonDocument document = JsonDocument.Parse((sourceFiles is null ? session.LoadedFile(record.ExpectedPath)! : sourceFiles[record.ExpectedPath]).Bytes);
         return new(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
     }
 
