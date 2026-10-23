@@ -1042,6 +1042,15 @@ whose principal is not the one the request names as acting is refused. Sign a de
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
 
+From the 0.8.3 development build, the existing upgrade request also accepts `from` (a downloaded
+release directory on the runtime's machine) and `clientBuild` (the invoking full informational version).
+When no Vericairn release of the requested version is recorded, the runtime verifies the published
+Vericairn dependency and platform archive before authoring a `vericairn-release` observation with the
+migration. The target, client and runtime build identities must agree. The response's `release` may
+identify that observation; its other fields retain their shape. `check: true` writes nothing.
+The path is input only and is never recorded. Offline inputs include saved release/tag responses,
+`SHA256SUMS` and the platform archive; see [installation](install.md#offline-inputs).
+
 ## Agent progress claims (0.7.0, additive)
 
 `POST /v1/work/progress` accepts `{attempt, by, phase, note, completed?}`. The default `completed` is false. It returns `WorkProgressResponse` with `claim`, optional `written`, `problem`, and `ok`; refusals are in the response. Only the attempt's contributor may submit. A phase completion is idempotent for the same note and cannot be revised or reopened. Other submissions after the attempt's result are refused.

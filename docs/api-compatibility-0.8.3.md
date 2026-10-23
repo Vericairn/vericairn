@@ -5,6 +5,39 @@ It is an interface inventory, not a claim of publication or a completed package 
 the published 0.8.2 packages. The API remains version 1, and no record format or existing method signature
 changes. Earlier interface changes remain documented in [API compatibility for 0.8.2](api-compatibility-0.8.2.md).
 
+## Published dependency release pins (FIX-52)
+
+`IReleaseSource.VerifyAsync(ReleaseBuild, string platform, CancellationToken = default)` is additive.
+Its default implementation returns a failed task naming the unsupported verification operation and
+the offline `--from` alternative. Existing sources remain loadable and keep their `LatestAsync`
+behavior; they do not silently claim archive verification. Both GitHub release-source entry points
+implement the new operation. It uses the anonymous release-check transport rules, bounded metadata,
+streamed archive hashing and a second tag read. No new interface member lacks a default implementation,
+and FIX-52 adds no MCP tool or API route.
+
+| Added public surface | Purpose |
+| --- | --- |
+| `ReleaseBuild(Version, Commit, Reads, Writes)`, `Identity`, `Parse`, `Platform` | Target build identity and its own format capabilities |
+| `ReleaseArchive(Name, Platform, Hash)`, `FileName`, `WorkbenchFileName` | A canonical distributable and its published hash |
+| `VerifiedRelease`, `ObservationBody`, `PageUrl`, `AssetUrl` | Immutable verified evidence, observation facts and canonical addresses; instances come from verification |
+| `PublishedReleaseVerifier.VerifyAsync`, `FromDirectoryAsync`, `HashArchiveAsync`, size limits | Shared online/offline verification with no scratch writes |
+| `VericairnReleaseObservation.Is`, `ReleaseBody` | Recognition and projection of validated flat dependency facts |
+| `ProviderRegistry.VericairnReleases` | Explicit host selection of the anonymous dependency source |
+| `EstateInitialization.Release`, `PreparedEstate.Release` | Optional verified dependency and its prepared observation; existing constructors and deconstruction remain unchanged |
+| `EstateLoader.LoadPrepared` | Validate prepared records against manifest bytes before initialization writes |
+| `EstateManifest.Release` | Optional exact observation reference in a release pin |
+| `EstateUpgrade.Plan(EstateModel, RecordEnvelope)` | Plan against a verified observation or a published product release |
+| `UpgradeRequest.From`, `UpgradeRequest.ClientBuild` | Optional runtime-local offline directory and invoking build identity; the existing constructor and deconstruction remain unchanged |
+
+`POST /v1/estate/upgrade` retains its route and response shape. `release` in its response may now
+identify a `vericairn-release` observation. Dependency verification requires the runtime and supplied
+client identity to match the target build. A `check` observes without writing; an apply pins the
+observation by hash and retains the existing forward migration and interrupted-manifest recovery.
+The `From` directory is input only and never enters a record. Local-network apply remains refused.
+See [the record-format guide](record-format.md#published-vericairn-dependency-observations-083-development)
+for the additive observation kind and optional manifest reference, and [installation](install.md#offline-inputs)
+for the offline evidence contract.
+
 ## Work-order creation (CODE-07)
 
 ### Members added to `IEstateApi`

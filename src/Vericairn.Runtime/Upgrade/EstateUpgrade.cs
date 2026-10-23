@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Updates;
 
 namespace Vericairn.Runtime.Upgrade;
 
@@ -71,7 +72,7 @@ public interface IRecordFormatMigration
 /// <param name="FromFormat">Current record format.</param>
 /// <param name="ToFormat">Target record format.</param>
 /// <param name="Migrations">Migrations that would run, in order.</param>
-/// <param name="Release">The published release record upgraded to.</param>
+/// <param name="Release">The published release record or verified dependency observation upgraded to.</param>
 /// <param name="Artifacts">Distributable hash per platform, carried into the manifest.</param>
 /// <param name="Anchored">Moving to record format 2, the admissions recorded without a signature that are in force, by id and hash, which the signed migration anchors.</param>
 public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts, IReadOnlyList<RecordReference> Anchored);
@@ -99,21 +100,43 @@ public static class EstateUpgrade
         return plan.Migrations.Select(name => Migrations.First(m => m.Name == name)).ToList();
     }
 
-    /// <summary>Plans an upgrade to a version; throws with the reason when no published release of that version is recorded.</summary>
+    /// <summary>Plans against a recorded published release or dependency observation; this pure planner never fetches or writes.</summary>
     public static UpgradePlan Plan(EstateModel model, string version)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
-        EstateManifest manifest = model.Manifest ?? throw new InvalidOperationException("The estate has no usable manifest.");
-        List<RecordEnvelope> candidates = model.Current("release").Where(r => EstateModel.BodyString(r, "version") == version).ToList();
+        List<RecordEnvelope> candidates = RecordedTargets(model, version);
         RecordEnvelope release = candidates.FirstOrDefault(r => EstateModel.BodyString(r, "status") == "published")
+            ?? (candidates.Count == 0 ? model.Current("observation").Where(VericairnReleaseObservation.Is)
+                .FirstOrDefault(r => r.Body.GetProperty("facts").GetProperty("version").GetString() == version) : null)
             ?? throw new InvalidOperationException(candidates.Count == 0
-                ? $"No release record has version {version}; a release is recorded in the estate before the estate is upgraded to it."
+                ? $"No release record or verified observation has version {version}; run estate upgrade with the target release's command line to verify the published dependency."
                 : $"Release {version} is recorded as {EstateModel.BodyString(candidates[0], "status")}, not published; the operator's acceptance and the observed publication come first.");
-        long toFormat = release.Body.TryGetProperty("recordFormat", out JsonElement format) && format.TryGetProperty("writes", out JsonElement writes) && writes.TryGetInt64(out long w) ? w : manifest.RecordFormat;
+        return Plan(model, release);
+    }
+
+    // An estate can publish an unrelated product with the same version. Its release cannot supply a Vericairn pin.
+    // Retain existing recorded-runtime paths, including forks whose canonical Vericairn archives identify the runtime.
+    internal static List<RecordEnvelope> RecordedTargets(EstateModel model, string version) => model.Current("release")
+        .Where(r => EstateModel.BodyString(r, "version") == version &&
+            (string.Equals(EstateModel.BodyString(r, "repository"), model.Manifest?.Repository, StringComparison.OrdinalIgnoreCase)
+             || r.Body.GetProperty("artifacts").EnumerateArray().Any(a => IsDistributable(a.GetProperty("name").GetString()!, version, a.GetProperty("platform").GetString()!))))
+        .ToList();
+
+    /// <summary>Plans against a published release record or a verified dependency observation prepared without writing it.</summary>
+    public static UpgradePlan Plan(EstateModel model, RecordEnvelope release)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(release);
+        EstateManifest manifest = model.Manifest ?? throw new InvalidOperationException("The estate has no usable manifest. Restore it before upgrading.");
+        JsonElement data = VericairnReleaseObservation.ReleaseBody(release);
+        if ((!VericairnReleaseObservation.Is(release) && release.Type != "release") || data.GetProperty("status").GetString() != "published")
+            throw new InvalidOperationException("The upgrade target is not a published release. Choose a published release or verify its dependency observation.");
+        string version = data.GetProperty("version").GetString()!;
+        long toFormat = data.TryGetProperty("recordFormat", out JsonElement format) && format.TryGetProperty("writes", out JsonElement writes) && writes.TryGetInt64(out long w) ? w : manifest.RecordFormat;
         if (toFormat < manifest.RecordFormat)
         {
-            throw new InvalidOperationException($"Release {version} writes record format {toFormat}, older than this estate's format {manifest.RecordFormat}; upgrades are forward-only.");
+            throw new InvalidOperationException($"Release {version} writes record format {toFormat}, older than this estate's format {manifest.RecordFormat}; upgrades are forward-only. Choose a release that writes at least this estate's format.");
         }
 
         if (toFormat > RecordFormats.Latest)
@@ -128,7 +151,7 @@ public static class EstateUpgrade
             long unread = Enumerable.Range((int)RecordFormats.First, (int)(manifest.RecordFormat - RecordFormats.First + 1)).Select(f => (long)f).FirstOrDefault(f => !read.Contains(f));
             if (unread != 0)
             {
-                throw new InvalidOperationException($"Release {version} does not read record format {unread}, which this estate's records use; it cannot be the estate's release.");
+                throw new InvalidOperationException($"Release {version} does not read record format {unread}, which this estate's records use; it cannot be the estate's release. Choose a release that reads every format this estate uses.");
             }
         }
 
@@ -147,7 +170,7 @@ public static class EstateUpgrade
         }
 
         var artifacts = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (release.Body.TryGetProperty("artifacts", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+        if (data.TryGetProperty("artifacts", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
         {
             foreach (JsonElement artifact in list.EnumerateArray())
             {
@@ -166,14 +189,13 @@ public static class EstateUpgrade
             throw new InvalidOperationException($"Release {version} names no distributable of the form vericairn-{version}-<platform>.tar.gz or .zip; the bootstrap could not verify what it fetches.");
         }
 
-        string repository = EstateModel.BodyString(release, "repository") ?? manifest.Repository ?? "?";
-
         // Moving to record format 2, the admissions recorded without a signature that are in force are listed by id and hash, so that the
         // signed migration anchors them; from then on an unsigned admission the list does not name counts for nothing.
         IReadOnlyList<RecordReference> anchored = steps.Contains("record-format-2")
             ? [.. model.OfType("admission").Where(a => a.Signatures.Count == 0).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).Select(a => new RecordReference("admission", a.Id, a.ComputedHash))]
             : [];
-        return new UpgradePlan(manifest.Describe(), $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts, anchored);
+        string fromPin = manifest.Mode == "source" ? $"source {manifest.Repository}@{manifest.Commit}" : manifest.Describe();
+        return new UpgradePlan(fromPin, $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts, anchored);
     }
 
     private sealed class Restore : IDisposable
@@ -233,6 +255,7 @@ public static class EstateUpgrade
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(plan);
         var artifacts = new JsonObject();
+        JsonElement data = VericairnReleaseObservation.ReleaseBody(plan.Release);
         foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
         {
             artifacts[platform] = hash;
@@ -247,11 +270,13 @@ public static class EstateUpgrade
             ["vericairn"] = new JsonObject
             {
                 ["mode"] = "release",
-                ["repository"] = EstateModel.BodyString(plan.Release, "repository") ?? current.Repository,
-                ["version"] = EstateModel.BodyString(plan.Release, "version"),
+                ["repository"] = data.GetProperty("repository").GetString() ?? current.Repository,
+                ["version"] = data.GetProperty("version").GetString(),
                 ["artifacts"] = artifacts,
             },
         };
+        if (VericairnReleaseObservation.Is(plan.Release))
+            manifest["vericairn"]!["release"] = new JsonObject { ["type"] = "observation", ["id"] = plan.Release.Id, ["hash"] = plan.Release.ComputedHash };
         using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
         return CanonicalJson.SerializePrettyUtf8(document.RootElement);
     }

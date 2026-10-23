@@ -116,46 +116,82 @@ their admitted signatures and exact authority.
 
 Nothing runs in the background until you ask: commands run the embedded runtime unless a daemon serves the estate (`vericairn runtime status` says which). A daemon started by `vericairn runtime start` (or by Workbench, through that command) writes its output to `daemon.log` beside the estate's live store, never to the terminal or the program that started it. When the daemon stops before it serves, `runtime start` exits with an error that quotes what the daemon wrote to its log and says where the log is. And `vericairn runtime install --plan` shows what installing the daemon as a per-user service would do before `runtime install` does it; Workbench's runtime workspace shows the same plan before it installs or uninstalls. The operator guide covers both.
 
-## 6. Upgrading an estate to 0.8.2
+## 6. Pinning and upgrading a published release
 
-Install the 0.8.2 binary by Route B. If a daemon serves the estate, restart it with the newly installed
-binary before running the upgrade.
-From the estate directory on the daemon's machine, run `vericairn runtime stop`, then
-`vericairn runtime start`. Replacing the installed binary does not replace a running daemon.
-Restart running workers with the new release too, after their active work has settled.
+The published-dependency commands below are additions in the **0.8.3 development build**.
+Use a published target build containing them when it is available. They let an estate other than
+Vericairn's own pin a published release without authoring a product release record.
 
-Run these commands in the estate after it holds the published release record:
+Install and checksum-verify the target command line by Route B. If a daemon serves the estate,
+restart it with the same target build before checking or applying the upgrade. From the estate
+directory on the daemon's machine, run `vericairn runtime stop`, then `vericairn runtime start`.
+Restart workers after their active work has settled. Installing a binary alone does not move an
+estate's pin or replace a running process.
 
 ```sh
-vericairn estate upgrade --to 0.8.2 --check
-vericairn estate upgrade --to 0.8.2 --by <your principal id>
+vericairn estate upgrade --to <published-version> --check
+vericairn estate upgrade --to <published-version> --by <your principal id>
 ```
 
-Only the estate that built and observed a release holds its release record
-([issue 177](https://github.com/Vericairn/vericairn/issues/177)). An estate other than Vericairn's own therefore
-cannot yet pin or upgrade to a published Vericairn release: `estate upgrade --to` refuses there, and its source
-pin does not move. Until a later release adds a supported record of a published Vericairn release that an
-estate depends on, initialize such an estate with a source pin and run the checksum-verified published
-binary with `--estate`. From 0.8.3, the running build supplies its exact source commit, the same commit
-reported by `vericairn --version`:
+The command uses a recorded Vericairn release when one exists. Otherwise it anonymously
+reads the target's GitHub release, its tag and `SHA256SUMS`, downloads this machine's platform archive
+and verifies its SHA-256. It checks the tag's commit against the target build's full source commit
+before and after downloading. The target build supplies the record formats it reads and writes.
+A draft, prerelease, changed tag, missing checksum file, mismatched archive, unreadable record format
+or older writable format refuses without changing the pin or writing an observation or migration.
+The refusal names the next action. An unavailable network asks for a retry or the offline inputs below.
+These explicit downloads use the release check's anonymous transport rules: no credentials, cookies,
+proxy or trace propagation; asset redirects are limited to GitHub's HTTPS download hosts.
+
+`--check` writes nothing. Applying creates a `vericairn-release` observation and a migration record,
+then moves the manifest to release mode, pinning that exact observation by hash and carrying the
+published archive hashes. A source pin takes the same path; the migration names both pins. The
+observation states that the builds are unsigned developer builds and that only the current platform's
+CLI archive was verified. Review and commit the estate change. The bootstrap's release mode stays the
+same: it verifies the downloaded archive against the manifest hash.
+
+For a fresh estate, run the published build with `--release`:
 
 ```sh
 mkdir my-estate && cd my-estate && git init
-vericairn estate init --name "My Venture" --slug my-venture \
+vericairn estate init --release --name "My Venture" --slug my-venture \
   --purpose "What this estate exists to do." \
   --operator-name "Your Name" --organization "Your Organization"
 vericairn status
 ```
 
-Published 0.8.2 still needs `--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` on `estate init`.
-An explicit `--commit <40-hex-commit>` overrides the default. A development build without a recorded
-commit requires it and refuses before writing anything when it is omitted. Never write a release
-record by hand to supply the missing published-release dependency.
+Verification finishes before initialization writes anything. The new estate has an operator, a
+charter and the dependency observation, with a release-mode manifest. `--profile local-only` supports
+the same path. Without `--release`, initialization needs no network and pins the running build's
+source commit; `--commit <40-hex-commit>` can override that source pin. Development builds without
+an exact recorded commit require `--commit`. A release pin requires a stable published target build,
+and refuses a different `--repository` or `--commit` override.
+
+### Offline inputs
+
+Add `--from <download-directory>` to either upgrade command, or to `estate init --release`.
+The directory is read on the runtime's machine, so copy it there when a daemon serves the command.
+It must contain the downloaded files below, from one release; their contents are never authored
+as release records. The same verification runs without contacting GitHub or changing these files.
+
+| File | Download source |
+| --- | --- |
+| `release.json` | GitHub API `repos/Vericairn/vericairn/releases/tags/v<version>` |
+| `tag.json` | GitHub API `repos/Vericairn/vericairn/git/ref/tags/v<version>` |
+| `tag-<sha>.json`, when the tag reference points to a tag object | GitHub API `repos/Vericairn/vericairn/git/tags/<sha>`; include each annotated object until it points to a commit |
+| `SHA256SUMS` | The release's download assets |
+| `vericairn-<version>-<platform>.tar.gz` (`.zip` on Windows) | The same release's platform archive |
+
+The API addresses start with `https://api.github.com/`. Save their response bodies unchanged.
+Checksums and an archive alone cannot establish a release's published status or its tag commit.
+Offline verification checks the supplied tag snapshot twice; it cannot establish whether GitHub
+changed after those responses were downloaded. Refresh the responses when current publication
+knowledge is needed. The builds remain unsigned in both paths.
 
 An estate running 0.8.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
 between the two resumes from that migration record when run again, and until then opening the estate
-warns `upgrade.incomplete`. A release pin with no migration record is refused.
+warns `upgrade.incomplete`. A legacy release pin with no migration record is refused; a fresh `init --release` pin has its exact dependency observation instead.
 
 An estate running 0.7.3 at format 2 applies `record-format-3`. The plan names that step, the
 published target and its artifact hashes. Applying it appends the migration record and changes the
@@ -490,8 +526,8 @@ Restart any serving daemon with the installed release first: from the estate dir
 run `vericairn runtime stop`, then `vericairn runtime start`. Restart running workers after their active
 work has settled. An estate upgrade changes the estate's pin; it does not restart those processes.
 
-To move an estate's pin, first ensure its target published release is recorded in that estate,
-then use the target release's CLI:
+To move an estate's pin, use the target release's CLI. From 0.8.3 it verifies and records a published
+dependency when the estate has no recorded Vericairn release:
 
 ```sh
 vericairn estate upgrade --to <published-version> --check
@@ -499,8 +535,10 @@ vericairn estate upgrade --to <published-version> --by <operator-id>
 ```
 
 `estate check` makes no release-check request. It warns with `manifest.release-behind` when the manifest
-pins a release below the newest stable published version known from matching release records or the
-local cache. The cache applies only to `Vericairn/vericairn`; another product's releases do not count.
+pins a release below the newest stable published version known from matching release records,
+`vericairn-release` observations or the local cache. For source pins it compares that knowledge with
+the build performing the check; it does not infer an arbitrary source commit's version. The cache
+applies only to `Vericairn/vericairn`; another product's releases do not count.
 This warning never makes the command fail and never changes the pin. See the
 [operator guide](operator-guide.md) for the distinction between installing a tool and upgrading an estate.
 

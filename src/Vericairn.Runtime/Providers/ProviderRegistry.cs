@@ -12,6 +12,9 @@ namespace Vericairn.Runtime.Providers;
 /// </summary>
 public sealed class ProviderRegistry
 {
+    /// <summary>The anonymous source used to verify a published Vericairn dependency; hosts select it explicitly.</summary>
+    public Vericairn.Records.Updates.IReleaseSource? VericairnReleases { get; set; }
+
     private readonly object gate = new();
     private readonly Dictionary<string, IReleaseProvider> releases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IPullRequestProvider> pullRequests = new(StringComparer.Ordinal);

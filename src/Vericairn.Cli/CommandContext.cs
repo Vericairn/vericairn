@@ -96,7 +96,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     public TextWriter Error => error ?? Console.Error;
 
     /// <summary>Runs an operation against the estate's API, retaining the existing ownership and failure boundary.</summary>
-    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false)
+    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false, bool upgrade = false)
     {
         try
         {
@@ -124,7 +124,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 }
             }
 
-            using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : EstateService.Open(root);
+            using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : upgrade ? EstateService.OpenForUpgrade(root) : EstateService.Open(root);
             UsingDaemon = false;
             return operation(new CancellationBoundApi(service, CancellationToken));
         }

@@ -20,6 +20,7 @@ internal static class Composition
     public static void Register(ProviderRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        registry.VericairnReleases ??= Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default;
         registry.RegisterIfAbsent(new GitHubReleaseProvider());
         registry.RegisterIfAbsent(new GitHubPullRequestProvider());
         registry.RegisterIfAbsent(Vericairn.Providers.NuGet.NuGetRegistryProvider.Default);
