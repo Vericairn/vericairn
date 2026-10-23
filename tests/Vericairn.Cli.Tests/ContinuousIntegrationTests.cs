@@ -102,7 +102,7 @@ public class ContinuousIntegrationTests
         int unpacked = scan.IndexOf("tar -xzf \"$dir/$archive\"", StringComparison.Ordinal);
         int detect = scan.IndexOf("\"$RUNNER_TEMP/gitleaks/gitleaks\" detect ", StringComparison.Ordinal);
         Assert.True(verified > 0 && unpacked > verified && detect > unpacked, "The archive is verified before it is unpacked, and unpacked before it runs.");
-        Assert.Equal(["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5"], scan.Split('\n').Where(l => l.TrimStart().StartsWith("- uses: ", StringComparison.Ordinal) || l.TrimStart().StartsWith("uses: ", StringComparison.Ordinal)).Select(l => l[(l.IndexOf("uses: ", StringComparison.Ordinal) + 6)..]));
+        Assert.Equal(["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"], scan.Split('\n').Where(l => l.TrimStart().StartsWith("- uses: ", StringComparison.Ordinal) || l.TrimStart().StartsWith("uses: ", StringComparison.Ordinal)).Select(l => l[(l.IndexOf("uses: ", StringComparison.Ordinal) + 6)..]));
         Assert.DoesNotContain(workflow.Split('\n'), l => l.Contains("uses:", StringComparison.Ordinal) && l.Contains("gitleaks", StringComparison.Ordinal));
         Assert.DoesNotContain("secrets.", scan, StringComparison.Ordinal);
 
@@ -298,7 +298,7 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n      fail-fast: false\n", job, StringComparison.Ordinal);
         Assert.Contains("\n    runs-on: ${{ matrix.os }}\n", job, StringComparison.Ordinal);
         Assert.Equal("      matrix:\n        include:\n          - os: macos-latest\n            rid: osx-arm64\n          - os: windows-latest\n            rid: win-x64\n", Block(job, "matrix:", 6));
-        Assert.Contains("uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0", job, StringComparison.Ordinal);
+        Assert.Contains("uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333", job, StringComparison.Ordinal);
         Assert.Contains("name: vericairn-${{ needs.package.outputs.version }}\n          path: dist\n", job, StringComparison.Ordinal);
         Assert.DoesNotContain("continue-on-error", job, StringComparison.Ordinal);
         Assert.DoesNotContain("dotnet publish", job, StringComparison.Ordinal);
