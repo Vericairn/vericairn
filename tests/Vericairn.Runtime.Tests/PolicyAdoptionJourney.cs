@@ -127,6 +127,7 @@ public static class PolicyAdoptionJourney
             provider = new JourneyProvider(Time);
             var providers = new ProviderRegistry();
             providers.Register(provider);
+            providers.Register(new GitCommandAdapter());
             Api.Providers = providers;
             PolicySources.Register(ReferenceCoverage.Registration(PolicySources.Digest(typeof(ReferenceCoverage).Assembly)));
             PolicySources.RepositorySource = new GitPolicySource();
@@ -281,7 +282,7 @@ public static class PolicyAdoptionJourney
             Assert.Equal(product.Id, Model.Chain(publicationProduct)[0]);
             RecordEnvelope next = Candidate("0.8.1");
             Advance();
-            ReleaseSubmitRequest request = new(publicationProduct.Id, "0.8.1", "Example/fixture", Operator, Commit: Commit, Expected: Model.Current("product").Single().ComputedHash);
+            ReleaseSubmitRequest request = new(publicationProduct.Id, "0.8.1", "Example/fixture", Operator, Commit: Commit, Expected: Model.Current("product").Single().ComputedHash) { ClientBuild = EstateService.Version };
             ReleaseResponse held = Surface.Submit(request);
             Assert.False(held.Ok);
             Assert.True(held.Policies is not null, JsonSerializer.Serialize(held, ProtocolJson.Options));

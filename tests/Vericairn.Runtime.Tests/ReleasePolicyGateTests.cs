@@ -19,7 +19,7 @@ using Vericairn.Sdk;
 namespace Vericairn.Runtime.Tests;
 
 [Collection("policy-sources")]
-public sealed class ReleasePolicyGateTests
+public sealed partial class ReleasePolicyGateTests
 {
     [Theory]
     [InlineData(0, 0)]
@@ -499,6 +499,7 @@ public sealed class ReleasePolicyGateTests
         using var f = new Fixture();
         f.Duty();
         var repository = f.Records.Add("resource", new() { ["kind"] = "repository", ["name"] = "Source inventory", ["role"] = "Read exact sources.", ["location"] = new JsonObject { ["github"] = "Example/widget" }, ["visibility"] = "public" });
+        RepositoryClones.Register(f.Records.Estate.Estate.Id, repository.Id, f.Records.Estate.Root);
         JsonObject definition = f.Records.PolicyBody("source");
         definition["startsAt"] = RecordParser.FormatTimestamp(f.Clock.Now.AddSeconds(-10));
         definition["level"] = "remind";
@@ -907,11 +908,16 @@ public sealed class ReleasePolicyGateTests
         internal RecordEnvelope Product { get; }
         internal Clock Clock { get; }
         internal DateTimeOffset Due { get; }
-        internal ReleaseSubmitRequest Request => new(Product.Id, "1.0.0", "Example/widget", Records.Estate.OperatorId, Commit: Commit, Expected: Product.ComputedHash);
+        internal ReleaseSubmitRequest Request => new(Product.Id, "1.0.0", "Example/widget", Records.Estate.OperatorId, Commit: Commit, Expected: Product.ComputedHash) { ClientBuild = EstateService.Version };
 
         internal Fixture()
         {
             Product = Records.Add("product", ProductBody("widget"));
+            Records.Add("resource", new JsonObject
+            {
+                ["kind"] = "repository", ["name"] = "Release source", ["role"] = "Release fixture source.",
+                ["location"] = new JsonObject { ["github"] = "Example/widget" }, ["visibility"] = "public",
+            });
             Api = EstateService.Open(Records.Estate.Root);
             RecordWritten device = Api.DeviceCreate(new(Records.Estate.OperatorId, "Fixture release writer", "file")).Written!;
             RecordEnvelope held = Api.Session.Load().ById[device.Id];
@@ -924,6 +930,7 @@ public sealed class ReleasePolicyGateTests
             var registry = new ProviderRegistry();
             registry.Register(Provider);
             Api.Providers = registry;
+            ReleaseGateSource.Prepare(Api, "Example/widget", Commit);
         }
 
         internal RecordEnvelope Duty(string level = "refuse", int graceDays = 0)

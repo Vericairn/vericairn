@@ -153,6 +153,16 @@ public sealed partial class ToolRegistry
                 async (api, a, token) => Json(await api.PolicyAccessAsync(by, token).ConfigureAwait(false))),
             Read("policy_show", "One policy by key or record id, including duty deadlines, exact evidence and exception history.", Arguments(("key", "Policy key or record id.")), "key",
                 async (api, a, token) => await api.PolicyAsync(Arg(a, "key"), token).ConfigureAwait(false) is { } policy ? Json(policy) : NotFound("policy", Arg(a, "key"))),
+            Read("release_submit_check", "Check every release submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and needs no presence; a passing check grants no authority.", ReleaseCheckArguments(),
+                async (api, a, token) =>
+                {
+                    var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), Arg(a, "by"),
+                        OptionalArg(a, "ref"), OptionalArg(a, "workflow"), OptionalArg(a, "reconciliation"), OptionalArg(a, "provider"),
+                        a?["settings"] is JsonObject settings ? settings.Deserialize<Dictionary<string, string>>(ProtocolJson.Options) : null,
+                        Arg(a, "commit"), Arg(a, "expected")) { ClientBuild = Arg(a, "clientBuild") };
+                    ReleaseResponse result = await api.ReleaseCheckAsync(request, token).ConfigureAwait(false);
+                    return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), !result.Ok);
+                }),
             Read("release_basis_get", "Read the retained exact release basis, including duty evidence, sources, findings and document comparisons. Historical evidence grants no new submission authority.", Arguments(("hash", "Release-basis object hash from operation evidence.")), "hash",
                 async (api, a, token) => await api.ReleaseBasisAsync(Arg(a, "hash"), token).ConfigureAwait(false) is { } basis
                     ? new ToolCallResult(JsonSerializer.Serialize(basis, ProtocolJson.Options), basis.Evidence is null) : NotFound("release basis", Arg(a, "hash"))),
@@ -281,6 +291,17 @@ public sealed partial class ToolRegistry
     private static ToolDefinition Definition(string name, string description, JsonObject schema, bool writes,
         Func<IEstateApi, JsonObject?, CancellationToken, Task<ToolCallResult>> invoke) =>
         new(name, description, schema, writes, (api, arguments) => invoke(api, arguments, CancellationToken.None).GetAwaiter().GetResult()) { InvokeAsync = invoke };
+
+    private static JsonObject ReleaseCheckArguments()
+    {
+        JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked."),
+            ("commit", "Exact lower-case forty-digit commit."), ("expected", "Expected current product hash."), ("clientBuild", "Full informational version of the submitting client, including source commit."),
+            ("repository", "Optional repository destination."), ("provider", "Optional release provider."), ("ref", "Optional provider ref setting."),
+            ("workflow", "Optional workflow setting."), ("reconciliation", "Optional settlement of the previous attempt."));
+        schema["properties"]!["settings"] = new JsonObject { ["type"] = "object", ["additionalProperties"] = new JsonObject { ["type"] = "string" } };
+        schema["required"] = new JsonArray("product", "version", "by", "commit", "expected", "clientBuild");
+        return schema;
+    }
 
     private static JsonObject NoArguments() => new() { ["type"] = "object", ["properties"] = new JsonObject(), ["additionalProperties"] = false };
 

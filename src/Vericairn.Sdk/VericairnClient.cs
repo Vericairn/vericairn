@@ -382,6 +382,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public ReleaseResponse ReleaseWithdraw(ReleaseWithdrawRequest request) => Post<ReleaseWithdrawRequest, ReleaseResponse>("/v1/releases/withdraw", request)!;
 
     /// <inheritdoc />
+    public ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/check", request)!;
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
 
     /// <inheritdoc />

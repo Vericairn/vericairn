@@ -12,6 +12,7 @@ internal sealed class ReleaseSubmitCommand : Command
     public ReleaseSubmitCommand(CommandContext context)
         : base("submit", "Record the intent, then dispatch the build through the provider; the run id and outcome are recorded as they are observed. Never publishes.")
     {
+        var checkOption = new Option<bool>("--check") { Description = "Report every submission objection and its next action at the exact commit; signs, records, retains and dispatches nothing, and needs no presence." };
         var byOption = new Option<string>("--by") { Description = "Principal id recording the operation (ULID).", Required = true };
         var versionOption = new Option<string>("--version") { Description = "The version to release, for example 0.4.0.", Required = true };
         var productOption = new Option<string>("--product") { Description = "Product record id the release belongs to; its declared release destination supplies the provider and settings the request does not name.", Required = true };
@@ -23,6 +24,7 @@ internal sealed class ReleaseSubmitCommand : Command
         var workflowOption = new Option<string?>("--workflow") { Description = "The setting workflow (the release workflow file); the provider's default when omitted." };
         var settingOption = new Option<string[]>("--setting") { Description = "Any declared setting as name=value; repeatable.", AllowMultipleArgumentsPerToken = true };
         var reconciliationOption = new Option<string?>("--reconciliation") { Description = "How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry." };
+        Options.Add(checkOption);
         Options.Add(productOption);
         Options.Add(versionOption);
         Options.Add(byOption);
@@ -47,14 +49,15 @@ internal sealed class ReleaseSubmitCommand : Command
             parseResult.GetValue(reconciliationOption),
             parseResult.GetValue(commitOption),
             parseResult.GetValue(expectedOption),
-            parseResult.GetValue(context.JsonOption)));
+            parseResult.GetValue(context.JsonOption),
+            parseResult.GetValue(checkOption)));
     }
 
-    private static int Execute(CommandContext context, string root, string product, string version, string by, string? provider, string? repository, string? reference, string? workflow, string[] settings, string? reconciliation, string? commit, string? expected, bool json)
+    private static int Execute(CommandContext context, string root, string product, string version, string by, string? provider, string? repository, string? reference, string? workflow, string[] settings, string? reconciliation, string? commit, string? expected, bool json, bool check)
     {
         Dictionary<string, string>? parsed = CommandSettings.Parse(settings, out string? problem);
-        return parsed is null
-            ? context.Fail(problem!)
-            : context.WithApi(root, api => ReleaseOutput.Write(context, api.ReleaseSubmit(new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation, provider, parsed, commit, expected)), json));
+        if (parsed is null) return context.Fail(problem!);
+        var request = new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation, provider, parsed, commit, expected) { ClientBuild = VersionText() };
+        return context.WithApi(root, api => ReleaseOutput.Write(context, check ? api.ReleaseCheck(request) : api.ReleaseSubmit(request), json), readOnly: check);
     }
 }

@@ -1,5 +1,14 @@
 # The MCP server
 
+In 0.8.3 development builds, `release_submit_check` is a read tool available without an admitted
+signing device or presence. Required inputs are `product`, `version`, `by` (the intended submitter),
+`commit`, `expected` (the product hash) and `clientBuild` (the full submitting client build identity).
+Optional inputs are `provider`, `repository`, `ref`, `workflow`, `settings` and `reconciliation`, as on
+submission. It returns the API's `ReleaseResponse` with `check.objections`, each naming a reason and
+`nextAction`, and marks a refused check as a tool error. It reports all admission objections, signs
+nothing, creates no record or retained object, calls no release provider and never fetches. A passing
+check grants no authority; submission evaluates again. See [API v1](api-v1.md#release-submission-check-083-development).
+
 Vericairn 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
 `policy_evaluate`, `writing_exceptions_list` and `writing_exception_show`.
 They return the same basis, findings, duty evidence and writing locations as the API.

@@ -667,6 +667,9 @@ public partial class MainWindow : Window
 
     private async void OnUninstallRuntime(object? sender, RoutedEventArgs e) => await shell.UninstallRuntimeAsync().ConfigureAwait(true);
 
+    private async void OnCheckRelease(object? sender, RoutedEventArgs e) =>
+        await shell.CheckReleaseAsync(DocumentOf<ReleaseWorkspace>(sender)).ConfigureAwait(true);
+
     private async void OnSubmitRelease(object? sender, RoutedEventArgs e) =>
         await shell.SubmitReleaseAsync(DocumentOf<ReleaseWorkspace>(sender)).ConfigureAwait(true);
 

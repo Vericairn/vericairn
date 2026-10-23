@@ -390,6 +390,10 @@ public sealed partial class VericairnClient
     public Task<ReleaseResponse> ReleaseWithdrawAsync(ReleaseWithdrawRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ReleaseResponse>(nameof(ReleaseWithdraw), async token => (await PostAsync<ReleaseWithdrawRequest, ReleaseResponse>("/v1/releases/withdraw", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReleaseWithdraw)), cancellationToken);
 
+    /// <summary>The cancellable read-only release check, with a deadline covering the complete response.</summary>
+    public Task<ReleaseResponse> ReleaseCheckAsync(ReleaseSubmitRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<ReleaseResponse>(nameof(ReleaseCheck), async token => (await PostAsync<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/check", request, cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(ReleaseCheck)), cancellationToken);
+
     /// <summary>The cancellable ReleaseSubmit operation, with a deadline covering the complete response.</summary>
     public Task<ReleaseResponse> ReleaseSubmitAsync(ReleaseSubmitRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ReleaseResponse>(nameof(ReleaseSubmit), async token => (await PostAsync<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReleaseSubmit)), cancellationToken);

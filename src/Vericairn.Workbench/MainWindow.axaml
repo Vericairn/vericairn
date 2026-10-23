@@ -521,6 +521,7 @@
                     <TextBlock Text="The runtime checks this commit and the selected product revision again before dispatch. A refusal shows every hold; retained evidence can be opened with release basis." TextWrapping="Wrap" Opacity="0.8" />
                     <TextBlock Text="Reconciliation (required for a retry after a failed, canceled or uncertain attempt)" />
                     <TextBox Text="{Binding Reconciliation}" MinHeight="28" AutomationProperties.Name="Reconciliation" />
+                    <Button Content="Check submission (nothing recorded)" MinHeight="32" Click="OnCheckRelease" />
                     <Button Content="Submit the release (intent, then dispatch)" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitRelease" />
                     <TextBlock Text="Destinations (Enter opens the candidate for acceptance)" FontWeight="SemiBold" />
                     <ListBox ItemsSource="{Binding Destinations}" SelectedItem="{Binding Selected}" Focusable="True" MaxHeight="240" AutomationProperties.Name="Release destinations">
