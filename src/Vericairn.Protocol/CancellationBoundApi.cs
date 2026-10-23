@@ -494,6 +494,7 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     /// <inheritdoc />
     public Task<ReleaseResponse> ReleaseWithdrawAsync(ReleaseWithdrawRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ReleaseWithdrawAsync(request, cancellationToken: token), cancellationToken);
 
+    /// <inheritdoc />
     public ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => inner.ReleaseCheckAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />
