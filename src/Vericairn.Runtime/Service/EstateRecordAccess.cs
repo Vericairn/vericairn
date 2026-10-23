@@ -20,7 +20,8 @@ internal sealed class EstateRecordAccess(
     Func<RecordDraft, EstateModel, (AuthoredRecord? Record, string? Refusal)> authorLocked,
     Func<IReadOnlyList<AuthoredRecord>, string, string?, (IReadOnlyList<RecordWritten> Written, Problem? Problem)> storeTogetherLocked,
     Func<IReadOnlyList<AuthoredRecord>, EstateModel> loadWith,
-    Func<EstateModel, Problem?> requestDeviceRefusal)
+    Func<EstateModel, Problem?> requestDeviceRefusal,
+    Func<RecordDraft, EstateModel, IReadOnlyList<FindingDto>> checkReleaseRecord)
 {
     internal object Gate { get; } = gate;
 
@@ -35,6 +36,8 @@ internal sealed class EstateRecordAccess(
         storeTogetherLocked(records, purpose, workOrder);
 
     internal EstateModel LoadWith(IReadOnlyList<AuthoredRecord> records) => loadWith(records);
+
+    internal IReadOnlyList<FindingDto> CheckReleaseRecord(RecordDraft draft, EstateModel model) => checkReleaseRecord(draft, model);
 
     internal Problem? RequestDeviceRefusal(EstateModel model) => requestDeviceRefusal(model);
 }

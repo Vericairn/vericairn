@@ -39,6 +39,7 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 | `policy_kinds` | read | Installed policy kind versions, implementation hashes, selections, sources and bounds. |
 | `policy_access` | read | Policy write actions currently admitted for the connected principal. Exact bounds are rechecked for every write. |
 | `policy_show` | read | One policy by key or record id, including duty deadlines, exact evidence and exception history. |
+| `release_submit_check` | read | Check every release submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and needs no presence; a passing check grants no authority. |
 | `release_basis_get` | read | Read the retained exact release basis, including duty evidence, sources, findings and document comparisons. Historical evidence grants no new submission authority. |
 | `policy_evaluate` | read | Evaluate policies with a recorded-time basis or explicit preview. A preview cannot authorize submission. |
 | `writing_exceptions_list` | read | Writing entries, removal history, match counts and exact excepted occurrences, with their basis. Reads create no record. |

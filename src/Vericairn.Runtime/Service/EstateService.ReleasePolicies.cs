@@ -13,11 +13,21 @@ namespace Vericairn.Runtime.Service;
 
 internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluation Evaluation, PolicyResponse View, IReadOnlyList<FindingDto> Objections)
 {
-    internal bool HasSameInputsAndFindings(ReleasePolicyAssessment other)
+    internal bool HasSameInputsAndFindings(ReleasePolicyAssessment other, IReadOnlyList<RecordEnvelope>? ownRevisions = null)
     {
         // Reuse the full basis digest contract at one instant for comparison only. Retained evidence
         // keeps its actual timestamp and digest; neither evaluation is rerun at an earlier time.
-        var comparable = new PolicyBasis(other.Basis.Model, Basis.AsOf, other.Basis.Origin,
+        EstateModel model = other.Basis.Model;
+        if (ownRevisions is { Count: > 0 })
+        {
+            // Excluding a retry's new record also excludes its own link from the canceled intent.
+            // Match both ends: another successor of that intent, or any other revision, still counts.
+            var successors = model.SupersededBy.Where(pair => !ownRevisions.Any(revision =>
+                revision.Type == "operation" && revision.Supersedes == pair.Key && revision.Id == pair.Value))
+                .ToImmutableDictionary(StringComparer.Ordinal);
+            model = new EstateModel(model.Root, model.Records, model.ById, successors, model.Findings) { Manifest = model.Manifest };
+        }
+        var comparable = new PolicyBasis(model, Basis.AsOf, other.Basis.Origin,
             other.Basis.Repositories, other.Basis.Objects, other.Basis.Implementations, other.Basis.Submission, other.Basis.Complete);
         return Basis.Digest == comparable.Digest && AdmissionState(Evaluation).Canonical() == AdmissionState(other.Evaluation).Canonical();
     }
@@ -153,39 +163,39 @@ public sealed partial class EstateService
         PolicyKindRegistry registry = PolicySources.Registry();
         PolicyBasis basis = PolicySnapshot(model, registry, RecordParser.FormatTimestamp(PolicyClock.GetUtcNow()), submission, live: true);
         PolicyEvaluation evaluation = PolicyEvaluator.Evaluate(basis, registry);
-        List<FindingDto> objections = model.Findings.Concat(ChecksWithBatches(model)).Where(f => f.Severity == Severity.Error).Distinct().Select(PolicyDiagnostic).ToList();
+        List<FindingDto> objections = model.Findings.Concat(RepositoryChecks(model)).Concat(ReleaseBatchFindings()).Where(f => f.Severity == Severity.Error).Distinct().Select(PolicyDiagnostic).ToList();
         foreach (Finding diagnostic in evaluation.Diagnostics.Where(d => d.Severity == Severity.Error).Except(model.Findings)) objections.Add(PolicyDiagnostic(diagnostic));
         foreach (PolicyFinding finding in evaluation.Findings.Where(f => f.ReleaseHold))
             objections.Add(new("warning", "policy." + finding.Verdict, "policy:" + finding.PolicyKey + "/" + finding.Rule,
                 $"{finding.PolicyKey}/{finding.Rule} [{finding.Policy.Id} {finding.Policy.Hash}] {finding.Target.Identity}: {finding.Actual} Required: {finding.Required} Next: {finding.NextAction}" +
                 (finding.Duty is { } duty ? $" Due {duty.DueAt}; deadline {duty.Deadline}; occurrence {duty.Occurrence.GetRawText()}." : "")));
-        return new(basis, evaluation, PolicyView(model, basis, evaluation), objections);
+        return new(basis, evaluation, PolicyView(model, basis, evaluation, sourceFiles: session.ReadFiles().ToDictionary(f => f.Path, StringComparer.Ordinal)), objections);
     }
 
-    private string RetainReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
+    private static byte[] SerializeReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
     {
-        // Ordinary operation evidence points to a retained object; no record field or record type is added. Records and objects are
-        // already immutable and content-addressed, so the basis names them by hash instead of copying them, and stays within the
-        // estate's object limit however many records the estate holds. Each source file's exact bytes are kept as an object of their
-        // own: identical bytes are stored once, and a file changed after this evaluation still resolves to the bytes it read.
+        // This exact serialization is measured by admission and retained by submission. It writes no source objects.
         var repositories = assessment.Basis.Repositories.Select(repository => new
         {
             repository.Identity, repository.Revision, repository.Contract, repository.Complete,
-            files = repository.Files.Select(file =>
-            {
-                // A single file larger than the estate's object limit stays named by its hash; its basis then reads as unavailable.
-                if (file.Available && file.Bytes.Length <= EstateLayout.MaxObjectBytes) session.Objects.Put(file.Bytes.AsSpan());
-                return new { file.Path, file.Hash, file.Available, file.IsLink };
-            }).ToArray(),
+            files = repository.Files.Select(file => new { file.Path, file.Hash, file.Available, file.IsLink }).ToArray(),
             repository.Evidence, repository.TreeComparisons,
         }).ToArray();
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(PolicyBasis.Canonical(JsonSerializer.SerializeToElement(new
+        return System.Text.Encoding.UTF8.GetBytes(PolicyBasis.Canonical(JsonSerializer.SerializeToElement(new
         {
             format = ReferencedBasisFormat, basis = assessment.View.Basis,
             records = assessment.Basis.Records.Select(r => new { r.Type, r.Id, hash = r.ComputedHash }).ToArray(),
             repositories, objects = assessment.Basis.Objects.Select(o => new { o.Hash, o.Available }).ToArray(), policies = assessment.View,
             documents, excludedOperationRevisions = excluded,
         }, ProtocolJson.Options)));
+    }
+
+    private string RetainReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
+    {
+        byte[] bytes = SerializeReleaseBasis(assessment, documents, excluded);
+        if (bytes.Length > EstateLayout.MaxObjectBytes || assessment.Basis.Repositories.SelectMany(r => r.Files).Any(f => f.Available && f.Bytes.Length > EstateLayout.MaxObjectBytes))
+            throw new InvalidOperationException("The release basis exceeds the estate's object limit; reduce the source selection and check again.");
+        foreach (var file in assessment.Basis.Repositories.SelectMany(r => r.Files).Where(f => f.Available)) session.Objects.Put(file.Bytes.AsSpan());
         return session.Objects.Put(bytes);
     }
 }

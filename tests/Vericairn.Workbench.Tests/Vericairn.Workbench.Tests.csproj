@@ -17,6 +17,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Vericairn.TestSupport" />
+    <Compile Include="../TestSupport/ReleaseGateSource.cs" Link="TestSupport/ReleaseGateSource.cs" />
     <Compile Include="../TestSupport/FakeReleaseProvider.cs" Link="TestSupport/FakeReleaseProvider.cs" />
     <Compile Include="../TestSupport/CompanionWriteFixture.cs" Link="TestSupport/CompanionWriteFixture.cs" />
     <EmbeddedResource Include="shared-api-values.json" />

@@ -289,6 +289,10 @@ public sealed partial class ShellViewModel
             Status = page.PreparedState;
         }, cancellationToken);
 
+    /// <summary>Checks a release form without submitting or requiring signing presence.</summary>
+    public Task CheckReleaseAsync(ReleaseWorkspace? page, CancellationToken cancellationToken = default) =>
+        DocumentCommandAsync(page, "Check release " + page?.Version, token => page!.CheckAsync(AvailableApi, ActingPrincipalId, token), refresh: false, cancellationToken: cancellationToken);
+
     /// <summary>Submits a release intent; an interrupted response stays uncertain.</summary>
     public Task SubmitReleaseAsync(ReleaseWorkspace? page, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Submit release " + page?.Version, token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, submission: true);

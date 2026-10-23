@@ -6,6 +6,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using Vericairn.Protocol;
@@ -48,6 +49,9 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         {
             await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.Same(provider, connection!.Service!.Providers.Release("github-releases"));
+            connection.Service.Providers = new ProviderRegistry();
+            connection.Service.Providers.Register(provider);
+            ReleaseGateSource.Prepare(connection.Service, "Example/widget", provider.HeadSha);
 
             // Ctrl+Shift+E opens the release workspace with the keyboard in its first field; the form is typed, Ctrl+Enter submits.
             await fixture.UiAsync(async () =>
@@ -82,6 +86,18 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             await fixture.Ui(() => Keys.Type(window, provider.HeadSha, "Commit"));
             Assert.Equal(provider.HeadSha, workspace.Commit);
             Assert.Equal(shell.Api.Record(workspace.Product!.Id)!.Hash, workspace.Product.Hash);
+            await fixture.UiAsync(async () =>
+            {
+                Button check = window.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "Check submission (nothing recorded)"));
+                check.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await shell.PendingOperation;
+            });
+            Assert.True(workspace.LastResponse!.Ok, workspace.Status);
+            Assert.Equal("checked", workspace.LastResponse.Status);
+            Assert.Equal(provider.HeadSha, workspace.LastResponse.Check!.Commit);
+            Assert.Contains("nothing retained", workspace.Status, StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+            Assert.Empty(shell.Api.Records("operation"));
             await fixture.UiAsync(async () =>
             {
                 window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);

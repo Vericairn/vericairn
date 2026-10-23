@@ -48,6 +48,7 @@ public class McpTests
             Assert.Contains("estate_status", names);
             Assert.Contains("work_brief", names);
             Assert.Contains("asks_list", names);
+            Assert.Contains("release_submit_check", names);
             Assert.DoesNotContain(names, name => name.StartsWith("operator_", StringComparison.Ordinal));
             Assert.DoesNotContain(new ToolRegistry(api, null).All, tool => tool.Name.StartsWith("operator_", StringComparison.Ordinal));
             Assert.DoesNotContain("work_attempt", names);

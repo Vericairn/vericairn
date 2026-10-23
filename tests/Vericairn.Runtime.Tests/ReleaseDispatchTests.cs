@@ -13,6 +13,31 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class ReleaseDispatchTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
+    public void AReconciledRetryAddsTheSameRevisionsAsAFirstSubmission(string? previous)
+    {
+        using var fixture = new ReleaseFixture(previous);
+        int originalCount = fixture.Service.Session.Load().OfType("operation").Count();
+        fixture.Provider.OnDispatch = _ =>
+        {
+            RecordEnvelope claim = Assert.Single(fixture.Service.Session.Load().Current("operation"));
+            Assert.Equal(previous is null ? "not-started" : "uncertain", claim.Body.GetProperty("status").GetString());
+            Assert.Equal(originalCount + 1, fixture.Service.Session.Load().OfType("operation").Count());
+            Assert.Single(claim.Body.GetProperty("evidence").EnumerateArray(), item => item.TryGetProperty("hash", out var _));
+        };
+
+        ReleaseResponse result = fixture.Service.ReleaseSubmit(fixture.Request);
+
+        Assert.True(result.Ok, result.Message);
+        Assert.Equal(1, fixture.Provider.Calls);
+        Assert.Single(result.BasisEvidence!);
+        Assert.Equal(originalCount + 2, fixture.Service.Session.Load().OfType("operation").Count());
+        Assert.Equal(0, fixture.Service.Validate().Errors);
+    }
+
     [Fact]
     public async Task CancelledEmbeddedReleaseRetainsItsRuntimeUntilTheEffectFinishes()
     {
