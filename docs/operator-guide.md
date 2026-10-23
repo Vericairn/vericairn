@@ -1137,14 +1137,20 @@ installed client. They do not update an estate's manifest.
 
 `vericairn estate check` separately warns with `manifest.release-behind` when an estate is pinned below
 the newest published stable release it knows. It reads the estate's release records for the manifest's
-repository and, for `Vericairn/vericairn`, the local release cache. It makes no network request. Unrelated
-products, candidate releases and prereleases do not count. An equal or higher pin, a source pin, or no
-known release produces no warning. The finding is always a warning, so it does not fail the check.
+repository and, for `Vericairn/vericairn`, the local release cache. The **0.8.3 development build** also
+reads verified `vericairn-release` observations and warns for a source pin when the running build's
+version is older than a known published release; it does not infer an ordering of source commits.
+The check makes no network request. Unrelated products, candidate releases and prereleases do not
+count. An equal or newer version, or no known release, produces no warning. The finding is always a
+warning, so it does not fail the check.
 
-Once the target's published release record and required evidence are in the estate, use that release's
-CLI to review `vericairn estate upgrade --to <published-version> --check`, then apply it with
-`vericairn estate upgrade --to <published-version> --by <operator-id>`. The existing upgrade checks,
-authority rules and migration record still apply. A cached network answer grants no upgrade authority.
+Use a published target build containing the 0.8.3 dependency support to review
+`vericairn estate upgrade --to <published-version> --check`, then apply it with
+`vericairn estate upgrade --to <published-version> --by <operator-id>`. When the estate has no matching
+Vericairn product release record, the command verifies the published release metadata and tag, checks
+the platform archive against `SHA256SUMS`, then records a dependency observation and pins its hash.
+Add `--from <directory>` to verify downloaded release evidence offline. The existing upgrade checks,
+authority rules and record-format migrations still apply. A cached network answer grants no upgrade authority.
 
 
 ## 25. Current required attention
