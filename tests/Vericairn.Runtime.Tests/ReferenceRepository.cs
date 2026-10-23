@@ -53,7 +53,10 @@ internal sealed class ReferenceRepository : IDisposable
     {
         Git("add", ".");
         Git("commit", "--quiet", "--allow-empty", "-m", "Retain fixture sources");
-        return Git("rev-parse", "HEAD");
+        string commit = Git("rev-parse", "HEAD");
+        Git("update-ref", "refs/remotes/origin/main", commit);
+        Git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+        return commit;
     }
 
     internal string Git(params string[] arguments)

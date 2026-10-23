@@ -17,7 +17,7 @@ using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
-public sealed class ReleaseDocumentGateTests
+public sealed partial class ReleaseDocumentGateTests
 {
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"];
 
@@ -136,6 +136,7 @@ public sealed class ReleaseDocumentGateTests
             _ => target,
         };
         Git(fixture.Repository, "checkout", "-q", "-B", "main", head);
+        Git(fixture.Repository, "update-ref", "refs/remotes/origin/main", target);
         fixture.Provider.HeadSha = target;
 
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
@@ -176,6 +177,7 @@ public sealed class ReleaseDocumentGateTests
         fixture.Review(fixture.Commit("Reviewed documentation."));
         var registry = new ProviderRegistry();
         registry.Register(new MovingProvider(fixture.Provider, null));
+        registry.Register(new GitCommandAdapter());
         fixture.Service.Providers = registry;
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request with { Commit = null });
         Assert.False(response.Ok);
@@ -194,6 +196,8 @@ public sealed class ReleaseDocumentGateTests
         fixture.Provider.HeadSha = built;
         var registry = new ProviderRegistry();
         registry.Register(new MovingProvider(fixture.Provider, reviewed));
+        registry.Register(new GitCommandAdapter());
+        Git(fixture.Repository, "update-ref", "refs/remotes/origin/main", reviewed);
         fixture.Service.Providers = registry;
         ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request with { Commit = reviewed });
         Assert.True(submitted.Ok, submitted.Message);
@@ -400,6 +404,7 @@ public sealed class ReleaseDocumentGateTests
         fixture.Review(fixture.Commit("Reviewed documentation."));
         var registry = new ProviderRegistry();
         registry.Register(new MovingProvider(fixture.Provider, null));
+        registry.Register(new GitCommandAdapter());
         fixture.Service.Providers = registry;
 
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
@@ -417,6 +422,7 @@ public sealed class ReleaseDocumentGateTests
         fixture.Review(reviewed);
         string head = fixture.Commit("Unreviewed future documentation.");
         fixture.Provider.HeadSha = reviewed;
+        Git(fixture.Repository, "update-ref", "refs/remotes/origin/main", reviewed);
         fixture.Estate.Add("resource", fixture.Estate.OperatorId, fixture.Resource.Body.GetRawText(), supersedes: fixture.Resource.Id);
         RecordEnvelope product = fixture.Estate.Load().ById[fixture.Request.Product];
         RecordEnvelope revisedProduct = fixture.Estate.Add("product", fixture.Estate.OperatorId, product.Body.GetRawText(), supersedes: product.Id);
@@ -496,6 +502,7 @@ public sealed class ReleaseDocumentGateTests
             Repository = Path.Combine(Scratch.Root, "source");
             Directory.CreateDirectory(Repository);
             Git(Repository, "init", "-q", "-b", "main");
+            Git(Repository, "config", "core.autocrlf", "false");
             DocumentSources.Register(new GitFileSource());
             RecordEnvelope product = Estate.Add("product", Estate.OperatorId, """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}],"release":{"destination":{"provider":"github-releases","settings":{"repository":"Example/widget"}}}}""");
             string location = otherRepository ? "Example/profile" : "Example/widget";
@@ -506,6 +513,7 @@ public sealed class ReleaseDocumentGateTests
             Service = EstateService.Open(Estate.Root);
             var registry = new ProviderRegistry();
             registry.Register(Provider);
+            registry.Register(new GitCommandAdapter());
             Service.Providers = registry;
             request = new ReleaseSubmitRequest(product.Id, "1.0.0", "Example/widget", Estate.OperatorId);
             if (otherRepository)
@@ -523,7 +531,10 @@ public sealed class ReleaseDocumentGateTests
             File.WriteAllText(Path.Combine(Repository, "README.md"), content);
             Git(Repository, "add", ".");
             Git(Repository, "commit", "-q", "--allow-empty", "-m", "Document the widget");
-            return Git(Repository, "rev-parse", "HEAD");
+            string commit = Git(Repository, "rev-parse", "HEAD");
+            Git(Repository, "update-ref", "refs/remotes/origin/main", commit);
+            Git(Repository, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+            return commit;
         }
 
         public void Review(string commit)

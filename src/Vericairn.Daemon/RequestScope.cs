@@ -45,6 +45,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // These reads carry their input in a POST body, with no signing key or write ledger needed.
         bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+            !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
         if (!write)
@@ -224,6 +225,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/work/{key}/move-plan"] = typeof(WorkMovePlanRequest),
         ["POST /v1/releases/withdraw"] = typeof(ReleaseWithdrawRequest),
+        ["POST /v1/releases/check"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
         ["POST /v1/changes/push"] = typeof(ChangesPushRequest),

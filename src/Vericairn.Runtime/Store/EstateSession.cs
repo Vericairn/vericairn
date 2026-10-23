@@ -20,6 +20,7 @@ namespace Vericairn.Runtime.Store;
 public sealed class EstateSession : IDisposable
 {
     private readonly RecordParseCache parseCache = new();
+    private bool readOnly;
     private LiveStore.FileSnapshot? loadedFiles;
 
     internal long ParsedFiles => parseCache.ParsedFiles;
@@ -54,7 +55,9 @@ public sealed class EstateSession : IDisposable
     public static string LiveStorePath(string root, string estateId, string profile) => EstateLocations.LiveStorePath(root, estateId, profile);
 
     /// <summary>Opens the estate at a root; the manifest decides the profile.</summary>
-    public static EstateSession Open(string root)
+    public static EstateSession Open(string root) => Open(root, false);
+
+    internal static EstateSession Open(string root, bool readOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         root = Path.GetFullPath(root);
@@ -65,19 +68,32 @@ public sealed class EstateSession : IDisposable
             throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
         }
 
-        var live = new LiveStore(LiveStorePath(root, manifest.Estate, manifest.Profile));
-        live.SetMeta("estate", manifest.Estate);
-        live.SetMeta("profile", manifest.Profile);
-        live.SetMeta("root", root);
-        IObjectStore objects = manifest.Profile == "local-only"
-            ? new SqliteObjectStore(Path.Combine(Path.GetDirectoryName(live.Path)!, "objects.db"))
-            : new FileObjectStore(Path.Combine(root, EstateLayout.ObjectsDirectory));
-        return new EstateSession(root, manifest, live, objects);
+        var live = new LiveStore(LiveStorePath(root, manifest.Estate, manifest.Profile), readOnly, transient: readOnly && manifest.Profile == "repository-synced");
+        if (!readOnly)
+        {
+            live.SetMeta("estate", manifest.Estate);
+            live.SetMeta("profile", manifest.Profile);
+            live.SetMeta("root", root);
+        }
+        try
+        {
+            IObjectStore objects = manifest.Profile == "local-only"
+                ? new SqliteObjectStore(Path.Combine(Path.GetDirectoryName(live.Path)!, "objects.db"), readOnly)
+                : new FileObjectStore(Path.Combine(root, EstateLayout.ObjectsDirectory));
+            return new EstateSession(root, manifest, live, objects) { readOnly = readOnly };
+        }
+        catch { live.Dispose(); throw; }
     }
 
-    /// <summary>Loads and validates the estate. Repository-synced: the live store is refreshed from the record files first.</summary>
+    // Submission checks read the canonical source without refreshing or touching the live cache.
+    internal IReadOnlyList<RecordFile> ReadFiles() => Profile == "repository-synced" ? EstateLoader.EnumerateRecordFiles(Root) : Live.Files();
+
+    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles());
+
+    /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
     {
+        if (readOnly) return Read();
         if (Profile == "repository-synced")
         {
             Live.SyncFromDirectory(Root);
@@ -98,6 +114,7 @@ public sealed class EstateSession : IDisposable
     public string Write(AuthoredRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
+        if (readOnly) throw new InvalidOperationException("This session is read-only.");
         if (Profile == "repository-synced")
         {
             RecordAuthor.Write(Root, record);
@@ -119,6 +136,7 @@ public sealed class EstateSession : IDisposable
     public void Discard(AuthoredRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
+        if (readOnly) throw new InvalidOperationException("This session is read-only.");
         if (Profile == "repository-synced")
         {
             string full = Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -134,6 +152,7 @@ public sealed class EstateSession : IDisposable
     /// <summary>Every record file the estate holds, in path order (from the repository or the live store).</summary>
     public IReadOnlyList<RecordFile> Files()
     {
+        if (readOnly) return ReadFiles();
         if (Profile == "repository-synced")
         {
             Live.SyncFromDirectory(Root);

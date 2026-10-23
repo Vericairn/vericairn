@@ -270,6 +270,9 @@ public partial interface IEstateApi
     /// <summary>Withdraw an exact candidate and record its draft-deletion intent without deleting it.</summary>
     ReleaseResponse ReleaseWithdraw(ReleaseWithdrawRequest request) => new(request.Release, "not-started", "This API implementation does not support release withdrawal.", false, Problem: new("unsupported", "Release withdrawal is unavailable.", []));
 
+    /// <summary>Checks release submission without signing, recording, retaining, presence or dispatch; re-evaluated on actual submission.</summary>
+    ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request);
+
     /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
     ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
 

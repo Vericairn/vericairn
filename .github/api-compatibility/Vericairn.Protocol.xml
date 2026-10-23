@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Expected API changes against the latest published package; see docs/api-compatibility-0.8.3.md. CODE-07 adds IEstateApi.WorkNew, whose implementers must add it. -->
+<!-- Expected API changes against the latest published package; see docs/api-compatibility-0.8.3.md. CODE-07 adds IEstateApi.WorkNew and FIX-55 adds IEstateApi.ReleaseCheck, which implementers must add. -->
 <Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>M:Vericairn.Protocol.IEstateApi.ReleaseCheck(Vericairn.Protocol.ReleaseSubmitRequest)</Target>
+    <Left>lib/net10.0/Vericairn.Protocol.dll</Left>
+    <Right>lib/net10.0/Vericairn.Protocol.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
   <Suppression>
     <DiagnosticId>CP0006</DiagnosticId>
     <Target>M:Vericairn.Protocol.IEstateApi.WorkNew(Vericairn.Protocol.WorkNewRequest)</Target>
