@@ -49,7 +49,7 @@ public sealed partial class ReleasePolicyGateTests
 
         Assert.True(response.Ok, response.Message);
         Assert.Equal(1, f.Provider.Calls);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence);
         Assert.Equal(preparedAt, retained.Basis.AsOf);
         Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies!.Basis.AsOf);
         Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
@@ -99,7 +99,7 @@ public sealed partial class ReleasePolicyGateTests
             Assert.Equal("uncertain", EstateModel.BodyString(current, "status"));
             ReleaseBasisEvidence[] retained = current.Body.GetProperty("evidence").EnumerateArray()
                 .Where(item => item.TryGetProperty("hash", out _))
-                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+                .Select(item => Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence)).ToArray();
             Assert.Equal(2, retained.Length);
             ReleaseBasisEvidence first = retained[0], fresh = retained[1];
             Assert.NotEqual(first.Basis.Digest, fresh.Basis.Digest);
@@ -174,7 +174,7 @@ public sealed partial class ReleasePolicyGateTests
         {
             Assert.Equal("canceled", response.Status);
             Assert.Equal(2, response.BasisEvidence!.Count);
-            ReleaseBasisEvidence fresh = f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence;
+            ReleaseBasisEvidence fresh = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence);
             Assert.Equal(current.Supersedes, Assert.Single(fresh.ExcludedOperationRevisions).Id);
             Assert.Contains(fresh.Records, record => record.GetProperty("id").GetString() == canceled.Id);
         }
