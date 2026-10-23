@@ -20,7 +20,9 @@ public static class UpgradeProgress
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         if (newest is null) return null;
         string current = manifest.Describe();
-        return EstateModel.BodyString(newest, "fromPin") == current && EstateModel.BodyString(newest, "toPin") is { } to && to != current
+        string exact = manifest.Mode == "source" ? $"source {manifest.Repository}@{manifest.Commit}" : current;
+        string? from = EstateModel.BodyString(newest, "fromPin");
+        return (from == current || from == exact) && EstateModel.BodyString(newest, "toPin") is { } to && to != current && to != exact
             ? newest
             : null;
     }

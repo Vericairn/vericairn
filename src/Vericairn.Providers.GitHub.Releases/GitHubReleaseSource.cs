@@ -9,7 +9,7 @@ namespace Vericairn.Providers.GitHub.Releases;
 
 /// <summary>An anonymous stable-release lookup, separate from the estate API transport.</summary>
 /// <param name="client">The HTTP transport; the shipped instance disables credentials, cookies, redirects, proxies and trace propagation.</param>
-public sealed class GitHubReleaseSource(HttpClient client) : IReleaseSource
+public sealed partial class GitHubReleaseSource(HttpClient client) : IReleaseSource
 {
     internal const string Endpoint = "https://api.github.com/repos/Vericairn/vericairn/releases/latest";
     private static readonly HttpClient PublicClient = new(CreateHandler())

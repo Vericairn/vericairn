@@ -4,6 +4,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Updates;
 
 namespace Vericairn.Records.Types;
 
@@ -11,7 +12,7 @@ namespace Vericairn.Records.Types;
 public sealed class ObservationType : IRecordType
 {
     /// <summary>What kinds of subject are observed so far.</summary>
-    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package"];
+    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package", "vericairn-release"];
 
     /// <inheritdoc />
     public string Name => "observation";
@@ -41,12 +42,13 @@ public sealed class ObservationType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
-        string? kind = body.Enum("kind", true, context.Format >= 3 ? Kinds : context.Format >= 2 ? ["repository", "release", "workflow-run", "estate"] : ["repository", "release", "workflow-run"]);
+        string? kind = body.Enum("kind", true, context.Format >= 3 ? Kinds : context.Format >= 2 ? ["repository", "release", "workflow-run", "estate", "vericairn-release"] : ["repository", "release", "workflow-run", "vericairn-release"]);
         string? asOf = body.Timestamp("asOf", true);
         body.Text("summary", true, 4000);
         BodyReader? facts = body.Nested("facts", true);
         if (facts is not null)
         {
+            if (kind == "vericairn-release") VericairnReleaseObservation.Validate(context, facts);
             if (kind == "estate")
             {
                 facts.Number("records", true, min: 0);

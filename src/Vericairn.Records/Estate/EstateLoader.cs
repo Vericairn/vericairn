@@ -41,8 +41,15 @@ public static class EstateLoader
     /// <summary>Loads an estate whose records are supplied by the caller (from files, a live store or an export).</summary>
     public static EstateModel Load(string root, IReadOnlyList<RecordFile> files) => Load(root, files, null);
 
+    /// <summary>Validates prepared records and manifest bytes before initialization writes any files.</summary>
+    public static EstateModel LoadPrepared(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes)
+    {
+        ArgumentNullException.ThrowIfNull(manifestBytes);
+        return Load(root, files, null, manifestBytes);
+    }
+
     // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
-    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache)
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -184,7 +191,7 @@ public static class EstateLoader
         // The manifest is read before the signatures are checked, because which unsigned admissions count depends on the estate's
         // record format; its findings keep their place after the signatures'.
         var manifestFindings = new FindingList();
-        model.Manifest = EstateManifest.Load(root, manifestFindings);
+        model.Manifest = manifestBytes is null ? EstateManifest.Load(root, manifestFindings) : EstateManifest.Parse(manifestBytes, manifestFindings);
         SignatureChecks.Run(model, findings);
         foreach (Finding finding in manifestFindings)
         {
@@ -195,6 +202,7 @@ public static class EstateLoader
         // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.
         if (model.Manifest is not null)
         {
+            Updates.VericairnReleaseObservation.ValidatePin(model);
             // An upgrade stopped between its migration record and the manifest is reported, not refused: rerunning it finishes the move.
             RecordEnvelope? pending = UpgradeProgress.Pending(model.Manifest, records);
             if (pending is not null)
