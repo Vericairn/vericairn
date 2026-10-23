@@ -34,6 +34,9 @@ public static class ReleaseFlow
     /// <summary>The action recorded on release operations.</summary>
     public const string DispatchAction = "dispatch-release-workflow";
 
+    /// <summary>The intent for an operator to delete a withdrawn candidate's draft; no provider deletion is performed by the runtime.</summary>
+    public const string DeleteDraftAction = "delete-release-draft";
+
     /// <summary>The platform identifiers a release's artifacts can name.</summary>
     public static readonly ImmutableArray<string> Platforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 

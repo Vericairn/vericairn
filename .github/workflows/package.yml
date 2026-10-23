@@ -29,7 +29,7 @@ jobs:
     # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Build vericairn-enclave for both Mac architectures
@@ -63,7 +63,7 @@ jobs:
           test -s "$dir/signature.txt"
           rm -rf "$dir"
           echo "the shipped helper made a Secure Enclave key, read its public key back and signed a digest with it"
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: enclave-helper
           path: enclave
@@ -72,16 +72,18 @@ jobs:
   package:
     needs: [enclave-helper]
     runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The documentation comparison proves the commit's build sources match the commit the set's references were generated
           # from, which a shallow clone lacks. No step needs the checkout's token, so the clone keeps none.
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - name: Check the version
@@ -106,7 +108,11 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Restore (locked)
         run: dotnet restore --locked-mode
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - name: Test the API compatibility gate with local packages
+        run: python3 .github/scripts/test-api-validation.py
+      - name: Test resolved publish pack evidence
+        run: python3 .github/scripts/test-publish-evidence.py
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: enclave-helper
           path: enclave
@@ -136,6 +142,8 @@ jobs:
           fi
           dotnet run --configuration Release --project tools/Vericairn.DocsTool -- compare "$docs"
           echo "DOCS=$docs" >> "$GITHUB_ENV"
+      - name: Resolve the latest published API baselines
+        run: python3 .github/scripts/api-baselines.py artifacts/api-baselines
       - name: Pack Community NuGet packages
         shell: bash
         # Pack before the RID-specific publishes: the tool is portable and the packages all carry the checked release version. These
@@ -144,7 +152,8 @@ jobs:
           set -eu
           mkdir -p dist
           dotnet pack --no-restore --configuration Release --output dist \
-            -p:Version="$VERSION" -p:VersionSuffix= -p:ContinuousIntegrationBuild=true
+            -p:Version="$VERSION" -p:VersionSuffix= -p:ContinuousIntegrationBuild=true \
+            -p:VericairnApiBaselineRoot="$GITHUB_WORKSPACE/artifacts/api-baselines"
       - name: Restore the distributables (locked)
         shell: bash
         # Each self-contained distributable restores locked from its committed runtime-specific lock files
@@ -228,13 +237,14 @@ jobs:
         shell: bash
         # The tool is pinned, and asked for a CycloneDX specification the components report reads (1.2 to 1.6): CycloneDX 6.3 writes
         # 1.7 by default, which stopped 0.8.0's third release run before any asset or draft. It reads the restores above without
-        # restoring again, so the bill describes the packages and every platform graph of the distributables, and a check confirms
-        # that each package the distributables' lock files hold is in it.
+        # restoring again. The publish evidence adds runtime and apphost packs, which NuGet lock files do not hold. The verifier
+        # requires every locked package and every resolved pack, attributed to each distributable including Workbench's CLI copy.
         run: |
           set -eu
           dotnet tool install --global CycloneDX --version 6.3.1
           dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects --spec-version 1.6 --disable-package-restore
-          python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json
+          python3 .github/scripts/runtime-packs.py sbom/bom.json artifacts/runtime-packs
+          python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json --runtime-packs artifacts/runtime-packs
           cp sbom/bom.json "dist/vericairn-$VERSION-sbom.cdx.json"
           cp THIRD-PARTY-NOTICES.md "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md"
           # The build tooling below restores the portable graph again.
@@ -280,8 +290,54 @@ jobs:
       - name: Verify every package against SHA256SUMS
         # The same check nuget.yml runs before it pushes the published files.
         run: python3 .github/scripts/verify-packages.py dist
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vericairn-${{ steps.version.outputs.version }}
           path: dist
           retention-days: ${{ inputs.release && 90 || 1 }}
+
+  published-cli:
+    # These runners execute the archives built by package, so the reusable workflow cannot succeed before both have run.
+    needs: [package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rid: osx-arm64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vericairn-${{ needs.package.outputs.version }}
+          path: dist
+      - name: Run the published macOS command line
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          RID: ${{ matrix.rid }}
+        run: |
+          set -eu
+          mkdir smoke
+          tar -xzf "dist/vericairn-$VERSION-$RID.tar.gz" -C smoke
+          smoke/bin/vericairn --version
+          smoke/bin/vericairn sources inspect "$GITHUB_WORKSPACE"
+      - name: Run the published Windows command line
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          RID: ${{ matrix.rid }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -LiteralPath "dist/vericairn-$env:VERSION-$env:RID.zip" -DestinationPath smoke
+          & ./smoke/bin/vericairn.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./smoke/bin/vericairn.exe sources inspect "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
