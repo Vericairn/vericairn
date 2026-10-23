@@ -4,30 +4,54 @@ Vericairn is a local-first creation and operations platform. It helps you, alone
 carry work from an intention to a reviewed, delivered and maintained result, with its decisions, sources
 and history kept as records you own: by default in a git repository beside your work, or in a store on one
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
+accept it. Software is its first domain, and the one that ships today.
+
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.8.2, from
+October 22, 2026.
+[Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
+[NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
+[Limitations](docs/limitations-and-platforms.md) ·
+[Support](https://github.com/Vericairn/.github/blob/main/SUPPORT.md) · [Roadmap](ROADMAP.md)
+
+Vericairn's official destinations are [vericairn.com](https://vericairn.com),
+[vericairn.org](https://vericairn.org), the [Vericairn organization](https://github.com/Vericairn) on GitHub
+and the [dotnet-vc](https://www.nuget.org/packages/dotnet-vc) and
+[Vericairn](https://www.nuget.org/packages/Vericairn) packages on nuget.org. Other sites using the name are
+not Vericairn's.
+
+## Who it helps today
+
+A developer, alone or in a small team, who builds and ships software with coding agents such as Codex and
+Claude Code, and wants to know afterwards what each agent was asked to do, what it did, what was checked
+and who accepted it.
+
+## What you do with it
+
+You write a work order: what to build, its scope and the question that decides when it is done. You
+assign it to an agent with an exact brief. Vericairn's worker runs Codex or Claude Code on that brief in a
+workspace repository of its own, within a spending cap recorded before the run, and a coding agent that
+supports MCP can work in the estate through Vericairn's MCP server. You review the result and accept it or
+ask for another attempt. A release is built as a draft on GitHub Releases and published only after you
 accept it.
 
-Software is its first domain. Today Vericairn helps you build and ship software with coding agents: agents
-work from exact briefs, their results are checked and reviewed, and each work order, attempt, review,
-decision and release is a record with a content hash and, from an admitted device, a signature. Beyond
-software, Vericairn's catalog plans more than 3,000 entries across creative and technical work and 27
-industries: domain packs that describe a field's work, foundries that start or reshape a project, adapters
-for the formats and tools you use, and providers for the services you deliver through. None of them ships
-yet; websites and web applications come first, then books, book series and world building, courses and
-video, and crowdfunding.
+The outcome is the release you accepted and an estate: the records, in your git repository by default, of
+every work order, brief, run, result, review, decision and release behind it. `dotnet vc status` and
+`dotnet vc progress` show where it stands.
 
-Vericairn's own development runs this way. Its work orders, reviews, decisions and releases are records in a
-Vericairn estate, and every release ships only after its operator accepts it.
+## Why records, reviews and acceptance
 
-This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
-`vericairn` command line, the SDK, the MCP server and the Workbench desktop. The Remote client is not
-implemented here.
+An agent's report that work is done is a claim, not evidence. In Vericairn each step is a record with a
+content hash and, from an admitted device, a signature. A review names the exact result it read and an
+acceptance the exact hash it accepts, so a changed result needs a new review and acceptance, and nothing is
+released until you accept it. Later, you can still see what was asked, what was done, what was checked and
+who decided.
 
-**Status:** pre-1.0. The current published release is [0.8.2](https://github.com/Vericairn/vericairn/releases/tag/v0.8.2),
-published on October 22, 2026. The [public roadmap](ROADMAP.md) lists what comes next, with no dates.
+Vericairn's own development runs this way: its work orders, reviews, decisions and releases are records in
+a Vericairn estate, and every release ships only after its operator accepts it.
 
-## Try it
+## Begin
 
-With the .NET 10 SDK on Linux, macOS or Windows:
+With the .NET 10 SDK and git on Linux, macOS or Windows:
 
 ```sh
 dotnet tool install --global dotnet-vc
@@ -39,43 +63,34 @@ dotnet vc estate init --name "My Venture" --slug my-venture \
 dotnet vc status
 ```
 
-`estate init` writes two records, you as the operator and the estate's charter, and a manifest that pins the
-Vericairn source it names, here 0.8.2's commit. From 0.8.3, `--commit` is optional: `estate init` pins the
-running build's exact source commit, as `dotnet vc --version` reports it, and a development build without a
-recorded commit still requires the option. `status` shows the new, empty estate. The
-[operator's guide](docs/operator-guide.md) continues from there: your device and its key, a builder agent,
-decisions, a work order, an agent's run, its review and acceptance, and a release.
+`estate init` records you as the operator and the estate's charter, and writes a manifest that pins the
+Vericairn source it names, here 0.8.2's commit. `status` shows the new, empty estate. The
+[operator's guide](docs/operator-guide.md) continues from there: your device and its key, a work order, an
+agent's run, its review and acceptance, and a release. The [install guide](docs/install.md) also covers the
+self-contained archives for machines without the .NET SDK, checking a download, Workbench and the MCP server.
 
-With the **0.8.3 development build**, continue this first-estate sequence by creating and admitting
-your signing device, then recording a work order from flags. Use the operator id printed by `estate init`
-and the device id printed by `devices create`:
+In a .NET 10 project, `dotnet add package Vericairn` adds the SDK, the typed client of Vericairn's API; see
+the [SDK guide](docs/api-v1.md#the-sdk).
 
-```sh
-dotnet vc devices create --principal <operator id> --name "My device"
-dotnet vc devices admit <device id> --by <operator id> --note "My first signing device."
-dotnet vc work new --by <operator id> --key W-1 --title "Build the widget" \
-  --intent "Make a useful widget." --scope "widget sources and tests" \
-  --deliverable "widget.txt" --exit-question "Does the widget build and pass its tests?"
-```
+## Limits that affect your start
 
-`work new` defaults to `--kind ordinary` and prints the signed record's id and hash; `--json` returns
-its receipt. Repeat `--scope`, `--deliverable`, `--after <work-order id>` and `--input <type:id>` as
-needed. It uses the same validation and refusal messages as `records new work-order`. Published 0.8.2
-uses the JSON-body command shown in the [operator's guide](docs/operator-guide.md#5-the-work-loop-order-brief-assignment-attempt-result).
+- **Pre-1.0.** Commands and record formats still change between releases. Upgrading an estate is
+  forward-only, and when a release changes the record format, every writer and clone of the estate moves to
+  it together.
+- **Unsigned builds.** The archives are developer builds without code signing or notarization. Verify each
+  download against the release's `SHA256SUMS`, as the [install guide](docs/install.md) shows.
+- **Platforms.** The command line is qualified on Linux x64, macOS on Apple silicon and Windows x64. The
+  other archives are provided but unqualified, and Workbench is not qualified on any platform.
+- **Agents.** The worker runs only exact coding-agent versions, configured on each machine: the release's
+  baselines, or another version a person qualifies there. Live runs have qualified one Codex configuration,
+  which the [software guide](docs/software.md#native-inventory-qualification-run-02-and-run-03) describes.
+  Spending caps are soft: unknown usage is charged at the cap.
+- **Not built yet.** Remote, the phone client, and every entry of the planned catalog below.
+- **Support.** Help is self-service, with no promised response time.
 
-## What works today
-
-- **Records in git.** Canonical, content-addressed JSON records, one file each, checked by
-  `vericairn estate check`, with export and verified restore.
-- **Work with agents.** Work orders with exit questions, exact briefs, assignments, attempts, results, reviews
-  and acceptance pinned to exact hashes. The worker runs Codex on an assignment within a recorded cap, with a
-  command audit and a scope check; live runs qualify one Codex version. The MCP server gives a coding agent,
-  such as Claude Code, an estate's reads and the narrow writes an agent is meant to have.
-- **Releases.** Candidates, a release gate that needs the operator's acceptance, intent recorded before every
-  external effect, and publication through GitHub Releases.
-- **Estate policies.** Policies, recurring duties and writing exceptions, evaluated from the records.
-- **Platforms.** The command line is qualified on Linux x64, macOS on Apple silicon and Windows x64. Workbench
-  is included but not yet qualified on any platform.
+The [limitations and platforms](docs/limitations-and-platforms.md) guide gives every current limit, and the
+[release index](docs/releases/README.md#readiness-disclosures) gives the current release's readiness
+disclosures and security notices.
 
 ## Planned
 
@@ -89,12 +104,13 @@ uses the JSON-body command shown in the [operator's guide](docs/operator-guide.m
   can move between Vericairn's hosting and your own either way; the [roadmap](ROADMAP.md#editions--planned-direction)
   lists all five no-lock-in rules.
 - Separately installed extensions and the package registry, at milestone M4.
-- Vericairn's catalog, at later milestones: more than 3,000 planned entries, including 1,289 domain packs,
-  989 foundries, 291 adapters and 566 providers. The creator domains above come first. Every entry is
+- Vericairn's catalog, at later milestones: more than 3,000 planned entries, including 1,290 domain packs,
+  992 foundries, 301 adapters and 575 providers. The creator domains above come first. Every entry is
   planned; a name in the catalog is scope, not availability. The catalog covers:
   - Creative and technical work: the web, games and Unity, books and book series, courses and course series,
     video and video series, worldbuilding, media, documentation, marketing, canon, adaptation, continuity,
-    franchises, rights, localization, release readiness, analytics, crowdfunding and extension ecosystems.
+    franchises, rights, localization, release readiness, analytics, crowdfunding, AI applications and
+    extension ecosystems.
   - 27 industries: aerospace and defense; chemicals; construction; e-commerce and online retail; education
     institutions; environmental consulting; finance, accounting and audit; food and agriculture; governance,
     risk and compliance; information technology services and operations; insurance; land management; legal
@@ -104,128 +120,19 @@ uses the JSON-body command shown in the [operator's guide](docs/operator-guide.m
     utilities and power.
   - In regulated fields, agents prepare and check the work, and licensed or authorized people make the
     decisions and perform the acts reserved to them.
-- The [roadmap](ROADMAP.md) gives the order, and [the limitations](docs/limitations-and-platforms.md) give
-  the current limits.
-
-## The current release
-
-The current published release is [0.8.2](https://github.com/Vericairn/vericairn/releases/tag/v0.8.2),
-published on October 22, 2026 at 11:24:13 UTC, tag `v0.8.2`, commit `e000a12`. It follows published 0.8.0
-and carries the work of the 0.8.1 candidate, which was withdrawn before publication: FIX-53 corrects the
-macOS and Linux command lines, which could not start other programs, and FIX-54 rechecks a retained release
-basis's record digest. Its release notes open with a [Security](docs/releases/0.8.2/release-notes.md#security)
-section: FIX-34 through FIX-38 harden the worker's command audit and settlement, the release gate, checked
-pushes and merges, and the upgrade, and CI-03 builds releases with only the tokens each step needs. FIX-39
-through FIX-46 and FIX-48 correct what adopting estate policies found; FIX-29, FIX-32, FIX-49 and CI-01
-settle test timing and split each platform's tests; FIX-51 keeps a retained release basis small; DOCS-07
-adds `vericairn docs pin`, DIST-02 NuGet observations, DIST-03 the package icon and DIST-04 the MCP Registry
-listing. [API compatibility](docs/api-compatibility-0.8.2.md) lists two interface changes. One known issue:
-each platform's archive carries a separately compiled build of the same libraries, so a policy basis differs
-by platform ([issue 184](https://github.com/Vericairn/vericairn/issues/184)); 0.8.3 fixes it. The
-[0.8.2 documentation set](docs/releases/0.8.2/README.md) describes the behavior and remaining limits; the
-estate's release record establishes publication and qualification.
-
-0.7.2's release notes open with [Security](docs/releases/0.7.2/release-notes.md#security): F-01 affected export
-restoration in every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
-The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
-
-Release 0.7.1 carried the withdrawn 0.7.0 candidate's work with
-FIX-12: a machine-local workspace root, current assignment-holder checks and precise treatment of validated
-public keys and signatures. Its earlier frozen set remains unchanged. All eight command-line and library
-packages are available at 0.8.2 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
-records publication and the earlier 0.7.1 recovery.
-
-Ordinary source builds retain `0.8.2-dev`. The maintained guides describe 0.8.2; earlier release sets
-keep their original bytes. Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
-refuses the upgraded estate, so every writer and clone moves to 0.8.0 or later together. The upgrade declares no policy
-or duty; the operator adopts them explicitly, as the [adoption guide](docs/policy-adoption.md) describes.
-Release checks reach only GitHub, ignore system proxies, are disabled with `vericairn updates configure --enabled false`
-and retain cached information when disabled. Command observations remain signals, not an enforcement boundary.
-Required attention cannot infer closure from prose or missing evidence; its [rules](docs/required-attention.md)
-keep undecidable items visible as unknown.
-
-The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
-needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
-configure that machine's worker with `vericairn worker configure --launcher codex --model <model> --effort <effort>`
-(or `--launcher claude-code`); omit model and effort to show it. Repeated `--allow-model` and `--allow-effort`
-options narrow the permitted choices and never widen the qualified harness inventory. FIX-18 adds Codex's `max`
-effort in 0.7.2; the harness validates model/effort support at launch, and an observed refusal is recorded as a
-failed run. Configuration is per machine and is never recorded in the estate. Its Vericairn home must be outside
-every Git repository and estate;
-if your home directory is a repository, set `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them.
-If your home holds `.claude` or `.codex` settings, move workspaces outside it with
-`vericairn worker configure --workspaces <absolute-directory>`; `vericairn worker configure` shows the root.
-The root applies to every launcher, must be outside repositories, estates and configured ancestors, and is
-reread by the CLI and daemon for each run. New roots are owner-only. The harness configuration scan remains strict.
-Codex also refuses the user's own `~/.agents` customization, independently of workspace placement or
-`CODEX_HOME`; use a worker account without that discovery root. An empty ordinary directory or one containing
-only recognized instruction files is allowed by the native scan; skills, other entries and uninspected links are refused.
-Harness qualification is machine-local too: paired local-network devices are refused. The
-[software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes the setup and
-admission checks. The efficiency Adapter
-is absent until the planned 0.8.4 work, Remote is not built, and context tokens remain unknown without a
-qualified local tokenizer. Spending and containment limits remain as described in the guides.
-The seventh live Codex run committed the permitted file in its independent workspace on macOS; settlement
-audited the commit and fetched its branch into the registered clone. Only the workspace's own `.git` is
-added to Codex's writable roots. This live qualification covers the reported macOS path, not other harness
-versions, accounts, platforms, provider billing or acceptance of the work. 0.8.2's worker changes, FIX-32
-through FIX-35, are covered by tests only: the estate's own live runs have used 0.8.0's worker, not yet 0.8.2's. The
-[software guide](docs/software.md#native-inventory-qualification-run-02-and-run-03) retains all seven observations.
+- The [roadmap](ROADMAP.md) gives the order.
 
 ## Releases
 
-The [public roadmap](ROADMAP.md) lists the current published release and planned releases and later
-milestones, with no dates or promises.
-
 The published releases are on the [Releases page](https://github.com/Vericairn/vericairn/releases). Each
-carries the command line's archives for Linux, macOS and Windows, `SHA256SUMS`, a software bill of materials and
-the third-party notices; from 0.3.1 a release also carries Workbench's archives and its documentation set. The
-sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md): the overview, installation
-and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
-the maintained documents, the release notes and known limitations. The index there also names the versions
-withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the maintained drafts. The 0.8.2 set documents the work described above; the earlier sets remain frozen,
-including the withdrawn 0.7.0 and 0.8.1 candidates'.
-
-For 0.8.2, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
-The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
-any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
-as the [install guide](docs/releases/0.8.2/install.md) describes. 0.8.2's `SHA256SUMS` also lists
-`vericairn-0.8.2-companions.zip`, the readable build reports, which the release run keeps in its CI artifact
-and does not attach; check the attached assets with `--ignore-missing`, as the guide does.
+carries the command line's archives for Linux, macOS and Windows, `SHA256SUMS`, a software bill of materials
+and the third-party notices; from 0.3.1 a release also carries Workbench's archives and its documentation
+set. The [release index](docs/releases/README.md) keeps every set from 0.2.0 on, with each release's notes
+and security sections, and names the candidates withdrawn before publication and why. The documents at
+`docs/` are the maintained drafts for the next release; a released set is never edited.
 
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
-
-## Install the command line and SDK
-
-The 0.8.2 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
-
-```sh
-dotnet tool install --global dotnet-vc --version 0.8.2
-dotnet vc version
-dotnet vc doctor
-dotnet vc records describe
-```
-
-The global tool directory must be on PATH, as the installer describes. A repository can instead keep a
-local tool manifest; see the [0.8.2 install guide](docs/releases/0.8.2/install.md#9-nuget-command-line-and-sdk).
-The tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
-also carry the Secure Enclave helper. The NuGet tool does not bundle that helper or Workbench.
-The worker's agent-side MCP command still resolves `vericairn`; keep the archive executable on PATH for worker
-runs. A NuGet-only worker installation is not qualified by the package installation checks.
-
-In a .NET 10 project, install the SDK with:
-
-```sh
-dotnet add package Vericairn --version 0.8.2
-```
-
-`Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
-and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.8.2;
-the SDK front door does not embed a runtime or daemon. See the [SDK guide](docs/api-v1.md#the-sdk).
-The packages contain Community code only.
-Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
 
 ## What is here
 
@@ -293,9 +200,6 @@ The following capabilities are in 0.8.2.
   due and why, reviews and generated regions. `vericairn mcp serve` is the Model Context Protocol server for
   coding agents, a client adapter over the API that lists only the tools the connected device may use,
   documented in [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
-- Worker spending limits are soft, and unknown usage is charged at the reserved cap. The launchers are tested with
-  stand-in processes; live coding-agent sessions and sign-in are not qualified by those tests. Process containment
-  and the workspace audit have platform limits, detailed in [docs/software.md](docs/software.md#launch-accounting-and-containment).
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
   the runtime: home with attention, the asks waiting among it, and the progress report, products, work orders, assignments,
   results, review and decisions, goals, releases, living documents, readable views, communication settings,

@@ -35,29 +35,29 @@ background runtime is still serving the estate.
 Reusable templates give documents, roadmaps, communication, context, commits and reviews consistent
 sections and checks. Saved prompts, each with a title, description, category, placeholders and the roles
 it suits, can be shared across an estate, kept as personal favorites, and used with new agent runs,
-assignments and answers to an agent's questions, from the command line or as prompts in coding agents that
-support them. An optional efficiency adapter helps reduce eligible agent context, once the agent hook it
-uses is designed and qualified, and a design document's revision lines are generated from the revisions
-the estate records. The operator closes finished work in one signed action, and release review briefs,
-decisions and the documentation pass after each release come from the records. This release's cycle also
-designs release lines and channels (long-term support, prerelease and nightly channels, release cadences
-and keeping a fix's public description until its release) and progress that an agent reports when its
-configuration asks for it, as an exact count, a best-effort estimate or not measurable, with a status
-text. None of either design is built before it is accepted.
+assignments and answers to an agent's questions, from the command line or as prompts in coding agents
+that support them. An optional efficiency adapter helps reduce eligible agent context, once the agent
+hook it uses is designed and qualified, and a design document's revision lines are generated from the
+revisions the estate records. The operator closes finished work in one signed action, and release review
+briefs, decisions and the documentation pass after each release come from the records. A public example
+estate and app show the whole loop on GitHub, from a work order through an agent's recorded run, review
+and acceptance to a release, and every release upgrades them. This release's cycle also designs release
+lines and channels (long-term support, prerelease and nightly channels, release cadences and keeping a
+fix's public description until its release) and progress that an agent reports when its configuration
+asks for it, as an exact count, a best-effort estimate or not measurable, with a status text. None of
+either design is built before it is accepted.
 
 ## 0.9.0 — planned
 
-The Remote companion brings supervision, eligible decisions and readable records to a phone, with
-handoff to the desktop for work that needs it. From Workbench or the phone, a saved prompt can be sent to a
-running agent in one step; it steers the agent without widening what the agent may do.
-A public example estate and app show the whole loop on GitHub, from a work order through an agent's
-recorded run, review and acceptance to a release, and every release upgrades them. Every planned catalog
-entry gets a community build guide, and anyone can request the implementations they need most, one
-request per account, to inform what is built next. A support bundle collects what a support case needs,
-with secrets and paths removed, and shows you everything in it before you share it. This release's cycle
-also designs the editions and their services, the contract for foundries that start or reshape a project
-with the first software foundries, and the website, web application, book, book series and world-building
-domains.
+The Remote companion brings supervision, eligible decisions and readable records to a phone, with handoff
+to the desktop for work that needs it. From Workbench or the phone, a saved prompt can be sent to a
+running agent in one step; it steers the agent without widening what the agent may do. Every planned
+catalog entry gets a community build guide, and anyone can request the implementations they need most,
+one request per account, to inform what is built next. A support bundle collects what a support case
+needs, with secrets and paths removed, and shows you everything in it before you share it. This release's
+cycle also designs the editions and their services, the contract for foundries that start or reshape a
+project with the first software foundries, and the website, web application, book, book series and
+world-building domains.
 
 ## 0.10.x — planned
 
