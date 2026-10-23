@@ -38,8 +38,13 @@ public sealed record ResultReviewBody(string Independence, string Outcome, strin
 public sealed record ResultReviewFindingDto(string Severity, string Summary,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Location = null);
 
-/// <summary>A retained release-admission snapshot. Reading historical evidence grants no authority for a later submission.</summary>
-public sealed record ReleaseBasisResponse(string Hash, ReleaseBasisEvidence Evidence);
+/// <summary>A retained release-admission snapshot, or a problem identifying why it cannot resolve. Reading historical evidence grants no authority for a later submission.</summary>
+public sealed record ReleaseBasisResponse(string Hash, ReleaseBasisEvidence? Evidence)
+{
+    /// <summary>Resolution failures for a recognized basis. Evidence is null when any reference fails; no partial snapshot is returned.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Problem? Problem { get; init; }
+}
 
 /// <summary>The complete immutable inputs, findings and document comparisons retained under ordinary operation evidence.</summary>
 public sealed record ReleaseBasisEvidence(string Format, PolicyBasisDto Basis, IReadOnlyList<JsonElement> Records,

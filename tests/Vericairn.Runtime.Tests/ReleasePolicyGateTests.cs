@@ -49,7 +49,7 @@ public sealed partial class ReleasePolicyGateTests
 
         Assert.True(response.Ok, response.Message);
         Assert.Equal(1, f.Provider.Calls);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence);
         Assert.Equal(preparedAt, retained.Basis.AsOf);
         Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies!.Basis.AsOf);
         Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
@@ -99,7 +99,7 @@ public sealed partial class ReleasePolicyGateTests
             Assert.Equal("uncertain", EstateModel.BodyString(current, "status"));
             ReleaseBasisEvidence[] retained = current.Body.GetProperty("evidence").EnumerateArray()
                 .Where(item => item.TryGetProperty("hash", out _))
-                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+                .Select(item => Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence)).ToArray();
             Assert.Equal(2, retained.Length);
             ReleaseBasisEvidence first = retained[0], fresh = retained[1];
             Assert.NotEqual(first.Basis.Digest, fresh.Basis.Digest);
@@ -174,7 +174,7 @@ public sealed partial class ReleasePolicyGateTests
         {
             Assert.Equal("canceled", response.Status);
             Assert.Equal(2, response.BasisEvidence!.Count);
-            ReleaseBasisEvidence fresh = f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence;
+            ReleaseBasisEvidence fresh = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence);
             Assert.Equal(current.Supersedes, Assert.Single(fresh.ExcludedOperationRevisions).Id);
             Assert.Contains(fresh.Records, record => record.GetProperty("id").GetString() == canceled.Id);
         }
@@ -209,7 +209,7 @@ public sealed partial class ReleasePolicyGateTests
         Assert.True(response.Ok, response.Message);
         Assert.Equal(1, f.Provider.Calls);
         string hash = Assert.Single(response.BasisEvidence!);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(hash)!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(hash)!.Evidence);
         Assert.Equal(preparedAt, retained.Basis.AsOf);
         Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies!.Basis.AsOf);
         Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
@@ -245,7 +245,7 @@ public sealed partial class ReleasePolicyGateTests
 
         Assert.True(response.Ok, response.Message);
         Assert.Equal(1, f.Provider.Calls);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence);
         PolicyFindingDto original = Assert.Single(retained.Policies.Findings);
         PolicyFindingDto fresh = Assert.Single(response.Policies!.Findings);
         Assert.Equal(overdue ? "86401 elapsed seconds." : "86398 elapsed seconds.", original.Actual);
@@ -316,7 +316,7 @@ public sealed partial class ReleasePolicyGateTests
         void AssertChangedEvidence(RecordEnvelope operation)
         {
             ReleaseBasisEvidence[] retained = operation.Body.GetProperty("evidence").EnumerateArray()
-                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+                .Select(item => Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence)).ToArray();
             Assert.Equal(2, retained.Length);
             PolicyFindingDto original = Assert.Single(retained[0].Policies.Findings);
             PolicyFindingDto updated = Assert.Single(retained[1].Policies.Findings);
@@ -352,7 +352,7 @@ public sealed partial class ReleasePolicyGateTests
         ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
 
         Assert.True(response.Ok, response.Message);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence);
         PolicyFindingDto original = Assert.Single(retained.Policies.Findings, finding => finding.Duty!.Missed);
         PolicyFindingDto fresh = Assert.Single(response.Policies!.Findings, finding => finding.Duty!.Missed);
         Assert.Equal("unmet", fresh.Verdict);
@@ -408,7 +408,7 @@ public sealed partial class ReleasePolicyGateTests
             Assert.Equal(boundary == "before-dispatch" ? 2 : 1, model.OfType("operation").Count());
             Assert.Equal(boundary == "before-dispatch" ? "uncertain" : "not-started", EstateModel.BodyString(current, "status"));
             ReleaseBasisEvidence[] retained = current.Body.GetProperty("evidence").EnumerateArray()
-                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+                .Select(item => Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence)).ToArray();
             Assert.Equal(2, retained.Length);
             ReleaseBasisEvidence first = retained[0], fresh = retained[1];
             Assert.NotEqual(first.Basis.Digest, fresh.Basis.Digest);
@@ -558,8 +558,8 @@ public sealed partial class ReleasePolicyGateTests
             Assert.Equal("canceled", EstateModel.BodyString(canceled, "status"));
             Assert.Equal(2, model.OfType("operation").Count());
             Assert.Equal(2, response.BasisEvidence!.Count);
-            ReleaseBasisEvidence original = f.Api.ReleaseBasis(response.BasisEvidence[0])!.Evidence;
-            ReleaseBasisEvidence rechecked = f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence;
+            ReleaseBasisEvidence original = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(response.BasisEvidence[0])!.Evidence);
+            ReleaseBasisEvidence rechecked = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence);
             Assert.Equal(original.Basis.RecordDigest, rechecked.Basis.RecordDigest);
             Assert.Equal("satisfied", Assert.Single(original.Policies.Findings).Verdict);
             Assert.Contains(rechecked.Policies.Findings, finding => finding.Verdict == "unmet" && finding.ReleaseHold);
@@ -664,7 +664,7 @@ public sealed partial class ReleasePolicyGateTests
         Assert.All(document.RootElement.GetProperty("records").EnumerateArray(),
             r => Assert.Equal(["hash", "id", "type"], r.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal)));
         Assert.Equal(0, f.Api.Validate().Errors);
-        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(hash)!.Evidence;
+        ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(hash)!.Evidence);
         Assert.All(retained.Records, r => Assert.True(r.TryGetProperty("body", out _)));
         ReleaseBasisFile large = Assert.Single(retained.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/large-3.md");
         Assert.Equal("3" + page, System.Text.Encoding.UTF8.GetString(large.Bytes.ToArray()));
@@ -677,15 +677,17 @@ public sealed partial class ReleasePolicyGateTests
         f.Duty();
         ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
         Assert.True(response.Ok, response.Message);
-        ReleaseBasisEvidence copied = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence with { Format = "vericairn.release-basis/1" };
+        ReleaseBasisEvidence copied = Assert.IsType<ReleaseBasisEvidence>(f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence) with { Format = "vericairn.release-basis/1" };
 
         string hash = f.Api.Session.Objects.Put(JsonSerializer.SerializeToUtf8Bytes(copied, ProtocolJson.Options));
 
         Assert.Equal(JsonSerializer.Serialize(copied, ProtocolJson.Options), JsonSerializer.Serialize(f.Api.ReleaseBasis(hash)!.Evidence, ProtocolJson.Options));
     }
 
-    [Fact]
-    public void AReferencedBasisReadsAsUnavailableWhenASourceItNamesIsGone()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AReferencedBasisReadsAsUnavailableWhenASourceItNamesIsLostOrCorrupted(bool corrupted)
     {
         using var f = new Fixture();
         f.Duty();
@@ -699,9 +701,17 @@ public sealed partial class ReleasePolicyGateTests
         string path = Path.Combine(f.Records.Estate.Root, EstateLayout.ObjectsDirectory, source[Vericairn.Records.Hashing.ContentHash.Prefix.Length..]);
         Assert.True(File.Exists(path), path);
 
-        File.Delete(path);
+        if (corrupted) File.WriteAllText(path, "Different bytes.\n");
+        else File.Delete(path);
 
-        Assert.Null(f.Api.ReleaseBasis(hash));
+        ReleaseBasisResponse unavailable = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(hash));
+        Assert.Equal(hash, unavailable.Hash);
+        Assert.Null(unavailable.Evidence);
+        Assert.Equal("release-basis-unavailable", unavailable.Problem!.Code);
+        FindingDto failure = Assert.Single(unavailable.Problem.Findings);
+        Assert.Equal(corrupted ? "release-basis.hash-mismatch" : "release-basis.missing", failure.Code);
+        Assert.Contains("docs/evidence.md", failure.Location, StringComparison.Ordinal);
+        Assert.Contains(source, failure.Location, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -724,7 +734,12 @@ public sealed partial class ReleasePolicyGateTests
         File.WriteAllText(path, File.ReadAllText(path).Replace(judged.Signatures[0].Signature, System.Buffers.Text.Base64Url.EncodeToString(signature), StringComparison.Ordinal));
 
         Assert.Contains(f.Api.Session.Load().Records, r => r.Id == judged.Id && r.ComputedHash == judged.ComputedHash);
-        Assert.Null(f.Api.ReleaseBasis(hash));
+        ReleaseBasisResponse unavailable = Assert.IsType<ReleaseBasisResponse>(f.Api.ReleaseBasis(hash));
+        Assert.Null(unavailable.Evidence);
+        Assert.Equal("release-basis-unavailable", unavailable.Problem!.Code);
+        FindingDto failure = Assert.Single(unavailable.Problem.Findings);
+        Assert.Equal("release-basis.record-digest-mismatch", failure.Code);
+        Assert.Equal("record-set:" + stored.RootElement.GetProperty("basis").GetProperty("recordDigest").GetString(), failure.Location);
     }
 
     [Fact]
@@ -757,6 +772,8 @@ public sealed partial class ReleasePolicyGateTests
         int before = f.Api.Session.Load().Records.Count;
         ReleaseBasisResponse retained = f.Api.ReleaseBasis(hash)!;
         Assert.NotNull(retained);
+        Assert.NotNull(retained.Evidence);
+        Assert.Null(retained.Problem);
         Assert.Equal(digest, retained.Evidence.Basis.RecordDigest);
         Assert.Equal(Fixture.Commit, retained.Evidence.Basis.Submission!.Commit);
         Assert.Equal("Retained admission source.\n", System.Text.Encoding.UTF8.GetString(Assert.Single(retained.Evidence.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray()));

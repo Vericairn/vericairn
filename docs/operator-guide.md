@@ -306,6 +306,23 @@ The retained basis is inspectable with `release basis <evidence-hash>`. A previe
 authority. An effect already dispatched remains under its original identity if later observation fails;
 a client cancellation does not roll it back. See [estate policies](policies.md).
 
+In the 0.8.3 development build (FIX-58), `release basis <evidence-hash>` distinguishes a wrong
+identifier from lost retained sources. An unknown hash or unsupported object reports
+`No supported retained release basis has this hash`, followed by the requested hash. A retained
+basis whose references cannot resolve reports `Retained release basis <hash> cannot resolve`
+and lists every failed reference. A source finding names its repository, revision, relative path
+and expected hash; a proof finding names the object hash. `release-basis.missing` means the
+referenced object is absent; `release-basis.hash-mismatch` means its bytes no longer match its
+hash. Record failures name the record type, id and expected hash. A record-set digest mismatch
+also keeps the evidence unavailable, including when signatures changed.
+
+Both outcomes exit 2. For a basis that cannot resolve, `--json` returns its hash, `evidence: null`
+and a `release-basis-unavailable` problem with all findings; it never returns partial evidence.
+The API returns this same response with HTTP 200 and the SDK preserves it. Unknown or unsupported
+hashes retain HTTP 404 and SDK null. Check the identifier for the latter; for a resolution problem,
+use the named references to recover the exact retained bytes. Replacing them with current source
+bytes does not restore the historical basis. Reading a recovered basis grants no submission authority.
+
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
 4,194,304 characters per stdout or stderr stream. The deadline includes launch, concurrent output reads

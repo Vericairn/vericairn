@@ -164,7 +164,8 @@ public sealed partial class ToolRegistry
                     return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), !result.Ok);
                 }),
             Read("release_basis_get", "Read the retained exact release basis, including duty evidence, sources, findings and document comparisons. Historical evidence grants no new submission authority.", Arguments(("hash", "Release-basis object hash from operation evidence.")), "hash",
-                async (api, a, token) => await api.ReleaseBasisAsync(Arg(a, "hash"), token).ConfigureAwait(false) is { } basis ? Json(basis) : NotFound("release basis", Arg(a, "hash"))),
+                async (api, a, token) => await api.ReleaseBasisAsync(Arg(a, "hash"), token).ConfigureAwait(false) is { } basis
+                    ? new ToolCallResult(JsonSerializer.Serialize(basis, ProtocolJson.Options), basis.Evidence is null) : NotFound("release basis", Arg(a, "hash"))),
             Read("policy_evaluate", "Evaluate policies with a recorded-time basis or explicit preview. A preview cannot authorize submission.", Arguments(("asOf", "Optional canonical UTC preview time."), ("release", "Optional release record id selecting its exact product, version and commit.")),
                 async (api, a, token) => { PolicyResponse result = await api.PolicyEvaluateAsync(OptionalArg(a, "asOf"), OptionalArg(a, "release"), token).ConfigureAwait(false); return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), result.Problem is not null); }),
             Read("writing_exceptions_list", "Writing entries, removal history, match counts and exact excepted occurrences, with their basis. Reads create no record.", NoArguments(),

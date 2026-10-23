@@ -150,3 +150,32 @@ purposes, including on authenticated local-network connections. Connection authe
 principal binding still apply. There is no fallback to `/v1/releases/submit` on an older server.
 The new MCP read tool is `release_submit_check`; the CLI option is `release submit --check`;
 Workbench offers **Check submission (nothing recorded)**. See [API v1](api-v1.md#release-submission-check-083-development).
+
+## Retained release-basis diagnostics (FIX-58)
+
+| Changed member | Change |
+| --- | --- |
+| `ReleaseBasisResponse.Problem { get; init; }` | Added nullable `Problem`, naming every failed reference when a basis cannot resolve. Omitted from successful JSON responses. |
+| `ReleaseBasisResponse.Evidence` | Now annotated `ReleaseBasisEvidence?`; null when resolution fails. |
+| `ReleaseBasisResponse(string Hash, ReleaseBasisEvidence? Evidence)` and its generated `Deconstruct` | The evidence parameter's nullable annotation changes; the CLR types and two-argument constructor remain the same. |
+
+`IEstateApi.ReleaseBasis`, `ReleaseBasisAsync`, `VericairnClient` and `CancellationBoundApi` keep
+their signatures. Unknown hashes and objects without a supported basis format still return null
+(HTTP 404). A retained basis that cannot resolve now returns `ReleaseBasisResponse` (HTTP 200)
+with its hash, null evidence and a `release-basis-unavailable` problem. Its findings distinguish
+missing references from bytes that do not match their hash, identify source files by repository,
+revision, path and hash, and identify proof objects and records by their retained references.
+The record-set digest check still covers signatures; a mismatch names that digest. No partial
+evidence is returned. The retained `/1` and `/2` object formats do not change.
+
+Callers must check `Evidence` and `Problem` before using a non-null response. Code compiled
+against an earlier package can deserialize this response but must be updated to handle null
+evidence; the previous null-response check alone no longer establishes that evidence resolved.
+Recompilation with nullable analysis exposes accesses that need this check.
+
+`release basis` exits 2 for both absence and resolution failure, with distinct messages naming
+the requested hash. For resolution failure, `--json` preserves the API response and standard
+error prints all findings. `release_basis_get` preserves the same response and sets `isError`
+when evidence cannot resolve. Successful CLI and MCP reads retain their existing behavior.
+See the [release guide](operator-guide.md#8-releases) and
+[API v1](api-v1.md#release-basis-diagnostics-083-development) for the read contract.

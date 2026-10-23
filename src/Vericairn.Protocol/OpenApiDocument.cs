@@ -282,7 +282,12 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (path == "/v1/companions" || path.StartsWith("/v1/companions/", StringComparison.Ordinal))
+        if (path == "/v1/release-bases/{hash}")
+        {
+            responses["200"] = new JsonObject { ["description"] = "ReleaseBasisResponse: complete retained evidence, or null evidence with a release-basis-unavailable problem naming every failed reference. Historical evidence grants no submission authority." };
+            responses["404"] = new JsonObject { ["description"] = "No supported retained release basis has this hash." };
+        }
+        else if (path == "/v1/companions" || path.StartsWith("/v1/companions/", StringComparison.Ordinal))
         {
             string schema = path == "/v1/companions" ? "CompanionsResponse" : path.EndsWith("/compare", StringComparison.Ordinal) ? "CompanionComparison" : "CompanionResponse";
             responses["200"] = new JsonObject

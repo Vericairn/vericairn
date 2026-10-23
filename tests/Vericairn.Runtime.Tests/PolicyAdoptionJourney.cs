@@ -337,7 +337,7 @@ public static class PolicyAdoptionJourney
             Assert.True(admitted.Ok, admitted.Message);
             Assert.Equal(1, provider.Calls);
             Assert.Equal(2, Model.OfType("operation").Count());
-            ReleaseBasisEvidence retained = Api.ReleaseBasis(Assert.Single(admitted.BasisEvidence!))!.Evidence;
+            ReleaseBasisEvidence retained = Assert.IsType<ReleaseBasisEvidence>(Api.ReleaseBasis(Assert.Single(admitted.BasisEvidence!))!.Evidence);
             AssertReferenceSource(admitted.Policies!);
             Assert.Equal(source.SourceCommit, Assert.Single(Assert.Single(retained.Repositories, r => r.Identity == repository.Id && !r.Evidence).TreeComparisons).SourceCommit);
             PolicyFindingDto age = Assert.Single(retained.Policies.Findings, f => f.PolicyKey == "planned-age" && f.Actual.EndsWith(" elapsed seconds.", StringComparison.Ordinal));

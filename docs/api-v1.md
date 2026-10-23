@@ -42,6 +42,33 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## Release-basis diagnostics (0.8.3 development)
+
+FIX-58 changes the failure response of `GET /v1/release-bases/{hash}`. An unknown hash or an
+object without a supported basis format still answers HTTP 404, and both SDK methods return null.
+A recognized basis that cannot resolve answers HTTP 200 with `ReleaseBasisResponse`: the requested
+`hash`, `evidence: null` and `problem` with code `release-basis-unavailable`. A successful response
+still carries complete `evidence` and omits `problem`. Callers must inspect the response before
+using its evidence. No partial evidence is returned and the stored basis formats are unchanged.
+
+Each `problem.findings` entry has a code, a reference in `location`, and an explanation in `message`:
+
+| Code | Meaning |
+| --- | --- |
+| `release-basis.missing` | A retained object is missing, or a referenced record is absent or unreadable. |
+| `release-basis.hash-mismatch` | Object bytes do not match their hash, or a record's type/content differs from its reference. |
+| `release-basis.record-digest-mismatch` | The resolved record set, including signatures, differs from its retained digest. |
+| `release-basis.invalid-reference` | A source or proof reference has an unsupported content hash. |
+| `release-basis.invalid` | A recognized basis has missing or invalid evidence fields. |
+
+Source locations name the repository, revision, relative file path and hash. Record locations name
+the type, id and hash; object locations name the hash. A record-set mismatch names its aggregate
+digest: that digest alone cannot identify which record's signatures changed. Every failed reference
+is reported, including distinct file references to the same object. Sources already marked
+unavailable at admission keep that historical state and do not become new resolution failures.
+The CLI and MCP show these same findings; SDK synchronous, asynchronous and cancellation-bound
+reads preserve the typed response. See [API compatibility for 0.8.3](api-compatibility-0.8.3.md#retained-release-basis-diagnostics-fix-58).
+
 ## Work-order creation (0.8.3 development)
 
 `POST /v1/work/new` takes `WorkNewRequest`, the API counterpart of `vericairn work new`:

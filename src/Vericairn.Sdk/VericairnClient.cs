@@ -601,6 +601,6 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }
-    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    /// <summary>Read retained release-admission evidence or its resolution problem; null means an unknown or unsupported hash. Grants no submission authority.</summary>
     public ReleaseBasisResponse? ReleaseBasis(string hash) => Get<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true);
 }
