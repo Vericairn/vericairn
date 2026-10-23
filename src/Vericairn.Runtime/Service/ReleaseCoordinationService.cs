@@ -18,7 +18,7 @@ using static Vericairn.Runtime.Service.EstateServiceValues;
 namespace Vericairn.Runtime.Service;
 
 /// <summary>Owns release admission, in-flight identities, dispatch receipts and reconciliation under each original identity.</summary>
-internal sealed class ReleaseCoordinationService(
+internal sealed partial class ReleaseCoordinationService(
     EstateRecordAccess recordAccess,
     Func<ProviderRegistry> providers,
     Func<string, RecordResponse?> readRecord,
@@ -409,6 +409,7 @@ internal sealed class ReleaseCoordinationService(
     internal ReleaseResponse ReleaseObserve(ReleaseObserveRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Withdrawal is not null) return ObserveWithdrawal(request);
         string tag = ReleaseFlow.Tag(request.Version);
         string pending = $"release {request.Version}";
         if (!Ulid.IsValid(request.By))
@@ -666,6 +667,9 @@ internal sealed class ReleaseCoordinationService(
             return new ReleaseResponse(identity, "published", $"release {request.Version} is published ({recorded.Id}); nothing to observe.", true, ReleaseId: recorded.Id, Url: release?.Url);
         }
 
+        if (recorded.Status == "withdrawn")
+            return new ReleaseResponse(identity, "withdrawn", $"Release {request.Version} is withdrawn. Observe its draft-deletion intent with --withdrawal; a withdrawal is never published by this observation.", true, ReleaseId: recorded.Id, Url: release?.Url);
+
         if (release is null || release.Draft || release.PublishedAt is null)
         {
             return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.", true, ReleaseId: recorded.Id, Publish: provider.ManualPublicationCommand(destination, tag), Url: release?.Url);
@@ -688,6 +692,7 @@ internal sealed class ReleaseCoordinationService(
         {
             EstateModel model = session.Load();
             List<RecordEnvelope> operations = model.Current("operation")
+                .Where(o => EstateModel.BodyString(o, "action") == ReleaseFlow.DispatchAction)
                 .Where(o => o.Body.TryGetProperty("target", out JsonElement t) && t.ValueKind == JsonValueKind.Object && t.TryGetProperty("version", out JsonElement v) && v.GetString() == request.Version)
                 .ToList();
             if (!string.IsNullOrWhiteSpace(request.Provider) && !string.IsNullOrWhiteSpace(request.Repository))
