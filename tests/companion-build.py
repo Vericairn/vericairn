@@ -4,6 +4,7 @@
 """Exercise the build's existing generate/compare operations without the CLI suite."""
 
 import hashlib
+import html
 import json
 import os
 import shutil
@@ -15,6 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "artifacts/bin/Vericairn.DocsTool/release/vericairn-docs.dll"
+CLI = ROOT / "artifacts/bin/Vericairn.Cli/release/vericairn.dll"
 
 
 class CompanionBuildTests(unittest.TestCase):
@@ -37,7 +39,7 @@ class CompanionBuildTests(unittest.TestCase):
                       "Missing prerequisite: Vericairn.DocsTool rebuilt in Release at the checkout's HEAD commit.")
         self.output = self.root / "set"
         self.declaration = self.root / "documents.json"
-        self.declaration.write_text('["cli-reference.md", "api-reference.md", "record-reference.md"]\n', encoding="utf-8")
+        self.declaration.write_text('["cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md"]\n', encoding="utf-8")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -56,6 +58,34 @@ class CompanionBuildTests(unittest.TestCase):
 
     def snapshot(self):
         return {p.relative_to(self.output).as_posix(): p.read_bytes() for p in self.output.rglob("*") if p.is_file()}
+
+    def test_client_outcomes_retain_recovery_and_checks_refuse_its_removal(self):
+        self.generate()
+        path = self.output / "cli-client-outcomes.md"
+        original = path.read_text(encoding="utf-8")
+        heading = "## Stored records awaiting companion recovery"
+        following = "## Interrupted client requests"
+        self.assertIn(heading, original)
+        section = original[original.index(heading):original.index(following)].rstrip()
+        maintained = (ROOT / "docs/cli-client-outcomes.md").read_text(encoding="utf-8")
+        self.assertEqual(maintained[maintained.index(heading):maintained.index(following)].rstrip(), html.unescape(section))
+        self.assertIn(section, (self.output / "cli-reference.md").read_text(encoding="utf-8"))
+        self.tool("compare", self.output)
+
+        def check(expected):
+            result = subprocess.run(["dotnet", str(CLI), "docs", "check", str(self.output),
+                                     "--documents", str(self.declaration), "--json"],
+                                    cwd=ROOT, capture_output=True, text=True, timeout=120)
+            self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
+            return json.loads(result.stdout)["findings"]
+
+        self.assertEqual([], check(0))
+        path.write_text(original[:original.index(heading)] + original[original.index(following):], encoding="utf-8")
+        self.assertIn("docs.companion-bytes", self.tool("compare", self.output, expected=1))
+        self.assertTrue(any(f["Code"] == "docs.client-outcomes" and f["Location"] == path.name for f in check(1)))
+        path.unlink()
+        self.assertIn("docs.companion-unavailable", self.tool("compare", self.output, expected=1))
+        self.assertTrue(any(f["Code"] == "docs.document" and f["Location"] == path.name for f in check(1)))
 
     def test_complete_bytes_repeat_with_retained_instant_and_detect_hand_edits(self):
         self.generate()

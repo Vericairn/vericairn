@@ -78,6 +78,33 @@ public class SoftwareCompanionTests
         Assert.Contains("`7`", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Caller cancellation", text, StringComparison.Ordinal);
         Assert.DoesNotContain("exit code `2`", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Stored records awaiting companion recovery", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cli-client-outcomes")]
+    [InlineData("cli-reference")]
+    public void StoredRecordRecoveryProseComesFromTheRetainedBuildSnapshot(string name)
+    {
+        string commands = JsonSerializer.Serialize(new
+        {
+            format = "vericairn.build-references/1", kind = "cli-reference", commit = Commit,
+            rootOptions = System.Array.Empty<object>(), commands = System.Array.Empty<object>(),
+            clientOutcomes = new
+            {
+                storedRecords = new { storage = "Recorded storage.", clients = "Recorded client receipts.", recovery = "Recorded recovery <action>." },
+                introduction = "Recorded introduction.", refusal = "Recorded refusal.", cancellation = "Recorded cancellation.",
+                uncertain = "Recorded uncertain effect.", rows = System.Array.Empty<object>(),
+            },
+        });
+        string text = Read(Render(name, "commands.json", File("commands.json", commands)));
+        Assert.Contains("## Stored records awaiting companion recovery", text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded storage."), text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded client receipts."), text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded recovery <action>."), text, StringComparison.Ordinal);
+        Assert.Contains("[API outcomes](api-v1.md#outcomes-and-problems)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<action>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("never resubmit the stored record", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -85,7 +112,7 @@ public class SoftwareCompanionTests
     {
         DocumentRendition output = Render("checksums", "SHA256SUMS", File("SHA256SUMS", new string('b', 64) + "  fixture.zip\n"));
         Assert.Equal(DocumentGenerationStatus.Success, output.Status);
-        Assert.Equal("sha256:98235798476b3ede726e8a9a7b6a4e6299ef73db13eaa8c112384f81afd586e3", output.ContentHash);
+        Assert.Equal("sha256:faed0f90e8557af8f8be3b5e0b254ead9d99f71d127db4b7e91ed1a18f47ac36", output.ContentHash);
     }
 
     [Fact]
