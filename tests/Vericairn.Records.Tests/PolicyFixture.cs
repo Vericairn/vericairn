@@ -126,9 +126,9 @@ public sealed class PolicyFixture : IDisposable
         ["basis"] = grant is null ? new JsonObject { ["decision"] = Ref(Decision) } : new JsonObject { ["decision"] = Ref(Decision), ["authority"] = Ref(grant) },
     };
 
-    public RecordEnvelope BeginAttempt(bool builder = true)
+    public RecordEnvelope BeginAttempt(bool builder = true, RecordEnvelope? order = null)
     {
-        RecordEnvelope order = Add("work-order", new JsonObject { ["key"] = "TASK-" + Estate.Load().OfType("work-order").Count(), ["kind"] = "ordinary", ["title"] = "Maintenance", ["intent"] = "Perform the declared checks.", ["scope"] = new JsonArray("test inventory"), ["exitQuestion"] = "Was the inventory checked?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("report") });
+        order ??= Add("work-order", new JsonObject { ["key"] = "TASK-" + Estate.Load().OfType("work-order").Count(), ["kind"] = "ordinary", ["title"] = "Maintenance", ["intent"] = "Perform the declared checks.", ["scope"] = new JsonArray("test inventory"), ["exitQuestion"] = "Was the inventory checked?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("report") });
         RecordEnvelope assignment = Add("assignment", new JsonObject { ["contributor"] = builder ? Estate.BuilderId : Estate.OperatorId, ["brief"] = new JsonObject { ["outcome"] = "A checked inventory.", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("test fixtures"), ["prohibitedEffects"] = new JsonArray("publication"), ["workspace"] = new JsonArray("example repository"), ["limits"] = new JsonArray(), ["expectedOutputs"] = new JsonArray("report"), ["reviewCriteria"] = new JsonArray("inventory"), ["recovery"] = "Read the prior result." } }, subject: order.Reference);
         RecordEnvelope attempt = Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(Estate.Clock), ["workspace"] = "example repository", ["note"] = "Check the inventory." }, builder: builder, subject: assignment.Reference);
         return attempt;

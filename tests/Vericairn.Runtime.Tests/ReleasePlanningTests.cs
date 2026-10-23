@@ -14,6 +14,51 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class ReleasePlanningTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MovingSeveralOrdersKeepsTheirAssignmentsAttemptsAndReviewsCurrent(bool newVersion)
+    {
+        using var f = new ReleasePlanningFixture();
+        var retained = new List<RecordEnvelope>();
+        foreach (RecordEnvelope order in new[] { f.First, f.Second })
+        {
+            RecordEnvelope attempt = f.Records.BeginAttempt(order: order);
+            retained.Add(f.Model.ById[attempt.Subject!.Id]);
+            retained.Add(attempt);
+            RecordEnvelope result = f.Records.Add("result", PolicyFixture.ResultBody(), builder: true, subject: attempt.Reference);
+            retained.Add(result);
+            retained.Add(f.Records.Review(result));
+            retained.Add(f.Records.Add("review", new() { ["independence"] = "self", ["outcome"] = "pass", ["summary"] = "Reviewed the planned work.", ["findings"] = new JsonArray() }, subject: order.Reference));
+        }
+        RecordEnvelope carrierReview = f.Records.Add("review", new() { ["independence"] = "self", ["outcome"] = "pass", ["summary"] = "Reviewed the release plan.", ["findings"] = new JsonArray() }, subject: f.Source.Reference);
+        int before = f.Model.Records.Count;
+        WorkMovePlanRequest request = newVersion ? f.Move with { To = null, ExpectedTarget = null, Version = "1.2.0" } : f.Move;
+        WorkMovePlanResponse moved = f.Api.WorkMovePlan("PLAN-1", request);
+        Assert.True(moved.Ok, JsonSerializer.Serialize(moved, ProtocolJson.Options));
+        Assert.Equal(newVersion ? 3 : 2, moved.Written.Count);
+        EstateModel model = f.Model;
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.Equal(before + moved.Written.Count, model.Records.Count);
+        foreach (RecordEnvelope record in retained)
+        {
+            Assert.True(model.IsCurrent(record));
+            Assert.Equal(record.ComputedHash, model.ById[record.Id].ComputedHash);
+            Assert.Equal(record.Subject, model.ById[record.Id].Subject);
+            Assert.DoesNotContain(model.Findings, finding => finding.Code == "record.subject-stale" && finding.Location == record.ExpectedPath);
+        }
+        foreach (RecordEnvelope order in new[] { f.First, f.Second })
+        {
+            RecordEnvelope current = model.Latest(order);
+            Assert.NotEqual(order.Id, current.Id);
+            Assert.Contains($"Pinned to work-order revision {order.ComputedHash} (current)", WorkView.RenderBrief(model, current), StringComparison.Ordinal);
+            Assert.DoesNotContain("[pinned to an earlier work-order revision]", WorkView.RenderObserve(model, current), StringComparison.Ordinal);
+        }
+        // Moving to a new version also changes the carrier's releasePlan, which remains a content change.
+        Assert.Equal(newVersion, model.Findings.Any(finding => finding.Code == "record.subject-stale" && finding.Location == carrierReview.ExpectedPath));
+        Assert.Equal(newVersion ? 1 : 0, model.Findings.Count(finding => finding.Code == "record.subject-stale"));
+    }
+
     [Fact]
     public void AVersionMoveCombinesASelfPlacedCarriersChangesIntoOneSuccessor()
     {

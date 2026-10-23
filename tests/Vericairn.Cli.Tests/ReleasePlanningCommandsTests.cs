@@ -13,6 +13,34 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class ReleasePlanningCommandsTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WorkBriefAndCheckDistinguishPlacementFromContentChanges(bool contentChange)
+    {
+        CliHarness.Ok("work", "--help");
+        using var f = new ReleasePlanningFixture();
+        f.Records.BeginAttempt(order: f.First);
+        Assert.True(f.Api.WorkMovePlan("PLAN-1", f.Move).Ok);
+        if (contentChange)
+        {
+            RecordEnvelope moved = f.Model.Latest(f.First);
+            JsonObject body = PolicyFixture.Body(moved);
+            body["scope"] = new JsonArray("revised scope");
+            f.Records.Estate.SetClock(f.Model.Records.Max(record => record.AtTime));
+            f.Records.Add("work-order", body, supersedes: moved.Id);
+        }
+        int before = f.Model.Records.Count;
+        CliHarness.Outcome brief = CliHarness.RunWithApi(f.Api, null, "--estate", f.Records.Estate.Root, "work", "brief", "WORK-1");
+        Assert.Equal(0, brief.Code);
+        Assert.Contains($"Pinned to work-order revision {f.First.ComputedHash}" +
+            (contentChange ? " (an earlier revision; review before continuing)" : " (current)"), brief.Out, StringComparison.Ordinal);
+        CliHarness.Outcome check = CliHarness.RunWithApi(f.Api, null, "--estate", f.Records.Estate.Root, "estate", "check");
+        Assert.Equal(0, check.Code);
+        Assert.Equal(contentChange, check.Out.Contains("record.subject-stale", StringComparison.Ordinal));
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
     [Fact]
     public void BothCommandsReturnRecordValidationFindingsWithoutWriting()
     {

@@ -258,7 +258,7 @@ public static class WorkView
         {
             string contributor = EstateModel.BodyString(assignment, "contributor") ?? "?";
             text.Append("  assignment ").Append(assignment.Id).Append(" to ").Append(PrincipalName(model, contributor)).Append(" (").Append(contributor).Append(')')
-                .Append(assignment.Subject?.Hash == order.ComputedHash ? string.Empty : "  [pinned to an earlier work-order revision]").Append('\n');
+                .Append(WorkOrderRevisions.IsCurrentSubject(model, assignment.Subject, order) ? string.Empty : "  [pinned to an earlier work-order revision]").Append('\n');
             foreach (RecordEnvelope amendment in model.About(assignment.Id, "amendment").Where(model.IsCurrent).OrderBy(a => a.Id, StringComparer.Ordinal))
             {
                 text.Append("    amendment ").Append(amendment.Id).Append(" (").Append(EstateModel.BodyString(amendment, "kind")).Append("): ").Append(EstateModel.BodyString(amendment, "rationale")).Append('\n');
@@ -309,7 +309,7 @@ public static class WorkView
 
         foreach (RecordEnvelope acceptance in chain.SelectMany(id => model.About(id, "acceptance")).Where(model.IsCurrent).OrderBy(a => a.Id, StringComparer.Ordinal))
         {
-            text.Append("  acceptance ").Append(acceptance.Id).Append(" by ").Append(PrincipalName(model, acceptance.By)).Append(acceptance.Subject?.Id == order.Id ? string.Empty : " [earlier revision]").Append(": ").Append(EstateModel.BodyString(acceptance, "statement")).Append('\n');
+            text.Append("  acceptance ").Append(acceptance.Id).Append(" by ").Append(PrincipalName(model, acceptance.By)).Append(WorkOrderRevisions.IsCurrentSubject(model, acceptance.Subject, order) ? string.Empty : " [earlier revision]").Append(": ").Append(EstateModel.BodyString(acceptance, "statement")).Append('\n');
         }
 
         return text.ToString();
@@ -319,7 +319,7 @@ public static class WorkView
     {
         string contributor = EstateModel.BodyString(assignment, "contributor") ?? "?";
         text.Append("## Assignment ").Append(assignment.Id).Append(" to ").Append(PrincipalName(model, contributor)).Append(" (").Append(contributor).Append(")\n\n");
-        text.Append("Pinned to work-order revision ").Append(assignment.Subject?.Hash).Append(assignment.Subject?.Hash == order.ComputedHash ? " (current)" : " (an earlier revision; review before continuing)").Append("; assignment hash ").Append(assignment.ComputedHash).Append(".\n\n");
+        text.Append("Pinned to work-order revision ").Append(assignment.Subject?.Hash).Append(WorkOrderRevisions.IsCurrentSubject(model, assignment.Subject, order) ? " (current)" : " (an earlier revision; review before continuing)").Append("; assignment hash ").Append(assignment.ComputedHash).Append(".\n\n");
         if (assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object)
         {
             text.Append("### Outcome\n\n").Append(brief.TryGetProperty("outcome", out JsonElement outcome) ? outcome.GetString() : string.Empty).Append("\n\n");

@@ -150,6 +150,16 @@ hide an occurrence already due. Ending debt never labels the work completed.
 `work-order.releasePlan` contains `{product, version}`. A release carrier can place itself in its own plan.
 These fields organize work under its existing authority and do not create dependencies or acceptance.
 
+A work-order revision that changes only `placement` keeps records pinned to its predecessor current.
+Assignments, their attempts and results, reviews and acceptances retain their original ids and hashes;
+moving the work does not require replacement records. Currency is derived from the recorded revision
+chain, so existing placement-only `record.subject-stale` warnings clear when the estate is read again.
+Every intervening revision must change `placement` and preserve the rest of the body. An identical-body
+reissue still requires reconsideration. Any other body change, including
+`releasePlan`, still requires reconsideration, even if a later revision restores the earlier content.
+The original subject hash must still match. This exception does not apply to revisions of assignments,
+attempts, results or other record types.
+
 ## Checked repository changes
 
 A product's optional `changes` object has `provider`, a repository resource id in

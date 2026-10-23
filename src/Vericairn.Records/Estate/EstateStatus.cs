@@ -31,7 +31,7 @@ public static class EstateStatus
         {
             RecordEnvelope? basis = StatusRecord(model, order);
             string status = basis is null ? "planned"
-                : basis.Type == "acceptance" ? basis.Subject?.Id == order.Id ? "accepted" : "accepted (earlier revision)"
+                : basis.Type == "acceptance" ? WorkOrderRevisions.IsCurrentSubject(model, basis.Subject, order) ? "accepted" : "accepted (earlier revision)"
                 : EstateModel.BodyString(basis, "status") ?? "planned";
             items.Add(new WorkItem(EstateModel.BodyString(order, "key") ?? "?", EstateModel.BodyString(order, "kind") ?? "?", EstateModel.BodyString(order, "title") ?? "?", status, order.Id));
         }
