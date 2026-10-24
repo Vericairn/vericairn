@@ -39,6 +39,15 @@ Workbench bundles, including Workbench's copy of the CLI, and fails if their lib
 bytes differ, which holds the identities used by policy implementation digests equal across platforms.
 The fix changes no policy digest formula or frozen release documentation.
 
+## Known issue in published 0.8.3
+
+On a slower Windows machine, `vericairn status` can exceed its 30-second read deadline for a large estate and
+fail with "The request timed out." (exit code 124). Vericairn's own estate, about 4,100 records and 70 living
+documents, takes over 30 seconds on GitHub's Windows runner with 0.8.3, against about 22 seconds with 0.8.2;
+macOS and Linux take 16 and 25 seconds, as before, and render byte-identical status, policy basis included.
+`estate check` and other commands are not affected. 0.8.4 keeps status within its deadline on Windows
+(FIX-63, [issue 205](https://github.com/Vericairn/vericairn/issues/205)).
+
 ## Machine-local worker configuration and qualification
 
 FIX-11 supplies the stock CLI and daemon with native worker configuration. Before a native run, use `vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`); omit choices to show it. Both model and effort are required when setting. Repeated `--allow-model` and `--allow-effort` options narrow choices and must include their defaults. Without a model allowlist only the default is admitted; without an effort allowlist the launcher's supported efforts are admitted. Each set replaces that launcher's defaults and allowlists. Missing or malformed configuration refuses before intent, and an explicit run override cannot replace it or escape its restrictions.
