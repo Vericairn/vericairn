@@ -6,8 +6,8 @@ and history kept as records you own: by default in a git repository beside your 
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
 accept it. Software is its first domain, and the one that ships today.
 
-**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.8.2, from
-October 22, 2026.
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.8.3, from
+October 24, 2026.
 [Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
 [NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
 [Limitations](docs/limitations-and-platforms.md) ·
@@ -58,13 +58,13 @@ dotnet tool install --global dotnet-vc
 mkdir my-venture && cd my-venture && git init
 dotnet vc estate init --name "My Venture" --slug my-venture \
   --purpose "Build and ship one product with coding agents." \
-  --operator-name "Your Name" --organization "Your Organization" \
-  --commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f
+  --operator-name "Your Name" --organization "Your Organization"
 dotnet vc status
 ```
 
 `estate init` records you as the operator and the estate's charter, and writes a manifest that pins the
-Vericairn source it names, here 0.8.2's commit. `status` shows the new, empty estate. The
+exact Vericairn build you run, by its source commit; add `--release` to pin the published release itself,
+verified against its checksums. `status` shows the new, empty estate. The
 [operator's guide](docs/operator-guide.md) continues from there: your device and its key, a work order, an
 agent's run, its review and acceptance, and a release. The [install guide](docs/install.md) also covers the
 self-contained archives for machines without the .NET SDK, checking a download, Workbench and the MCP server.

@@ -99,17 +99,22 @@ establish that the intended head is there. An opening requires a recorded
 successful scanned push of the same repository, branch and head; the GitHub
 provider also checks the pushed head before opening.
 
-From 0.8.3, a checked push's git processes load no system or global
-configuration, and its remote access runs from a private repository that
-reads the clone's objects but none of the clone's configuration, so the
-clone's address rewrites, transport settings and hooks never apply. Only the
-remote's own protocol is allowed: https for GitHub, or a repository on this
-machine. From the user's system and global configuration, git takes only the
-credential helpers and the TLS trust settings (`http.sslBackend`,
-`http.sslCAInfo`, `http.sslCAPath` and the Schannel options); a proxy comes
-from the environment, such as `HTTPS_PROXY`. gh uses the user's own
-configuration and login. The runtime has no token parameter, does not request
-a token, and does not retain authentication output.
+Before 0.8.3, a checked push ran git with the clone's own configuration and
+the user's system and global configuration, including files they include; a
+clone used with `changes push` under 0.8.0 through 0.8.2 can be checked for
+`url.` rewrites, hooks and proxy settings at each of those levels, and each
+pushed branch compared with the head Vericairn recorded. From 0.8.3, a checked
+push's git processes load no system or global configuration, and its remote
+access runs from a private repository that reads the clone's objects but none
+of the clone's configuration, so the clone's address rewrites, transport
+settings and hooks never apply. Only the remote's own protocol is allowed:
+https for GitHub, or a repository on this machine. From the user's system and
+global configuration, git takes only the credential helpers and the TLS trust
+settings (`http.sslBackend`, `http.sslCAInfo`, `http.sslCAPath` and the
+Schannel options); a proxy comes from the environment, such as `HTTPS_PROXY`.
+gh uses the user's own configuration and login. The runtime has no token
+parameter, does not request a token, and does not retain authentication
+output.
 
 ## Merge and observe
 

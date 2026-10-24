@@ -4,31 +4,19 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.8.2 — current published release
+## 0.8.3 — current published release
 
-0.8.2 follows 0.8.0 and carries the work of the 0.8.1 candidate, which was withdrawn before publication,
-with a correction that lets the macOS and Linux command lines start other programs. Commands record exact
-document revisions and observe NuGet publication, listing and deprecation, and the packages carry the
-cairn mark as their icon. The worker's command audit and settlement, the release gate, the rules for
-checked pushes and merges and the estate upgrade are hardened, as the release notes' Security section
-describes. Every client reports a record as stored, not refused, when publishing its readable companions
-was interrupted, and the estate check ignores top-level files the repository's own ignore rules exclude.
-A retained release basis stays small however large the estate grows. Vericairn's MCP server is listed in
-the official MCP Registry and among nuget.org's MCP servers. One known issue: each platform's archive
-carries a separately compiled build of the same libraries, so a policy basis differs by platform
-([issue 184](https://github.com/Vericairn/vericairn/issues/184)); 0.8.3 fixes it. Its
-[release notes](docs/releases/0.8.2/release-notes.md) and [documentation set](docs/releases/0.8.2/README.md)
-describe what shipped and its limits.
-
-## 0.8.3 — planned
-
-A first estate needs no hand-written JSON: `estate init` pins the build you run, a new command creates a
-work order from its options, and an estate can pin and upgrade to the published Vericairn release it
-depends on. Living documents show the same due state everywhere the release gate does. A release can be
-checked against the whole gate before it is submitted, a candidate withdrawn and a plan moved to another
-version with single commands, and every platform's archive carries the same library builds. CI runs each
-platform's published command line, and after an upgrade the command line says plainly when an older
-background runtime is still serving the estate.
+0.8.3 follows 0.8.2. A first estate needs no hand-written JSON: `estate init` pins the build you run and
+`work new` creates a work order from its options. Any estate can pin and upgrade to the published
+Vericairn release it depends on, verified against the release's tag and checksums, online or from
+downloaded files. A release can be checked against the whole gate before it is submitted, a candidate
+withdrawn and a plan moved to another version with single commands, and every platform's archive carries
+the same library builds ([issue 184](https://github.com/Vericairn/vericairn/issues/184)). Living
+documents show the same due state everywhere the release gate does, CI runs each platform's published
+command line, and after an upgrade the command line says plainly when an older background runtime is
+still serving the estate. A checked push runs git with only the settings a push needs, as the release
+notes' Security section describes. Its [release notes](docs/releases/0.8.3/release-notes.md) and
+[documentation set](docs/releases/0.8.3/README.md) describe what shipped and its limits.
 
 ## 0.8.4 — planned
 
