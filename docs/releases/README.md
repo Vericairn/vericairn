@@ -1,56 +1,60 @@
 # Release documentation sets
 
-The current published release is **0.8.2**, published on October 22, 2026 at 11:24:13 UTC,
-with tag `v0.8.2` at `e000a12ea980a4ac0c7e7a127a714f6423e27d7f`
-(estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It follows 0.8.0, published on October 20, 2026
-at 11:28:45 UTC with tag `v0.8.0` at `cd508425339415944411cf71cce9ad20f46ff41f`
-(estate release record `01M5CH7JNSD0MPQZHW51BGYNN4`); the 0.8.1 candidate between them was withdrawn.
-0.8.2's [Security section](0.8.2/release-notes.md#security) discloses the corrections from 0.8.0's
-security review. One known issue of 0.8.2: each platform's archive carries a separately compiled build of
-the same libraries, so a policy basis differs by platform
-([issue 184](https://github.com/Vericairn/vericairn/issues/184)). The fix for 0.8.3 (FIX-61) builds
-platform-independent libraries while retaining the applications' locked per-platform restores.
-The shared packaging job compares the embedded Vericairn library assemblies in all six platforms'
-CLI and Workbench distributables and fails on any difference, holding policy implementation identities
-equal across platforms. This changes no frozen set and does not establish 0.8.3 publication.
+The current published release is **0.8.3**, published on October 24, 2026 at 14:24:07 UTC,
+with tag `v0.8.3` at `fb5b497df0686079e917ec5eac375a7d48d27504`
+(estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`). It follows 0.8.2, published on October 22, 2026
+at 11:24:13 UTC with tag `v0.8.2` at `e000a12ea980a4ac0c7e7a127a714f6423e27d7f`
+(estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). 0.8.3 was published before the Reviewer's review of
+its candidate finished and before the operator's acceptance was recorded (decision
+`01M5Q4Y34CFCY24W4F3A6ZD2SP`); the Reviewer's review `01M5Q6D7PJFDMSB6ST7AAVQ7QV` then passed with four informational findings, and the operator's acceptance followed. 0.8.3's [Security section](0.8.3/release-notes.md#security)
+discloses FIX-60's correction to checked pushes, and 0.8.2's [Security section](0.8.2/release-notes.md#security)
+the corrections from 0.8.0's security review. 0.8.2's known issue, a policy basis that differed by platform
+([issue 184](https://github.com/Vericairn/vericairn/issues/184)), is fixed in 0.8.3 (FIX-61).
 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
 ## Readiness disclosures
 
-Read these before relying on the current published release, 0.8.2. They moved here from the repository's
+Read these before relying on the current published release, 0.8.3. They moved here from the repository's
 README, which links to this section; the [limitations and platforms](../limitations-and-platforms.md) guide
 gives every current limit.
 
-- **Security.** 0.8.2's release notes open with a [Security](0.8.2/release-notes.md#security) section:
-  FIX-34 through FIX-38 harden the worker's command audit and settlement, the release gate, checked pushes
+- **Security.** 0.8.3's release notes open with a [Security](0.8.3/release-notes.md#security) section:
+  FIX-60 corrects how `changes push` ran git in 0.8.0 through 0.8.2, with the clone's own and the user's
+  configuration and any protocol, and says what to check in a clone used with it before 0.8.3; the user's system and global git
+  configuration, and files they include, applied before 0.8.3 too, so check them as well. 0.8.2's
+  [Security](0.8.2/release-notes.md#security) section: FIX-34 through FIX-38 harden the worker's command audit and settlement, the release gate, checked pushes
   and merges, and the upgrade, and CI-03 builds releases with only the tokens each step needs. 0.7.2's
   [Security](0.7.2/release-notes.md#security) section discloses F-01, which affected export restoration in
   every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
   The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
-- **Known issue.** Each platform's 0.8.2 archive carries a separately compiled build of the same libraries,
-  so a policy basis differs by platform ([issue 184](https://github.com/Vericairn/vericairn/issues/184));
-  0.8.3 fixes it.
-- **Interfaces.** [API compatibility](../api-compatibility-0.8.2.md) lists 0.8.2's two interface changes.
+- **Order of review and publication.** 0.8.3 was published before the Reviewer's independent review of
+  its candidate finished and before the operator's acceptance was recorded, because the publication command
+  ran early (decision 01M5Q4Y34CFCY24W4F3A6ZD2SP). The Reviewer's review `01M5Q6D7PJFDMSB6ST7AAVQ7QV` then passed with four informational
+  findings, and the operator's acceptance followed on October 24, 2026. Its assets are exactly the reviewed
+  candidate's.
+- **Interfaces.** [API compatibility](../api-compatibility-0.8.3.md) lists 0.8.3's interface additions, among
+  them `IEstateApi.WorkNew` and `IEstateApi.ReleaseCheck` without default implementations and a nullable
+  `ReleaseBasisResponse.Evidence`.
 - **Record format 3.** Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
   refuses the upgraded estate, so every writer and clone moves to 0.8.0 or later together. The upgrade
   declares no policy or duty; the operator adopts them explicitly, as the
   [adoption guide](../policy-adoption.md) describes.
-- **Sources and guides.** Ordinary source builds retain `0.8.2-dev`. The maintained guides describe 0.8.2;
+- **Sources and guides.** Ordinary source builds retain `0.8.3-dev`. The maintained guides describe 0.8.3;
   earlier release sets keep their original bytes.
 - **Release checks.** Release checks reach only GitHub, ignore system proxies, are disabled with
   `vericairn updates configure --enabled false` and retain cached information when disabled.
 - **Signals and attention.** Command observations remain signals, not an enforcement boundary. Required
   attention cannot infer closure from prose or missing evidence; its [rules](../required-attention.md) keep
   undecidable items visible as unknown.
-- **Platforms and downloads.** For 0.8.2, the command line is qualified on `linux-x64`, `osx-arm64` and
+- **Platforms and downloads.** For 0.8.3, the command line is qualified on `linux-x64`, `osx-arm64` and
   `win-x64`, where the release's tests ran. The `linux-arm64`, `osx-x64` and `win-arm64` archives are
   provided but unqualified. Workbench is not qualified on any platform. The archives are unsigned developer
-  builds, without code signing or notarization; verify downloads as the [install guide](0.8.2/install.md)
-  describes. 0.8.2's `SHA256SUMS` also lists `vericairn-0.8.2-companions.zip`, the readable build reports,
+  builds, without code signing or notarization; verify downloads as the [install guide](0.8.3/install.md)
+  describes. 0.8.3's `SHA256SUMS` also lists `vericairn-0.8.3-companions.zip`, the readable build reports,
   which the release run keeps in its CI artifact and does not attach; check the attached assets with
   `--ignore-missing`, as the guide does.
-- **NuGet.** All eight command-line and library packages are available at 0.8.2 on nuget.org. The `dotnet-vc`
+- **NuGet.** All eight command-line and library packages are available at 0.8.3 on nuget.org. The `dotnet-vc`
   tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without
   the SDK, and the macOS archives also carry the Secure Enclave helper. The NuGet tool does not bundle that
   helper or Workbench. The worker's agent-side MCP command still resolves `vericairn`; keep the archive
@@ -84,8 +88,8 @@ gives every current limit.
   workspace on macOS; settlement audited the commit and fetched its branch into the registered clone. Only
   the workspace's own `.git` is added to Codex's writable roots. This live qualification covers the reported
   macOS path, not other harness versions, accounts, platforms, provider billing or acceptance of the work.
-  0.8.2's worker changes, FIX-32 through FIX-35, are covered by tests only: the estate's own live runs have
-  used 0.8.0's worker, not yet 0.8.2's. The
+  0.8.3 changes no worker behavior; the estate's fourteen 0.8.3 worker runs, on macOS, used its pinned 0.8.2
+  worker, so 0.8.2's worker changes, FIX-32 through FIX-35, now have live runs on that platform. The
   [software guide](../software.md#native-inventory-qualification-run-02-and-run-03) retains all seven
   observations.
 - **Limits.** Worker spending limits are soft, and unknown usage is charged at the reserved cap. The
@@ -97,9 +101,9 @@ gives every current limit.
 
 ## Documentation sets
 
-The [0.8.3 set](0.8.3/README.md) documents 0.8.3, prepared after published 0.8.2: FIX-47 and CODE-07 for a first estate without hand-written JSON, CODE-08's withdrawal and plan moves, FIX-52's verified pins of a published Vericairn release ([issue 177](https://github.com/Vericairn/vericairn/issues/177)), FIX-55's submission check, FIX-60's correction to how a checked push runs git, FIX-61's platform-independent libraries ([issue 184](https://github.com/Vericairn/vericairn/issues/184)), FIX-62's warning about an older background runtime, FIX-50 and FIX-56 through FIX-59, CI-04 and BRAND-04. An estate at format 3 upgrades to it without a format step. The source version is `0.8.3-dev`. Its references retain build commit `a1aac5a1849570994a6f676dfd5242e5ee19a748`, with 150 commands, 108 API operations, 42 record types and 34 required documents. Its notes render the estate's records with `--from 0.8.2 --to 0.8.3` and open with the operator's approved Security section. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`; it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish.
+The [0.8.3 set](0.8.3/README.md) documents the current published release, published on October 24, 2026 at tag `v0.8.3`, commit `fb5b497df0686079e917ec5eac375a7d48d27504` (estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`), after published 0.8.2: FIX-47 and CODE-07 for a first estate without hand-written JSON, CODE-08's withdrawal and plan moves, FIX-52's verified pins of a published Vericairn release ([issue 177](https://github.com/Vericairn/vericairn/issues/177)), FIX-55's submission check, FIX-60's correction to how a checked push runs git, FIX-61's platform-independent libraries ([issue 184](https://github.com/Vericairn/vericairn/issues/184)), FIX-62's warning about an older background runtime, FIX-50 and FIX-56 through FIX-59, CI-04 and BRAND-04. An estate at format 3 upgrades to it without a format step. The source version is `0.8.3-dev`. Its references retain build commit `a1aac5a1849570994a6f676dfd5242e5ee19a748`, with 150 commands, 108 API operations, 42 record types and 34 required documents. Its notes render the estate's records with `--from 0.8.2 --to 0.8.3` and open with the operator's approved Security section. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`; it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish.
 
-The [0.8.2 set](0.8.2/README.md) documents the current published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
+The [0.8.2 set](0.8.2/README.md) documents an earlier published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
 FIX-53, which lets the macOS and Linux single-file command lines start processes again, and FIX-54, which rechecks a
 retained basis's record digest when it is read. That work is FIX-34 through FIX-38 and CI-03, the corrections from
 0.8.0's security review; FIX-39 through FIX-46 and FIX-48, found while adopting estate policies;
@@ -160,12 +164,13 @@ The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn befor
 
 ## NuGet publication setup
 
-The 0.8.2 release event's Trusted Publishing run, [run 39770313785](https://github.com/Vericairn/vericairn/actions/runs/39770313785),
+The 0.8.3 release event's Trusted Publishing run, [run 40102325701](https://github.com/Vericairn/vericairn/actions/runs/40102325701),
+pushed all eight packages with their symbol packages at 0.8.3. The 0.8.2 release event's Trusted Publishing run, [run 39770313785](https://github.com/Vericairn/vericairn/actions/runs/39770313785),
 pushed all eight packages with their symbol packages, and each lists 0.8.2 on nuget.org:
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
 `Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.2 is available. 0.8.0's own run,
 [run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377), published 0.8.0 the same way.
-The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0 or 0.8.2 events.
+The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0, 0.8.2 or 0.8.3 events.
 
 On October 17, 2026, [run 39028643979](https://github.com/Vericairn/vericairn/actions/runs/39028643979)
 of `nuget.yml` pushed `dotnet-vc` and the seven Vericairn packages at 0.7.1, with their produced symbol packages,
@@ -212,7 +217,7 @@ the macOS Secure Enclave helper nor Workbench.
 | `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
-| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md` |
+| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md`, `api-compatibility-0.8.3.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md`; from 0.8.3, that release's interface additions |
 | `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
 | `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
 | `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |
