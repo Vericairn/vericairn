@@ -72,11 +72,15 @@ internal static partial class FoundationPolicyKinds
     {
         EstateModel model = context.Model;
         string identity = PolicyWork.Identity(model, order);
+        RecordEnvelope[] revisions = model.OfType("work-order").Where(r => PolicyWork.Identity(model, r) == identity).ToArray();
+        IReadOnlySet<DateTimeOffset> changes = ChangeInstants(model, identity, revisions);
         RecordEnvelope? anchor = null;
         foreach (IGrouping<string, RecordEnvelope> instant in model.Records.Where(r => string.CompareOrdinal(r.At, model.ById[identity].At) >= 0).GroupBy(r => r.At, StringComparer.Ordinal))
         {
             DateTimeOffset at = instant.First().AtTime;
-            RecordEnvelope current = model.OfType("work-order").Single(r => PolicyWork.Identity(model, r) == identity && PolicyWork.CurrentAt(model, r, at));
+            // The waiting state, and so the anchor already found, holds until the next instant that can change it.
+            if (!changes.Contains(at)) continue;
+            RecordEnvelope current = revisions.Single(r => PolicyWork.CurrentAt(model, r, at));
             (string verdict, string reason, _) = PolicyWork.ReleasePlacement(model, current, at);
             if (verdict == "unavailable") throw new PolicyInputException(reason);
             bool waiting = PolicyWork.Planned(model, current, at) && verdict != "satisfied";
@@ -87,6 +91,37 @@ internal static partial class FoundationPolicyKinds
                 ?? PolicyWork.ReleasePlacement(model, current, at).Evidence ?? current;
         }
         return anchor ?? order;
+    }
+
+    // An order's waiting state reads its own revisions and those of every carrier it has named, their statuses, assignments,
+    // attempts and results, every acceptance and release, and the records that supersede or withdraw any of those. The basis
+    // lists records in time order with whole-second times, so the state can change only at the instants those were recorded.
+    internal static IReadOnlySet<DateTimeOffset> ChangeInstants(EstateModel model, string identity, IReadOnlyList<RecordEnvelope> revisions)
+    {
+        HashSet<string> lines = revisions.Select(r => Text(Get(r.Body, "placement"), "carrier")).OfType<string>().Append(identity).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> orders = model.OfType("work-order").Where(r => lines.Contains(PolicyWork.Identity(model, r))).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        bool Concerns(RecordEnvelope record)
+        {
+            // A status or an assignment names its work order; an attempt reaches it through its assignment, a result through both.
+            RecordEnvelope? link = record;
+            for (int depth = 0; depth < 3 && link?.Subject is { } subject; depth++)
+            {
+                if (orders.Contains(subject.Id)) return true;
+                link = model.ById.GetValueOrDefault(subject.Id);
+            }
+            return false;
+        }
+        HashSet<string> read = model.Records.Where(r => r.Type switch
+        {
+            "work-order" => orders.Contains(r.Id),
+            "work-status" or "assignment" or "attempt" or "result" => Concerns(r),
+            "acceptance" or "release" => true,
+            _ => false,
+        }).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var successors = new Queue<string>(read);
+        while (successors.TryDequeue(out string? id))
+            if (model.SupersededBy.TryGetValue(id, out string? next) && read.Add(next)) successors.Enqueue(next);
+        return read.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().Select(r => r.AtTime).ToHashSet();
     }
 
     private static PolicyFinding Age(PolicyRuleContext context, RecordEnvelope subject, string item, long days, DateTimeOffset anchorTime, RecordEnvelope? anchor, IEnumerable<RecordReference>? evidence = null)
