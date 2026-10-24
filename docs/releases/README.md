@@ -33,6 +33,11 @@ gives every current limit.
   ran early (decision 01M5Q4Y34CFCY24W4F3A6ZD2SP). The Reviewer's review `01M5Q6D7PJFDMSB6ST7AAVQ7QV` then passed with four informational
   findings, and the operator's acceptance followed on October 24, 2026. Its assets are exactly the reviewed
   candidate's.
+- **Known issue.** On a slower Windows machine, `status` can exceed its 30-second read deadline for a large
+  estate and fail with "The request timed out." (exit code 124): Vericairn's own estate, about 4,100 records,
+  takes over 30 seconds on GitHub's Windows runner, against 16 seconds on macOS and 25 on Linux. Other
+  commands are not affected. 0.8.4 fixes it (FIX-63,
+  [issue 205](https://github.com/Vericairn/vericairn/issues/205)).
 - **Interfaces.** [API compatibility](../api-compatibility-0.8.3.md) lists 0.8.3's interface additions, among
   them `IEstateApi.WorkNew` and `IEstateApi.ReleaseCheck` without default implementations and a nullable
   `ReleaseBasisResponse.Evidence`.
