@@ -39,6 +39,8 @@ public static class OpenApiDocument
         ("GET", "/v1/health"),
         ("GET", "/v1/communication"),
         ("GET", "/v1/prompts"),
+        ("GET", "/v1/resources"),
+        ("POST", "/v1/resources/read"),
         ("POST", "/v1/prompts"),
         ("POST", "/v1/prompts/preferences"),
         ("POST", "/v1/prompts/copy"),
@@ -360,6 +362,15 @@ public static class OpenApiDocument
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + (path.EndsWith("/use", StringComparison.Ordinal) ? "PromptUseResponse" : "PromptsResponse") } } },
             };
         }
+        else if (path is "/v1/resources" or "/v1/resources/read")
+        {
+            string schema = path.EndsWith("/read", StringComparison.Ordinal) ? "ResourceResponse" : "ResourcesResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = schema + ": estate read access is rechecked; no record, signing or write ledger. Refusals return no content.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
         else if (path is "/v1/resume")
         {
             responses["200"] = new JsonObject { ["description"] = "ResumeResponse: every difference, or an invalid-handoff problem. This POST is a read; it authors no record." };
@@ -664,6 +675,10 @@ public static class OpenApiDocument
             ["PromptSelection"] = Object(("prompt", "string"), ("expected", "string"), ("values", "object")),
             ["PromptUseRequest"] = Object(("by", "string"), ("selection", "object"), ("assignment", "object"), ("run", "object"), ("ask", "string"), ("favor", "boolean")),
             ["PromptsResponse"] = Object(("prompts", "array"), ("problem", "object")),
+            ["ResourceRequest"] = Object(("kind", "string"), ("key", "string"), ("maxBytes", "integer"), ("recipient", "string"), ("assignment", "string"), ("form", "string"), ("estate", "string")),
+            ["ResourceEntry"] = Object(("name", "string"), ("description", "string"), ("mimeType", "string"), ("request", "object")),
+            ["ResourcesResponse"] = Object(("estate", "string"), ("resources", "array"), ("problem", "object")),
+            ["ResourceResponse"] = Object(("content", "string"), ("mimeType", "string"), ("hash", "string"), ("sourceHash", "string"), ("problem", "object")),
             ["PromptUseResponse"] = Object(("ok", "boolean"), ("text", "string"), ("written", "object"), ("run", "object"), ("problem", "object")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
@@ -819,6 +834,7 @@ public static class OpenApiDocument
 
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/prompts" => "PromptSaveRequest",
+        "/v1/resources/read" => "ResourceRequest",
         "/v1/prompts/preferences" => "PromptPreferenceRequest",
         "/v1/prompts/copy" => "PromptCopyRequest",
         "/v1/prompts/use" => "PromptUseRequest",

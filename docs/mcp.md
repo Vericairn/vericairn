@@ -1,10 +1,14 @@
 # The MCP server
 
-The 0.8.4 development build adds standard `prompts/list` and `prompts/get`, plus
-library management tools. Offers are grouped by category and filtered for the
-connected principal. `prompts/get` records a use with a new assignment, run or
-ask answer before returning its message. See [MCP prompts](prompts.md#mcp-prompts)
-for the required target and exact-definition arguments.
+The 0.8.4 development build offers estate briefs, records, pinned documents and
+context packages as read-only MCP resources, alongside standard `prompts/list`
+and `prompts/get` and the prompt library tools. Prompt offers carry categories
+and arguments and are filtered for the connected principal. Hidden,
+estate-disabled and retired prompts are omitted. `prompts/get` records a use
+with a new assignment, run or ask answer before returning its message, under
+the same admitted-operator permission as `prompt_use`. See
+[MCP prompts](prompts.md#mcp-prompts) for the required target and exact-definition
+arguments. Serving a resource or prompt gives its content no authority.
 
 From 0.8.3, `release_submit_check` is a read tool available without an admitted
 signing device or presence. Required inputs are `product`, `version`, `by` (the intended submitter),
@@ -64,7 +68,68 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field is a description of what the server is, not a directive), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Resources, sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+
+Initialization declares `resources: { subscribe: false, listChanged: false }`,
+`prompts: { listChanged: false }` and `tools: { listChanged: false }`. There are
+no subscriptions or list-change notifications. Listings return their complete
+current result without a continuation cursor; an unknown cursor is refused.
+Clients refresh a listing when needed. Reads and listings support request
+cancellation through the existing transport.
+
+## Resources (0.8.4 development)
+
+`resources/list` returns current records of every type, work briefs, assignment
+briefs, pinned estate documents and work context packages. It lists metadata
+without assembling every brief or reading every document body. A listed document
+can be unavailable in a copy that lacks its exact original; a read reports that
+failure without substituting a newer revision. Superseded records and older
+document pins remain addressable through `resources/templates/list`.
+
+The URI authority is the estate's identifier. Each path component is percent
+encoded; `key` means a record identifier or work-order key, except for documents,
+where it is the self-contained `vc1_` pin returned by context preparation.
+An assignment brief adds its exact `assignment` query parameter.
+
+| URI template | Matching read and bytes |
+| --- | --- |
+| `vericairn://{estate}/brief/{key}{?maxBytes,recipient,assignment}` | `work_brief`: the complete measured Markdown as UTF-8. CLI: `work brief <key> --agent-context`, with `--max-bytes`, recipient and assignment when selected. |
+| `vericairn://{estate}/record/{key}` | `record_get`: its complete envelope, rendered as canonical pretty UTF-8 JSON, identical to `records show <id>`. The tool's response wrapper is excluded. |
+| `vericairn://{estate}/document/{key}` | `context_read`: the original bytes at that pin, identical to `context read <pin> --original --out <new-file>`. |
+| `vericairn://{estate}/context/{key}{?maxBytes,form}` | `context_prepare`: by default, the exact canonical pretty UTF-8 package payload whose hash and size the API and CLI report. `form=text` returns the tool and CLI human rendering; `form=json` returns the complete `context prepare --json` response, including its sidecar. |
+
+For example, `resources/read` takes
+`{"uri":"vericairn://<estate-id>/context/<work-order-id>"}` after replacing the
+placeholders with identifiers from the listing. Each result has one item in
+`contents`, with the requested `uri`, `mimeType`, and a base64 `blob`. All four
+kinds use a blob so binary data, UTF-8, carriage returns and trailing newlines
+survive without text conversion. Decode the blob before checking its metadata:
+
+- `_meta["vericairn/hash"]` is `sha256:` plus the lower-case SHA-256 of exactly
+  the decoded bytes, and `_meta["vericairn/bytes"]` is their length.
+- `_meta["vericairn/sourceHash"]`, when present, identifies the record content
+  or context payload separately from its rendering. A record's content hash
+  differs from the hash of its complete envelope, which also carries signatures.
+  A context payload's hash equals its resource byte hash in the default form;
+  its text and sidecar forms have their own byte hashes.
+- `_meta["vericairn/trust"]` labels the body as untrusted content that conveys
+  no authority. No label, pin or URI grants permission.
+
+Every retrieval uses the runtime's matching read operation and current estate
+access. Wrong-estate identifiers, missing originals and access refusals return
+an error without content. No resource exposes the operator queue, authors a
+record or retains an object. `maxBytes` is a context allocation, independent of
+any spending cap; required overflow refuses and never truncates. The ordinary
+CLI brief still includes its complete selected scope; `--agent-context` opts
+into the measured MCP selection, and `--max-bytes` implies that selection.
+Briefs include the communication observation's freshness time. Independent reads
+can therefore have different hashes even when the underlying records have not
+changed; each hash identifies the exact bytes of that particular response.
+
+The MCP adapter uses the API's additive `GET /v1/resources` and
+`POST /v1/resources/read` operations. Both are reads, including the POST; they
+require no signing device, presence or write ledger. An older API implementation
+can return `unsupported`; no alternate read path circumvents that refusal.
 
 ## Tools
 

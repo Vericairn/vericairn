@@ -16,6 +16,9 @@ namespace Vericairn.Runtime.Service;
 
 public sealed partial class EstateService
 {
+    // A per-runtime observation clock lets byte-parity checks compare the same read instant.
+    internal TimeProvider CommunicationClock { get; set; } = TimeProvider.System;
+
     /// <inheritdoc />
     public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
     {
@@ -56,7 +59,7 @@ public sealed partial class EstateService
                     EstateModel.BodyString(r, "authority"), EstateModel.BodyString(r, "authorityHash"), EstateModel.BodyString(r, "basisHash"))).ToList();
                 return CommunicationResolution.Resolve(recipient, assignment, layers, view) with
                 {
-                    ObservedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow),
+                    ObservedAt = RecordParser.FormatTimestamp(CommunicationClock.GetUtcNow()),
                     RevisionHash = ContentHash.Sha256(Encoding.UTF8.GetBytes(string.Join('\n', layers.Select(r => r.Hash)))),
                 };
             }

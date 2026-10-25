@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
+using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
@@ -25,7 +26,7 @@ public sealed class ContextHistoryTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void RequiredEarlierRevisionIsReadFromHistoryWithoutChangingTheEstate(bool deleted)
+    public async Task RequiredEarlierRevisionIsReadFromHistoryWithoutChangingTheEstate(bool deleted)
     {
         using var fixture = new Fixture();
         TestEstate estate = fixture.Estate;
@@ -52,6 +53,12 @@ public sealed class ContextHistoryTests
         ContextReadResponse read = service.ContextRead(original.GetProperty("pin").GetString()!);
         Assert.Null(read.Problem);
         Assert.Equal(Original, read.Content);
+        ResourceEntry resource = service.Resources().Resources.Single(r => r.Request.Kind == "document");
+        // A template can read an older pin even when the catalogue offers the current document revision.
+        string uri = "vericairn://" + estate.Estate.Id + "/document/" + original.GetProperty("pin").GetString();
+        JsonObject fetched = await new ToolRegistry(service, null).ResourceReadAsync(uri, TestContext.Current.CancellationToken);
+        ResourceMcpTests.AssertBytes(fetched["contents"]![0]!, Original);
+        Assert.NotEqual(original.GetProperty("pin").GetString(), resource.Request.Key);
         Assert.Null(service.Brief("H-1")!.Problem);
         Assert.Equal(records, estate.Load().Records.Count);
         Assert.Empty(service.Objects());

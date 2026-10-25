@@ -4,6 +4,15 @@ The 0.8.4 development build adds `prompt list`, `show`, `add`, `revise`, `retire
 `favor`, `hide`, `disable`, `copy` and `use`. See [Saved prompts](prompts.md) for
 category discovery, reversible preferences and recorded uses with new work.
 
+`work brief <key> --agent-context` selects the same measured brief as the MCP
+`work_brief` tool and brief resource: mandatory originals remain complete, and
+named optional originals are withheld without a byte allocation.
+`--max-bytes <positive-integer>` implies `--agent-context` and admits optional
+originals only when they fit; required overflow refuses. These options preserve
+recipient and assignment presentation settings. Without either option, the
+ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084-development)
+for exact representations and hashes.
+
 Revision 4, October 23, 2026. Point to the operator's guide for 0.8.3's command additions.
 
 Revision 3, October 20, 2026. Add package registry observations and account-holder intents, and document exact-byte document pinning and policy definition hashing in the development build.

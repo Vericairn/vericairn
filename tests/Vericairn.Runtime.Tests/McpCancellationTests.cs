@@ -134,6 +134,35 @@ public sealed class McpCancellationTests
         }
     }
 
+    [Theory]
+    [InlineData("resources/list", "{}")]
+    [InlineData("resources/read", "{\"uri\":\"vericairn://estate/record/id\"}")]
+    [InlineData("prompts/list", "{}")]
+    public async Task ResourceAndPromptReadsRemainCancellableWithoutClaimingAnUnknownWrite(string method, string parameters)
+    {
+        var entered = TestTiming.Signal();
+        using var client = Client(async (_, token) =>
+        {
+            entered.TrySetResult();
+            await TestTiming.UntilCancelled(token);
+            return new(HttpStatusCode.OK);
+        });
+        using var input = new Input();
+        using var output = new Output();
+        Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
+        input.Add(new JsonObject { ["id"] = "read", ["method"] = method, ["params"] = JsonNode.Parse(parameters) }.ToJsonString());
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        input.Add("""{"id":2,"method":"ping"}""");
+        Assert.Empty((await output.Next())["result"]!.AsObject());
+        input.Add("""{"method":"notifications/cancelled","params":{"requestId":"read"}}""");
+        JsonObject cancelled = await output.Next();
+        Assert.Equal("read", cancelled["id"]!.GetValue<string>());
+        Assert.Equal("The request was cancelled.", cancelled["error"]!["message"]!.GetValue<string>());
+        Assert.Null(cancelled["result"]);
+        input.Complete();
+        await serving.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+    }
+
     [Fact]
     public async Task ServerCancellationSettlesEveryPendingRequest()
     {

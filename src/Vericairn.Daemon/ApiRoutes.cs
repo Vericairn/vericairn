@@ -21,6 +21,10 @@ public static class ApiRoutes
         CompanionRoutes.Map(app, service);
         PromptRoutes.Map(app, service);
         TemplateRoutes.Map(app, service);
+        app.MapGet("/v1/resources", (Func<HttpContext, Task<IResult>>)(async context =>
+            Results.Json(await service.ResourcesAsync(context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options)));
+        app.MapPost("/v1/resources/read", async (ResourceRequest request, HttpContext context) =>
+            Results.Json(await service.ResourceReadAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>

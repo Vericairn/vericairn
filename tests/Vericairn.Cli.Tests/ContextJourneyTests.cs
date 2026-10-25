@@ -79,6 +79,7 @@ public class ContextJourneyTests
         estate.Add("work-order", estate.OperatorId, """{"key":"C-1","kind":"ordinary","title":"Context","intent":"Read docs/named.md for background.","scope":["work"],"exitQuestion":"Complete?","inputs":[],"deliverables":["result"]}""");
         using EstateService api = EstateService.Open(estate.Root);
         Assert.True(api.CommunicationSet(new(estate.OperatorId, "person", new(Handoff: "short"), estate.OperatorId)).Ok);
+        api.CommunicationClock = new ClientClock(DateTimeOffset.Parse("2026-10-13T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
         var registry = new ToolRegistry(api, null);
         ToolCallResult agent = registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["recipient"] = estate.OperatorId });
         Assert.Contains("handoff (short)", agent.Text, StringComparison.Ordinal);
@@ -88,8 +89,15 @@ public class ContextJourneyTests
         Assert.Contains("docs/named.md", agent.Text, StringComparison.Ordinal);
         Assert.Contains("vericairn context catalogue", agent.Text, StringComparison.Ordinal);
         Assert.Contains("OPTIONAL SOURCE BODY", CliHarness.Ok("--estate", estate.Root, "work", "brief", "C-1").Out, StringComparison.Ordinal);
+        CliHarness.Outcome measured = CliHarness.RunWithApi(api, null, "--estate", estate.Root, "work", "brief", "C-1", "--agent-context", "--recipient", estate.OperatorId);
+        Assert.Equal(0, measured.Code);
+        Assert.Equal(agent.Text, measured.Out);
         Assert.Contains("OPTIONAL SOURCE BODY", registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "300000" }).Text, StringComparison.Ordinal);
+        CliHarness.Outcome allocated = CliHarness.RunWithApi(api, null, "--estate", estate.Root, "work", "brief", "C-1", "--max-bytes", "300000");
+        Assert.Equal(0, allocated.Code);
+        Assert.Equal(registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "300000" }).Text, allocated.Out);
         Assert.True(registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "1" }).IsError);
+        Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "work", "brief", "C-1", "--max-bytes", "1").Code);
         string catalogue = CliHarness.Ok("--estate", estate.Root, "context", "catalogue").Out;
         Assert.Contains("docs/unrelated.md", catalogue, StringComparison.Ordinal);
         Assert.DoesNotContain(new string('u', 100), catalogue, StringComparison.Ordinal);

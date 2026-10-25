@@ -170,14 +170,16 @@ cancellation and uncertain-write semantics, with no fallback to another operatio
 
 ## MCP prompts
 
-The server advertises `prompts` alongside `tools`, with `listChanged: false`.
+The server advertises `prompts` alongside `tools` and read-only resources, with `listChanged: false`.
 `prompts/list` offers the connected principal's roles and personal choices, in
 category order. Titles include the category. Source, version, exact hash,
 favorite and draft state appear in names, descriptions and `_meta`. A connection
 without a principal receives only prompts suited to every role.
+Hidden, estate-disabled and retired prompts are never listed. Retrieval rechecks
+the connected principal's current offers; a previously listed name grants no access.
 
-`prompts/get` is a recorded use. It requires an admitted acting principal and
-signing device. Arguments are strings: each described placeholder, `_expected`
+`prompts/get` is a recorded use. It requires the same admitted operator and
+signing device as `prompt_use` over MCP. Arguments are strings: each described placeholder, `_expected`
 (the offer's hash), `_target` (a JSON object encoded as a string), and optional
 `_favor` (`true` or `false`). The target is exactly one of `{"ask":"<ask id>"}`,
 `{"assignment":{...}}`, or `{"run":{...}}`. The server supplies the connection

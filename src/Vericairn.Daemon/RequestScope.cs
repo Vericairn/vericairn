@@ -45,6 +45,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // These reads carry their input in a POST body, with no signing key or write ledger needed.
         bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+            !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
@@ -168,6 +169,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/health"] = null,
         ["GET /v1/communication"] = null,
         ["GET /v1/prompts"] = null,
+        ["GET /v1/resources"] = null,
+        ["POST /v1/resources/read"] = typeof(ResourceRequest),
         ["POST /v1/prompts"] = typeof(PromptSaveRequest),
         ["POST /v1/prompts/preferences"] = typeof(PromptPreferenceRequest),
         ["POST /v1/prompts/copy"] = typeof(PromptCopyRequest),
@@ -312,6 +315,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptCopyRequest)] = (_, r, d) => Acting(((PromptCopyRequest)r).By, d),
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
+        [typeof(ResourceRequest)] = (_, _, _) => null,
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
