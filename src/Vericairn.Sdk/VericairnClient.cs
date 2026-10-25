@@ -309,7 +309,15 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
-    public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request) => DecisionFromAskAsync(request).GetAwaiter().GetResult();
+    public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request)
+    {
+        // Transport and parse failures reach the caller unchanged, as other synchronous operations' do; a success reply without a
+        // definite outcome leaves the write unknown, as the asynchronous call reports it.
+        DecisionNewResponse? response = Post<DecisionNewRequest, DecisionNewResponse>("/v1/decisions/new", request);
+        return response is null || InvalidDecisionOutcome(response)
+            ? throw new ClientUnavailableException(true, new JsonException("The runtime returned no definite write outcome."))
+            : response;
+    }
 
     /// <inheritdoc />
     public DocumentPinResponse DocumentPin(DocumentPinRequest request) => Post<DocumentPinRequest, DocumentPinResponse>("/v1/documents/pin", request)!;
