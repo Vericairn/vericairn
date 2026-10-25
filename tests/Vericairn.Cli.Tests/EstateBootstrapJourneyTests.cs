@@ -166,6 +166,9 @@ public sealed class EstateBootstrapJourneyTests
         start.Environment["BootstrapTestRuntime"] = Path.Combine(payload, "bin");
         start.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         start.Environment["DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE"] = "true";
+        // Windows PowerShell computes its own module path when started fresh, as a person starts it. A path inherited from
+        // the PowerShell 7 that runs CI's test step points it at modules it cannot load, so even Get-FileHash goes missing.
+        if (shell == "powershell") start.Environment.Remove("PSModulePath");
         using Process process = Process.Start(start)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
