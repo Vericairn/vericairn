@@ -179,6 +179,7 @@ public sealed class RunSupervisor
             Run = run,
             Supervisor = Environment.ProcessId,
             HeartbeatSeconds = options.Heartbeat.TotalSeconds,
+            MinuteTicks = options.Minute.Ticks,
             ProcessId = process.Id,
             LaunchedAt = RecordParser.FormatTimestamp(launchedAt),
             Heartbeat = RecordParser.FormatTimestamp(launchedAt),
@@ -328,10 +329,24 @@ public sealed class RunSupervisor
                 state.Stop = state.Stop with { ContainedAt = RecordParser.FormatTimestamp(exited) };
             }
 
-            Save();
             var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), watch.ExecutionObserved);
+            state.Outcome = outcome;
+            Save();
             process.Close();
             return outcome;
+        }
+    }
+
+    // Retain settlement-only audits as well as the exit, before any estate write can fail.
+    internal void RetainSettlement(RunOutcome outcome, RunScope scope, bool prepared = false)
+    {
+        lock (gate)
+        {
+            state.Outcome = outcome;
+            state.Scope = scope;
+            state.SettlementPrepared = prepared;
+            state.Signals = [.. outcome.Signals ?? []];
+            Save();
         }
     }
 

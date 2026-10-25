@@ -82,6 +82,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         var service = new EstateService(EstateSession.Open(root));
         service.JudgeInterruptedBatches();
+        service.runDispatch.RecoverSettlements();
         return service;
     }
 

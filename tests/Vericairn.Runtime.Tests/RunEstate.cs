@@ -69,6 +69,7 @@ internal sealed class RunEstate : IDisposable
         Clone = Path.Combine(Scratch, "widget");
         Directory.CreateDirectory(Clone);
         Git(Clone, "init", "-q", "-b", "main");
+        Git(Clone, "config", "core.autocrlf", "false");
         File.WriteAllText(Path.Combine(Clone, "README.md"), "widget\n");
         Git(Clone, "add", "README.md");
         Git(Clone, "commit", "-q", "-m", "The first commit");

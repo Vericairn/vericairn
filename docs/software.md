@@ -813,6 +813,27 @@ stop for the worker; revocation after authentication cannot queue a new stop. Th
 at 30 seconds, whatever grace it names, with a bounded wait for settlement after exit. It can return before containment;
 poll `worker runs` for the later facts. On Windows the stop file is the transmission; there is no graceful process signal.
 
+**Settle after a failed write (0.8.4).** `vericairn worker settle <run> --by <principal>` retries settlement
+when the worker observed the whole run boundary exit but could not record the settlement. It uses the retained
+observation on the machine that ran the worker. The runtime also attempts this recovery when it starts, after
+handling interrupted record batches. A successful settlement releases the branch reservation, charges observed
+usage, preserves the exit, stop, execution and audit facts, and clears the local settlement problem. It accepts
+no result and starts no new run. The workspace remains available for review; recovery does not repeat the
+workspace transfer to the registered clone.
+
+The same principals who may stop a run may request settlement. Startup uses the original run author's current
+standing; record validation and signing still apply. A run still being observed, or already settled, is refused
+with its reason. A missing, unreadable, inconsistent or insufficient observation stays unresolved, keeps its
+reservation and appears with its reason in `worker runs`. `--json` returns the receipt or refusal, and the
+command exits 2 when no settlement was written. A runtime start may already have recovered the run before
+the command reaches it; `already-settled` then reports the recorded state without writing again.
+
+Current workers retain the monotonic duration, reported usage and final audits before attempting settlement.
+Older observations can supply the exit, timestamps, token usage, stop facts and signals they actually retained.
+For those observations, elapsed time comes from the retained UTC timestamps; absent currency usage remains
+unreported and charged at its cap, and missing final scope and attempt audits are explicitly unverified.
+Recovery never infers an exit from a stale heartbeat, a missing process or closed output.
+
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
 ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
 none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts

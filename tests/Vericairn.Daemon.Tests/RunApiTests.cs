@@ -103,6 +103,7 @@ public class RunApiTests
             LedgerRow ledger = Assert.Single(api.Runs().Goals);
             Assert.Equal((60L, 60L, 0L), (ledger.Units[0].Budget, ledger.Units[0].Spent, ledger.Units[0].Remaining));
             Assert.Equal(1, ledger.InFlight);
+            Assert.Equal("in-flight", api.RunSettle(started.Run, new(op)).Problem!.Code);
 
             Task<RunStopResponse> stopping = Task.Run(() => api.RunStop(started.Run, new RunStopRequest(op, "Through the API.", 1)), TestContext.Current.CancellationToken);
             await Until(host, scratch, api, started.Run, r => r.Stop?.TransmittedAt is not null);
@@ -117,6 +118,7 @@ public class RunApiTests
             Assert.Equal("contained", row.Stop!.State);
             Assert.NotNull(row.Usage);
             Assert.Equal("not-found", api.RunStop("01M4TRNE1GYEK4P8MXQAB3C8Q4", new RunStopRequest(op)).Problem!.Code);
+            Assert.Equal("already-settled", (await api.RunSettleAsync(started.Run, new(op), TestContext.Current.CancellationToken)).Problem!.Code);
             Assert.Equal("refused", api.RunStart(new RunStartRequest(assignment, "claude-code", builder, op, resource)).Problem!.Code);
 
             // The first run's settlement was recorded on the wall clock; the controlled clock catches up before the next run starts.
@@ -131,6 +133,28 @@ public class RunApiTests
             Assert.Contains(watched.Signals!, s => s.Code == "credentials" && s.Severity == "critical" && s.Attention is not null);
             Assert.NotNull(watched.Stop!.ContainedAt);
             Assert.Contains(api.Progress().Json.GetProperty("runSignals").EnumerateArray(), r => r.GetProperty("run").GetString() == audited.Run);
+            Assert.Equal(0, api.Check().Errors);
+
+            host.Service.BeforeValidatingRecords = records =>
+            {
+                if (records.Any(r => r.Envelope.Type == "operation" && EstateModel.BodyString(r.Envelope, "status") == "observed-success"))
+                    throw new IOException("Synthetic failed settlement.");
+            };
+            behind = DateTimeOffset.UtcNow - clock.GetUtcNow();
+            if (behind > TimeSpan.Zero) clock.Elapse(behind);
+            RunResponse pending = api.RunStart(new(assignment, "stand-in", builder, op, resource, Branch: "work/recovery",
+                Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("generic", Path.Combine(scratch, "recover.jsonl")) }));
+            Assert.True(pending.Ok, pending.Message);
+            var directory = new RunDirectory(host.Service.Session.Manifest.Estate, pending.Run);
+            await Until(host, scratch, api, pending.Run, _ => directory.Read() is { ExitedAt: not null, Problem: not null });
+            Assert.Equal("unresolved", api.RunSettle(pending.Run, new(op)).Problem!.Code);
+            host.Service.BeforeValidatingRecords = null;
+            var bound = new CancellationBoundApi(api, TestContext.Current.CancellationToken);
+            RunSettleResponse recovered = await bound.RunSettleAsync(pending.Run, new(op), TestContext.Current.CancellationToken);
+            Assert.True(recovered.Ok, recovered.Message);
+            Assert.NotNull(recovered.Operation);
+            Assert.Equal("observed-success", Assert.Single(api.Runs().Runs, r => r.Run == pending.Run).Status);
+            Assert.Null(directory.Read()!.Problem);
             Assert.Equal(0, api.Check().Errors);
         }
         finally

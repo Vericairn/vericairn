@@ -208,9 +208,10 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(103, synchronous.Length);
+        Assert.Equal(104, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.WorkNew));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseCheck));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.RunSettle));
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];

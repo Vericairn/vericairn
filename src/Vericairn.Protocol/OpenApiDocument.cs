@@ -97,6 +97,7 @@ public static class OpenApiDocument
         ("GET", "/v1/runs"),
         ("POST", "/v1/runs"),
         ("POST", "/v1/runs/{id}/stop"),
+        ("POST", "/v1/runs/{id}/settle"),
         ("POST", "/v1/work/{key}/move-plan"),
         ("POST", "/v1/releases/withdraw"),
         ("POST", "/v1/releases/check"),
@@ -370,7 +371,14 @@ public static class OpenApiDocument
         }
         else if (method == "POST" && path.StartsWith("/v1/runs", StringComparison.Ordinal))
         {
-            responses["200"] = new JsonObject { ["description"] = path == "/v1/runs" ? "RunResponse: what was recorded and launched; a problem inside when nothing was launched." : "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked." };
+            responses["200"] = new JsonObject { ["description"] = path switch
+            {
+                "/v1/runs" => "RunResponse: what was recorded and launched; a problem inside when nothing was launched.",
+                "/v1/runs/{id}/settle" => "RunSettleResponse: the recorded settlement, or a problem explaining why recovery was refused or remains unresolved.",
+                _ => "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked.",
+            } };
+            if (path == "/v1/runs/{id}/settle")
+                responses["200"]!["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/RunSettleResponse" } } };
             responses.Remove("404");
         }
         else if (method == "POST" && path is "/v1/goals/{id}/step" or "/v1/work/takeover")
@@ -566,6 +574,8 @@ public static class OpenApiDocument
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
             ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
             ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer")),
+            ["RunSettleRequest"] = Object(("by", "string")),
+            ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),
             ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object")),
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
@@ -627,6 +637,7 @@ public static class OpenApiDocument
         "/v1/runs" => "RunStartRequest",
         "/v1/harness-qualifications" => "HarnessQualifyRequest",
         "/v1/runs/{id}/stop" => "RunStopRequest",
+        "/v1/runs/{id}/settle" => "RunSettleRequest",
         "/v1/work/{key}/move-plan" => "WorkMovePlanRequest",
         "/v1/releases/withdraw" => "ReleaseWithdrawRequest",
         "/v1/releases/check" => "ReleaseSubmitRequest",
@@ -740,6 +751,7 @@ public static class OpenApiDocument
         ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight), a stop's facts and worker-observed signals with severity and attention references; and the ledger of every goal with a run or active now.",
         ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. The principal recording the run (by) is the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
+        ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",

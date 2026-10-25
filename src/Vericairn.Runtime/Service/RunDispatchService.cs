@@ -21,7 +21,7 @@ using static Vericairn.Runtime.Service.EstateServiceValues;
 namespace Vericairn.Runtime.Service;
 
 /// <summary>Owns run dispatch receipts, supervision, stop requests and settlement, including its supervision lifetime.</summary>
-internal sealed class RunDispatchService(
+internal sealed partial class RunDispatchService(
     EstateRecordAccess recordAccess,
     RunAdmissionService runAdmission,
     Func<ProviderRegistry> providers,
@@ -166,11 +166,22 @@ internal sealed class RunDispatchService(
             }
             IReadOnlyList<RunSignal>? signals = run.Latest.Body.TryGetProperty("signals", out JsonElement recordedSignals)
                 ? JsonSerializer.Deserialize<RunSignal[]>(recordedSignals, ProtocolJson.Options) : observed?.Signals;
+            if (signals?.Any(s => s is null) == true)
+            {
+                signals = signals.Where(s => s is not null).ToArray();
+                unavailable.Add("The run observation contains unreadable signals; only the readable signals are shown.");
+            }
             if (!run.InFlight && observed is { Settled: not null, Problem: string problem })
             {
                 // A post-settlement local transfer failure is visible without rewriting the immutable settlement or adding
                 // machine bindings to its records. The provider's refusal is path-free.
                 signals = [.. signals ?? [], new RunSignal("audit-unverified", "warning", observed.ExitedAt ?? run.Latest.At, problem)];
+            }
+            if (run.InFlight && includeLocalObservations)
+            {
+                if (settlementProblems.TryGetValue(run.Id, out string? unresolved)) unavailable.Add(unresolved);
+                else if (observed is { ExitedAt: not null, Settled: null, Problem: not null })
+                    unavailable.Add("The run exited but its settlement is unrecorded. Request worker settle to retry from the retained observation.");
             }
             if (unavailable.Count > 0)
             {
@@ -356,7 +367,7 @@ internal sealed class RunDispatchService(
     /// Who may stop a run, on every profile: an operator; who decides for its goal, its sponsor or, for a goal an agent sponsors, an
     /// operator; and the principal who started it, who recorded its intent. Anyone else is refused before anything is asked of the run.
     /// </summary>
-    private static string? StopRefusal(EstateModel model, AgentRuns.Run run, string by)
+    private static string? StopRefusal(EstateModel model, AgentRuns.Run run, string by, string action = "stop")
     {
         if (model.HasRole(by, Roles.Operator) || string.Equals(run.Intent.By, by, StringComparison.Ordinal))
         {
@@ -368,7 +379,7 @@ internal sealed class RunDispatchService(
             return null;
         }
 
-        return $"Principal {by} may not stop run {run.Id}: an operator stops a run, as do whoever decides for its goal and {run.Intent.By}, who started it.";
+        return $"Principal {by} may not {action} run {run.Id}: an operator {action}s a run, as do whoever decides for its goal and {run.Intent.By}, who started it.";
     }
 
     /// <summary>
@@ -528,6 +539,7 @@ internal sealed class RunDispatchService(
                 $"The worker's final scope audit found {scope.OutsideCount.ToString(CultureInfo.InvariantCulture)} paths outside the brief{(scope.Problem is null ? "." : "; the audit is incomplete.")} The run's boundary has already exited; review its changes.");
             outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
         }
+        supervisor.RetainSettlement(outcome, scope);
 
         try
         {
@@ -543,6 +555,7 @@ internal sealed class RunDispatchService(
                         "The run settled without the agent's attempt on its assignment during the run. A clean harness exit does not establish that the agent did the work.");
                     outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
                 }
+                supervisor.RetainSettlement(outcome, scope, prepared: true);
                 if (found is { Status: "not-started" })
                 {
                     WriteOutcome recovered = RecordDispatch(run, by, outcome.LaunchedAt);
@@ -595,11 +608,11 @@ internal sealed class RunDispatchService(
     });
 
     /// <summary>The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts.</summary>
-    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope)
+    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope, TimeSpan? minute = null, double? heartbeatSeconds = null)
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
         TimeSpan elapsed = outcome.Elapsed ?? (outcome.ExitedAt - outcome.LaunchedAt);
-        long minutes = (long)Math.Ceiling(Math.Max(elapsed.Ticks, 0) / (double)WorkerOptions.Minute.Ticks);
+        long minutes = (long)Math.Ceiling(Math.Max(elapsed.Ticks, 0) / (double)(minute ?? WorkerOptions.Minute).Ticks);
         var usage = new JsonObject { ["wallMinutes"] = minutes };
         var unreported = new JsonArray();
         if (outcome.Tokens is long tokens)
@@ -661,7 +674,7 @@ internal sealed class RunDispatchService(
         {
             evidence.Add(new JsonObject { ["summary"] = signal.Summary });
         }
-        evidence.Add(new JsonObject { ["summary"] = $"Observed by the worker on the machine that ran it at {outcome.Heartbeats.ToString(CultureInfo.InvariantCulture)} heartbeats every {WorkerOptions.Heartbeat.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds, from {RecordParser.FormatTimestamp(outcome.LaunchedAt)} to its exit at {RecordParser.FormatTimestamp(outcome.ExitedAt)}; its output is kept on that machine." });
+        evidence.Add(new JsonObject { ["summary"] = $"Observed by the worker on the machine that ran it at {outcome.Heartbeats.ToString(CultureInfo.InvariantCulture)} heartbeats every {(heartbeatSeconds ?? WorkerOptions.Heartbeat.TotalSeconds).ToString(CultureInfo.InvariantCulture)} seconds, from {RecordParser.FormatTimestamp(outcome.LaunchedAt)} to its exit at {RecordParser.FormatTimestamp(outcome.ExitedAt)}; its output is kept on that machine." });
         if (outcome.EscalationFailure is string failure)
         {
             evidence.Add(new JsonObject { ["summary"] = failure });
