@@ -8,6 +8,14 @@ namespace Vericairn.Records.Tests;
 
 public sealed class ReleaseReviewRecordTests
 {
+    /// <summary>A recorded estate holding an approved release review, for the golden round trip of later format-3 fields.</summary>
+    public static PolicyFixture RecordedFixture()
+    {
+        var f = new Fixture();
+        f.Records.Add("decision", f.Approval());
+        return f.Records;
+    }
+
     [Theory]
     [InlineData("full")]
     [InlineData("focused")]

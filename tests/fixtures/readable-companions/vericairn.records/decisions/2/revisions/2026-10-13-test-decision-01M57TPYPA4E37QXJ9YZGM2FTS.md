@@ -107,3 +107,9 @@ Not recorded in this revision. Absence supplies no inferred value or permission.
 Keyed declare&#47;revise&#47;retire requirements&#58; policy key or identity&#44; priorHash for changes&#44; change and optional exact definitionHash&#46; A requirement does not grant authority&#46;
 
 Not recorded in this revision. Absence supplies no inferred value or permission.
+
+## Release Review
+
+Approved release review&#58; exact candidate and workOrder references&#44; scope &#40;full&#124;focused&#41;&#44; focus and probes string arrays&#46; Focused reviews require a focus&#59; full reviews leave it empty&#46;
+
+Not recorded in this revision. Absence supplies no inferred value or permission.

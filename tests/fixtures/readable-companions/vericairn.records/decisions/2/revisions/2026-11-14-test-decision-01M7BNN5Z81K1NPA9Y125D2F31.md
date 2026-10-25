@@ -117,3 +117,9 @@ Keyed declare&#47;revise&#47;retire requirements&#58; policy key or identity&#44
 - Policies&#91;1&#93; &#47; Policy: 01M57TPYPJKBXGK2AHXZEYBYDT
 
 - Policies&#91;1&#93; &#47; Prior Hash: sha256&#58;e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9
+
+## Release Review
+
+Approved release review&#58; exact candidate and workOrder references&#44; scope &#40;full&#124;focused&#41;&#44; focus and probes string arrays&#46; Focused reviews require a focus&#59; full reviews leave it empty&#46;
+
+Not recorded in this revision. Absence supplies no inferred value or permission.

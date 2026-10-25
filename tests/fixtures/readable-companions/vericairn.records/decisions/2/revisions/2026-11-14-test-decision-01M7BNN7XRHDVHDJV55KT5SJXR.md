@@ -115,3 +115,9 @@ Keyed declare&#47;revise&#47;retire requirements&#58; policy key or identity&#44
 - Policies&#91;1&#93; &#47; Key: definition
 
 - Policies&#91;1&#93; &#47; Policy: renewed&#45;maintenance
+
+## Release Review
+
+Approved release review&#58; exact candidate and workOrder references&#44; scope &#40;full&#124;focused&#41;&#44; focus and probes string arrays&#46; Focused reviews require a focus&#59; full reviews leave it empty&#46;
+
+Not recorded in this revision. Absence supplies no inferred value or permission.
