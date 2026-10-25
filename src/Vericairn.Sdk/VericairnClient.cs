@@ -567,6 +567,7 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
             try
             {
                 TResponse? result = response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
+                if (result is DocumentPassAssignResponse pass) CheckPassAssignmentOutcome(pass);
                 if (response.StatusCode == HttpStatusCode.NotFound && result is null or WriteOutcome { Written: null, Problem: null } or DocumentPinResponse { Written: null, Problem: null })
                     throw MissingOperationAsync(response, CancellationToken.None).GetAwaiter().GetResult();
                 return result;

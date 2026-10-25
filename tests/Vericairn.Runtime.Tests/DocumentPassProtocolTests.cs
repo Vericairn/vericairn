@@ -96,6 +96,8 @@ public sealed class DocumentPassProtocolTests
     [InlineData("{}")]
     [InlineData("{\"written\":[],\"problem\":null}")]
     [InlineData("{\"written\":[{\"id\":\"receipt\",\"hash\":\"hash\",\"path\":\"record.json\"}],\"problem\":null}")]
+    [InlineData("{\"written\":[{},{}],\"problem\":null}")]
+    [InlineData("{\"written\":[{\"id\":\"receipt\",\"hash\":\"hash\",\"path\":\"record.json\"},{\"id\":\"receipt\",\"hash\":\"hash\",\"path\":\"record.json\"}],\"problem\":null}")]
     public async Task AnIncompleteSuccessResponseCannotClaimThatTheAssignmentWasStored(string body)
     {
         using var client = new VericairnClient(new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -103,6 +105,7 @@ public sealed class DocumentPassProtocolTests
         ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
             client.DocumentPassAssignAsync("0.2.0", new("author", "reviewer", "KEY-1", new("release", "hash"), []), TestContext.Current.CancellationToken));
         Assert.True(failure.OutcomeUnknown);
+        Assert.Throws<JsonException>(() => client.DocumentPassAssign("0.2.0", new("author", "reviewer", "KEY-1", new("release", "hash"), [])));
     }
 
     [Fact]
@@ -118,5 +121,7 @@ public sealed class DocumentPassProtocolTests
         await Assert.ThrowsAsync<ClientRefusedException>(() => client.DocumentPassAssignAsync("0.2.0",
             new("author", "reviewer", "KEY-1", new("release", "hash"), []), TestContext.Current.CancellationToken));
         Assert.Equal(1, writes);
+        Assert.Throws<ClientRefusedException>(() => client.DocumentPassAssign("0.2.0", new("author", "reviewer", "KEY-1", new("release", "hash"), [])));
+        Assert.Equal(2, writes);
     }
 }

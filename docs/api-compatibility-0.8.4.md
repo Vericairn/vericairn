@@ -85,6 +85,8 @@ Both routes return HTTP 200 with typed responses, including refusals. Inspect `O
 `reconcile-required` problem; inspect those records and the original batch before retrying.
 A cancelled or interrupted assignment can have an unknown outcome. Older servers have no
 fallback route. Listing prepares patches in the response but writes no files or records.
+The synchronous SDK methods preserve the SDK's original transport exceptions; async
+methods and the cancellation-bound wrapper classify interrupted writes as uncertain.
 The command line's explicit `--output` writes proposed patch files; application and review
 remain separate. See [Living documents](living-documents.md#after-a-publication).
 

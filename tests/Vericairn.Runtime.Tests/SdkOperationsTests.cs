@@ -208,7 +208,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(123, synchronous.Length);
+        Assert.Equal(125, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.WorkNew));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DecisionFromAsk));
         foreach (string prompt in new[] { nameof(IEstateApi.Prompts), nameof(IEstateApi.PromptSave), nameof(IEstateApi.PromptPreference), nameof(IEstateApi.PromptCopy), nameof(IEstateApi.PromptUse) })
@@ -225,6 +225,8 @@ public sealed class SdkOperationsTests
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name + "Async").IsAbstract);
         }
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DocumentPass));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DocumentPassAssign));
         foreach (string name in new[] { nameof(IEstateApi.OperatorCloseCandidates), nameof(IEstateApi.OperatorClose), nameof(IEstateApi.OperatorCloseCandidatesAsync), nameof(IEstateApi.OperatorCloseAsync) })
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
         foreach (string name in new[] { nameof(IEstateApi.Templates), nameof(IEstateApi.DocumentSections), nameof(IEstateApi.SectionBrief), nameof(IEstateApi.DocumentNew) })
