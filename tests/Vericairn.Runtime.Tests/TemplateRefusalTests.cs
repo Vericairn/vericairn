@@ -109,6 +109,9 @@ public sealed class TemplateRefusalTests
         Assert.True(service.SectionBrief(declaration.Id, "answer").Brief!.Complete);
         Assert.False(service.DocumentNew(new(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "docs/new.md", "New")).Ok);
         Assert.False(service.NewRecord(new("living-document", estate.OperatorId, Element(Declaration(estate, definition, "docs/raw.md")))).Ok);
+        JsonObject detached = JsonNode.Parse(declaration.Body.GetRawText())!.AsObject(); detached.Remove("template");
+        WriteOutcome removed = service.NewRecord(new("living-document", estate.OperatorId, Element(detached), Supersedes: declaration.Id, Expected: declaration.Id));
+        Assert.False(removed.Ok); Assert.Null(removed.Written);
         WriteOutcome retained = service.NewRecord(new("living-document", estate.OperatorId, declaration.Body, Supersedes: declaration.Id, Expected: declaration.Id));
         Assert.True(retained.Ok, retained.Problem?.Message);
         Assert.Equal(definition.Hash, TemplateCatalog.Pin(service.Session.Load().ById[retained.Written!.Id])!.Hash);

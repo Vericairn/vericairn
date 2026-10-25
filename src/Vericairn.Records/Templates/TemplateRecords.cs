@@ -24,6 +24,8 @@ public static class TemplateRecords
         BodyReader? upgrade = body.Since(3, "templateUpgrade") ? body.Nested("templateUpgrade", false) : null;
         if (template is null)
         {
+            if (context.Find(context.Record.Supersedes) is { } retained && TemplateCatalog.Pin(retained) is not null)
+                context.Error("template.retained", "An instance revision retains its template contract; removing it cannot bypass required sections or their reviews.");
             if (upgrade is not null) context.Error("template.upgrade", "An upgrade belongs to a template instance.");
             return;
         }
