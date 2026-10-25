@@ -477,13 +477,13 @@ public class McpTests
             (int code, string output) = await Peer(python!, root);
             Assert.True(code == 0, output);
             Assert.Contains("SKIP work_brief returns markdown: the estate has no work order, so there is no brief to read", output, StringComparison.Ordinal);
-            Assert.Contains("13 of 13 checks passed, 1 skipped", output, StringComparison.Ordinal);
+            Assert.Contains("23 of 23 checks passed, 4 skipped", output, StringComparison.Ordinal);
 
             CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(bodies, "order.json", """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"The peer.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}"""));
             (code, output) = await Peer(python!, root);
             Assert.True(code == 0, output);
             Assert.Contains("PASS work_brief W-1 returns markdown: the estate has no work order MCP-01, so the first one its status lists stands in", output, StringComparison.Ordinal);
-            Assert.Contains("14 of 14 checks passed", output, StringComparison.Ordinal);
+            Assert.Contains("27 of 27 checks passed, 1 skipped", output, StringComparison.Ordinal);
         }
         finally
         {
