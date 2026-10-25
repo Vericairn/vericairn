@@ -642,6 +642,13 @@ vericairn --estate <root> docs notes --from 0.8.2 --to 0.8.3 --out docs/releases
 ```
 
 `docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.2's recorded end.
+From 0.8.4, decisions, work orders, acceptances, identity and policy records, and migrations are listed
+once per supersession chain, at the revision current when the window ends. Revised entries name all
+replaced revision IDs, earliest first, including those recorded before the window. A later revision does
+not replace the wording in an earlier window. Document revisions and both release history sections still
+list each revision; candidates and publications remain separate entries. Result sections retain their
+existing selection and acceptance rules below.
+
 FIX-13 gives accepted work one entry per work order, naming the latest accepted current result in the
 window by recorded time and then identifier, with its acceptance. Earlier results and attempts remain
 available through `work observe`; later unaccepted results remain separate. Superseded results are omitted.

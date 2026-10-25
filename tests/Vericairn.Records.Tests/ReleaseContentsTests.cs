@@ -13,6 +13,85 @@ public class ReleaseContentsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ADecisionRevisedInTheWindowAppearsOnceWithItsEarlierRevision(bool originalBeforeWindow)
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope original = Decision(estate, "Original wording");
+        RecordEnvelope separate = Decision(estate, "Separate decision");
+        RecordEnvelope revised = Decision(estate, "Corrected wording", original.Id);
+        Decision(estate, "After the window");
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+
+        var window = ReleaseContents.Window(model, originalBeforeWindow ? original.At : estate.Estate.At, revised.At);
+        var current = ReleaseContents.CurrentRevisions(model, window, revised.At);
+
+        Assert.Equal([separate.Id, revised.Id], current.Where(r => r.Type == "decision").Select(r => r.Id));
+        Assert.Equal([original.Id, revised.Id], model.Chain(revised));
+        Assert.Equal(originalBeforeWindow ? 2 : 3, window.Count(r => r.Type == "decision"));
+    }
+
+    [Fact]
+    public void RevisionsAfterTheWindowDoNotChangeTheDecisionCurrentAtItsEnd()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = Decision(estate, "First wording");
+        RecordEnvelope second = Decision(estate, "Second wording", first.Id);
+        RecordEnvelope third = Decision(estate, "Third wording", second.Id);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.Equal(third.Id, model.Latest(first).Id);
+
+        foreach (RecordEnvelope end in new[] { first, second })
+        {
+            var window = ReleaseContents.Window(model, estate.Builder.At, end.At);
+            RecordEnvelope entry = Assert.Single(ReleaseContents.CurrentRevisions(model, window, end.At));
+            Assert.Equal(end.Id, entry.Id);
+            Assert.DoesNotContain(third.Id, model.Chain(entry));
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AChainOfThreeRevisionsNamesAllReplacedIdsIncludingBeforeTheWindow(int revisionsBeforeWindow)
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = Decision(estate, "First wording");
+        RecordEnvelope second = Decision(estate, "Second wording", first.Id);
+        RecordEnvelope third = Decision(estate, "Third wording", second.Id);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        string after = revisionsBeforeWindow switch { 0 => estate.Builder.At, 1 => first.At, _ => second.At };
+        var window = ReleaseContents.Window(model, after, third.At);
+
+        RecordEnvelope entry = Assert.Single(ReleaseContents.CurrentRevisions(model, window, third.At));
+
+        Assert.Equal(third.Id, entry.Id);
+        Assert.Equal([first.Id, second.Id], model.Chain(entry).SkipLast(1));
+        Assert.Equal(3 - revisionsBeforeWindow, window.Count);
+    }
+
+    [Fact]
+    public void RevisionsRecordedAtTheSameTimeStillUseTheSupersessionChain()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        DateTimeOffset before = estate.Clock;
+        RecordEnvelope first = Decision(estate, "First wording");
+        estate.SetClock(before);
+        RecordEnvelope second = Decision(estate, "Second wording", first.Id);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        var window = ReleaseContents.Window(model, estate.Builder.At, second.At);
+
+        Assert.Equal(first.At, second.At);
+        Assert.Equal(second.Id, Assert.Single(ReleaseContents.CurrentRevisions(model, window, second.At)).Id);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void AcceptedWorkIsGroupedUnderItsLatestAcceptedResult(bool acceptOrder)
     {
         using var estate = new TestEstate(recordFormat: 2);
@@ -136,4 +215,7 @@ public class ReleaseContentsTests
         Assert.Equal(acceptance.Id, Assert.Single(results.Accepted).Acceptance.Id);
         Assert.Empty(results.NotAccepted);
     }
+
+    private static RecordEnvelope Decision(TestEstate estate, string title, string? supersedes = null) =>
+        estate.Add("decision", estate.OperatorId, $$"""{"title":"{{title}}","stake":"low","notAuthorized":[],"statement":"Use the recorded wording.","summary":"{{title}}.","synthesis":"Release note correction.","effects":["Use the wording in the notes."],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""", supersedes: supersedes);
 }
