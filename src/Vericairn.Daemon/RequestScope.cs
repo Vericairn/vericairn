@@ -118,6 +118,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             RunSettleResponse { Operation: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
+            OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             WorkMovePlanResponse move => move.Written.Count == 0 ? null : move.Written[^1],
             ReleaseResponse release when operation == "POST /v1/releases/withdraw" => release.Operation ?? release.Release,
@@ -125,7 +126,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
-        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -207,6 +208,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/asks"] = null,
         ["GET /v1/operator/actions"] = null,
         ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
+        ["GET /v1/operator/close"] = null,
+        ["POST /v1/operator/close"] = typeof(OperatorCloseRequest),
         ["GET /v1/goals"] = null,
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
@@ -287,6 +290,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
+        [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
         [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
         [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),
         [typeof(WorkNewRequest)] = (_, r, d) => Acting(((WorkNewRequest)r).By, d),

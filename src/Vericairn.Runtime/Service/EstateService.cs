@@ -2117,6 +2117,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// and none of its records is ever removed. A store that fails part-way returns what it stored with the problem. Caller holds the gate.
     /// </summary>
     private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder)
+        => StoreTogetherLocked(records, purpose, workOrder, null);
+
+    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder,
+        Func<EstateModel, Problem?>? precondition)
     {
         if (RequestDeviceRefusal(session.Load()) is Problem denied)
         {
@@ -2131,6 +2135,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         DocumentChangePlan generated = PrepareDocuments(session.Load(), records);
         if (generated.Status != DocumentGenerationStatus.Success)
             return ([], new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
+
+        // Recheck displayed evidence after signing, validation and generation, before even a batch journal is stored.
+        if (precondition?.Invoke(session.Load()) is Problem changed) return ([], changed);
 
         BatchJournal journal;
         try

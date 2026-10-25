@@ -200,6 +200,12 @@ public partial interface IEstateApi
     /// <summary>Sign the operator's own record and carry its isolated commit through recorded repository operations; resume identical input safely.</summary>
     OperatorRecordResponse OperatorRecord(OperatorRecordRequest request);
 
+    /// <summary>Lists every latest completed, reviewed and unaccepted result with the exact evidence to inspect before closing it.</summary>
+    OperatorCloseCandidatesResponse OperatorCloseCandidates() => new([], new("unsupported", "This API implementation does not support operator close.", []));
+
+    /// <summary>Signs one acceptance per displayed selection, refusing the entire batch if any evidence changed.</summary>
+    OperatorCloseResponse OperatorClose(OperatorCloseRequest request) => new([], new("unsupported", "This API implementation does not support operator close.", []));
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 

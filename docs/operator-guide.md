@@ -263,6 +263,25 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
 
+### Closing finished steps in the 0.8.4 development build
+
+The per-release closing scripts are retired. `vericairn operator close` lists every latest
+completed, reviewed and unaccepted result, showing its exact hash, passing reviews and their
+independence, and the work order's exit question. Run it on your own admitted operator device:
+
+```sh
+vericairn operator close
+vericairn operator close --select W-1 --select W-2 --by <operator id>
+vericairn operator close --all --by <operator id>
+```
+
+The selection displays its evidence before signing one acceptance per result. Each acceptance
+names that exact result and all displayed passing reviews. Changed evidence or a non-operator
+refuses the entire action without acceptances. Current custody checks presence per signature
+when required. `--all` covers every eligible step in the estate; use `--select` to close only
+the steps you inspected for a release. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
+for saved listings with `--from`, API/SDK use and interrupted-storage recovery.
+
 ## 7. Repositories and checks as evidence
 
 The estate records the repositories it uses as resources, by observation, without changing them:

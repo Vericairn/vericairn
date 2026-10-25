@@ -322,6 +322,12 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => Post<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request)!;
 
     /// <inheritdoc />
+    public OperatorCloseCandidatesResponse OperatorCloseCandidates() => Get<OperatorCloseCandidatesResponse>("/v1/operator/close")!;
+
+    /// <inheritdoc />
+    public OperatorCloseResponse OperatorClose(OperatorCloseRequest request) => Post<OperatorCloseRequest, OperatorCloseResponse>("/v1/operator/close", request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />

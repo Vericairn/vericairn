@@ -80,6 +80,8 @@ public static class OpenApiDocument
         ("GET", "/v1/asks"),
         ("GET", "/v1/operator/actions"),
         ("POST", "/v1/operator/record"),
+        ("GET", "/v1/operator/close"),
+        ("POST", "/v1/operator/close"),
         ("GET", "/v1/goals"),
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
@@ -335,6 +337,15 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "OperatorRecordResponse: the signed record, retained branch and head, last recorded change and exact recovery step. Only ok with completed means the pinned merge and target checks passed.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/OperatorRecordResponse" } } } };
         }
+        else if (path == "/v1/operator/close")
+        {
+            string schema = method == "GET" ? "OperatorCloseCandidatesResponse" : "OperatorCloseResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = schema + ": inspect ok and problem. A changed selection, missing passing review or non-operator refuses the whole batch without acceptances. Storage interruptions retain written receipts and require reconciliation.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
         else if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
             DaemonResponses(path, responses);
@@ -473,6 +484,23 @@ public static class OpenApiDocument
         operatorRecordRequest["required"] = new JsonArray("type", "by", "body");
         operatorRecordRequest["properties"]!["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 240, ["default"] = 120 };
 
+        JsonObject closeSelection = Object(("key", "string"), ("workOrder", "object"), ("result", "object"), ("reviews", "array"));
+        closeSelection["required"] = new JsonArray("key", "workOrder", "result", "reviews");
+        foreach (string member in new[] { "workOrder", "result" }) closeSelection["properties"]![member] = SchemaReference("OperatorClosePin");
+        closeSelection["properties"]!["reviews"]!["items"] = SchemaReference("OperatorClosePin");
+        JsonObject closeItem = (JsonObject)closeSelection.DeepClone();
+        closeItem["required"] = new JsonArray("key", "workOrder", "exitQuestion", "result", "outcome", "summary", "reviews");
+        foreach (string member in new[] { "exitQuestion", "outcome", "summary" }) closeItem["properties"]![member] = new JsonObject { ["type"] = "string" };
+        closeItem["properties"]!["reviews"]!["items"] = SchemaReference("OperatorCloseReview");
+        JsonObject closeRequest = Object(("by", "string"), ("selection", "array"), ("all", "boolean"));
+        closeRequest["required"] = new JsonArray("by", "selection");
+        closeRequest["properties"]!["selection"]!["items"] = SchemaReference("OperatorCloseSelection");
+        closeRequest["properties"]!["all"]!["default"] = false;
+        JsonObject closeCandidates = Object(("items", "array"), ("ok", "boolean"), ("problem", "object"));
+        closeCandidates["properties"]!["items"]!["items"] = SchemaReference("OperatorCloseItem");
+        JsonObject closeResponse = Object(("written", "array"), ("ok", "boolean"), ("problem", "object"));
+        closeResponse["properties"]!["written"]!["items"] = Object(("path", "string"), ("id", "string"), ("hash", "string"));
+
         JsonObject workNewRequest = Object(("by", "string"), ("key", "string"), ("title", "string"), ("intent", "string"),
             ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"));
         workNewRequest["required"] = new JsonArray("by", "key", "title", "intent", "scope", "exitQuestion", "deliverables");
@@ -557,6 +585,13 @@ public static class OpenApiDocument
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["OperatorRecordRequest"] = operatorRecordRequest,
+            ["OperatorClosePin"] = Object(("id", "string"), ("hash", "string")),
+            ["OperatorCloseReview"] = Object(("id", "string"), ("hash", "string"), ("independence", "string"), ("summary", "string")),
+            ["OperatorCloseSelection"] = closeSelection,
+            ["OperatorCloseItem"] = closeItem,
+            ["OperatorCloseRequest"] = closeRequest,
+            ["OperatorCloseCandidatesResponse"] = closeCandidates,
+            ["OperatorCloseResponse"] = closeResponse,
             ["OperatorRecordResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("nextStep", "string"), ("record", "object"), ("branch", "string"), ("head", "string"), ("change", "object"), ("problem", "object")),
             ["ChangesOpenRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("title", "string"), ("body", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
@@ -595,6 +630,8 @@ public static class OpenApiDocument
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
         };
     }
+
+    private static JsonObject SchemaReference(string schema) => new() { ["$ref"] = "#/components/schemas/" + schema };
 
     private static string RequestSchema(string path) => path switch
     {
@@ -645,6 +682,7 @@ public static class OpenApiDocument
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
         "/v1/operator/record" => "OperatorRecordRequest",
+        "/v1/operator/close" => "OperatorCloseRequest",
         "/v1/changes/open" => "ChangesOpenRequest",
         "/v1/changes/merge" => "ChangesMergeRequest",
         "/v1/changes/observe" => "ChangesObserveRequest",
@@ -735,6 +773,8 @@ public static class OpenApiDocument
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
+        ("GET", "/v1/operator/close") => "Read every current work order whose latest result is completed, has current passing reviews and has no acceptance of that exact result. Includes the exit question, result summary, review summaries and independence, and exact record hashes. Reads sign and write nothing. Not exposed through MCP.",
+        ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody currently checks presence per signature. Not exposed through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
