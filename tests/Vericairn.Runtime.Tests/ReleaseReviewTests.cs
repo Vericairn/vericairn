@@ -177,6 +177,98 @@ public sealed class ReleaseReviewTests
         Assert.Equal(before, f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version).Text);
     }
 
+    [Fact]
+    public void AFirstCandidateReportsMissingHistoryWithoutInventingEvidence()
+    {
+        using var f = new ReleaseReviewFixture();
+        RecordEnvelope first = f.Model.OfType("release").OrderBy(r => r.At, StringComparer.Ordinal).First();
+        f.Approve("full", candidate: first);
+        ReleaseReviewBriefResponse response = f.Api.ReleaseReviewBrief("1.0.0");
+        Assert.True(response.Ok, response.Problem?.Message);
+        Assert.Contains("## Previous candidate or release\n\nNone recorded.", response.Text, StringComparison.Ordinal);
+        Assert.Contains("## Merged changes in the recorded window\n\nNone recorded.", response.Text, StringComparison.Ordinal);
+        Assert.Contains("## Previous review findings\n\nNone recorded.", response.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(f.Merge.Id, response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANewerUnreviewedCandidateDoesNotHideTheLastReviewsFindings()
+    {
+        using var f = new ReleaseReviewFixture();
+        RecordEnvelope next = f.AddRelease("1.3.0");
+        f.Approve("full", candidate: next);
+        ReleaseReviewBriefResponse response = f.Api.ReleaseReviewBrief("1.3.0");
+        Assert.True(response.Ok, response.Problem?.Message);
+        AssertRecord(response.Text, f.Candidate);
+        AssertRecord(response.Text, f.Review);
+        AssertRecord(response.Text, f.Disposition);
+        AssertRecord(response.Text, f.FutureMerge);
+        Assert.DoesNotContain(f.Merge.Id, response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProductSelectionDisambiguatesVersionsAndFollowsProductRevisions()
+    {
+        using var f = new ReleaseReviewFixture();
+        JsonObject product = PolicyFixture.Body(f.Product);
+        product["slug"] = "another-widget";
+        RecordEnvelope other = f.Records.Add("product", product);
+        f.Records.Add("release", PolicyFixture.Body(f.Candidate), subject: other.Reference);
+        Assert.Equal("ambiguous", f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version).Problem!.Code);
+        string identity = f.Model.Chain(f.Product)[0];
+        ReleaseReviewBriefResponse response = f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version, identity);
+        Assert.True(response.Ok, response.Problem?.Message);
+        AssertRecord(response.Text, f.Candidate);
+        AssertRecord(response.Text, f.Merge);
+        Assert.Equal("not-found", f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version, "absent").Problem!.Code);
+    }
+
+    [Fact]
+    public void ADispositionMustPinTheReviewHash()
+    {
+        using var f = new ReleaseReviewFixture();
+        JsonObject disposition = PolicyFixture.Body(f.Disposition);
+        RecordEnvelope unpinned = f.Records.Add("decision", disposition, subject: f.Review.Reference with { Hash = null }, supersedes: f.Disposition.Id);
+        ReleaseReviewBriefResponse response = f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version);
+        Assert.True(response.Ok, response.Problem?.Message);
+        AssertRecord(response.Text, f.Review);
+        Assert.DoesNotContain(unpinned.Id, response.Text, StringComparison.Ordinal);
+        Assert.Contains("## Disposition decisions pinned to those reviews\n\nNone recorded.", response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReviewerWhoAuthoredTheCandidateCannotBeAssigned()
+    {
+        using var f = new ReleaseReviewFixture();
+        JsonObject reviewer = PolicyFixture.Body(f.Reviewer);
+        reviewer["roles"] = new JsonArray("contributor");
+        f.Records.Add("principal", reviewer, supersedes: f.Reviewer.Id);
+        JsonObject author = PolicyFixture.Body(f.Records.Estate.Operator);
+        author["roles"] = new JsonArray("operator", "reviewer");
+        f.Records.Add("principal", author, supersedes: f.Operator);
+        int before = f.Model.Records.Count;
+        ReleaseReviewBriefResponse response = f.Api.ReleaseReviewAssign(ReleaseReviewFixture.Version, new(f.Operator, "prepared"));
+        Assert.Equal("refused", response.Problem!.Code);
+        Assert.Contains("authored", response.Problem.Message, StringComparison.Ordinal);
+        Assert.Null(response.Assignment);
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
+    [Fact]
+    public void AWithdrawnCandidateIsNotPreparedOrAssigned()
+    {
+        using var f = new ReleaseReviewFixture();
+        JsonObject body = PolicyFixture.Body(f.Candidate);
+        body["status"] = "withdrawn";
+        f.Records.Add("release", body, subject: f.Candidate.Subject, supersedes: f.Candidate.Id);
+        int before = f.Model.Records.Count;
+        Assert.Equal("refused", f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version).Problem!.Code);
+        ReleaseReviewBriefResponse assigned = f.Api.ReleaseReviewAssign(ReleaseReviewFixture.Version, new(f.Operator, "prepared"));
+        Assert.Equal("refused", assigned.Problem!.Code);
+        Assert.Null(assigned.Assignment);
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
     private static void AssertRecord(string text, RecordEnvelope record)
     {
         string heading = "### " + record.Type + " " + record.Id + " at " + record.ComputedHash + "\n";
