@@ -63,3 +63,16 @@ evidence names that grant, and other due reasons still hold the gate.
 See the [operator guide](operator-guide.md#16-living-documents)
 and the [record-format guide](record-format-v2.md#living-documents-due) for declarations,
 review fields and the other triggers.
+
+## Template sections in the development build
+
+[Templates](templates.md) add exact version pins and per-section states to authored
+living documents in record format 3. `docs new` creates an instance; `docs sections`
+shows each part's evidence; `docs brief --section` supplies complete measured
+context; `docs review --section --fidelity` reviews a selected part. A passing
+review clears no sibling. Required sections must be reviewed at sufficient
+fidelity, and no section may be due or failing before the document is current.
+Existing triggers, covered paths, policy rules and release gates still apply.
+Generated parts keep their generated-region comparison, quoted parts preserve
+exact record text, and neither synthesis nor a template grants acceptance or
+other authority. Existing non-template living-document behavior is unchanged.

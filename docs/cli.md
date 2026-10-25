@@ -173,3 +173,26 @@ historical success.
 All return `PackagesResponse`; the API binds `by` to the authenticated acting device like the other
 record-writing operations. `GET /v1/providers` and `release providers` list the `nuget-org` package
 registry provider and its limits. There is no API-key option or registry mutation method.
+
+## Template documents in 0.8.4 development
+
+`vericairn templates list` lists available exact versions; `templates show <id>`
+prints their contracts and accepts `--version`. Create an instance with:
+
+```sh
+vericairn docs new example/design docs/design.md --version 1.0.0 --by <owner> --title "Design"
+vericairn docs sections docs/design.md --json
+vericairn docs brief docs/design.md --section overview --max-bytes 60000 --json
+vericairn docs review docs/design.md --section overview --fidelity draft --by <reviewer> --outcome current --summary "Read the exact section and sources."
+```
+
+Creation also accepts `--configuration <file>` containing `options`, `scope` and
+`overrides`, and `--level remind|warn|refuse` (default `warn`). It refuses an
+existing file. Section reads and briefs accept `--commit` for an exact external
+repository source. Section review requires `--section` and `--fidelity` together;
+`--judgments <file>` supplies evaluator verdicts and exact evidence for that
+section. All commands retain the root connection options and `--json` behavior.
+A brief exceeding `--max-bytes` exits 2 with explicit incomplete evidence and no
+silent truncation. Creation interrupted after declaration storage also exits 2
+and preserves its receipt for reconciliation. See [Templates](templates.md) for
+the contract, defaults, overrides, review rules and recovery.

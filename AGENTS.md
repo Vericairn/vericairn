@@ -40,6 +40,8 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 | `prompt_preference` | operator write, signed by the acting principal's device | Change this principal's favorite or hidden choice, or disable estate-wide when the operator acts. Choices are reversible and retain history. |
 | `prompt_copy` | operator write, signed by the acting principal's device | Copy a reviewed built-in into the estate with its exact origin; requires shared prompt writing authority. |
 | `prompt_use` | operator write, signed by the acting principal's device | Record a prompt together with a new run, assignment or ask answer. It cannot change authority; changes require an amendment. |
+| `document_sections` | read | Each section's state, required fidelity, checks and evaluator judgments at the exact available basis. Reading grants no authority. |
+| `section_brief` | read | A complete measured section brief: purpose, writing role, fidelity, quality, options and exact original sources. A template grants nothing. |
 | `policies_list` | read | Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record. |
 | `policy_kinds` | read | Installed policy kind versions, implementation hashes, selections, sources and bounds. |
 | `policy_access` | read | Policy write actions currently admitted for the connected principal. Exact bounds are rechecked for every write. |

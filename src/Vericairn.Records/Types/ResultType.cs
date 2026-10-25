@@ -6,6 +6,7 @@ using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Records.Types;
 
@@ -35,7 +36,7 @@ public sealed class ResultType : IRecordType
     [
         new("outcome", string.Join('|', Outcomes), true, "completed when the brief's outcome was produced; partial when usable work exists but the outcome was not reached; blocked or abandoned otherwise."),
         new("summary", "string", true, "What was done and what changed."),
-        new("outputs", "object[]", true, "name, hash (sha256 of the bytes), optional bytes, mediaType and location (repository-relative; verified when the file is present); may be empty."),
+        new("outputs", "object[]", true, "name, hash (sha256 of the bytes), optional bytes, mediaType and location (repository-relative; verified when the file is present); may be empty. From format 3 an optional section contains id and document (an exact living-document reference); hash and bytes then identify that section's payload."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("checks", "object[]", true, "name, outcome (passed|failed|skipped|not-performed), summary; may be empty."),
         new("limitations", "string[]", true, "What the result does not establish; may be empty."),
@@ -60,8 +61,9 @@ public sealed class ResultType : IRecordType
             long? bytes = output.Number("bytes", false, 0, 1L << 40);
             output.Text("mediaType", false, 100);
             string? location = output.Text("location", false, 500);
+            bool section = TemplateRecords.Output(context, output, hash, bytes, location);
             output.NoOtherKeys();
-            VerifyOutput(context, output, hash, bytes, location);
+            if (!section) VerifyOutput(context, output, hash, bytes, location);
         }
 
         foreach (BodyReader evidence in body.NestedArray("evidence", true, allowEmpty: true) ?? [])

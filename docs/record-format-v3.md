@@ -276,3 +276,47 @@ reviewed migration preview. Restoring authored ownership requires an exact pin i
 the proposed batch. Source records and historical pins are retained unchanged.
 Local-only records remain in their canonical live store; committed estate companion
 adoption requires repository custody, while on-demand rendering needs no file.
+
+## Template instances and section evidence
+
+TPL-01 in the 0.8.4 development build adds optional fields and one type within
+format 3. Estates with no template continue using their existing declarations,
+reviews and result outputs. No migration rewrites older records, and no template
+field is admitted in formats 1 or 2. The contract and workflows are described in
+[Templates](templates.md); the [generated reference](reference/record-reference.md)
+comes from the registered type and field descriptions.
+
+| Record | Additive contract |
+| --- | --- |
+| `living-document` | Optional `template: {id, version, hash, owner, scope?, options, overrides}` pins canonical template content and records every effective choice. Optional `templateUpgrade: {offered, outcome, reason}` records exact acceptance or explicit decline of an offered version. |
+| `document-review` | Optional `sections` array, required when reviewing a template instance. Each entry has `id`, `hash`, `sourceDigest`, `outcome`, `fidelity`, `sources`, `checks` and `cohesion`. |
+| `result` | Optional `outputs[].section: {id, document: {type, id, hash}}` identifies exact payload bytes within a living document; `location` names the declared document path. |
+| `template-defaults` | New type since format 3: exact `template: {id, version, hash}`, `scope: {kind, target?}`, `options` and `reason`; no envelope subject. |
+
+The instance's owner or operator revises its declaration. An owner transfer needs
+operator standing. A revision keeps its template contract; explicit required
+omissions need the operator's exact decision. A changed pin needs an accepted
+upgrade matching the offered content. A declined offer retains the previous pin
+and its reason. Existing history and file bytes are not automatically migrated.
+
+Review `sources` retain each source's id, kind, identity, hash, byte count, status
+and exact record references. `checks` retain name, outcome and summary. Cohesion
+entries retain id, kind, outcome and summary; evaluator entries also retain the
+exact evidence hashes read. The runtime recomputes new review evidence before
+storing it, including writes through generic record authoring. Historical review
+validation checks its declared evidence structure without comparing old bytes
+against today's files. Currentness separately reads current content and sources.
+
+Fresh section results must match the actual payload hash and any stated UTF-8
+byte count. Later edits retain the historical result and report output drift.
+Missing retained template content prevents clearance. Installed role names,
+options, defaults and all passing checks supply no authority or acceptance.
+Defaults require existing operator or `administer` standing and are unique per
+exact template and adoption scope; narrower defaults are materialized only at
+creation.
+
+`records describe template-defaults`, `records describe living-document`,
+`records describe document-review` and `records describe result` include these
+contracts. Registered readable companions cover the new type and nested
+collections, retaining every source, check, judgment and option rather than
+reducing them to a summary.

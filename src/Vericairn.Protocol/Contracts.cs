@@ -258,7 +258,11 @@ public sealed record DocumentReason(string On, string Level, string Summary, str
 /// <param name="Findings">What was found: severity (error, warning or info), summary and optional location.</param>
 /// <param name="Commit">For a document of another repository, the commit reviewed.</param>
 /// <param name="Independence">For a document of another repository, whose author the estate's records do not show, the reviewer's independence of its content: self, independent-agent or operator; without it, self for a principal that holds the builder role, else judged from the estate's records. An estate file's revisions decide its reviewer's independence, and a statement that differs is refused. From 0.6.0.</param>
-public sealed record DocumentReviewRequest(string By, string Outcome, string Summary, IReadOnlyList<DocumentFinding>? Findings = null, string? Commit = null, string? Independence = null);
+public sealed record DocumentReviewRequest(string By, string Outcome, string Summary, IReadOnlyList<DocumentFinding>? Findings = null, string? Commit = null, string? Independence = null)
+{
+    /// <summary>Optional individual section reviews. Required for a template instance; the existing constructor is unchanged.</summary>
+    public IReadOnlyList<DocumentSectionReview>? Sections { get; init; }
+}
 
 /// <summary>Pin the exact bytes of an authored document in the estate repository as its next revision.</summary>
 /// <param name="Path">Normalized repository-relative file path under design/ or docs/.</param>

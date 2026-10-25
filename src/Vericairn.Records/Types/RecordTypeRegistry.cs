@@ -54,6 +54,7 @@ public static class RecordTypeRegistry
         new OperationType(),
         new LivingDocumentType(),
         new DocumentReviewType(),
+        new TemplateDefaultsType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases; not yet admitted.</summary>

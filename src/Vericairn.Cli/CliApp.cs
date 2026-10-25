@@ -38,6 +38,7 @@ internal static class CliApp
         root.Subcommands.Add(new RecoverCommand(context));
         root.Subcommands.Add(new ObjectsCommand(context));
         root.Subcommands.Add(new DocsCommand(context));
+        root.Subcommands.Add(new TemplatesCommand(context));
         root.Subcommands.Add(new McpCommand(context));
         root.Subcommands.Add(new ContextCommand(context));
         root.Subcommands.Add(new UpdatesCommand(context));

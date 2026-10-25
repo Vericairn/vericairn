@@ -67,6 +67,7 @@ public class CompanionImplementationTests
             cases.Add("duties-list.md", RecordCompanionTests.Render([source], "list", "duties"));
             cases.Add("duties-item.md", RecordCompanionTests.Render([source], "item", "duties", "1"));
             cases.Add("list.md", RecordCompanionTests.Render([source], "list"));
+            foreach (var template in TemplateCompanionTests.GoldenCases()) cases.Add(template.Key, template.Value);
         }
         else
         {

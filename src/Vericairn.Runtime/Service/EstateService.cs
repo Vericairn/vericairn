@@ -903,11 +903,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
             if (GeneratedDocumentContract.IsStrict(model, declared))
                 return Refuse("Wholly generated documents are proved by their sources and cannot receive authored clearance.");
+            if (request.Sections?.Any(s => s is null || s.Judgments?.Any(j => j is null || j.Evidence is null) == true) == true)
+                return Refuse("Section reviews and their judgments must contain complete objects and evidence arrays.");
 
             // Who wrote an estate file is in the estate's own revisions, and they decide its reviewer's independence. Who wrote a
             // document of another repository is not in the estate, so there the reviewer states it; without a statement a
             // principal with the builder role, which writes the product's documents, is taken to review its own work.
             string independence = DocumentIndependence(model, declared, request.By, request.Outcome);
+            if (request.Sections is { Count: > 0 } sectionRequests)
+            {
+                IReadOnlyList<global::Vericairn.Records.Templates.TemplateSectionState> sectionStates = global::Vericairn.Records.Templates.TemplateDocuments.Sections(model, declared, request.Commit);
+                bool self = request.Outcome == "revised" || sectionRequests.Any(r => r.Outcome == "revised"
+                    || sectionStates.Any(s => s.Id == r.Id && s.Writer == request.By));
+                independence = self ? "self" : model.HasRole(request.By, Roles.Operator) ? "operator" : "independent-agent";
+            }
             if (EstateModel.BodyString(declared, "repository") is not null)
             {
                 independence = request.Independence ?? (model.HasRole(request.By, Roles.Builder) ? "self" : independence);
@@ -994,6 +1003,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 body["covered"] = covered;
             }
+
+            if (request.Sections is not null)
+            {
+                try { body["sections"] = global::Vericairn.Records.Templates.TemplateDocuments.ReviewSections(model, declared, text, commit, request.By, request.Sections.Select(SectionRequest).ToArray()); }
+                catch (InvalidOperationException error) { return Refuse(error.Message); }
+            }
+            else if (global::Vericairn.Records.Templates.TemplateCatalog.Pin(declared) is not null)
+                return Refuse("A template instance is reviewed section by section; name the sections and fidelity being reviewed.");
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             return WriteLocked(new RecordDraft("document-review", request.By, document.RootElement, declared.Reference), model);
@@ -2066,6 +2083,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
+        if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
+            return (null, templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {
             return (null, communicationRefusal);

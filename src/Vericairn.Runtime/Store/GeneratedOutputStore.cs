@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Runtime.Store;
 
@@ -30,6 +32,14 @@ internal static class GeneratedOutputStore
                     {
                         GeneratedDocumentPlan fresh = GeneratedDocumentVerification.Plan(model, owner);
                         if (fresh.Status != DocumentGenerationStatus.Success || !fresh.Expected.Any(f => f.Path == change.Path && f.Hash == change.AfterHash)) return false;
+                    }
+                    else if (TemplateCatalog.Pin(owner) is not null && owner.Supersedes is null && change.BeforeHash is null
+                        && EstateModel.BodyString(owner, "path") == change.Path && journal.Records.Any(r => r.Id == owner.Id))
+                    {
+                        // Initial authored content is recoverable only from the exact new instance in this batch.
+                        // Recompute its scaffold, quotes and generated sections before accepting the retained bytes.
+                        string initial = TemplateDocuments.NewContent(model, owner);
+                        if (ContentHash.Sha256(Encoding.UTF8.GetBytes(initial)) != change.AfterHash) return false;
                     }
                     else
                     {
