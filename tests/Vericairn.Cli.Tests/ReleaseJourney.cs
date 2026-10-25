@@ -16,15 +16,31 @@ internal static class ReleaseJourney
     internal static CliHarness.Outcome Ok(string commit, params string[] arguments) => Invoke(commit, arguments, true);
     internal static CliHarness.Outcome Run(string commit, params string[] arguments) => Invoke(commit, arguments, false);
 
-    private static CliHarness.Outcome Invoke(string commit, string[] arguments, bool ok)
+    // A submission reads the policy clock for its check and again for its recheck. On a slow runner the two reads can fall in
+    // different seconds, so the submission retains two bases where a journey asserts one. These hold the clock at the command's
+    // start, as one instant; real time still moves between commands.
+    internal static CliHarness.Outcome OkHeld(string commit, params string[] arguments) => Invoke(commit, arguments, true, held: true);
+    internal static CliHarness.Outcome RunHeld(string commit, params string[] arguments) => Invoke(commit, arguments, false, held: true);
+
+    private static CliHarness.Outcome Invoke(string commit, string[] arguments, bool ok, bool held = false)
     {
         ISourceAdapter source = ProviderRegistry.Current.Source("git") ?? new GitCommandAdapter();
         try
         {
             string[] prepared = Prepare(commit, arguments);
-            return ok ? CliHarness.Ok(prepared) : CliHarness.Run(prepared);
+            if (!held) return ok ? CliHarness.Ok(prepared) : CliHarness.Run(prepared);
+            using EstateService api = EstateService.Open(arguments[Array.IndexOf(arguments, "--estate") + 1]);
+            api.PolicyClock = new HeldClock(DateTimeOffset.UtcNow);
+            CliHarness.Outcome outcome = CliHarness.RunWithApi(api, null, prepared);
+            if (ok) Assert.True(outcome.Code == 0, $"vericairn {string.Join(' ', prepared)}\n{outcome.Out}\n{outcome.Err}");
+            return outcome;
         }
         finally { ProviderRegistry.Current.Register(source); }
+    }
+
+    private sealed class HeldClock(DateTimeOffset at) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => at;
     }
 
     private static string[] Prepare(string commit, string[] arguments)
