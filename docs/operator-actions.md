@@ -85,7 +85,7 @@ the `packages` member is:
 ```
 
 The declaration accepts one to sixteen distinct package ids. Use an already recorded release
-version of the product; a candidate can be observed while publication is pending. After every
+version of the product by default; a candidate can be observed while publication is pending. After every
 package publication, including the Trusted Publishing workflow, record the registry state:
 
 ```sh
@@ -99,6 +99,32 @@ its metadata. Every response retains its exact registry URL, body SHA-256, HTTP 
 count and content encoding. Hashes cover bytes before gzip decoding. An absent version is
 recorded as `not-found`, with listing and deprecation unknown.
 Search results, workflow completion and upload receipts are not publication observations.
+
+From 0.8.4, a product holding package names before its first release can add an optional `reserved`
+array to the same declaration:
+
+```json
+{
+  "provider": "nuget-org",
+  "ids": ["Example.Widget"],
+  "reserved": ["0.0.1-reserved"]
+}
+```
+
+Declare one to eight distinct valid NuGet versions. Versions are compared without case, and none
+may equal a recorded release version of this product, including across product revisions. Keep a
+placeholder as a reserved declaration; it needs no release record. Select it explicitly:
+
+```sh
+vericairn packages observe --product <product-id> --version 0.0.1-reserved --reserved --by <principal-id>
+vericairn packages unlist --product <product-id> --version 0.0.1-reserved --reserved --package Example.Widget --by <operator-id>
+```
+
+The observation and account-holder intent pin the exact product id and hash and the reserved
+version, with no release pins. Response evidence, intent-before-effect ordering and confirmation
+checks are the same as for a release's packages. Without `--reserved`, commands still require a
+recorded release; with it, they require the current product declaration to reserve that version.
+A version satisfying neither selection is refused. No package command creates a release.
 
 Before unlisting one version, record the intent:
 
@@ -127,9 +153,20 @@ Omitted message or alternate options mean that no corresponding value is intende
 checks the reasons, message, alternate package and range, not merely that some deprecation exists.
 The estate operator records these intents and outcomes; package ownership is established by nuget.org.
 
+A reserved version uses `--reserved` for deprecation too. If the account holder chooses, the
+ordinary message and alternate options can point to the first real release:
+
+```sh
+vericairn packages deprecate --product <product-id> --version 0.0.1-reserved --reserved --package Example.Widget --by <operator-id> --reason Legacy --message "Use the first release, 1.0.0." --alternate-package Example.Widget --alternate-range "[1.0.0,)"
+```
+
+After either reserved-version intent, follow the printed account-holder step and observe its
+original operation. `observe --operation` derives its selection from the intent; do not add
+`--reserved`, `--product` or `--version`.
+
 Rerunning an identical intent command returns the original intent and latest operation revision.
 It does not create another intent or query the registry. Changing the intended metadata under that
-identity is refused. `observe --operation` keeps the original package and release pins even if the
+identity is refused. `observe --operation` keeps the original package and release or reservation pins even if the
 product declaration changes later. A complete read matching the intent records `observed-success`.
 A missing, still-listed or differently deprecated version leaves the outcome `uncertain`, with its
 actual state recorded. Allow for registry propagation, then observe again under the same identity.

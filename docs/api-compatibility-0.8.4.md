@@ -1,5 +1,38 @@
 # API compatibility in 0.8.4
 
+## Reserved package versions (FIX-72)
+
+`PackagesObserveRequest`, `PackagesUnlistRequest` and `PackagesDeprecateRequest`
+each add an init-only `bool Reserved` property, default false. Their positional
+constructors and generated deconstructors are unchanged. The existing API and SDK
+methods, including async and cancellation-bound methods, carry this property;
+OpenAPI declares optional JSON `reserved` as a boolean on all three request schemas.
+No route, response contract or interface member changes.
+
+With `reserved: true`, product/version selection requires the version in the current
+product's `packages.reserved` array and selects no release. Omitted or false preserves
+the existing recorded-release selection. `PackagesObserveRequest.Operation` cannot
+be combined with `Reserved = true`, `Product` or `Version`: an operation observation
+uses its original intent's exact pins. Undeclared reserved versions and unrecorded
+release versions are refused before contacting the registry or writing records.
+
+This is additive within record format 3. `packages.reserved` is an optional array
+of one to eight distinct valid NuGet versions; comparisons ignore case. No reserved
+version may equal a recorded release version of the same product, across revisions.
+Reserved package observation facts and account-holder operation targets retain
+`product`, `productHash`, `package`, `version` and `provider`, add string `reserved`
+equal to the reserved version, and omit both `release` and `releaseHash`. The initial
+observation or intent subjects the exact product declaration; an outcome observation
+subjects the original intent. Mixed release and reserved pins are refused. Existing
+records remain valid and the record-format number is unchanged. Earlier builds do
+not implement reserved selection; upgrade before using these declarations or requests.
+
+Intent ordering, response evidence, time checks, outcome matching and operator
+authority for account-holder actions are unchanged. MCP worker access is unchanged;
+this addition exposes no package write tool. See the
+[package procedure](operator-actions.md#package-publication-unlisting-and-deprecation)
+and [CLI options](cli.md#vericairn-packages).
+
 ## Release review briefs (CODE-09)
 
 | Added member | Purpose |

@@ -205,6 +205,16 @@ public class DocsTests
                 Assert.Contains(route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             string records = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "record-reference.md")));
             foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "From format 3 an optional section contains id and document" }) Assert.Contains(field, records, StringComparison.Ordinal);
+            Assert.Contains("optional reserved (one to eight distinct NuGet placeholder versions", records, StringComparison.Ordinal);
+            Assert.Contains("with either release and releaseHash or reserved", records, StringComparison.Ordinal);
+            string packageCommands = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "cli-reference.md")));
+            foreach (string action in new[] { "observe", "unlist", "deprecate" })
+            {
+                int start = packageCommands.IndexOf($" `vericairn packages {action}`\n", StringComparison.Ordinal);
+                Assert.True(start >= 0);
+                int end = packageCommands.IndexOf("\n#", start + 1, StringComparison.Ordinal);
+                Assert.Contains("--reserved", end < 0 ? packageCommands[start..] : packageCommands[start..end], StringComparison.Ordinal);
+            }
             Assert.Contains("docs check", commands);
             Assert.Contains("docs pin", commands);
             Assert.Contains("POST /v1/documents/pin", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
