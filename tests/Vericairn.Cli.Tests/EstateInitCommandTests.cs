@@ -34,7 +34,7 @@ public sealed class EstateInitCommandTests
     [InlineData("repository-synced", true)]
     [InlineData("local-only", false)]
     [InlineData("local-only", true)]
-    public void SourceInitKeepsTheExistingOutput(string profile, bool json)
+    public void SourceInitAddsBootstrapReceiptsToTheExistingOutput(string profile, bool json)
     {
         string root = CliHarness.TempDirectory("init-source-output");
         try
@@ -47,13 +47,16 @@ public sealed class EstateInitCommandTests
             Assert.Equal(2, estate.Records.Count);
             Assert.Equal("source", estate.Manifest!.Mode);
             Assert.Null(estate.Manifest.Release);
+            EstateBootstrapTests.AssertInstalled(root);
+            Assert.Empty(EstateChecks.Run(estate));
             RecordEnvelope operatorRecord = Assert.Single(estate.OfType("principal"));
             RecordEnvelope estateRecord = Assert.Single(estate.OfType("estate"));
             string expected = json
-                ? $"{{\"operator\":\"{operatorRecord.Id}\",\"estate\":\"{estateRecord.Id}\",\"manifest\":\"{EstateLayout.ManifestPath}\"}}{Environment.NewLine}"
+                ? $"{{\"operator\":\"{operatorRecord.Id}\",\"estate\":\"{estateRecord.Id}\",\"manifest\":\"{EstateLayout.ManifestPath}\",\"bootstrap\":{EstateBootstrapTests.WrittenJson}}}{Environment.NewLine}"
                 : $"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}{Environment.NewLine}"
                     + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
-                    + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}";
+                    + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}"
+                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}written   .gitattributes{Environment.NewLine}";
             Assert.Equal(expected, outcome.Out);
         }
         finally { CliHarness.Delete(root); }
@@ -168,11 +171,58 @@ public sealed class EstateInitCommandTests
         finally { CliHarness.Delete(root); }
     }
 
+    [Theory]
+    [InlineData("repository-synced", "bootstrap")]
+    [InlineData("repository-synced", "bootstrap.ps1")]
+    [InlineData("local-only", "bootstrap")]
+    [InlineData("local-only", "bootstrap.ps1")]
+    public void DifferingBootstrapRefusesBeforeCreatingTheEstate(string profile, string name)
+    {
+        string root = CliHarness.TempDirectory("init-custom-bootstrap");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, name), "# Estate customization.\n");
+            CliHarness.Outcome outcome = WithVersion("0.8.3+" + Commit, Arguments(root, profile));
+            Assert.Equal(2, outcome.Code);
+            Assert.Empty(outcome.Out);
+            Assert.Contains(name + " differs", outcome.Err, StringComparison.Ordinal);
+            Assert.Contains("Nothing changed.", outcome.Err, StringComparison.Ordinal);
+            Assert.Equal([name], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName));
+            Assert.Equal("# Estate customization.\n", File.ReadAllText(Path.Combine(root, name)));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
+    [Theory]
+    [InlineData("repository-synced")]
+    [InlineData("local-only")]
+    public void IdenticalBootstrapsAreKeptAndNamedAsUnchangedDuringInitialization(string profile)
+    {
+        string root = CliHarness.TempDirectory("init-identical-bootstrap");
+        try
+        {
+            var timestamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            foreach (string name in new[] { "bootstrap", "bootstrap.ps1" })
+            {
+                string path = Path.Combine(root, name);
+                File.WriteAllBytes(path, EstateBootstrapTests.ShippedBytes(name));
+                File.SetLastWriteTimeUtc(path, timestamp);
+            }
+            CliHarness.Outcome outcome = WithVersion("0.8.3+" + Commit, Arguments(root, profile));
+            AssertPin(root, outcome, Commit, profile);
+            Assert.Equal("""[{"path":"bootstrap","status":"unchanged"},{"path":"bootstrap.ps1","status":"unchanged"},{"path":".gitattributes","status":"written"}]""",
+                outcome.Json.GetProperty("bootstrap").GetRawText());
+            foreach (string name in new[] { "bootstrap", "bootstrap.ps1" })
+                Assert.Equal(timestamp, File.GetLastWriteTimeUtc(Path.Combine(root, name)));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
     private static string[] Arguments(string root, string profile = "repository-synced", bool json = true) =>
         ["--estate", root, .. json ? new[] { "--json" } : [], "estate", "init", "--name", "Example", "--slug", "example",
             "--purpose", "Prove initialization.", "--operator-name", "Operator", "--organization", "Example", "--profile", profile];
 
-    private static CliHarness.Outcome WithVersion(string version, string[] arguments)
+    internal static CliHarness.Outcome WithVersion(string version, string[] arguments)
     {
         using var output = new StringWriter();
         using var error = new StringWriter();
@@ -195,6 +245,7 @@ public sealed class EstateInitCommandTests
         EstateModel estate = CommandContext.LoadCopy(root);
         Assert.False(estate.Findings.HasErrors, string.Join("\n", estate.Findings));
         Assert.False(EstateChecks.Run(estate).HasErrors);
+        EstateBootstrapTests.AssertInstalled(root);
         Assert.Equal(2, estate.Records.Count);
         Assert.Equal("source", estate.Manifest!.Mode);
         Assert.Equal(commit, estate.Manifest.Commit);

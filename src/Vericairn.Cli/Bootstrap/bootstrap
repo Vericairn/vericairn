@@ -1,0 +1,116 @@
+#!/bin/sh
+# Vericairn estate bootstrap.
+# Obtains the Vericairn pinned in estate/manifest.json and runs it against this estate.
+# Usage: ./bootstrap [vericairn arguments]   (default: estate check)
+# Source mode: VERICAIRN_SOURCE must be a clean clone at the pin. For development only,
+# VERICAIRN_SOURCE_OVERRIDE=1 allows a different or dirty local source and identifies it explicitly.
+# Release mode: the distributable is fetched from the pinned release and verified against the hash in the manifest,
+# never against the tag alone; set VERICAIRN_RELEASE_BASE to fetch from another location (a directory or URL).
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+manifest="$root/estate/manifest.json"
+[ -f "$manifest" ] || { echo "bootstrap: no estate/manifest.json here" >&2; exit 2; }
+
+field() { grep "\"$1\":" "$manifest" | head -n 1 | sed -E 's/.*"'"$1"'": "([^"]*)".*/\1/'; }
+mode=$(field mode)
+repository=$(field repository)
+commit=$(field commit)
+version=$(field version)
+work="$root/.vericairn/toolchain"
+bin="$work/bin"
+
+platform() {
+  case "$(uname -s)" in
+    Darwin) case "$(uname -m)" in arm64) echo osx-arm64 ;; *) echo osx-x64 ;; esac ;;
+    Linux) case "$(uname -m)" in aarch64|arm64) echo linux-arm64 ;; *) echo linux-x64 ;; esac ;;
+    MINGW*|MSYS*|CYGWIN*) case "$(uname -m)" in aarch64|arm64) echo win-arm64 ;; *) echo win-x64 ;; esac ;;
+    *) echo "bootstrap: unsupported platform $(uname -s) $(uname -m)" >&2; exit 2 ;;
+  esac
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  else echo "bootstrap: no sha256sum or shasum available" >&2; exit 2
+  fi
+}
+
+case "$mode" in
+  source)
+    [ -n "$commit" ] || { echo "bootstrap: manifest has no commit" >&2; exit 2; }
+    if [ -n "${VERICAIRN_SOURCE:-}" ]; then
+      src="$VERICAIRN_SOURCE"
+    else
+      src="$work/vericairn-src"
+      if [ ! -d "$src/.git" ]; then
+        git clone --quiet "https://github.com/$repository.git" "$src" || exit $?
+      fi
+      git -C "$src" fetch --quiet origin "$commit" 2>/dev/null || git -C "$src" fetch --quiet origin || exit $?
+      git -C "$src" checkout --quiet --detach "$commit" || exit $?
+    fi
+    head=$(git -C "$src" rev-parse --verify HEAD) || exit $?
+    changes=$(git -C "$src" status --porcelain --untracked-files=all --ignore-submodules=none) || exit $?
+    dirty=false
+    [ -z "$changes" ] || dirty=true
+    override=false
+    if [ -n "${VERICAIRN_SOURCE:-}" ] && [ "${VERICAIRN_SOURCE_OVERRIDE:-}" = 1 ]; then
+      override=true
+      echo "bootstrap: development override: commit=$head dirty=$dirty; manifest pins $commit" >&2
+    elif [ "$head" != "$commit" ] || [ "$dirty" = true ]; then
+      echo "bootstrap: source is at $head (dirty=$dirty), manifest pins $commit; refusing to run it. For development, set VERICAIRN_SOURCE and VERICAIRN_SOURCE_OVERRIDE=1" >&2
+      exit 2
+    fi
+    # Never trust the old bin/.commit stamp: it could name a pin that was not built.
+    bin="$work/source/$head/bin"
+    stamp="$bin/.source"
+    identity=$(printf 'commit=%s\ndirty=%s\noverride=%s\npin=%s' "$head" "$dirty" "$override" "$commit")
+    if [ "$dirty" = true ] || { [ ! -x "$bin/vericairn" ] && [ ! -x "$bin/vericairn.exe" ]; } || [ "$(cat "$stamp" 2>/dev/null || true)" != "$identity" ]; then
+      # Invalidate before building, so a failed build cannot leave a reusable stamp or old outputs.
+      rm -rf "$bin"
+      echo "bootstrap: building vericairn from $repository@$head" >&2
+      dotnet build "$src/src/Vericairn.Cli/Vericairn.Cli.csproj" --configuration Release --output "$bin" --nologo --verbosity quiet || exit $?
+      printf '%s' "$identity" > "$stamp"
+    fi
+    exe="$bin/vericairn"
+    ;;
+  release)
+    [ -n "$version" ] || { echo "bootstrap: manifest has no version" >&2; exit 2; }
+    rid=$(platform)
+    expected=$(grep "\"$rid\":" "$manifest" | head -n 1 | sed -E 's/.*"'"$rid"'": "sha256:([0-9a-f]*)".*/\1/')
+    [ -n "$expected" ] && [ "$expected" != "$(grep "\"$rid\":" "$manifest" | head -n 1)" ] || { echo "bootstrap: the manifest has no artifact hash for $rid" >&2; exit 2; }
+    case "$rid" in win-*) ext=zip ;; *) ext=tar.gz ;; esac
+    name="vericairn-$version-$rid.$ext"
+    dir="$work/release/$version/$rid"
+    archive="$dir/$name"
+    stamp="$dir/.sha256"
+    if [ "$(cat "$stamp" 2>/dev/null || true)" != "$expected" ]; then
+      rm -rf "$dir"; mkdir -p "$dir"
+      base="${VERICAIRN_RELEASE_BASE:-https://github.com/$repository/releases/download/v$version}"
+      echo "bootstrap: fetching $name from $base" >&2
+      case "$base" in
+        http://*|https://*|file://*) curl -fsSL --retry 3 -o "$archive" "$base/$name" || exit $? ;;
+        *) cp "$base/$name" "$archive" || exit $? ;;
+      esac
+      actual=$(sha256_of "$archive")
+      if [ "$actual" != "$expected" ]; then
+        rm -rf "$dir"
+        echo "bootstrap: $name has hash $actual, the manifest pins $expected; refusing to run it" >&2
+        exit 2
+      fi
+      case "$ext" in zip) unzip -q "$archive" -d "$dir" || exit $? ;; *) tar -xzf "$archive" -C "$dir" || exit $? ;; esac
+      printf '%s' "$expected" > "$stamp"
+    fi
+    exe="$dir/bin/vericairn"
+    ;;
+  *)
+    echo "bootstrap: unknown mode '$mode'" >&2
+    exit 2
+    ;;
+esac
+
+[ -x "$exe.exe" ] && exe="$exe.exe"   # Git Bash on Windows
+if [ "$#" -eq 0 ]; then
+  exec "$exe" --estate "$root" estate check
+fi
+exec "$exe" --estate "$root" "$@"

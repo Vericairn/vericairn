@@ -65,6 +65,35 @@ not choose the pin.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
+From 0.8.4, both forms of `estate init` also write `bootstrap` and `bootstrap.ps1` at the estate root.
+These are the first-party copies embedded in the installed command line, whose source of truth is
+`src/Vericairn.Cli/Bootstrap/` in the product repository. Both have LF line endings, and `bootstrap`
+is executable on Linux and macOS, and both commands keep them LF on every checkout by adding
+`bootstrap text eol=lf` and `bootstrap.ps1 text eol=lf` to `.gitattributes` when those lines are missing.
+Commit them and `.gitattributes` with the estate, and keep `.vericairn/` in its
+`.gitignore` for the bootstrap's local downloads. A fresh estate or clone can run `./bootstrap estate check`
+on Linux and macOS, or `./bootstrap.ps1 estate check` in Windows PowerShell 5.1 or PowerShell 7.
+The scripts use the manifest's source or release pin; [Route A](install.md#1-route-a-as-part-of-an-estate-through-its-bootstrap)
+describes the prerequisites and cold start.
+
+An existing estate obtains or refreshes the copies from an installed command line from 0.8.4 or later:
+
+```sh
+vericairn estate bootstrap
+```
+
+The command reports `written` for a new or replaced copy and `unchanged` for identical bytes, and
+restores executable permission on the POSIX script. It checks both destinations before writing.
+A differing copy refuses the operation; preserve any customizations, then use
+`vericairn estate bootstrap --force` to replace it. A link or directory must be moved aside first,
+even with `--force`. Refreshing the scripts keeps the estate's records and manifest pin in place.
+Initialization also refuses an existing differing copy before creating the estate; keep a copy of
+any customizations and move the file aside before retrying initialization.
+
+Both commands name the two scripts and `.gitattributes` in their receipt. Human output adds lines such as
+`written   bootstrap`, `written   bootstrap.ps1` and `written   .gitattributes`; `--json` adds a `bootstrap`
+array of `path` and `status` objects.
+
 0.8.3 also adds opt-in `estate init --release`. Run the published target release's own command line,
 adding `--release` to the command above. It verifies the
 GitHub release, tag commit, `SHA256SUMS` and the current platform archive before creating anything.
@@ -92,13 +121,18 @@ With `--json`, the existing `operator`, `estate` and `manifest` fields are joine
     "path": "records/observation/<YYYY-MM>/<observation id>.json",
     "id": "<observation id>",
     "hash": "sha256:<hash>"
-  }
+  },
+  "bootstrap": [
+    { "path": "bootstrap", "status": "written" },
+    { "path": "bootstrap.ps1", "status": "written" },
+    { "path": ".gitattributes", "status": "written" }
+  ]
 }
 ```
 
 The receipt identifies the exact observation pinned by the manifest in either storage profile. Its
 path is the record's portable path; with `local-only`, the record stays in the live store. Without
-`--release`, both output formats remain unchanged and no release receipt is included.
+`--release`, both output formats include the bootstrap files and omit the release receipt.
 
 Optional charter signatures do not waive record-specific requirements. Policy and writing changes,
 duty results/reviews, strict generated declarations and the operator one-step action still require
