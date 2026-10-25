@@ -161,8 +161,10 @@ vericairn devices list
 with `builder.json`:
 
 ```json
-{"kind": "agent", "name": "Builder", "roles": ["builder"], "agent": {"vendor": "the agent's vendor", "product": "the agent's product"}}
+{"kind": "agent", "name": "Builder", "roles": ["builder"], "agent": {"vendor": "OpenAI", "product": "Codex"}}
 ```
+
+`agent.product` names the harness the agent runs in, as a launcher routes to it: routing matches it to a launcher's harness name or id, ignoring case, so `Codex` or `codex` for the codex launcher and `Claude Code` or `claude-code` for claude-code. From 0.8.4, `records new principal` still records an agent whose product matches no installed launcher, and warns with the accepted values, since `goal next` would report that agent unavailable until a signed revision names one.
 
 `devices create` generates the key, records the device signed by its own key, and proves possession of that key. Once admitted, the device can sign records that principal authors from this machine. `devices admit` records the admission; `devices revoke <device> --by --reason` ends it from now on, leaving earlier records attributable. `devices list` shows each device by its identity with its current name, custody, presence, admission and whether its key is held here.
 

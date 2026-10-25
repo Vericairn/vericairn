@@ -24,7 +24,7 @@ public sealed class PrincipalType : IRecordType
         new("kind", "human|agent|service", true, "What the principal is."),
         new("name", "string", true, "Display name."),
         new("roles", "string[]", true, "operator, builder, reviewer, contributor, service."),
-        new("agent", "object", false, "For agents: vendor, product and optional notes. Never a model name as proof of anything."),
+        new("agent", "object", false, "For agents: vendor, product and optional notes. Routing matches product to a launcher's harness name or id, ignoring case: Codex or codex for the codex launcher, Claude Code or claude-code for claude-code. Never a model name as proof of anything."),
         new("notes", "string", false, "Free text."),
     ];
 
