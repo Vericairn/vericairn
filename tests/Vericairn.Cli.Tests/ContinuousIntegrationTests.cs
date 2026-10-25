@@ -18,6 +18,59 @@ public class ContinuousIntegrationTests
     private static readonly string[] ProjectDirectories = ["src", "tests", "tools"];
 
     [Fact]
+    public void EveryJobHasAnExplicitTimeLimit()
+    {
+        foreach (string file in WorkflowFiles())
+        {
+            foreach (string job in Jobs(Read(file)))
+            {
+                Assert.DoesNotContain("continue-on-error", job, StringComparison.Ordinal);
+                string[] properties = job.Split('\n').Where(line => line.StartsWith("    ", StringComparison.Ordinal)
+                    && line.Length > 4 && line[4] != ' ').ToArray();
+                if (properties.Any(line => line.StartsWith("    uses:", StringComparison.Ordinal)))
+                {
+                    // GitHub forbids a timeout on a reusable-workflow caller. Its runnable jobs are checked in package.yml.
+                    Assert.Contains("    uses: ./.github/workflows/package.yml", properties);
+                    Assert.DoesNotContain(properties, line => line.StartsWith("    timeout-minutes:", StringComparison.Ordinal));
+                    continue;
+                }
+
+                Assert.Contains(properties, line => line.StartsWith("    runs-on:", StringComparison.Ordinal));
+                string timeout = Assert.Single(properties, line => line.StartsWith("    timeout-minutes:", StringComparison.Ordinal));
+                Assert.Matches(@"^    timeout-minutes: (?:[1-5][0-9]|60)$", timeout);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("ci.yml", "workflow-policy:", 15)]
+    [InlineData("ci.yml", "build-test:", 60)]
+    [InlineData("release.yml", "verify:", 60)]
+    [InlineData("package.yml", "enclave-helper:", 20)]
+    [InlineData("package.yml", "package:", 45)]
+    [InlineData("package.yml", "published-cli:", 30)]
+    [InlineData("release.yml", "draft:", 20)]
+    [InlineData("nuget.yml", "publish:", 20)]
+    [InlineData("secret-scan.yml", "secret-scan:", 15)]
+    public void JobTimeLimitsLeaveRoomForNormalRuns(string file, string job, int minutes)
+    {
+        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", file));
+        AssertTimeout(Block(workflow, job, 2), 4, minutes);
+    }
+
+    [Fact]
+    public void EveryPackageInstallAndDownloadHasATenMinuteTimeLimit()
+    {
+        string[] installs = WorkflowFiles().SelectMany(file => Steps(Read(file))).Where(InstallsOrDownloadsPackages).ToArray();
+        Assert.NotEmpty(installs);
+        foreach (string step in installs)
+        {
+            AssertTimeout(step, 8, 10);
+            Assert.DoesNotContain("continue-on-error", step, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void PullRequestsCheckAllowedActionsAndTheirFullCommitPins()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
@@ -512,6 +565,59 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n    needs: [enclave-helper]\n", package, StringComparison.Ordinal);
         Assert.DoesNotContain("always()", package, StringComparison.Ordinal);
         Assert.Contains("built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform.", package, StringComparison.Ordinal);
+    }
+
+    private static string[] WorkflowFiles()
+    {
+        string[] files = Directory.GetFiles(Path.Combine(RepositoryRoot(), ".github", "workflows"))
+            .Where(file => Path.GetExtension(file) is ".yml" or ".yaml").ToArray();
+        Assert.NotEmpty(files);
+        return files;
+    }
+
+    private static IEnumerable<string> Jobs(string yaml)
+    {
+        string[] keys = Block(yaml, "jobs:", 0).Split('\n').Where(line => line.StartsWith("  ", StringComparison.Ordinal)
+            && line.Length > 2 && line[2] != ' ' && line[2] != '#').ToArray();
+        Assert.NotEmpty(keys);
+        foreach (string key in keys)
+        {
+            // These checks share Block's explicit indentation convention; an unrecognized job cannot be silently skipped.
+            Assert.Matches(@"^  [A-Za-z_][A-Za-z0-9_-]*:$", key);
+            yield return Block(yaml, key.Trim(), 2);
+        }
+    }
+
+    private static void AssertTimeout(string block, int indent, int minutes)
+    {
+        string prefix = new string(' ', indent) + "timeout-minutes:";
+        string timeout = Assert.Single(block.Split('\n'), line => line.StartsWith(prefix, StringComparison.Ordinal));
+        Assert.Equal(prefix + " " + minutes.ToString(System.Globalization.CultureInfo.InvariantCulture), timeout);
+    }
+
+    private static bool InstallsOrDownloadsPackages(string step)
+    {
+        if (step.Contains("uses: actions/setup-", StringComparison.Ordinal)
+            || step.Contains("uses: actions/download-artifact@", StringComparison.Ordinal)
+            || step.Contains(".github/scripts/api-baselines.py", StringComparison.Ordinal)) return true;
+
+        // Names cover scripted installers such as the local-feed check; commands also catch newly added or renamed steps.
+        string first = step.Split('\n')[0];
+        foreach (string verb in new[] { "Install ", "Restore ", "Download ", "Set up " })
+            if (first.StartsWith("      - name: " + verb, StringComparison.Ordinal)) return true;
+
+        foreach (string line in step.Split('\n'))
+        {
+            string command = line.TrimStart();
+            foreach (string prefix in new[] { "- run: ", "run: ", "sudo " })
+                if (command.StartsWith(prefix, StringComparison.Ordinal)) command = command[prefix.Length..];
+            foreach (string install in new[] { "apt ", "apt-get ", "brew install ", "choco install ", "winget install ",
+                         "curl ", "wget ", "dotnet restore", "dotnet tool install ", "dotnet tool restore", "dotnet tool update ",
+                         "npm ci", "npm install", "pip install ", "pip3 install ", "python -m pip install ", "python3 -m pip install " })
+                if (command.StartsWith(install, StringComparison.Ordinal)) return true;
+        }
+
+        return false;
     }
 
     /// <summary>Each step of a workflow: from its "- " line to the next step or the end of its job.</summary>

@@ -27,6 +27,34 @@ materials and checksums. It executes the published Linux CLI on `sources inspect
 which starts Git. The macOS arm64 and Windows x64 jobs download that package job's
 archives and run the same command; their failure fails the reusable workflow.
 
+Every runnable job has an explicit `timeout-minutes` limit:
+
+| Workflow | Job | Minutes |
+| --- | --- | --- |
+| `ci.yml` | `workflow-policy` | 15 |
+| `ci.yml` | `build-test` (each platform and share) | 60 |
+| `release.yml` | `verify` (each platform and share) | 60 |
+| `package.yml` | `enclave-helper` | 20 |
+| `package.yml` | `package` | 45 |
+| `package.yml` | `published-cli` (each platform) | 30 |
+| `release.yml` | `draft` | 20 |
+| `nuget.yml` | `publish` | 20 |
+| `secret-scan.yml` | `secret-scan` | 15 |
+
+Package installation and download steps have a 10-minute limit: .NET SDK setup,
+locked restores (including distributables), the Linux secret service, gitleaks,
+the local tool and SDK feed check, API baseline downloads, the bill of materials
+step that installs CycloneDX, and package or artifact downloads. A hung install
+fails its step when that limit expires. The job limit bounds the whole job,
+including a hung test and its retry; it does not restart for each step. These
+limits leave headroom over normal runs: test shares usually take 5 to 25 minutes.
+
+The `package` callers in `ci.yml` and `release.yml` use a reusable workflow.
+GitHub does not support `timeout-minutes` on those caller jobs; the limits apply
+to every runnable job in `package.yml`. `ContinuousIntegrationTests` checks job
+and install step limits, including the reusable workflow, so removing a limit
+fails the tests.
+
 Before packing, `api-baselines.py` discovers each packable library and downloads its
 latest stable version from nuget.org. It retains the versions and SHA-256 values
 under `artifacts/api-baselines`. SDK package validation runs during pack with the
