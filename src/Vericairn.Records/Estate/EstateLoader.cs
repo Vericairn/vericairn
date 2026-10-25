@@ -269,9 +269,11 @@ public static class EstateLoader
 
         RecordEnvelope latest = model.Latest(target);
         // An admission follows its device's identity, so a rename or a rotation of the device leaves it in force.
+        // A Vericairn dependency observation uses the estate's charter only as an identity anchor.
         // Only a current record needs reconsideration; its own successor has already answered a historical judgment.
         if (model.IsCurrent(record) && record.Subject.Hash is not null && latest.Id != target.Id &&
             !WorkOrderRevisions.IsCurrentSubject(model, record.Subject, latest) &&
+            !(Updates.VericairnReleaseObservation.Is(record) && target.Type == "estate" && latest.Id == model.CurrentEstate?.Id) &&
             !ReleaseType.IsPublicationOf(target, latest) && !(record.Type == "admission" && target.Type == "device"))
         {
             // A release withdrawn since answers what was said of its earlier revisions, so the withdrawal is named instead.
