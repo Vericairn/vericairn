@@ -101,7 +101,8 @@ public class PortabilityJourneyTests
             string builder = Admit(c, op, scratch);
             CliHarness.Ok("--estate", c, "--json", "records", "new", "work-order", "--by", builder, "--body", CliHarness.WriteJson(scratch, "order.json", """{"key":"L-1","kind":"ordinary","title":"Local work","intent":"Local-only.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["y"]}"""));
             Assert.False(Directory.Exists(Path.Combine(c, "records")));
-            Assert.Equal(["estate"], Directory.EnumerateFileSystemEntries(c).Select(Path.GetFileName).ToArray());
+            Assert.Equal(["bootstrap", "bootstrap.ps1", "estate"], Directory.EnumerateFileSystemEntries(c).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
+            EstateBootstrapTests.AssertInstalled(c);
             string statusC = CliHarness.Ok("--estate", c, "--json", "status").Out;
             Assert.Contains("\"L-1\"", statusC, StringComparison.Ordinal);
             Assert.Equal(0, CliHarness.Run("--estate", c, "estate", "check").Code);

@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Bootstrap/bootstrap" LogicalName="Vericairn.Cli.Bootstrap.bootstrap" />
+    <EmbeddedResource Include="Bootstrap/bootstrap.ps1" LogicalName="Vericairn.Cli.Bootstrap.bootstrap.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The tool bundles its dependencies, so their notices travel with the package. -->
     <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
     <None Include="../../licenses/*.txt" Pack="true" PackagePath="/licenses/" />

@@ -39,6 +39,7 @@ internal sealed class EstateOperations(CommandContext context)
             }
             var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
             initialization = initialization with { Release = verified };
+            EstateBootstrap bootstrap = EstateBootstrap.Prepare(root);
             RecordEnvelope operatorRecord;
             RecordEnvelope estateRecord;
             RecordEnvelope? releaseRecord = null;
@@ -75,17 +76,19 @@ internal sealed class EstateOperations(CommandContext context)
                 }
             }
 
+            BootstrapReceipt[] bootstraps = bootstrap.Write();
             if (json)
             {
                 context.Output.WriteLine(releaseRecord is null
-                    ? JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath })
+                    ? JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath, bootstrap = bootstraps }, ProtocolJson.Options)
                     : JsonSerializer.Serialize(new
                     {
                         @operator = operatorRecord.Id,
                         estate = estateRecord.Id,
                         manifest = EstateLayout.ManifestPath,
                         release = new { path = releaseRecord.ExpectedPath, id = releaseRecord.Id, hash = releaseRecord.ComputedHash },
-                    }));
+                        bootstrap = bootstraps,
+                    }, ProtocolJson.Options));
             }
             else
             {
@@ -94,6 +97,7 @@ internal sealed class EstateOperations(CommandContext context)
                 context.Output.WriteLine($"manifest  {EstateLayout.ManifestPath}");
                 if (releaseRecord is not null)
                     context.Output.WriteLine($"release   {releaseRecord.Id}  {releaseRecord.ExpectedPath}  {releaseRecord.ComputedHash}");
+                ReportBootstrap(bootstraps);
             }
 
             return Clean;
@@ -106,6 +110,28 @@ internal sealed class EstateOperations(CommandContext context)
 
     public int Check(string root, bool json) =>
         IsEstate(root) ? context.WithApi(root, api => context.ReportFindings(api.Check(), json)) : context.WithFiles(root, model => context.ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
+
+    public int Bootstrap(string root, bool force, bool json)
+    {
+        if (!IsEstate(root)) return context.Fail("No estate/manifest.json here. Initialize an estate before writing its bootstrap.");
+        try
+        {
+            BootstrapReceipt[] bootstraps = EstateBootstrap.Prepare(root, force).Write();
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(new { bootstrap = bootstraps }, ProtocolJson.Options));
+            else ReportBootstrap(bootstraps);
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return context.Fail(exception.Message);
+        }
+    }
+
+    private void ReportBootstrap(IEnumerable<BootstrapReceipt> bootstraps)
+    {
+        foreach (BootstrapReceipt bootstrap in bootstraps)
+            context.Output.WriteLine($"{bootstrap.Status,-9} {bootstrap.Path}");
+    }
 
     public int Export(string root, string output, string? by, bool json) => context.WithApi(root, api =>
     {

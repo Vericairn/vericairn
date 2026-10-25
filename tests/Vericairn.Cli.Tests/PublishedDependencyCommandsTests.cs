@@ -50,6 +50,8 @@ public sealed class PublishedDependencyCommandsTests
             RecordEnvelopeAssertion(model);
             Assert.Equal(offline ? 0 : 5, fixture.Requests.Count);
             Assert.Equal(profile == "repository-synced", Directory.Exists(Path.Combine(root, "records")));
+            EstateBootstrapTests.AssertInstalled(root);
+            Assert.Empty(EstateChecks.Run(model));
 
             RecordEnvelope operatorRecord = Assert.Single(model.OfType("principal"));
             RecordEnvelope estateRecord = Assert.Single(model.OfType("estate"));
@@ -57,7 +59,7 @@ public sealed class PublishedDependencyCommandsTests
             if (json)
             {
                 JsonElement output = result.Json;
-                Assert.Equal(["operator", "estate", "manifest", "release"], output.EnumerateObject().Select(p => p.Name));
+                Assert.Equal(["operator", "estate", "manifest", "release", "bootstrap"], output.EnumerateObject().Select(p => p.Name));
                 Assert.Equal(operatorRecord.Id, output.GetProperty("operator").GetString());
                 Assert.Equal(estateRecord.Id, output.GetProperty("estate").GetString());
                 Assert.Equal(EstateLayout.ManifestPath, output.GetProperty("manifest").GetString());
@@ -66,6 +68,7 @@ public sealed class PublishedDependencyCommandsTests
                 Assert.Equal(observation.ExpectedPath, receipt.GetProperty("path").GetString());
                 Assert.Equal(observation.Id, receipt.GetProperty("id").GetString());
                 Assert.Equal(observation.ComputedHash, receipt.GetProperty("hash").GetString());
+                Assert.Equal(EstateBootstrapTests.WrittenJson, output.GetProperty("bootstrap").GetRawText());
             }
             else
             {
@@ -73,7 +76,8 @@ public sealed class PublishedDependencyCommandsTests
                     $"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}{Environment.NewLine}"
                     + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
                     + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}"
-                    + $"release   {observation.Id}  {observation.ExpectedPath}  {observation.ComputedHash}{Environment.NewLine}", result.Out);
+                    + $"release   {observation.Id}  {observation.ExpectedPath}  {observation.ComputedHash}{Environment.NewLine}"
+                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}", result.Out);
             }
         }
         finally { ProviderRegistry.Current.VericairnReleases = previous; CliHarness.Delete(root, download); }

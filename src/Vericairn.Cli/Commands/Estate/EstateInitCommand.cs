@@ -13,7 +13,7 @@ internal sealed class EstateInitCommand : Command
     }
 
     internal EstateInitCommand(CommandContext context, string versionText)
-        : base("init", "Create a new estate: operator principal, charter and manifest, validated together.")
+        : base("init", "Create a new estate: operator principal, charter and manifest, validated together, with first-party bootstrap scripts.")
     {
         var operations = new EstateOperations(context);
         var nameOption = new Option<string>("--name") { Description = "Estate display name.", Required = true };
