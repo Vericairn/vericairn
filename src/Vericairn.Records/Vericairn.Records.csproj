@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../Shared/PresentationContent.cs" Link="Templates/PresentationContent.cs" />
+    <EmbeddedResource Include="Templates/Definitions/*.json" LogicalName="PresentationTemplates.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="Vericairn.Records.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime" />
