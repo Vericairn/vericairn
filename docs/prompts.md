@@ -69,11 +69,11 @@ Built-ins are read-only. Copying a reviewed built-in creates an estate definitio
 with `origin: {source, key, version, hash}`. A personal preference grants no shared
 writing authority.
 
-The four foundation and four software contributions in this development build
-are **drafts awaiting operator review**. They can be inspected, favored, hidden
-and disabled, but cannot yet be used or copied. Their categories, descriptions,
-text and placeholder descriptions are in the catalog sources. The proposed sets
-are:
+The four foundation and four software built-ins were reviewed and approved by
+the operator before shipping, and can be used and copied. A pack's unreviewed
+contribution stays a draft that can be inspected, favored, hidden and disabled,
+but not used or copied. The built-ins' categories, descriptions, text and
+placeholder descriptions are in the catalog sources. The sets are:
 
 | Source | Key | Category |
 |---|---|---|

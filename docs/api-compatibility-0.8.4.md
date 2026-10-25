@@ -46,7 +46,7 @@ and deconstruction contracts. The new prompt request types refuse unknown fields
 
 `ProviderRegistry.Prompts` owns the runtime's `PromptCatalog`, whose registration
 accepts immutable versioned contributions. `SoftwarePrompts.All` supplies the
-software pack's review drafts. `ToolRegistry` adds `PromptsListAsync` and
+software pack's reviewed prompts. `ToolRegistry` adds `PromptsListAsync` and
 `PromptGetAsync`; MCP advertises standard prompts with no change notifications.
 Saved definitions, preferences and uses are additive within record format 3.
 
