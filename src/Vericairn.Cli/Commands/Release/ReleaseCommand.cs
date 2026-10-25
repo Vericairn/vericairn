@@ -15,6 +15,7 @@ internal sealed class ReleaseCommand : Command
         Subcommands.Add(new ReleaseSubmitCommand(context));
         Subcommands.Add(new ReleaseBasisCommand(context));
         Subcommands.Add(new ReleaseWithdrawCommand(context));
+        Subcommands.Add(new ReleaseReviewBriefCommand(context));
         Subcommands.Add(new ReleaseObserveCommand(context));
     }
 }

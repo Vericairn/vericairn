@@ -205,8 +205,11 @@ public class DocsTests
             Assert.DoesNotContain("docs generate", commands);
             Assert.Contains("release providers", commands);
             Assert.Contains("release withdraw", commands);
+            Assert.Contains("release review-brief", commands);
             Assert.Contains("work move-plan", commands);
             Assert.Contains("POST /v1/releases/withdraw", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("GET /v1/releases/{version}/review-brief", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("POST /v1/releases/{version}/review-brief", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("POST /v1/work/{key}/move-plan", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("records new", commands);
             Assert.Contains("work new", commands);
@@ -249,6 +252,7 @@ public class DocsTests
             foreach (string option in new[] { "--by", "--key", "--title", "--intent", "--scope", "--deliverable", "--exit-question", "--kind", "--after", "--input" })
                 Assert.Contains(option, workNew, StringComparison.Ordinal);
             Assert.Contains("### `vericairn release withdraw`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn release review-brief`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn work move-plan`", cli, StringComparison.Ordinal);
             Assert.Contains("`--expected-work <expected-work>`", cli, StringComparison.Ordinal);
             Assert.Contains("`--withdrawal <withdrawal>`", cli, StringComparison.Ordinal);
