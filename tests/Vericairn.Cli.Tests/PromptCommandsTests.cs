@@ -8,6 +8,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
@@ -88,11 +89,14 @@ public sealed class PromptCommandsTests
         Assert.Contains("placeholders", CliHarness.Ok("records", "describe", "saved-prompt").Out, StringComparison.Ordinal);
         Assert.Contains("disabled", CliHarness.Ok("records", "describe", "prompt-preference").Out, StringComparison.Ordinal);
         Assert.Contains("promptUse", CliHarness.Ok("records", "describe", "operation").Out, StringComparison.Ordinal);
-        PromptRow draft = writer.Api.Prompts(new()).Prompts.First(p => p.Source == "foundation");
-        CliHarness.Outcome copy = CliHarness.Run("--estate", root, "prompt", "copy", draft.Identity, "--by", writer.Operator, "--key", "unreviewed");
+        // The shipped built-ins are reviewed; an example draft, installed on this service, keeps the refusals under test.
+        JsonObject unreviewed = PromptRecordsTests.Definition("unreviewed-example"); unreviewed.Remove("state");
+        writer.Api.Providers.Prompts.Register([PromptCatalog.BuiltIn("example", "1.2.3", PolicyFixture.Element(unreviewed))]);
+        PromptRow draft = writer.Api.Prompts(new() { IncludeUnavailable = true }).Prompts.Single(p => p.Identity == "example:unreviewed-example");
+        CliHarness.Outcome copy = CliHarness.RunWithApi(writer.Api, null, "--estate", root, "prompt", "copy", draft.Identity, "--by", writer.Operator, "--key", "unreviewed");
         Assert.NotEqual(0, copy.Code);
         Assert.Contains("draft", copy.Err, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(writer.Model.OfType("saved-prompt"));
-        Assert.NotEqual(0, CliHarness.Run("--estate", root, "prompt", "retire", draft.Identity, "--by", writer.Operator).Code);
+        Assert.NotEqual(0, CliHarness.RunWithApi(writer.Api, null, "--estate", root, "prompt", "retire", draft.Identity, "--by", writer.Operator).Code);
     }
 }

@@ -96,7 +96,10 @@ public sealed class PromptLibraryTests
         JsonElement origin = writer.Model.ById[copied.Id].Body.GetProperty("origin");
         Assert.Equal(installed.Hash, origin.GetProperty("hash").GetString());
         Assert.Equal(installed.Version, origin.GetProperty("version").GetString());
-        PromptRow draft = writer.Api.Prompts(new()).Prompts.First(p => p.Source == "foundation");
+        // The shipped built-ins are reviewed; an example draft keeps the refusal under test.
+        JsonObject unreviewed = PromptRecordsTests.Definition("unreviewed-example"); unreviewed.Remove("state");
+        writer.Api.Providers.Prompts.Register([PromptCatalog.BuiltIn("example", "1.2.3", PolicyFixture.Element(unreviewed))]);
+        PromptRow draft = writer.Api.Prompts(new() { IncludeUnavailable = true }).Prompts.Single(p => p.Identity == "example:unreviewed-example");
         Assert.True(draft.Draft);
         Assert.False(writer.Api.PromptCopy(new(writer.Operator, draft.Identity, draft.Hash, "unreviewed")).Ok);
         PromptUseResponse use = writer.Api.PromptUse(new(writer.Operator, new(installed.Identity, installed.Hash, new Dictionary<string, string> { ["topic"] = "the original evidence" }), Assignment: writer.Assignment()));

@@ -18,7 +18,7 @@ public sealed class PromptCatalog
 {
     private readonly Dictionary<string, PromptRow> entries = new(StringComparer.Ordinal);
 
-    /// <summary>Installs the foundation's review drafts.</summary>
+    /// <summary>Installs the foundation's reviewed prompts.</summary>
     public PromptCatalog() => Register(Foundation());
 
     /// <summary>The installed definitions in stable source/key order.</summary>
@@ -69,9 +69,9 @@ public sealed class PromptCatalog
     private static IEnumerable<PromptRow> Foundation()
     {
         string version = typeof(PromptCatalog).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-        yield return BuiltIn("foundation", version, Definition("clarify-next-step", "Clarify the next step", "Identify the next useful action within the assignment.", "Work/Planning", "For {topic}, identify the next action within the existing assignment and explain any missing evidence. Request an amendment for changed terms.", "topic", "The part of the assigned work to consider."));
-        yield return BuiltIn("foundation", version, Definition("summarize-evidence", "Summarize the evidence", "Separate observations, claims and unknowns.", "Work/Review", "Summarize the already permitted evidence about {topic}, separating observations, claims and unknowns. Keep the existing disclosure limits.", "topic", "The evidence topic."));
-        yield return BuiltIn("foundation", version, Definition("review-within-scope", "Review within scope", "Assess work against its existing criteria.", "Work/Review", "Review {topic} against the assignment's existing review criteria. Cite evidence and unresolved findings; this review does not accept the work.", "topic", "The assigned work to review.", "reviewer", "operator"));
-        yield return BuiltIn("foundation", version, Definition("prepare-handoff", "Prepare a handoff", "Explain the current state for the next contributor.", "Work/Handoff", "Prepare a handoff for {topic}: completed work, exact evidence, limitations and next action, within the existing disclosure and output rules.", "topic", "The assigned work to hand off."));
+        yield return BuiltIn("foundation", version, Definition("clarify-next-step", "Clarify the next step", "Identify the next useful action within the assignment.", "Work/Planning", "For {topic}, identify the next action within the existing assignment and explain any missing evidence. Request an amendment for changed terms.", "topic", "The part of the assigned work to consider."), draft: false);
+        yield return BuiltIn("foundation", version, Definition("summarize-evidence", "Summarize the evidence", "Separate observations, claims and unknowns.", "Work/Review", "Summarize the already permitted evidence about {topic}, separating observations, claims and unknowns. Keep the existing disclosure limits.", "topic", "The evidence topic."), draft: false);
+        yield return BuiltIn("foundation", version, Definition("review-within-scope", "Review within scope", "Assess work against its existing criteria.", "Work/Review", "Review {topic} against the assignment's existing review criteria. Cite evidence and unresolved findings; this review does not accept the work.", "topic", "The assigned work to review.", "reviewer", "operator"), draft: false);
+        yield return BuiltIn("foundation", version, Definition("prepare-handoff", "Prepare a handoff", "Explain the current state for the next contributor.", "Work/Handoff", "Prepare a handoff for {topic}: completed work, exact evidence, limitations and next action, within the existing disclosure and output rules.", "topic", "The assigned work to hand off."), draft: false);
     }
 }
