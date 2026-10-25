@@ -40,7 +40,27 @@ and the existing containment limits still apply.
 
 ## 1. Route A: as part of an estate, through its bootstrap
 
-Once the estate has upgraded to 0.8.3, its repository pins that release in `estate/manifest.json`, by version and by the SHA-256 of every distributable. Its `bootstrap` script fetches that release, verifies it and runs it. This is the cold start. The bootstrap belongs to the estate; the commands below assume it provides the first-party bootstrap interface.
+From 0.8.4, `vericairn estate init`, with or without `--release`, writes `bootstrap` and
+`bootstrap.ps1` at the estate root and names both in its receipt. These are the first-party scripts
+embedded in the installed Vericairn command line, from `src/Vericairn.Cli/Bootstrap/` in the product
+repository. Every release from 0.8.4 carries them. Both use LF line endings; `bootstrap` is executable
+on Linux and macOS. Commit both files with the estate so a fresh clone can use Route A.
+
+For an existing estate, use an installed command line from 0.8.4 or later:
+
+```sh
+vericairn --estate <estate root> estate bootstrap
+```
+
+The command reports each file as `written` or `unchanged`. It checks both files before writing and
+refuses to replace a differing copy unless you add `--force`; preserve any estate customizations
+before doing so. It restores the POSIX script's executable permission even when its bytes are
+unchanged. With `--json`, the `bootstrap` array gives each file's `path` and `status`. This refresh
+uses the installed command line's copies and leaves the manifest's pin in place.
+
+The scripts read `estate/manifest.json`. A release pin supplies the version and SHA-256 of every
+distributable; the bootstrap fetches that release, verifies it and runs it. A source pin builds the
+exact source commit as described below. A newly initialized estate can use the same commands as a clone.
 
 Linux and macOS:
 
@@ -63,14 +83,14 @@ cd my-estate
 What the bootstrap does, step by step:
 
 1. Reads `estate/manifest.json`. In release mode it finds the pinned version and the hash recorded for this machine's platform (linux-x64, linux-arm64, osx-x64, osx-arm64, win-x64 or win-arm64).
-2. Fetches `vericairn-0.8.3-<platform>.tar.gz` (or `.zip` on Windows) from the release page, unless `VERICAIRN_RELEASE_BASE` names another directory or URL to fetch from.
+2. Fetches `vericairn-<pinned version>-<platform>.tar.gz` (or `.zip` on Windows) from the release page, unless `VERICAIRN_RELEASE_BASE` names another directory or URL to fetch from.
 3. Computes the archive's SHA-256 and refuses to continue when it differs from the manifest. The hash comes from the manifest, never from the tag name alone.
-4. Unpacks the archive under `.vericairn/toolchain/release/0.8.3/<platform>/` inside the clone, a directory git ignores, and remembers the verified hash beside it so later runs skip the fetch.
+4. Unpacks the archive under `.vericairn/toolchain/release/<pinned version>/<platform>/` inside the clone and remembers the verified hash beside it so later runs skip the fetch. Keep `.vericairn/` in the estate's `.gitignore` so these local downloads stay out of commits.
 5. Runs `bin/vericairn --estate <the clone> <your arguments>`; with no arguments it runs `estate check`.
 
-Expected observation: `estate check` ends with a line like `N records: 0 errors, 0 warnings`, and `status` renders the estate: its work orders, releases, assignments, decisions, documents and the living documents that are due. The bootstrap fetches the version its manifest pins, which is 0.8.3 only after that upgrade has been recorded.
+Expected observation: `estate check` ends with a line like `N records: 0 errors, 0 warnings`, and `status` renders the estate: its work orders, releases, assignments, decisions, documents and the living documents that are due. The bootstrap fetches the version its manifest pins, chosen by `estate init --release` or a recorded upgrade.
 
-If the manifest pins a source commit instead of a release (an estate younger than its first release), the bootstrap builds Vericairn from that commit and needs the .NET SDK named by the source's `global.json`; set `VERICAIRN_SOURCE` to a local clone of the Vericairn source to build from it instead of fetching.
+If the manifest pins a source commit instead of a release (the default for `estate init`), the bootstrap builds Vericairn from that commit and needs the .NET SDK named by the source's `global.json`; set `VERICAIRN_SOURCE` to a clean local clone at that exact commit to build from it instead of fetching.
 
 ## 2. Route B: direct download of the command line
 
