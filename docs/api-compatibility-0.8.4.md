@@ -59,6 +59,37 @@ write-response contract. Older servers have no fallback route. See the
 [operator request guide](operator-requests.md) for record fields, carry-over,
 publication intent and interrupted-write recovery.
 
+## Publication documentation pass (DOCS-12)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.DocumentPass(string version, string? product = null)` | Read the currently due publication queue, changes and proposed patches. The default returns an `unsupported` problem. |
+| `IEstateApi.DocumentPassAssign(string version, DocumentPassAssignRequest request)` | Store an ordinary review work order and assignment for exact displayed declarations. The default returns an `unsupported` problem. |
+| `IEstateApi.DocumentPassAsync` / `DocumentPassAssignAsync` | Default cancellable bridges, classified as a read and a write respectively. Both use the 15-minute preparation deadline. |
+| `EstateService.DocumentPass` / `DocumentPassAssign` | Reuse due-state derivation, prepare patches, validate and store selected review work. |
+| `VericairnClient.DocumentPass` / `DocumentPassAsync` | Call `GET /v1/documents/pass/{version}`, with optional `product`. |
+| `VericairnClient.DocumentPassAssign` / `DocumentPassAssignAsync` | Call `POST /v1/documents/pass/{version}/assignments`. |
+| `CancellationBoundApi.DocumentPass` / `DocumentPassAsync` / `DocumentPassAssign` / `DocumentPassAssignAsync` | Forward the caller's cancellation lifetime. |
+| `DocumentPassPin`, `DocumentPassChange`, `DocumentPassRecord`, `DocumentPassAssignment`, `DocumentPassItem`, `DocumentPassUpdate` | Carry exact record pins, covered file changes, record context, reviewer assignments and proposed patches with byte hashes and base commits. |
+| `DocumentPassResponse`, `DocumentPassAssignRequest`, `DocumentPassAssignResponse` | Carry the current queue, explicit selected pins and storage receipts or problems. Response `Ok` properties derive from `Problem`. |
+| `IDocumentSource.Changes(EstateModel, RecordEnvelope, string? before, string commit)` | Compare local exact publication commits. The default returns an explicit unavailable comparison. A null `before` selects all files of the first publication. |
+| `GitFileSource.Changes`, `DocumentSourceChange`, `DocumentSourceChanges` | Supply added, modified and deleted paths from registered local clones without fetching or changing them. |
+
+Every added interface member has a default implementation; no new abstract member is
+required. Existing record formats and constructors are unchanged. New positional records
+also expose their properties, constructors and generated record members. Review tasks use
+the existing work-order and assignment record types.
+
+Both routes return HTTP 200 with typed responses, including refusals. Inspect `Ok` and
+`Problem`. A partial assignment store can return `Written` receipts with a
+`reconcile-required` problem; inspect those records and the original batch before retrying.
+A cancelled or interrupted assignment can have an unknown outcome. Older servers have no
+fallback route. Listing prepares patches in the response but writes no files or records.
+The synchronous SDK methods preserve the SDK's original transport exceptions; async
+methods and the cancellation-bound wrapper classify interrupted writes as uncertain.
+The command line's explicit `--output` writes proposed patch files; application and review
+remain separate. See [Living documents](living-documents.md#after-a-publication).
+
 ## Operator close (OPS-02)
 
 | Added member | Purpose |

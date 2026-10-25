@@ -565,6 +565,7 @@ public sealed partial class VericairnClient
                 throw new JsonException("The runtime returned no definite write outcome.");
             if (result is OperatorCloseResponse close && request is OperatorCloseRequest closeRequest)
                 _ = CloseOutcome(closeRequest, close);
+            if (result is DocumentPassAssignResponse pass) CheckPassAssignmentOutcome(pass);
             return result;
         }
         catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))

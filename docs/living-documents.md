@@ -76,3 +76,69 @@ Existing triggers, covered paths, policy rules and release gates still apply.
 Generated parts keep their generated-region comparison, quoted parts preserve
 exact record text, and neither synthesis nor a template grants acceptance or
 other authority. Existing non-template living-document behavior is unchanged.
+
+## After a publication
+
+`vericairn docs pass <version>` gathers the documents still due for that publication.
+It uses the same due-state evaluation as `docs living` and the release gate, selecting
+only documents with a release reason that names the exact publication record.
+Documents already cleared for it and documents due only for other reasons are absent.
+After another publication supersedes the release reason, its remaining documents
+appear in the newer publication's pass. The pass is a current review queue, not a
+historical snapshot of the queue on publication day.
+
+Each entry names its declaration, repository, covered paths (including its own file),
+reasons and existing review assignments. Registered clones supply added, modified
+and deleted paths between this publication's commit and the preceding publication
+of the same product. The first publication lists covered files as added. Later work
+at clone HEAD is not attributed to the release. Missing commits, missing sources
+and documents in other repositories have explicit comparison notes; no clone is
+fetched or checked out. Record summaries from the release window provide context,
+with matching estate document revisions, decision document lists and estate result output paths
+also identified beside each document.
+
+```sh
+vericairn docs pass 0.2.0 --product widget
+vericairn docs pass 0.2.0 --product widget --json
+vericairn docs pass 0.2.0 --product widget --output artifacts/docs-pass
+vericairn docs pass 0.2.0 --product widget --document README.md --document ROADMAP.md \
+  --assign-to <reviewer id> --by <assigning principal id> --key DOCS-REVIEW-1
+```
+
+Use `--product` when more than one product published that version. The optional
+assignment selects all listed documents unless `--document` is supplied; repeat it
+for a group. A declaration id distinguishes identical paths in different repositories.
+The reviewer can be a person or agent, including the builder. The assigning principal
+needs operator or local-engineering authority. A new work-order key identifies the
+review task. The runtime validates its ordinary work order and assignment together,
+pins their publication and document sources, and rechecks that every selected document
+is still due before storing. `work brief <key>` gives the reviewer the covered paths,
+file changes, comparison gaps and pinned record context. The reviewer uses the ordinary
+attempt and result flow and `docs review` for each document. Assignment clears nothing;
+the declaration's checks and independence requirement still apply.
+
+The pass also prepares unified patches for declared authored `README.md`, `ROADMAP.md`
+and `docs/releases/README.md` front documents. The README's current-release sentence
+and date are updated; the roadmap moves its current marker to the published version;
+the releases index gains a current entry while retaining the earlier publication's
+text. The supported README forms are the sentence “The current published release is
+0.1.0, from” followed by its date on the next line, and a `Current release: 0.1.0` line.
+Roadmap headings use `## 0.1.0 — current published release` and
+`## 0.2.0 — planned`; the index uses `The current published release is **0.1.0**`.
+Missing or ambiguous markers need a manual update and are reported as notes.
+
+`--json` includes each patch, its base commit when applicable, and before/after hashes.
+`--output` writes one `<declaration id>.patch` per selected front document. It refuses
+existing patch files. Inspect the proposed changes and their source basis before
+applying them. The pass never edits source documents, clears a review, commits a file
+or changes a frozen version directory or its checksum index. Applying, committing
+and reviewing a proposed update remain separate actions. A partial assignment store
+returns its receipts with a reconciliation problem; inspect the original work order
+and batch before retrying.
+
+The API provides `GET /v1/documents/pass/{version}?product=<id or slug>` and
+`POST /v1/documents/pass/{version}/assignments`. The latter accepts `by`, `reviewer`,
+`key`, the displayed `release` pin and an explicit `documents` array of declaration
+pins. Both return typed responses, including problems; SDK callers use `DocumentPass`
+and `DocumentPassAssign`, or their cancellable asynchronous counterparts. See
+[API compatibility](api-compatibility-0.8.4.md#publication-documentation-pass-docs-12).

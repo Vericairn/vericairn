@@ -87,6 +87,8 @@ public static class ApiRoutes
         app.MapPost($"{v}/devices/revoke", (RevokeRequest request) => Outcome(service.DeviceRevoke(request)));
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
+        app.MapGet($"{v}/documents/pass/{{version}}", (string version, string? product) => Results.Json(service.DocumentPass(version, product), ProtocolJson.Options));
+        app.MapPost($"{v}/documents/pass/{{version}}/assignments", (string version, DocumentPassAssignRequest request) => Results.Json(service.DocumentPassAssign(version, request), ProtocolJson.Options));
         app.MapPost($"{v}/documents/pin", (DocumentPinRequest request) =>
         {
             DocumentPinResponse response = service.DocumentPin(request);

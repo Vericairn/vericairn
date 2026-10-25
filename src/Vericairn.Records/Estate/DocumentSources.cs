@@ -44,7 +44,17 @@ public interface IDocumentSource
 
     /// <summary>True when a repository-relative path exists at a commit.</summary>
     bool Exists(EstateModel model, RecordEnvelope declaration, string commit, string path);
+
+    /// <summary>Complete repository file changes between exact local publication commits; null before means the complete first publication.</summary>
+    DocumentSourceChanges Changes(EstateModel model, RecordEnvelope declaration, string? before, string commit) =>
+        new([], "This document source cannot compare publication commits.");
 }
+
+/// <summary>A repository-relative changed file and its added, modified or deleted status.</summary>
+public sealed record DocumentSourceChange(string Path, string Kind);
+
+/// <summary>A complete local comparison, or an explicit gap; an empty successful comparison means no changed files.</summary>
+public sealed record DocumentSourceChanges(IReadOnlyList<DocumentSourceChange> Files, string? Problem = null);
 
 /// <summary>The document sources installed here; registering one makes its name available to declarations.</summary>
 public static class DocumentSources
