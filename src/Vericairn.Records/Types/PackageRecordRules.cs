@@ -20,6 +20,14 @@ internal static class PackageRecordRules
         && packages.ValueKind == JsonValueKind.Object && packages.TryGetProperty("reserved", out JsonElement reserved) && reserved.ValueKind == JsonValueKind.Array
         && reserved.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && string.Equals(item.GetString(), version, StringComparison.OrdinalIgnoreCase));
 
+    // A reserved version's package records anchor on the product declaration, as a release's anchor on the release.
+    internal static bool PinsReserved(RecordEnvelope record) => record.Type switch
+    {
+        "observation" => EstateModel.BodyString(record, "kind") == "package" && record.Body.TryGetProperty("facts", out JsonElement facts) && Has(facts, "reserved"),
+        "operation" => IsAction(record) && record.Body.TryGetProperty("target", out JsonElement target) && Has(target, "reserved"),
+        _ => false,
+    };
+
     internal static void Observation(ValidationContext context, string? kind, BodyReader? facts)
     {
         IReadOnlyList<BodyReader>? evidence = context.Body.Since(3, "evidence")

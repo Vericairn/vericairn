@@ -121,7 +121,8 @@ vericairn packages unlist --product <product-id> --version 0.0.1-reserved --rese
 ```
 
 The observation and account-holder intent pin the exact product id and hash and the reserved
-version, with no release pins. Response evidence, intent-before-effect ordering and confirmation
+version, with no release pins. Revising the product declaration later leaves those records current;
+the declaration is only their anchor. Response evidence, intent-before-effect ordering and confirmation
 checks are the same as for a release's packages. Without `--reserved`, commands still require a
 recorded release; with it, they require the current product declaration to reserve that version.
 A version satisfying neither selection is refused. No package command creates a release.

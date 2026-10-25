@@ -144,6 +144,25 @@ public sealed class ReservedPackageTests
     }
 
     [Fact]
+    public void AProductRevisionLeavesReservedPackageRecordsCurrent()
+    {
+        // The product declaration is revised far more often than a release, so its reserved versions' records must not turn stale.
+        using var f = new PackageTestEstate(reserved: true);
+        PackagesResponse observed = f.Service.PackagesObserve(f.Observe);
+        Assert.True(observed.Ok, observed.Message);
+        PackagesResponse intent = f.Service.PackagesUnlist(f.Unlist);
+        Assert.True(intent.Ok, intent.Message);
+        JsonNode product = JsonNode.Parse(f.Product.Body.GetRawText())!;
+        product["summary"] = "A newer declaration.";
+        f.Estate.Add("product", f.Estate.OperatorId, product.ToJsonString(), supersedes: f.Product.Id);
+        f.Reopen();
+        var model = f.Service.Session.Load();
+        string[] paths = [.. model.OfType("observation").Concat(model.OfType("operation")).Select(record => record.ExpectedPath)];
+        Assert.Equal(2, paths.Length);
+        Assert.DoesNotContain(model.Findings, finding => finding.Code == "record.subject-stale" && paths.Contains(finding.Location));
+    }
+
+    [Fact]
     public void ADeclarationChangedDuringAReservedReadRequiresANewSelection()
     {
         using var f = new PackageTestEstate(reserved: true);
