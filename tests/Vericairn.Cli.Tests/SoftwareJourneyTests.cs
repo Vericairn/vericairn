@@ -144,7 +144,7 @@ public class SoftwareJourneyTests
             string resource = CliHarness.Ok("--estate", root, "--json", "records", "new", "resource", "--by", op, "--body", CliHarness.WriteJson(scratch, "resource.json", """{"kind":"repository","name":"Widget","role":"source","location":{"github":"Example/widget"},"visibility":"public"}""")).Id;
 
             // Submit: the intent is a record before the dispatch; the run is recorded as observed.
-            CliHarness.Outcome submitted = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome submitted = ReleaseJourney.OkHeld(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal("dispatched", submitted.Json.GetProperty("status").GetString());
             string run = submitted.Json.GetProperty("run").GetString()!;
             Assert.Single(provider.Dispatches);
@@ -157,7 +157,7 @@ public class SoftwareJourneyTests
             CliHarness.Outcome pending = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Contains("in progress", pending.Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
             Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
-            Assert.Equal(2, ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
+            Assert.Equal(2, ReleaseJourney.RunHeld(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
 
             // The run succeeds and the draft appears: the operation is observed-success and the candidate is recorded with every distributable by hash.
             provider.CompleteRun("Example/widget", run, true, "0.2.0");
@@ -168,7 +168,7 @@ public class SoftwareJourneyTests
             string candidateHash = built.Json.GetProperty("candidate").GetProperty("hash").GetString()!;
             Assert.Contains("0.2.0  candidate", CliHarness.Ok("--estate", root, "release", "list").Out, StringComparison.Ordinal);
             Assert.Contains("not published", CliHarness.Run("--estate", root, "estate", "upgrade", "--to", "0.2.0", "--check").Err, StringComparison.Ordinal);
-            Assert.Equal(2, ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
+            Assert.Equal(2, ReleaseJourney.RunHeld(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
 
             // Automation's verification of the run is recorded from the host's own report.
             CliHarness.Outcome ci = CliHarness.Ok("--estate", root, "--json", "check", "observe", "--resource", resource, "--repository", "Example/widget", "--run", run, "--workflow", "release.yml", "--by", builder);
@@ -234,27 +234,27 @@ public class SoftwareJourneyTests
 
             // A missing account blocks that destination, not local work; the refusal is a known failure and a retry names its reconciliation.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
-            CliHarness.Outcome refused = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome refused = ReleaseJourney.RunHeld(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(1, refused.Code);
             Assert.Equal("known-failure", refused.Json.GetProperty("status").GetString());
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
-            Assert.Equal(2, ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Code);
+            Assert.Equal(2, ReleaseJourney.RunHeld(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Code);
             int beforeRetry = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
-            CliHarness.Outcome retried = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "Logged in; the refused attempt had no effect.");
+            CliHarness.Outcome retried = ReleaseJourney.OkHeld(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "Logged in; the refused attempt had no effect.");
             Assert.Equal("dispatched", retried.Json.GetProperty("status").GetString());
             Assert.Single(retried.Json.GetProperty("basisEvidence").EnumerateArray());
             Assert.Equal(beforeRetry + 2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
 
             // An uncertain dispatch stays uncertain until reconciled; cancellation settles it once no effect is found.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.Uncertain;
-            CliHarness.Outcome uncertain = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome uncertain = ReleaseJourney.RunHeld(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(1, uncertain.Code);
             Assert.Equal("uncertain", uncertain.Json.GetProperty("status").GetString());
             Assert.Contains("no run is identified", CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--cancel", "GitHub shows no run and no release for v0.4.0.");
             Assert.Contains("github-releases:Example/widget:v0.4.0  canceled", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
             int beforeCanceledRetry = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
-            CliHarness.Outcome canceledRetry = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "The canceled intent was confirmed to have no effect.");
+            CliHarness.Outcome canceledRetry = ReleaseJourney.OkHeld(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "The canceled intent was confirmed to have no effect.");
             Assert.Equal("dispatched", canceledRetry.Json.GetProperty("status").GetString());
             Assert.Single(canceledRetry.Json.GetProperty("basisEvidence").EnumerateArray());
             Assert.Equal(beforeCanceledRetry + 2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
