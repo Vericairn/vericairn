@@ -131,5 +131,96 @@ public sealed class LocalPushTests : IDisposable
         return BoundedProcess.Run(info, TestTiming.HangTimeout);
     }
 
+    [Fact]
+    public void ACraftedCommitGraphCannotMakeANonAncestorPassTheFastForwardCheck()
+    {
+        // The remote's work/change is a commit the local head does not descend from, so a push to it is not a fast-forward and must
+        // be refused. A clone writes its own commit-graph; tampering with that cache to claim the remote commit is an ancestor must
+        // not change the adapter's answer, because the check reads the real objects.
+        CommitAt("2026-01-01T00:00:00Z", "readme.txt", "Initial content.\n", "init", "init", "--initial-branch=main");
+        string basis = Git(repository, "rev-parse", "HEAD");
+
+        Git(repository, "checkout", "-b", "remote-only");
+        CommitAt("2026-01-01T00:00:01Z", "remote-only.txt", "A remote commit not in the local head.\n", "Remote-only commit");
+        string remoteOnly = Git(repository, "rev-parse", "HEAD");
+
+        Git(directory, "clone", "--bare", "--", repository, remote);
+        Git(remote, "update-ref", "refs/heads/work/change", remoteOnly);
+
+        Git(repository, "checkout", "main");
+        Git(repository, "checkout", "-b", "work/change");
+        CommitAt("2026-01-02T00:00:00Z", "addition.txt", "First local commit.\n", "First local commit");
+        string middle = Git(repository, "rev-parse", "HEAD");
+        CommitAt("2026-01-03T00:00:00Z", "addition.txt", "Second local commit.\n", "Second local commit");
+        string head = Git(repository, "rev-parse", "HEAD");
+
+        // Build the cache, then rewire the middle commit's first parent to the remote-only commit. git then reports the remote-only
+        // commit as an ancestor of the head unless the cache is ignored; the honest graph's generation numbers do not block the walk
+        // because the remote-only commit is dated before the rewired commit.
+        Git(repository, "commit-graph", "write", "--reachable");
+        RewireFirstParent(Path.Combine(repository, ".git", "objects", "info", "commit-graph"), middle, remoteOnly);
+
+        var adapter = Adapter();
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(
+            () => adapter.Prepare(repository, remote, "work/change", "main", head));
+        Assert.Contains("not a known ancestor", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(remoteOnly, Git(remote, "rev-parse", "refs/heads/work/change"));
+    }
+
+    // Commit one file at an exact author and committer date, so the commit-graph's generation numbers are predictable.
+    private void CommitAt(string date, string file, string content, string message, params string[] before)
+    {
+        if (before.Length > 0) Git(repository, before);
+        File.WriteAllText(Path.Combine(repository, file), content);
+        Git(repository, "add", file);
+        GitAt(repository, date, "commit", "-m", message);
+    }
+
+    private string GitAt(string workingDirectory, string date, params string[] args)
+    {
+        string? author = Environment.GetEnvironmentVariable("GIT_AUTHOR_DATE");
+        string? committer = Environment.GetEnvironmentVariable("GIT_COMMITTER_DATE");
+        Environment.SetEnvironmentVariable("GIT_AUTHOR_DATE", date);
+        Environment.SetEnvironmentVariable("GIT_COMMITTER_DATE", date);
+        try { return Git(workingDirectory, args); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GIT_AUTHOR_DATE", author);
+            Environment.SetEnvironmentVariable("GIT_COMMITTER_DATE", committer);
+        }
+    }
+
+    // Overwrite one commit's first-parent slot in a version-1 commit-graph so the cache misreports ancestry. The checksum trailer
+    // is left stale on purpose: git still trusts the cache, which is why a checked push must not consult it.
+    private static void RewireFirstParent(string path, string child, string parent)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        Assert.True(data[0] == (byte)'C' && data[1] == (byte)'G' && data[2] == (byte)'P' && data[3] == (byte)'H' && data[4] == 1);
+        int hashLength = data[5] == 1 ? 20 : 32;
+        int chunks = data[6];
+        var offsets = new Dictionary<string, long>();
+        for (int i = 0; i <= chunks; i++)
+        {
+            int entry = 8 + 12 * i;
+            string id = System.Text.Encoding.ASCII.GetString(data, entry, 4);
+            offsets[id] = System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(data.AsSpan(entry + 4, 8));
+        }
+        long names = offsets["OIDL"];
+        long records = offsets["CDAT"];
+        int count = (int)((records - names) / hashLength);
+        int Index(string hex)
+        {
+            byte[] id = Convert.FromHexString(hex);
+            for (int i = 0; i < count; i++)
+                if (data.AsSpan((int)names + i * hashLength, hashLength).SequenceEqual(id)) return i;
+            throw new InvalidOperationException("The commit is not in the graph.");
+        }
+        long slot = records + (long)Index(child) * (hashLength + 16) + hashLength;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan((int)slot, 4), (uint)Index(parent));
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        File.WriteAllBytes(path, data);
+    }
+
     public void Dispose() => WorkspaceCleanup.Delete(directory);
 }
