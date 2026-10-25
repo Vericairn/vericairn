@@ -208,10 +208,14 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(104, synchronous.Length);
+        Assert.Equal(106, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.WorkNew));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseCheck));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.RunSettle));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.OperatorCloseCandidates));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.OperatorClose));
+        foreach (string name in new[] { nameof(IEstateApi.OperatorCloseCandidates), nameof(IEstateApi.OperatorClose), nameof(IEstateApi.OperatorCloseCandidatesAsync), nameof(IEstateApi.OperatorCloseAsync) })
+            Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];
@@ -604,6 +608,57 @@ public sealed class SdkOperationsTests
             client.DocumentPinAsync(new("docs/guide.md", "author", "Next revision."), TestContext.Current.CancellationToken));
         Assert.True(failure.OutcomeUnknown);
         Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"written\":null}")]
+    [InlineData("{\"written\":[]}")]
+    [InlineData("{\"written\":[null]}")]
+    [InlineData("{\"written\":[{}]}")]
+    [InlineData("{\"written\":[{\"path\":\"acceptance.json\",\"id\":\"acceptance\",\"hash\":\"hash\"}],\"problem\":{\"code\":\"refused\",\"message\":\"Not written.\",\"findings\":[]}}")]
+    public async Task AnIncompleteOperatorCloseResponseIsUncertainAndNeverRetried(string shape)
+    {
+        int requests = 0;
+        using var client = Client((_, _) =>
+        {
+            requests++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(shape) });
+        });
+        var request = new OperatorCloseRequest("operator", [new("STEP-1", new("order", "hash"), new("result", "hash"), [new("review", "hash")])]);
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() => client.OperatorCloseAsync(request, TestContext.Current.CancellationToken));
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task OperatorClosePreservesReceiptsThatNeedBatchReconciliation()
+    {
+        var receipt = new RecordWritten("acceptance.json", "acceptance", "hash");
+        var response = new OperatorCloseResponse([receipt], new("reconcile-required", "Inspect the original batch.", []));
+        using var client = Client((_, _) => Task.FromResult(Json(response)));
+        var request = new OperatorCloseRequest("operator", [
+            new("STEP-1", new("order", "hash"), new("result", "hash"), [new("review", "hash")]),
+            new("STEP-2", new("other-order", "hash"), new("other-result", "hash"), [new("other-review", "hash")]),
+        ]);
+        OperatorCloseResponse synchronous = client.OperatorClose(request);
+        OperatorCloseResponse asynchronous = await client.OperatorCloseAsync(request, TestContext.Current.CancellationToken);
+        Assert.False(synchronous.Ok);
+        Assert.False(asynchronous.Ok);
+        Assert.Equal(receipt, Assert.Single(synchronous.Written));
+        Assert.Equal(receipt, Assert.Single(asynchronous.Written));
+        Assert.Equal("reconcile-required", asynchronous.Problem!.Code);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task AnUnreadableOperatorCloseRejectionDoesNotClaimAnUncertainWrite(HttpStatusCode status)
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") }));
+        var request = new OperatorCloseRequest("operator", []);
+        ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => client.OperatorCloseAsync(request, TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
     }
 
     [Fact]

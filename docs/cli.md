@@ -6,6 +6,29 @@ Revision 3, October 20, 2026. Add package registry observations and account-hold
 
 The build generates the complete CLI reference from its command tree, including every option. Published references under `docs/releases/` describe their frozen builds. This page documents commands added after 0.8.0 for 0.8.2. The [operator's guide](operator-guide.md) describes 0.8.3's additions: `work new`, `release withdraw`, `work move-plan`, `release submit --check`, `estate init --release` and `estate upgrade --from`.
 
+## `vericairn operator close`
+
+The 0.8.4 development build replaces per-release closing scripts with an operator command.
+Without options it lists exactly the latest completed, reviewed and unaccepted results with their
+exit questions, result summaries, passing-review summaries and independence, and exact hashes.
+
+| Option | Meaning |
+|---|---|
+| `--select <key>` | Select a work-order key; repeat for several steps. |
+| `--all` | Select the entire displayed eligible list; cannot be combined with `--select`. |
+| `--by <operator-id>` | Required with a selection. The operator's own admitted device signs every acceptance. |
+| `--from <file>` | Use a saved `operator close --json` listing with a selection; `-` reads standard input. |
+| `--json` | Print one typed response. Selected evidence is shown on standard error before signing. |
+| `--estate <root>`, `-e <root>` | Select the estate. |
+
+Each acceptance names its exact result and all displayed passing reviews. A changed selected
+work order, result or review, a missing passing review, an existing acceptance or a non-operator
+refuses the whole action without acceptances. `--all` also pins complete eligible membership.
+Current signing custody checks presence per acceptance when required. Exit 0 means success,
+1 a selection or record refusal, and 2 invalid arguments or a client failure. The
+[operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
+listings, API/SDK counterparts and recovery after interrupted storage.
+
 ## `vericairn docs pin`
 
 Record a document's next revision from the exact bytes in the estate repository:

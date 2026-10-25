@@ -1,5 +1,30 @@
 # API compatibility in 0.8.4
 
+## Operator close (OPS-02)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.OperatorCloseCandidates()` | Read finished, reviewed and unaccepted steps with exact work-order, result and review pins. The default returns an `unsupported` problem. |
+| `IEstateApi.OperatorClose(OperatorCloseRequest)` | Sign the displayed selections as one validated batch. The default returns an `unsupported` problem. |
+| `IEstateApi.OperatorCloseCandidatesAsync(CancellationToken = default)` | Default cancellable read bridge. |
+| `IEstateApi.OperatorCloseAsync(OperatorCloseRequest, CancellationToken = default)` | Default cancellable write bridge. |
+| `EstateService.OperatorCloseCandidates` / `OperatorClose` / `OperatorCloseAsync` | Derive the list, validate exact selections, sign and store their acceptances. The synchronous write also has a cancellation-token overload. |
+| `VericairnClient.OperatorCloseCandidates` / `OperatorCloseCandidatesAsync` | Call `GET /v1/operator/close`. |
+| `VericairnClient.OperatorClose` / `OperatorCloseAsync` | Call `POST /v1/operator/close`; the asynchronous operation uses the 15-minute operator-action deadline. |
+| `CancellationBoundApi.OperatorCloseCandidates` / `OperatorCloseCandidatesAsync` / `OperatorClose` / `OperatorCloseAsync` | Forward the operation with the caller's cancellation lifetime. |
+| `OperatorClosePin`, `OperatorCloseReview`, `OperatorCloseItem`, `OperatorCloseSelection` | Carry exact displayed evidence. `OperatorCloseItem.ToSelection()` copies its subject and review pins. |
+| `OperatorCloseCandidatesResponse`, `OperatorCloseRequest`, `OperatorCloseResponse` | Carry the listing, explicit selection and acceptance receipts or refusal. Response `Ok` properties derive from `Problem`. |
+
+All four new interface members have default implementations. Existing implementers remain
+loadable; no new abstract member is required. Positional records expose their named properties,
+constructors and generated record members. Existing constructors and record formats are unchanged.
+The signing interface is unchanged and checks presence per signature where required.
+
+The new routes return HTTP 200 with typed responses, including refusals. Callers inspect `Ok`
+and `Problem`; a storage interruption can return `Written` receipts alongside a reconciliation
+problem. Older servers have no fallback route. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
+for the selection contract and recovery behavior.
+
 ## Worker settlement recovery (FIX-65)
 
 | Added member | Purpose |

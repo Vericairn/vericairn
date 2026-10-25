@@ -135,6 +135,70 @@ publication record. The workflow does not call the estate automatically: the pos
 observation is an operator step. See the [CLI reference](cli.md#vericairn-packages) for every option,
 JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-082) for the read bounds.
 
+## Close finished steps in one action
+
+The 0.8.4 development build adds `vericairn operator close`. The per-release closing scripts
+are retired. Run this command on your own admitted operator device:
+
+```sh
+vericairn operator close
+vericairn operator close --select STEP-1 --select STEP-3 --by <operator-id>
+vericairn operator close --all --by <operator-id>
+```
+
+Without a selection, the command is read-only. It lists every current work order whose latest
+result is `completed`, has at least one current `pass` review of that exact result, and has no
+acceptance of that result. Each entry shows its key, work-order id and hash, exit question, result
+id, hash, outcome and summary, and every passing review's id, hash, independence and summary.
+Both ordinary work and milestones can appear. A partial or blocked latest result, an old review
+of a superseded result, or a superseded passing review cannot qualify a step.
+
+`--select` is repeatable. `--all` selects the complete eligible list across the estate; inspect it
+before using it when several releases have finished work. The selected evidence is displayed
+before signing. Each acceptance names the exact result as its subject and every displayed passing
+review as its basis, states that the operator closed it with `operator close`, and records `self`
+according to who authored the result. These acceptances judge results; release acceptance remains
+a separate operator judgment.
+
+To preserve a listing while inspecting it, save its JSON and supply it with the selection:
+
+```sh
+vericairn operator close --json > closing.json
+vericairn operator close --from closing.json --select STEP-1 --by <operator-id>
+vericairn operator close --from closing.json --all --by <operator-id>
+```
+
+`--from -` reads a saved listing from standard input. Without `--from`, a selection reads and
+displays fresh evidence in that invocation. The runtime compares the supplied work-order, result
+and complete passing-review pins with the current records. It refuses the entire selection if
+any pin changed, a newer result arrived, a passing review is missing or replaced, an acceptance
+already arrived, or the actor is not an operator. `--all` also requires the complete eligible
+membership to remain unchanged. A partial selection is unaffected by changes to unselected steps.
+Refresh the listing and inspect the changed evidence before selecting again.
+
+The command uses the same admitted-device signing path as `operator record`, requiring a signature
+even in an estate that permits unsigned records. The installed custody interface signs one record
+at a time, so a device that requires presence checks it once per acceptance. All selected records
+are signed and validated before the batch starts storing them; an evidence or authority refusal
+writes no acceptance. An interrupted storage operation retains its receipts and journal for
+reconciliation, using the existing batch recovery mechanism. Inspect those receipts before retrying.
+This command records the closings locally; it does not carry them through repository operations.
+
+The API exposes `GET /v1/operator/close` and `POST /v1/operator/close`. SDK clients use
+`OperatorCloseCandidates()` and `OperatorClose(OperatorCloseRequest)`, or their `Async`
+counterparts. The read returns `items`, `ok` and `problem`; each item provides `ToSelection()`
+to copy its exact evidence pins. The write request contains `by`, `selection` and optional
+`all` (default `false`). A selection contains `key`, `workOrder` and `result` pins (`id`, `hash`),
+and the complete array of passing-review pins in `reviews`. The response contains `written`
+acceptance receipts, `ok` and `problem`, with HTTP 200 including refusals. Authenticated requests
+can act only for their own principal. Neither route is exposed through MCP.
+
+`--json` emits the typed read or write response; during a write the evidence appears on standard
+error before signing so standard output remains one JSON document. Exit 0 means the read is valid
+or the complete selection was stored, 1 means a record or selection refusal, and 2 means invalid
+arguments or a client failure. An interrupted client request retains the existing uncertainty
+rules: inspect current acceptances before retrying.
+
 ## Record and merge in one command
 
 Fill the required body fields, inspect the pinned evidence, and run the item's **Record and merge**

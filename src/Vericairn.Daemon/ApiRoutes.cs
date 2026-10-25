@@ -90,6 +90,8 @@ public static class ApiRoutes
         app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
             Results.Json(service.OperatorActions(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
         app.MapPost($"{v}/operator/record", async (OperatorRecordRequest request, HttpContext context) => Results.Json(await service.OperatorRecordAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        app.MapGet($"{v}/operator/close", () => Results.Json(service.OperatorCloseCandidates(), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/close", async (OperatorCloseRequest request, HttpContext context) => Results.Json(await service.OperatorCloseAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());

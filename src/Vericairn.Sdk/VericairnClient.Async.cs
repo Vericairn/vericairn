@@ -310,6 +310,14 @@ public sealed partial class VericairnClient
     public Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<OperatorRecordResponse>(nameof(OperatorRecord), async token => (await PostAsync<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorRecord)), cancellationToken);
 
+    /// <inheritdoc />
+    public Task<OperatorCloseCandidatesResponse> OperatorCloseCandidatesAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OperatorCloseCandidatesResponse>(nameof(OperatorCloseCandidates), async token => (await GetAsync<OperatorCloseCandidatesResponse>("/v1/operator/close", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(OperatorCloseCandidates)), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<OperatorCloseResponse> OperatorCloseAsync(OperatorCloseRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OperatorCloseResponse>(nameof(OperatorClose), async token => (await PostAsync<OperatorCloseRequest, OperatorCloseResponse>("/v1/operator/close", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorClose)), cancellationToken);
+
     /// <summary>The cancellable Goals operation, with a deadline covering the complete response.</summary>
     public Task<IReadOnlyList<GoalRow>> GoalsAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<IReadOnlyList<GoalRow>>(nameof(Goals), async token => (await GetAsync<List<GoalRow>>("/v1/goals", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Goals)), cancellationToken);
@@ -551,6 +559,8 @@ public sealed partial class VericairnClient
                 or DocumentPinResponse { Written: not null, Revision: null or <= 0 }
                 or DocumentPinResponse { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
                 throw new JsonException("The runtime returned no definite write outcome.");
+            if (result is OperatorCloseResponse close && request is OperatorCloseRequest closeRequest)
+                _ = CloseOutcome(closeRequest, close);
             return result;
         }
         catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))

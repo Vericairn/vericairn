@@ -322,6 +322,22 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => Post<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request)!;
 
     /// <inheritdoc />
+    public OperatorCloseCandidatesResponse OperatorCloseCandidates() => Get<OperatorCloseCandidatesResponse>("/v1/operator/close")!;
+
+    /// <inheritdoc />
+    public OperatorCloseResponse OperatorClose(OperatorCloseRequest request) => CloseOutcome(request, Post<OperatorCloseRequest, OperatorCloseResponse>("/v1/operator/close", request));
+
+    private static OperatorCloseResponse CloseOutcome(OperatorCloseRequest request, OperatorCloseResponse? response)
+    {
+        if (response?.Written is null || response.Written.Any(r => r is null || string.IsNullOrWhiteSpace(r.Id) || string.IsNullOrWhiteSpace(r.Hash) || string.IsNullOrWhiteSpace(r.Path))
+            || response.Written.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != response.Written.Count
+            || response.Ok && (request.Selection is null || response.Written.Count != request.Selection.Count)
+            || response.Written.Count > 0 && response.Problem is not null and not { Code: "reconcile-required" })
+            throw new JsonException("The runtime returned no definite operator-close outcome. Inspect the selected results' acceptances before retrying.");
+        return response;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />
