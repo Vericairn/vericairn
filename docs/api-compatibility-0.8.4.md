@@ -18,6 +18,10 @@ remain loadable. The positional request and response records also expose their
 named properties and generated record members. Existing constructors and record
 formats are unchanged.
 
+The new retained recovery fields are local storage internals, excluded from the
+run inspector's metadata projection. Existing inspector bytes and hashes remain
+unchanged; the settlement and run API carry the recorded usage and audit facts.
+
 The API returns HTTP 200 with the response, including refusals. Callers inspect
 `Ok` and `Problem`; codes include `in-flight`, `already-settled`, `unresolved`,
 `not-found`, `refused` and `denied`. A successful `Operation` is the settlement

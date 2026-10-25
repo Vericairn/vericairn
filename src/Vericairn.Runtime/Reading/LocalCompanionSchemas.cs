@@ -49,10 +49,6 @@ internal static class LocalCompanionSchemas
         schemas["connections"] = [F("id", "identity"), F("estate", "id"), F("device", "id"), F("principal", "id"), F("identityFingerprint", "hash"), F("pairedAt", "time"), A("profiles", "embedded|local-socket|loopback|local-network|relay"), F("state", "connecting|current|cached|partial|denied|unavailable"), O("observed", F("state", "connecting|current|cached|partial|denied|unavailable"), F("at", "time")), O("lastCurrent", F("at", "time"))];
         schemas["write-ledger"] = [F("id", "identity"), F("at", "time"), F("device", "id"), F("principal", "id"), F("operation", "operation"), F("state", "pending|written|failed|interrupted|unknown"), F("record", "id"), F("hash", "hash"), A("candidates", "id")];
         schemas["run-state"] = [F("run", "id"), F("heartbeatSeconds", "duration"), F("launchedAt", "time"), F("heartbeat", "time"), F("heartbeats", "number"), F("output", "time"), F("tokens", "number"), F("exitCode", "signed"), F("exitedAt", "time"), F("settled", "observed-success|known-failure|uncertain|canceled"),
-            F("settlementPrepared", "bool"), F("minuteTicks", "number"),
-            // Recovery retains full copies; the inspector selects accounting metadata, omitting raw text and paths.
-            O("outcome", F("exitCode", "signed"), F("heartbeats", "number"), F("tokens", "number"), F("price", "number"), F("priceUnit", "selector")),
-            O("scope", F("changed", "number"), F("outsideCount", "number")),
             O("liveness", F("stallSeconds", "number"), F("lastEventAt", "time"), F("attentionAt", "time"), F("attention", "id"), F("stoppedAt", "time")),
             O("stop", F("requestedAt", "time"), F("requestedBy", "actor"), F("transmittedAt", "time"), F("acknowledgedAt", "time"), F("escalatedAt", "time"), F("containedAt", "time")),
             L("signals", F("severity", "warning|critical"), F("at", "time"), F("count", "number"), F("attention", "id")),
