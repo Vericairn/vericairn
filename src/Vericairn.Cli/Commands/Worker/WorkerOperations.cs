@@ -157,7 +157,8 @@ internal sealed class WorkerOperations(CommandContext context)
             context.Output.WriteLine($"run {response.Run}  {response.Status}");
             context.Output.WriteLine("  " + response.Message);
         }
-        return response.Ok ? Clean : HasErrors;
+        // A refused or unresolved settlement fails the command, as a refused stop does.
+        return response.Ok ? Clean : Failed;
     });
 
     /// <summary>Lists the agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>

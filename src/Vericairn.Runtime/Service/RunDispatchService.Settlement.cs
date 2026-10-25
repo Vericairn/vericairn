@@ -45,7 +45,7 @@ internal sealed partial class RunDispatchService
             foreach (AgentRuns.Run run in AgentRuns.All(session.Load()).Where(r => r.InFlight))
             {
                 RunSettleResponse response = SettleRetained(run, run.Intent.By);
-                if (!response.Ok && response.Problem?.Code != "in-flight") settlementProblems[run.Id] = response.Message;
+                if (!response.Ok && response.Problem?.Code is not ("in-flight" or "no-observation")) settlementProblems[run.Id] = response.Message;
             }
         }
     }
@@ -64,7 +64,12 @@ internal sealed partial class RunDispatchService
         {
             return Unresolved("The worker's retained run observation could not be read; settlement remains unresolved.");
         }
-        if (observed is null) return Unresolved("No retained run observation is available on this machine; settlement remains unresolved.");
+        // A run another machine supervised has no run directory here, and that absence is not a local concern; a lost
+        // observation in this machine's own run directory stays unresolved.
+        if (observed is null)
+            return Directory.Exists(directory.Path)
+                ? Unresolved("No retained run observation is available on this machine; settlement remains unresolved.")
+                : SettlementProblem(run.Id, "no-observation", "This machine did not supervise the run and retains no observation of it; settle it where it ran.", run.Status);
         if (observed.Run != run.Id) return Unresolved("The retained observation names a different run; settlement remains unresolved.");
         if (observed.Settled is not null) return Unresolved("The local observation claims settlement but the records do not; reconcile the records before retrying.");
         if (observed.ExitedAt is null)
