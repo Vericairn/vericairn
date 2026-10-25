@@ -1,5 +1,36 @@
 # API compatibility in 0.8.4
 
+## Release review briefs (CODE-09)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.ReleaseReviewBrief(string version, string? product = null, string? decision = null)` | Read a deterministic candidate review brief. The default returns an `unsupported` problem. |
+| `IEstateApi.ReleaseReviewAssign(string version, ReleaseReviewAssignRequest request)` | Recheck the prepared brief hash and store its Reviewer assignment. The default returns an `unsupported` problem. |
+| `IEstateApi.ReleaseReviewBriefAsync` / `ReleaseReviewAssignAsync` | Default cancellable read and write bridges, each with an optional cancellation token. |
+| `EstateService.ReleaseReviewBrief` / `ReleaseReviewAssign` | Select records and store the exact prepared assignment through normal record validation and signing. |
+| `VericairnClient.ReleaseReviewBrief` / `ReleaseReviewBriefAsync` | Call `GET /v1/releases/{version}/review-brief`, preserving product and decision queries. |
+| `VericairnClient.ReleaseReviewAssign` / `ReleaseReviewAssignAsync` | Call `POST` on the same path. The asynchronous write uses the 15-minute preparation deadline. |
+| `CancellationBoundApi.ReleaseReviewBrief` / `ReleaseReviewAssign` and their asynchronous counterparts | Forward with the caller's cancellation lifetime. |
+| `ReleaseReviewAssignRequest(string By, string Expected, string? Product = null, string? Decision = null)` | Carry the assigning principal, exact prepared text hash and selection. |
+| `ReleaseReviewBriefResponse(string Text, string? Hash = null, JsonElement? Brief = null, string? Reviewer = null, RecordWritten? Assignment = null, Problem? Problem = null, string RequestedProgress = "unavailable")` | Carry the complete preparation or assignment receipt. `Ok` derives from `Problem`. `RequestedProgress` reserves the WATCH-02 integration seam without enabling it. |
+
+All four added interface members have default implementations; none requires an
+existing implementer to add a member. Positional records also expose their named
+properties, constructors and generated record members. Existing constructors are
+unchanged. Older servers have no fallback route.
+
+Both routes return HTTP 200 with the typed response, including refusals. Assignment
+requires the current prepared hash and the ordinary assignment authority. Paired
+requests bind `By` to their authenticated principal and retain the assignment receipt
+or refusal in the write ledger. Cancellation after a POST can leave its outcome
+unknown; inspect the work order before retrying.
+
+From 0.8.4, format-3 decisions may carry `releaseReview`, and format-3 assignment briefs
+may carry `reviewBrief`. Existing records are unchanged; earlier builds do not understand
+these optional fields. Upgrade the estate before recording them. The
+[release review guide](software.md#preparing-a-release-review-084) gives the selection,
+worker requirements and record format.
+
 ## Operator close (OPS-02)
 
 | Added member | Purpose |

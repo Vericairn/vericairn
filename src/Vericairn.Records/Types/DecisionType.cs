@@ -48,6 +48,7 @@ public sealed class DecisionType : IRecordType
         new("answer", "object", false, "Guided answer: exact ask revision id, hash and the operator's answer time (at). Supplied words remain in statement.", 2),
         new("changeSet", "object", false, "Guided change: baseCommit, observed head and exact document pins (path, id, hash), matching documents.", 2),
         new("policies", "object[]", false, "Keyed declare/revise/retire requirements: policy key or identity, priorHash for changes, change and optional exact definitionHash. A requirement does not grant authority.", 3),
+        new("releaseReview", "object", false, "Approved release review: exact candidate and workOrder references, scope (full|focused), focus and probes string arrays. Focused reviews require a focus; full reviews leave it empty.", 3),
     ];
 
     /// <inheritdoc />
@@ -56,6 +57,7 @@ public sealed class DecisionType : IRecordType
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
         PolicyRequirements.Validate(context);
+        ReleaseReviewRules.ValidateDecision(context);
         body.Text("title", true, 200);
         body.Text("statement", true, 20000);
         body.Text("summary", true, 4000);

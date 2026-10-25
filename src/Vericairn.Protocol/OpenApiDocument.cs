@@ -113,6 +113,8 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/settle"),
         ("POST", "/v1/work/{key}/move-plan"),
         ("POST", "/v1/releases/withdraw"),
+        ("GET", "/v1/releases/{version}/review-brief"),
+        ("POST", "/v1/releases/{version}/review-brief"),
         ("POST", "/v1/releases/check"),
         ("POST", "/v1/releases/submit"),
         ("POST", "/v1/releases/observe"),
@@ -142,6 +144,8 @@ public static class OpenApiDocument
 
     /// <summary>The path of the document itself.</summary>
     public const string Path = "/openapi/v1.json";
+
+    private static readonly string[] ReviewBriefParameterNames = ["version", "product", "decision"];
 
     /// <summary>The document as JSON.</summary>
     public static string Json { get; } = Build();
@@ -202,6 +206,13 @@ public static class OpenApiDocument
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
             }
+
+            if (method == "GET" && path == "/v1/releases/{version}/review-brief")
+                operation["parameters"] = new JsonArray(ReviewBriefParameterNames.Select(name => (JsonNode)new JsonObject
+                {
+                    ["name"] = name, ["in"] = name == "version" ? "path" : "query", ["required"] = name == "version",
+                    ["schema"] = new JsonObject { ["type"] = "string" },
+                }).ToArray());
 
             if (method == "GET" && path == "/v1/estate-policies/access")
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "Acting principal whose current policy action admission is inspected; exact bounds are rechecked for every write." });
@@ -421,6 +432,14 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ChangeResponse: recorded intent, observed effect and exact-head evidence; uncertainty never authorizes retry.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ChangeResponse" } } } };
+        }
+        else if (path == "/v1/releases/{version}/review-brief")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "ReleaseReviewBriefResponse: complete record-derived text and hash, assignment brief and Reviewer, or a typed refusal. POST rechecks the hash before recording an assignment; neither route launches a worker.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseReviewBriefResponse" } } },
+            };
         }
         else if (method == "POST" && path is "/v1/releases/withdraw" or "/v1/work/{key}/move-plan")
         {
@@ -694,6 +713,8 @@ public static class OpenApiDocument
             ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
             ["ReleaseWithdrawRequest"] = Object(("release", "string"), ("by", "string"), ("expected", "string"), ("provider", "string"), ("reason", "string"), ("settings", "object")),
+            ["ReleaseReviewAssignRequest"] = Object(("by", "string"), ("expected", "string"), ("product", "string"), ("decision", "string")),
+            ["ReleaseReviewBriefResponse"] = Object(("text", "string"), ("hash", "string"), ("brief", "object"), ("reviewer", "string"), ("assignment", "object"), ("problem", "object"), ("requestedProgress", "string"), ("ok", "boolean")),
             ["WorkMovePlanRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedWork", "object"), ("to", "string"), ("expectedTarget", "string"), ("version", "string")),
             ["WorkMovePlanResponse"] = Object(("written", "array"), ("problem", "object"), ("ok", "boolean")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string")),
@@ -775,6 +796,7 @@ public static class OpenApiDocument
         "/v1/runs/{id}/settle" => "RunSettleRequest",
         "/v1/work/{key}/move-plan" => "WorkMovePlanRequest",
         "/v1/releases/withdraw" => "ReleaseWithdrawRequest",
+        "/v1/releases/{version}/review-brief" => "ReleaseReviewAssignRequest",
         "/v1/releases/check" => "ReleaseSubmitRequest",
         "/v1/releases/submit" => "ReleaseSubmitRequest",
         "/v1/releases/observe" => "ReleaseObserveRequest",
@@ -818,6 +840,8 @@ public static class OpenApiDocument
         ("POST", "/v1/writing-exceptions/{id}/remove") => "WritingExceptionRemove: validate the expected hash and all source evidence, then sign as the acting principal.",
         ("POST", "/v1/work/{key}/move-plan") => "WorkMovePlan: compare the complete expected planned-work membership and all hashes, validate every successor, then store the batch. No writes on a conflict or validation refusal.",
         ("POST", "/v1/releases/withdraw") => "ReleaseWithdraw: validate the exact candidate withdrawal and draft-deletion intent together. Deletion remains the operator's step.",
+        ("GET", "/v1/releases/{version}/review-brief") => "Prepare a full or focused review brief from exact release, merge, review and operator-decision records. Writes nothing.",
+        ("POST", "/v1/releases/{version}/review-brief") => "Assign the exact prepared brief to the Reviewer after rechecking its hash. Starts no worker or provider effect.",
         ("POST", "/v1/work/{key}/placement") => "WorkPlace: validate the expected hash and all source evidence, then sign as the acting principal.",
 
         ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",

@@ -121,12 +121,13 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             WorkMovePlanResponse move => move.Written.Count == 0 ? null : move.Written[^1],
+            ReleaseReviewBriefResponse review => review.Assignment,
             ReleaseResponse release when operation == "POST /v1/releases/withdraw" => release.Operation ?? release.Release,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
-        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -240,6 +241,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs/{id}/settle"] = typeof(RunSettleRequest),
         ["POST /v1/work/{key}/move-plan"] = typeof(WorkMovePlanRequest),
         ["POST /v1/releases/withdraw"] = typeof(ReleaseWithdrawRequest),
+        ["GET /v1/releases/{version}/review-brief"] = null,
+        ["POST /v1/releases/{version}/review-brief"] = typeof(ReleaseReviewAssignRequest),
         ["POST /v1/releases/check"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
@@ -331,6 +334,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(GoalAcceptRequest)] = (_, r, d) => Acting(((GoalAcceptRequest)r).By, d),
         [typeof(WorkMovePlanRequest)] = (_, r, d) => Acting(((WorkMovePlanRequest)r).By, d),
         [typeof(ReleaseWithdrawRequest)] = (_, r, d) => Acting(((ReleaseWithdrawRequest)r).By, d),
+        [typeof(ReleaseReviewAssignRequest)] = (_, r, d) => Acting(((ReleaseReviewAssignRequest)r).By, d),
         [typeof(ReleaseSubmitRequest)] = (_, r, d) => Acting(((ReleaseSubmitRequest)r).By, d),
         [typeof(ReleaseObserveRequest)] = (_, r, d) => Acting(((ReleaseObserveRequest)r).By, d),
         [typeof(ChangesPushRequest)] = (_, r, d) => Acting(((ChangesPushRequest)r).By, d),

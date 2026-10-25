@@ -322,6 +322,8 @@ public static class WorkView
         text.Append("Pinned to work-order revision ").Append(assignment.Subject?.Hash).Append(WorkOrderRevisions.IsCurrentSubject(model, assignment.Subject, order) ? " (current)" : " (an earlier revision; review before continuing)").Append("; assignment hash ").Append(assignment.ComputedHash).Append(".\n\n");
         if (assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object)
         {
+            if (brief.TryGetProperty("reviewBrief", out JsonElement reviewBrief) && reviewBrief.ValueKind == JsonValueKind.String)
+                text.Append(reviewBrief.GetString()).Append('\n');
             text.Append("### Outcome\n\n").Append(brief.TryGetProperty("outcome", out JsonElement outcome) ? outcome.GetString() : string.Empty).Append("\n\n");
             text.Append("### Sources\n\n");
             bool anySource = false;

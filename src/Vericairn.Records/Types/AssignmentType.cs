@@ -28,7 +28,7 @@ public sealed class AssignmentType : IRecordType
         SavedPrompts.UseField,
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
-        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery."),
+        new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text."),
         new("note", "string", false, "Free text."),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
@@ -68,6 +68,8 @@ public sealed class AssignmentType : IRecordType
             brief.StringArray("expectedOutputs", true, allowEmpty: false, maxItemLength: 2000);
             brief.StringArray("reviewCriteria", true, allowEmpty: false, maxItemLength: 2000);
             brief.Text("recovery", true, 4000);
+            if (context.Format >= 3)
+                brief.Text("reviewBrief", false, 1_000_000);
             brief.NoOtherKeys();
         }
 

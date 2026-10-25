@@ -25,6 +25,25 @@ Policy evaluation and the CLI, API, SDK and MCP policy flows are described in [E
 Workbench's policy inspector remains separate work. An unrecognized rule contribution is retained as data; the record schema does not certify
 that the rule ran or passed. This change does not declare any policy in an existing estate.
 
+## Release review declarations and retained briefs (0.8.4)
+
+A decision may add `releaseReview` with exact `candidate` and `workOrder` references
+(`type`, `id`, `hash`), `scope` (`full` or `focused`), and `focus` and `probes` string
+arrays. The candidate reference must name a release record with candidate status.
+A focused scope has at least one focus item; a full scope leaves that array empty.
+Both arrays are required and each item has the ordinary 2,000-character bound.
+The normal decision rules still require `decidedBy` to hold the operator role.
+The declaration itself assigns and launches nothing.
+
+The review-brief command requires a current decision and its exact current candidate
+and work order. It reads disposition decisions by their exact review subject; it
+does not infer a disposition from unrelated decision prose. Its assignment carries
+the source references in `brief.sources` and the unchanged generated text in optional
+`brief.reviewBrief`, limited to 1,000,000 characters. This field is displayed in the
+worker's work brief. All existing assignment fields and authority checks remain
+required. No historical record is rewritten, and formats 1 and 2 do not admit these
+fields. See [Preparing a release review](software.md#preparing-a-release-review-084).
+
 ## Definitions and authority
 
 `estate-policy` has `key`, `title`, `owner`, `reason`, `basis`, `state`, `appliesTo`, `rules`, `level`, `startsAt`

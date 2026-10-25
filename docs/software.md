@@ -529,6 +529,82 @@ of other unaccepted work appear under **Work recorded, not yet accepted**. Froze
 Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
+## Preparing a release review (0.8.4)
+
+`vericairn release review-brief <version>` writes the candidate's review brief from the
+estate's records. `--out review-brief.md` also writes its exact UTF-8 bytes to a file;
+`--json` returns the text, its SHA-256, the assignment brief and the Reviewer identity.
+Preparation reads no provider or source clone and records nothing.
+
+The operator first records the review's scope in a decision's `releaseReview` object:
+
+```json
+{
+  "candidate": {"type": "release", "id": "<candidate-id>", "hash": "<candidate-hash>"},
+  "workOrder": {"type": "work-order", "id": "<review-work-order-id>", "hash": "<work-order-hash>"},
+  "scope": "focused",
+  "focus": ["The changed release output and the prior finding."],
+  "probes": ["Compare every candidate limitation with the release output."]
+}
+```
+
+A full review uses `"scope": "full"` and an empty `focus` array. A focused review
+requires at least one focus item. Both keep the recorded probes. Scope is read from
+this declaration, never guessed from a decision's prose or supplied by a CLI flag.
+The decision and both pinned subjects must be current. Use `--decision <id>` when
+several current decisions name the candidate, and `--product <id>` when several
+products have the requested version. Published and withdrawn releases refuse.
+
+The brief retains the candidate's entire body, including commit, artifacts, run
+evidence and limitations. Its change window runs after the most recent earlier
+candidate or publication for the same product and repository through this candidate,
+ordered by recorded timestamp and then id. It includes successful `change-merge`
+operations as they stood at the candidate, with their checks, evidence and merge
+commit. Later observations do not move a merge into that window. This is a record
+window; it makes no claim about unrecorded merges or Git ancestry.
+
+Previous findings come from the current reviews of the most recently reviewed
+candidate at or before this one. Decisions disposing of those findings name the
+exact review as their subject, including its hash. Their complete wording remains
+beside the findings; a missing decision leaves the disposition unknown. Every source
+body and its exact id and hash appears in the brief. Missing sections say that nothing
+is recorded. Preparation refuses an invalid estate or a brief above the assignment's
+text limit instead of silently omitting content.
+
+With `--assign --by <principal>`, the command stores the same brief as an assignment
+on the decision's pinned work order. The contributor is the identity holding the
+`reviewer` role, regardless of its display name; missing or multiple Reviewers refuse,
+as does a Reviewer who authored the candidate. The ordinary assignment authority and
+signature rules apply. `--expected <brief-hash>` can pin a previous preparation. The
+runtime regenerates and compares the complete text hash under its write lock before
+storing; a changed candidate, scope, finding, disposition or Reviewer needs a new
+preparation. A failed local file export happens before the assignment write.
+
+The assignment retains the text in `brief.reviewBrief` and pins its sources. The
+worker's work brief includes that retained text unchanged. It permits the Reviewer's
+own attempt and result and prohibits repository changes, push, merge, publication and
+release acceptance. This command starts no run. The operator can launch the assignment
+with the ordinary worker command:
+
+```sh
+vericairn worker run <assignment-id> --agent <reviewer-id> --by <principal> --repository <repository-id> --base <candidate-commit> --launcher <configured-launcher> --wall-minutes <cap>
+```
+
+The worker still requires the registered clone, an admitted device for the Reviewer,
+an available and qualified launcher with explicit execution settings, and the applicable
+authority, budget and run limits. No particular harness is selected by the review
+command. `ReleaseReviewBriefResponse.RequestedProgress` is the named WATCH-02 integration
+seam and currently reports `unavailable`; the assignment does not claim requested
+progress support.
+
+The API offers `GET /v1/releases/{version}/review-brief` with optional `product` and
+`decision` queries, and `POST` on the same path with `ReleaseReviewAssignRequest`.
+The POST requires the prepared text hash in `expected`. The SDK exposes
+`ReleaseReviewBrief` and `ReleaseReviewAssign`, plus their asynchronous counterparts.
+Both routes return a typed response, including refusals; inspect `Ok` and `Problem`.
+After an interrupted assignment response, inspect the work order's assignments before
+retrying. See [API compatibility](api-compatibility-0.8.4.md#release-review-briefs-code-09).
+
 ## Withdrawing a candidate and moving a release plan (0.8.3)
 
 `release withdraw <candidate-id> --expected <hash> --provider <provider> --reason
