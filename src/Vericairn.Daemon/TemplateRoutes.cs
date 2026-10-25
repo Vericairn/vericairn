@@ -12,6 +12,8 @@ internal static class TemplateRoutes
 {
     internal static void Map(IEndpointRouteBuilder app, IEstateApi service)
     {
+        app.MapPost("/v1/templates/render", async (TemplateRenderRequest request, HttpContext context) =>
+            Results.Json(await service.TemplateRenderAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet("/v1/templates", async Task<IResult> (HttpContext context) =>
             Results.Json(await service.TemplatesAsync(context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet("/v1/documents/{id}/sections", async (string id, string? commit, HttpContext context) =>

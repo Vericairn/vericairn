@@ -108,12 +108,15 @@ public static class CommunicationPresentation
             references.Append("  ").Append(Str(order, "key")).Append(' ').Append(Str(order, "status")).Append("; vericairn records show ").Append(Str(order, "id")).Append('\n');
         }
 
-        return Lead(profile, "status", "estate status", "Current recorded state; unknown observations remain unknown.") + content + references;
+        return profile.Template is { } use
+            ? CommunicationTemplatePresentation.Render(use, depth, "Current recorded state; unknown observations remain unknown.", response.Text + references, "estate status", profile)
+            : Lead(profile, "status", "estate status", "Current recorded state; unknown observations remain unknown.") + content + references;
     }
 
     /// <summary>A lead at the selected depth followed by the unchanged complete decision, result, handoff or progress text.</summary>
     public static string Protected(CommunicationProfile profile, string kind, string subject, string summary, string original) =>
-        Lead(profile, kind, subject, summary) + original;
+        profile.Template is { } use ? CommunicationTemplatePresentation.Render(use, Depth(profile, kind), summary, original, subject, profile)
+            : Lead(profile, kind, subject, summary) + original;
 
     /// <summary>The same four examples used by CLI and Workbench settings previews.</summary>
     public static string Preview(CommunicationProfile profile) => string.Join('\n', MessageKinds.Select(kind =>
@@ -121,10 +124,15 @@ public static class CommunicationPresentation
             "Complete example: do not publish; the check has not run, no acceptance is recorded, and the next permitted action is to inspect the original evidence.\n")));
 
     /// <summary>Communication instructions in a brief are additional input, separate from its complete original obligations.</summary>
-    public static string Brief(string original, CommunicationProfile profile) =>
-        Protected(profile, "handoff", "work brief", "The assignment and its original return contract follow in full.", original) +
-        "\n## Communication\n\n" + Describe(profile) +
-        "Frequency governs optional progress only. Required decisions, failed or unknown checks, blockers, uncertain effects, incidents and exhausted budgets are always reported. Read communication_get again at the next settled boundary.\n";
+    public static string Brief(string original, CommunicationProfile profile)
+    {
+        string instructions = "\n## Communication\n\n" + Describe(profile) +
+            "Frequency governs optional progress only. Required decisions, failed or unknown checks, blockers, uncertain effects, incidents and exhausted budgets are always reported. Read communication_get again at the next settled boundary.\n";
+        const string summary = "The assignment and its original return contract follow in full.";
+        return profile.Template is null
+            ? Protected(profile, "handoff", "work brief", summary, original) + instructions
+            : Protected(profile, "handoff", "work brief", summary, original + instructions);
+    }
 
     /// <summary>Complete required attention from the API. Missing checks or unavailable sources remain visible as unknown.</summary>
     public static IReadOnlyList<CommunicationAttention> Attention(IEstateApi api, string? recipient = null)

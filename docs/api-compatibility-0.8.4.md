@@ -288,3 +288,41 @@ The additive record fields remain in format 3. The readable record companion
 implementation advances to `vericairn.records/readers/3`; prior golden versions
 remain retained. See [Templates](templates.md) and the
 [generated record reference](reference/record-reference.md).
+
+## Presentation templates (TPL-COMMS-01)
+
+`IEstateApi` adds `TemplateRender(TemplateRenderRequest)` and
+`TemplateRenderAsync(TemplateRenderRequest, CancellationToken = default)`.
+Both have default implementations: the synchronous method returns a structured
+`unsupported` response and the asynchronous method uses the existing cancellable
+read bridge. No existing interface gains a member without a default.
+`EstateService`, `VericairnClient` and `CancellationBoundApi` implement both.
+
+`POST /v1/templates/render` is a read with a structured request body. It uses no
+write ledger or signing path, returns HTTP 200 with `TemplateRenderResponse`,
+and callers inspect `Problem`. The SDK marks it as a read for cancellation;
+an older daemon has no fallback route. MCP adds only the read `template_render`.
+Worker write visibility and admission remain unchanged.
+
+The new DTOs are `TemplateRenderRequest`, `TemplateRenderResponse` and
+`PresentationTemplateUse`. The request contains an exact template and subject,
+optional depth, authored fields, explanation, complete byte allocation, candidate
+and retained adoption. The response contains the exact adoption and template use,
+complete text, hash, byte count, checks and any refusal. OpenAPI describes these
+properties and the route's request and response schemas.
+
+`CommunicationProfile.Template` is an optional init-only `PresentationTemplateUse`.
+`SectionBriefResponse.Presentation` is an optional init-only
+`TemplateRenderResponse`. Their existing constructors and deconstruction remain
+unchanged, and null properties are omitted from wire output. The source section
+brief retains its own measured contract; an adopted human rendition has separate
+accounting, and exceeding the requested allocation returns an incomplete response.
+The shared client renderer and checker are `CommunicationTemplatePresentation`.
+Protocol retains no Records dependency: both compile the same content forms and
+presentation code. Records retains its existing no-embedded-resources invariant.
+
+No record schema or format changes. Explicit estate adoption and withdrawal use
+the existing `template-defaults` pin, scope, options and reason. The existing
+record reference and readable companion already cover these complete fields.
+See [presentation templates](presentation-templates.md) for preparation, checking,
+depth guarantees and the boundary between content checks and reviewer judgment.

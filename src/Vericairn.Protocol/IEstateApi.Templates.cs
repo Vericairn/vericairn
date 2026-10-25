@@ -5,6 +5,11 @@ namespace Vericairn.Protocol;
 
 public partial interface IEstateApi
 {
+    /// <summary>Read-only preparation or checking of an explicitly adopted presentation, with complete sources.</summary>
+    TemplateRenderResponse TemplateRender(TemplateRenderRequest request) => new(null, null, null, null, [], new Problem("unsupported", "Presentation templates are unavailable.", []));
+    /// <summary>Cancellable read-only preparation or checking of a complete presentation.</summary>
+    Task<TemplateRenderResponse> TemplateRenderAsync(TemplateRenderRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(TemplateRender), () => TemplateRender(request), false, this as IClientOperationLifetime, cancellationToken);
     /// <summary>Lists installed and estate-retained template versions without selecting one.</summary>
     TemplatesResponse Templates() => new([], new Problem("unsupported", "Template reads are unavailable.", []));
     /// <summary>Reads each section's state and evidence at an optional exact repository commit.</summary>

@@ -20,6 +20,8 @@ public sealed class TemplateCommandsTests
         Assert.IsType<TemplatesCommand>(templates);
         Assert.IsType<TemplatesListCommand>(templates.Subcommands.Single(c => c.Name == "list"));
         Assert.IsType<TemplatesShowCommand>(templates.Subcommands.Single(c => c.Name == "show"));
+        Assert.IsType<TemplatesRenderCommand>(templates.Subcommands.Single(c => c.Name == "render"));
+        Assert.IsType<TemplatesCheckCommand>(templates.Subcommands.Single(c => c.Name == "check"));
         Command docs = root.Subcommands.Single(c => c.Name == "docs");
         Command create = Assert.IsType<DocsNewCommand>(docs.Subcommands.Single(c => c.Name == "new"));
         foreach (string name in new[] { "--by", "--version", "--title" }) Assert.True(create.Options.Single(o => o.Name == name).Required);

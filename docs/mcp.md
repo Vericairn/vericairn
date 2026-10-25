@@ -346,3 +346,12 @@ The existing `document_review` tool accepts an optional `sections` array with
 recorded roles and reviewer independence still apply. Agents identify produced
 section bytes in ordinary result outputs. These additions introduce no new MCP
 write capability and never supply acceptance. See [Templates](templates.md).
+
+`template_render` prepares or checks a communication, context brief, commit or
+review from an explicitly adopted exact template. Its `request` object is a
+`TemplateRenderRequest`; `candidate` asks for checks against the separately
+prepared source basis. Missing required facts or references fail at every depth,
+and a byte allocation cannot truncate required content. This is a read: it records
+no adoption, review, result or acceptance and adds no worker write capability.
+See [presentation templates](presentation-templates.md) for the complete request
+forms and explicit adoption through existing `template-defaults` records.

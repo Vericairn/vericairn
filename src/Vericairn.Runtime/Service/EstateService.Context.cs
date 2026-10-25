@@ -29,7 +29,15 @@ public sealed partial class EstateService
             }
 
             RecordEnvelope? order = WorkView.FindOrder(model, workOrder);
-            return order is null ? ContextRefusal("not-found", "No work order has that identity.") : ContextLocked(model, files, order, maxBytes);
+            if (order is null) return ContextRefusal("not-found", "No work order has that identity.");
+            ContextResponse result = ContextLocked(model, files, order, maxBytes);
+            try
+            {
+                if (result.Package is { } package && PresentationUse(model, Vericairn.Records.Templates.PresentationTemplates.Context) is { } use)
+                    return result with { Text = RenderContextTemplate(use, package, result.Text, use.Depth).Text };
+                return result;
+            }
+            catch (InvalidOperationException) { return ContextRefusal("template-unavailable", "The explicitly adopted context template or its complete basis is unavailable."); }
         }
     }
 
@@ -97,10 +105,20 @@ public sealed partial class EstateService
         }
         json["documentsScope"] = "The documents field is the catalogue, not the context selection. The context manifest alone names selected sources; list the catalogue with vericairn context catalogue.";
         json["context"] = JsonSerializer.SerializeToNode(package, ProtocolJson.Options);
+        PresentationTemplateUse? use;
+        try { use = PresentationUse(model, Vericairn.Records.Templates.PresentationTemplates.Context); }
+        catch (InvalidOperationException) { return new BriefResponse("The adopted context template is unavailable.", Element(new JsonObject()), Problem: new("template-unavailable", "Resolve the explicit context template adoption before continuing.", [])); }
+        if (use is not null) json["presentationTemplate"] = JsonSerializer.SerializeToNode(use, ProtocolJson.Options);
         ContextPackage machine = ContextAccounting.Measure(json, null);
         string lead = WorkView.RenderBrief(model, order, includeDocumentCatalogue: false);
         if (promptUse is not null) lead += SavedPrompts.Addendum(Element(promptUse));
         (string text, ContextTextMeasurement measurement) = ContextRendering.Render(profile is null ? lead : CommunicationPresentation.Brief(lead, profile), package);
+        if (use is not null)
+        {
+            var rendered = RenderContextTemplate(use, package, text, profile is null ? use.Depth : CommunicationPresentation.Depth(profile, "handoff"));
+            text = rendered.Text;
+            measurement = new(rendered.Hash, rendered.Bytes, "exact UTF-8 bytes of the complete adopted template presentation, including its budget");
+        }
         return new BriefResponse(text, machine.Payload, measurement, JsonMeasurement: new ContextTextMeasurement(machine.Hash, machine.Bytes, "exact canonical pretty UTF-8 of the complete machine brief, including its context package and accounting"));
     }
 

@@ -6,6 +6,10 @@ namespace Vericairn.Protocol;
 public sealed partial class CancellationBoundApi
 {
     /// <inheritdoc />
+    public TemplateRenderResponse TemplateRender(TemplateRenderRequest request) => inner.TemplateRenderAsync(request, cancellationToken).GetAwaiter().GetResult();
+    /// <inheritdoc />
+    public Task<TemplateRenderResponse> TemplateRenderAsync(TemplateRenderRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.TemplateRenderAsync(request, token), cancellationToken);
+    /// <inheritdoc />
     public TemplatesResponse Templates() => inner.TemplatesAsync(cancellationToken).GetAwaiter().GetResult();
     /// <inheritdoc />
     public DocumentSectionsResponse DocumentSections(string declaration, string? commit = null) => inner.DocumentSectionsAsync(declaration, commit, cancellationToken).GetAwaiter().GetResult();

@@ -30,6 +30,7 @@ public static class TemplatePresentation
     {
         ArgumentNullException.ThrowIfNull(response);
         if (response.Brief is not { } brief) return response.Problem?.Message ?? "The section brief is unavailable.";
+        if (response.Problem is null && response.Presentation is { Problem: null, Text: { } presentation }) return presentation;
         var text = new StringBuilder("# Section brief: ").Append(brief.Section).Append("\n\n").Append(brief.Purpose).Append("\n\n")
             .Append("Instance: ").Append(brief.Declaration).Append(" at ").Append(brief.DeclarationHash).Append('\n')
             .Append("Template: ").Append(brief.Template.Id).Append(' ').Append(brief.Template.Version).Append(" at ").Append(brief.Template.Hash).Append('\n')

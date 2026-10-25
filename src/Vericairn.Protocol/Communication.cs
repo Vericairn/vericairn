@@ -22,7 +22,12 @@ public sealed record CommunicationLayer(string Scope, CommunicationValues Values
 public sealed record CommunicationValue(string? Value, string? Source, bool Conflict, IReadOnlyList<CommunicationLayer> Contributions);
 
 /// <summary>A read-only profile for a recipient and optional assignment. Freshness identifies the settings read, not authority.</summary>
-public sealed record CommunicationProfile(string? Recipient, string? Assignment, IReadOnlyDictionary<string, CommunicationValue> Fields, IReadOnlyList<CommunicationLayer> Revisions, IReadOnlyList<string> Conflicts, string? ObservedAt = null, string? RevisionHash = null, string? Unavailable = null);
+public sealed record CommunicationProfile(string? Recipient, string? Assignment, IReadOnlyDictionary<string, CommunicationValue> Fields, IReadOnlyList<CommunicationLayer> Revisions, IReadOnlyList<string> Conflicts, string? ObservedAt = null, string? RevisionHash = null, string? Unavailable = null)
+{
+    /// <summary>Absent until the estate explicitly adopts an exact communication template.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public PresentationTemplateUse? Template { get; init; }
+}
 
 /// <summary>Deterministic, field-by-field precedence shared by runtime and client previews.</summary>
 public static class CommunicationResolution

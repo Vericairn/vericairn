@@ -17,6 +17,11 @@ public static class TemplateCatalog
     private static readonly Dictionary<(string Id, string Version), TemplateDefinition> Installed = [];
     private static readonly HashSet<(string Id, string Version)> Retired = [];
 
+    static TemplateCatalog()
+    {
+        foreach (TemplateDefinition definition in PresentationTemplates.Definitions) Register(definition);
+    }
+
     /// <summary>Registers immutable content. Retirement hides a version from new-instance selection but keeps it readable.</summary>
     public static void Register(TemplateDefinition definition, bool retired = false)
     {

@@ -48,6 +48,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
@@ -215,6 +216,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/release-bases/{hash}"] = null,
         ["GET /v1/documents"] = null,
         ["GET /v1/templates"] = null,
+        ["POST /v1/templates/render"] = typeof(TemplateRenderRequest),
         ["GET /v1/documents/{id}/sections"] = null,
         ["GET /v1/documents/{id}/sections/{section}/brief"] = null,
         ["POST /v1/documents/new"] = typeof(DocumentNewRequest),
@@ -305,6 +307,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(CompanionRequest)] = (_, _, _) => null,
         [typeof(CompanionCompareRequest)] = (_, _, _) => null,
         [typeof(PolicyHashRequest)] = (_, _, _) => null,
+        [typeof(TemplateRenderRequest)] = (_, _, _) => null,
         [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
         [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),

@@ -61,6 +61,7 @@ public sealed partial class EstateService
                 {
                     ObservedAt = RecordParser.FormatTimestamp(CommunicationClock.GetUtcNow()),
                     RevisionHash = ContentHash.Sha256(Encoding.UTF8.GetBytes(string.Join('\n', layers.Select(r => r.Hash)))),
+                    Template = PresentationUse(model, Vericairn.Records.Templates.PresentationTemplates.Communication),
                 };
             }
             catch (Exception exception) when (exception is ArgumentException or JsonException or InvalidOperationException or KeyNotFoundException)

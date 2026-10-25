@@ -14,6 +14,53 @@ internal sealed class TemplatesCommand : Command
     {
         Subcommands.Add(new TemplatesListCommand(context));
         Subcommands.Add(new TemplatesShowCommand(context));
+        Subcommands.Add(new TemplatesRenderCommand(context));
+        Subcommands.Add(new TemplatesCheckCommand(context));
+    }
+}
+
+internal sealed class TemplatesRenderCommand : Command
+{
+    internal TemplatesRenderCommand(CommandContext context) : base("render", "Prepare an explicitly adopted presentation from an exact subject; creates no record.")
+    {
+        var request = new Argument<string>("request") { Description = "JSON TemplateRenderRequest; an exact template and subject, with any authored fields." };
+        Arguments.Add(request);
+        SetAction(p => Run(context, p.GetValue(context.EstateOption)!, p.GetValue(request)!, null, p.GetValue(context.JsonOption)));
+    }
+
+    internal static int Run(CommandContext context, string root, string requestFile, string? candidate, bool json) => context.WithBody(requestFile, body =>
+    {
+        TemplateRenderRequest? request;
+        try { request = body.Deserialize<TemplateRenderRequest>(ProtocolJson.Options); }
+        catch (JsonException) { return context.Fail("The request must be a complete TemplateRenderRequest with no unknown fields."); }
+        if (request is null || (candidate is null && request.Candidate is not null)) return context.Fail("Render takes a preparation request; use templates check for candidate content.");
+        return context.WithApi(root, api =>
+        {
+            TemplateRenderResponse response = api.TemplateRender(request with { Candidate = candidate });
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+            else if (candidate is null && response.Problem is null) context.Output.Write(response.Text);
+            else
+            {
+                foreach (TemplateCheckDto check in response.Checks) context.Output.WriteLine($"{check.Id}: {check.Outcome} — {check.Summary}");
+                if (response.Problem is not null) context.Error.WriteLine(response.Problem.Message);
+            }
+            return response.Problem is null ? Clean : response.Checks.Count > 0 ? HasErrors : Failed;
+        }, readOnly: true);
+    });
+}
+
+internal sealed class TemplatesCheckCommand : Command
+{
+    internal TemplatesCheckCommand(CommandContext context) : base("check", "Check every required fact and reference against a separately pinned presentation request.")
+    {
+        var request = new Argument<string>("request");
+        var candidate = new Argument<string>("candidate");
+        Arguments.Add(request); Arguments.Add(candidate);
+        SetAction(p =>
+        {
+            try { return TemplatesRenderCommand.Run(context, p.GetValue(context.EstateOption)!, p.GetValue(request)!, File.ReadAllText(p.GetValue(candidate)!), p.GetValue(context.JsonOption)); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return context.Fail("The candidate presentation could not be read."); }
+        });
     }
 }
 

@@ -1,5 +1,10 @@
 # Adopting the operator's existing communication choice
 
+In 0.8.4 development, [presentation templates](presentation-templates.md) have a
+separate explicit adoption. Choosing the five communication values below does
+not adopt a template. Without that separate record, communication and context
+renderings retain their existing behavior.
+
 COMMS-01 has one explicit first-party adoption. Decision
 `01M4WA3HZ8R5JXQZZTJKEA3MA0`, at
 `sha256:a7f473cbb5da48cbccb23b896b257ca4f0e764d38a478651d5b3fc106684c3d7`,
