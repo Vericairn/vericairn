@@ -328,7 +328,7 @@ internal static partial class Docs
 
         foreach (ReleaseContents.Accepted result in acceptedResults)
         {
-            Result(lines, result.Result, result.Order);
+            Result(lines, model, result.Result, result.Order);
             lines.Add($"Acceptance {result.Acceptance.Id} pins {(result.Acceptance.Subject?.Type == "result" ? "this result" : "the current work-order revision")}.");
             if (result.Order is not null)
             {
@@ -346,27 +346,29 @@ internal static partial class Docs
             lines.Add(string.Empty);
             foreach (RecordEnvelope result in openResults)
             {
-                Result(lines, result, ReleaseContents.OrderOf(model, result));
+                Result(lines, model, result, ReleaseContents.OrderOf(model, result));
             }
         }
 
-        Section(lines, "Decisions", window.Where(r => r.Type == "decision").Select(r => $"**{Str(r.Body, "title")}** ({When(r.At)}, decision {r.Id}): {Str(r.Body, "summary")}"));
-        Section(lines, "Work orders opened or revised", window.Where(r => r.Type == "work-order").Select(r => $"**{Str(r.Body, "key")}** ({Str(r.Body, "kind")}): {Str(r.Body, "title")}{(r.Supersedes is null ? string.Empty : " (revised)")}."));
-        Section(lines, "Milestone and release acceptances", window.Where(r => r.Type == "acceptance" &&
+        IReadOnlyList<RecordEnvelope> current = ReleaseContents.CurrentRevisions(model, window, upper);
+        Section(lines, "Decisions", current.Where(r => r.Type == "decision").Select(r => $"**{Str(r.Body, "title")}** ({When(r.At)}, decision {r.Id}): {Str(r.Body, "summary")}{RevisionNote(model, r)}"));
+        Section(lines, "Work orders opened or revised", current.Where(r => r.Type == "work-order").Select(r => $"**{Str(r.Body, "key")}** ({Str(r.Body, "kind")}): {Str(r.Body, "title")} (work order {r.Id}){RevisionNote(model, r)}."));
+        Section(lines, "Milestone and release acceptances", current.Where(r => r.Type == "acceptance" &&
             (!(r.Body.TryGetProperty("self", out JsonElement self) && self.ValueKind == JsonValueKind.True) ||
              (r.Subject?.Type == "release" && model.HasRole(r.By, Roles.Operator)))).Select(r =>
         {
             RecordEnvelope? subject = r.Subject is null ? null : model.ById.GetValueOrDefault(r.Subject.Id);
             string what = subject is null ? r.Subject?.ToString() ?? string.Empty : subject.Type == "release" ? "release " + Str(subject.Body, "version") : Str(subject.Body, "key") ?? subject.Id;
-            return $"{what}: \"{Str(r.Body, "statement")}\" (acceptance {r.Id}, {When(r.At)}{(r.HasSignatures ? ", signed" : string.Empty)})";
+            return $"{what}: \"{Str(r.Body, "statement")}\" (acceptance {r.Id}, {When(r.At)}{(r.HasSignatures ? ", signed" : string.Empty)}){RevisionNote(model, r)}";
         }));
-        Section(lines, "Identity and policy", window.Where(r => r.Type is "device" or "admission" or "principal" or "estate").Select(r => r.Type switch
+        Section(lines, "Identity and policy", current.Where(r => r.Type is "device" or "admission" or "principal" or "estate").Select(r => (r.Type switch
         {
             "device" => $"Device \"{Str(r.Body, "name")}\" recorded ({r.Id}).",
             "admission" => $"Device admitted to author records{(Str(r.Body, "scope") is { Length: > 0 } scope ? ", scope " + scope : string.Empty)} ({r.Id}).",
             "principal" => $"Principal {(r.Supersedes is null ? "recorded" : "revised")}: \"{Str(r.Body, "name")}\" ({r.Id}).",
             _ => $"Charter revised ({r.Id}).",
-        }));
+        }) + RevisionNote(model, r)));
+        // These sections describe revision history, including release candidates and their publication, rather than one entry per record.
         Section(lines, "Design documents revised", window.Where(r => r.Type == "document-revision").Select(r => $"{Str(r.Body, "title")} revision {Str(r.Body, "revision") ?? Num(r.Body, "revision")} (`{Str(r.Body, "path")}`): {Str(r.Body, "summary")}"));
         // The window begins where the previous notes ended, so it also holds the previous release's own candidate and publication.
         Section(lines, "The release itself", window.Where(r => r.Type == "release" && Str(r.Body, "version") == toVersion).Select(ReleaseLine));
@@ -376,13 +378,16 @@ internal static partial class Docs
             Section(lines, "Other releases recorded in this window", others);
         }
 
-        Section(lines, "Upgrading", window.Where(r => r.Type == "migration").Select(r => $"Migration {r.Id}: from {Str(r.Body, "fromPin")} to {Str(r.Body, "toPin")}, record format {Num(r.Body, "fromFormat")} to {Num(r.Body, "toFormat")}; migrations applied: {(Strings(r.Body, "migrations") is { Count: > 0 } m ? string.Join(", ", m) : "none")}; changes: {string.Join("; ", Strings(r.Body, "changes"))}."));
+        Section(lines, "Upgrading", current.Where(r => r.Type == "migration").Select(r => $"Migration {r.Id}: from {Str(r.Body, "fromPin")} to {Str(r.Body, "toPin")}, record format {Num(r.Body, "fromFormat")} to {Num(r.Body, "toFormat")}; migrations applied: {(Strings(r.Body, "migrations") is { Count: > 0 } m ? string.Join(", ", m) : "none")}; changes: {string.Join("; ", Strings(r.Body, "changes"))}{RevisionNote(model, r)}."));
         lines.Add($"An estate on {fromVersion} upgrades with `vericairn estate upgrade --to {toVersion} --by <principal>` run with the {toVersion} binary once the published release record is in the estate; `--check` shows the plan first.");
         return string.Join("\n", lines);
     }
 
     private static string ReleaseLine(RecordEnvelope r) =>
         $"{Str(r.Body, "version")} {Str(r.Body, "status")} ({r.Id}, {When(r.At)}); signing: {Str(r.Body, "signing")}; qualified: {string.Join(", ", Strings(r.Body, "qualified"))}.";
+
+    private static string RevisionNote(EstateModel model, RecordEnvelope record) =>
+        record.Supersedes is null ? string.Empty : $" (revised; replaces {string.Join(", ", model.Chain(record).SkipLast(1))})";
 
     private static void Section(List<string> lines, string title, IEnumerable<string> items)
     {
@@ -401,11 +406,11 @@ internal static partial class Docs
         lines.Add(string.Empty);
     }
 
-    private static void Result(List<string> lines, RecordEnvelope result, RecordEnvelope? order)
+    private static void Result(List<string> lines, EstateModel model, RecordEnvelope result, RecordEnvelope? order)
     {
         lines.Add("### " + (order is null ? "Result " + result.Id : Str(order.Body, "key") + ": " + Str(order.Body, "title")));
         lines.Add(string.Empty);
-        lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}");
+        lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}{RevisionNote(model, result)}");
         List<string> limitations = Strings(result.Body, "limitations");
         if (limitations.Count > 0)
         {

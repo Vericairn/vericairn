@@ -41,6 +41,21 @@ public static class ReleaseContents
     }
 
     /// <summary>
+    /// The revisions in a window that were current at its inclusive end, preserving the window's order. A successor dated
+    /// after that end does not replace an entry. Use the unfiltered window for sections that list revision history, and
+    /// <see cref="Results"/> for work classified by current acceptances. <see cref="EstateModel.Chain"/> names an entry's
+    /// earlier revisions, including those before the window.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> CurrentRevisions(EstateModel model, IReadOnlyList<RecordEnvelope> window, string upTo)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(upTo);
+        return window.Where(r => !model.SupersededBy.TryGetValue(r.Id, out string? next) ||
+            !model.ById.TryGetValue(next, out RecordEnvelope? successor) || string.CompareOrdinal(successor.At, upTo) > 0).ToList();
+    }
+
+    /// <summary>
     /// One accepted entry per work order in the window, naming its latest accepted current result by time and then identifier.
     /// Earlier results belong to that work's history. Other current results, including later claims not yet accepted, remain separate.
     /// </summary>
