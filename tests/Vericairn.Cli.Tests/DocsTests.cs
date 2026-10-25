@@ -19,6 +19,24 @@ namespace Vericairn.Cli.Tests;
 public class DocsTests
 {
     [Fact]
+    public void GeneratedReferencesIncludePublicationPassSelectionAssignmentAndPatchOutput()
+    {
+        string output = CliHarness.TempDirectory("docs-publication-pass");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            string cli = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            Assert.Contains("vericairn docs pass", cli, StringComparison.Ordinal);
+            foreach (string option in new[] { "--assign-to", "--document", "--output", "--product", "--key" })
+                Assert.Contains(option, cli, StringComparison.Ordinal);
+            string api = File.ReadAllText(Path.Combine(output, "api-reference.md"));
+            Assert.Contains("GET /v1/documents/pass/{version}", api, StringComparison.Ordinal);
+            Assert.Contains("POST /v1/documents/pass/{version}/assignments", api, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
+
+    [Fact]
     public void TheDocumentationToolGeneratesTheInterruptedRequestSectionAndItsExcerpt()
     {
         string output = CliHarness.TempDirectory("docs-interrupted");

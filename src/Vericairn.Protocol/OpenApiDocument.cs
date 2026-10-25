@@ -86,6 +86,8 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/new"),
         ("GET", "/v1/documents/{id}/sections"),
         ("GET", "/v1/documents/{id}/sections/{section}/brief"),
+        ("GET", "/v1/documents/pass/{version}"),
+        ("POST", "/v1/documents/pass/{version}/assignments"),
         ("POST", "/v1/documents/pin"),
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
@@ -247,6 +249,11 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
             }
 
+            if (method == "GET" && path == "/v1/documents/pass/{version}")
+                operation["parameters"] = new JsonArray(
+                    new JsonObject { ["name"] = "version", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" } },
+                    new JsonObject { ["name"] = "product", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "Product id or slug; required when the version is ambiguous." });
+
             if (path.Contains('{', StringComparison.Ordinal))
             {
                 var parameters = operation["parameters"] is JsonArray existingParameters ? (JsonArray)existingParameters.DeepClone() : new JsonArray();
@@ -394,6 +401,15 @@ public static class OpenApiDocument
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
             };
             responses.Remove("404");
+        }
+        else if (path.StartsWith("/v1/documents/pass/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "Typed response, including refusals. Inspect ok and problem; assignment receipts alongside a problem require reconciliation before retrying.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject
+                { ["$ref"] = "#/components/schemas/" + (method == "GET" ? "DocumentPassResponse" : "DocumentPassAssignResponse") } } },
+            };
         }
         else if (path == "/v1/documents/pin")
         {
@@ -683,6 +699,19 @@ public static class OpenApiDocument
             ["DocumentSectionJudgment"] = Object(("rule", "string"), ("verdict", "string"), ("summary", "string"), ("evidence", "array")),
             ["DocumentSectionsResponse"] = Object(("declaration", "string"), ("path", "string"), ("sections", "array"), ("problem", "object")),
             ["SectionBriefResponse"] = Object(("brief", "object"), ("problem", "object")),
+            ["DocumentPassPin"] = Object(("id", "string"), ("hash", "string")),
+            ["DocumentPassAssignRequest"] = new JsonObject
+            {
+                ["type"] = "object", ["required"] = new JsonArray("by", "reviewer", "key", "release", "documents"),
+                ["properties"] = new JsonObject
+                {
+                    ["by"] = new JsonObject { ["type"] = "string" }, ["reviewer"] = new JsonObject { ["type"] = "string" }, ["key"] = new JsonObject { ["type"] = "string" },
+                    ["release"] = new JsonObject { ["$ref"] = "#/components/schemas/DocumentPassPin" },
+                    ["documents"] = new JsonObject { ["type"] = "array", ["minItems"] = 1, ["items"] = new JsonObject { ["$ref"] = "#/components/schemas/DocumentPassPin" } },
+                },
+            },
+            ["DocumentPassResponse"] = Object(("version", "string"), ("release", "object"), ("previous", "object"), ("product", "string"), ("commit", "string"), ("documents", "array"), ("records", "array"), ("updates", "array"), ("notes", "array"), ("problem", "object"), ("ok", "boolean")),
+            ["DocumentPassAssignResponse"] = Object(("written", "array"), ("problem", "object"), ("ok", "boolean")),
             ["DocumentPinRequest"] = new JsonObject
             {
                 ["type"] = "object", ["required"] = new JsonArray("path", "by", "summary"),
@@ -815,6 +844,7 @@ public static class OpenApiDocument
         "/v1/decisions/new" => "DecisionNewRequest",
         "/v1/documents/pin" => "DocumentPinRequest",
         "/v1/documents/new" => "DocumentNewRequest",
+        "/v1/documents/pass/{version}/assignments" => "DocumentPassAssignRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
@@ -934,6 +964,8 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/new") => "Create a document and its living declaration from an exact template version. Records all effective choices and explicit overrides; existing files are never overwritten. A receipt with a problem requires reconciliation before retrying.",
         ("GET", "/v1/documents/{id}/sections") => "Each section's derived state, required fidelity, exact sources, checks and evaluator judgments. A passed check grants no authority.",
         ("GET", "/v1/documents/{id}/sections/{section}/brief") => "The complete measured section brief. Optional maxBytes refuses overflow without truncating required originals; commit selects the external repository revision.",
+        ("GET", "/v1/documents/pass/{version}") => "The documents still due for this exact publication, their covered paths and release changes, assignments and proposed front-document patches. Reads records and local registered clones; writes, fetches and commits nothing.",
+        ("POST", "/v1/documents/pass/{version}/assignments") => "Assign the exact displayed selection to a reviewer through an ordinary work order and assignment, validated together. Rechecks current publication and due declarations; clears no document and applies no patch.",
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",

@@ -21,7 +21,7 @@ public delegate DocumentSourceSelection GitDocumentSelection(RecordEnvelope decl
 /// clone of that repository registered on this machine (vericairn sources clone), with the covered paths' identity taken from
 /// git's own object ids at that commit. Every call is a read-only git command; nothing is fetched or changed.
 /// </summary>
-public sealed class GitFileSource : IDocumentSource
+public sealed partial class GitFileSource : IDocumentSource
 {
     private readonly GitDocumentSelection? select;
     private readonly Func<EstateModel, RecordEnvelope, string?> clone;

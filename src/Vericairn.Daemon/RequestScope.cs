@@ -119,6 +119,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
+            DocumentPassAssignResponse pass => pass.Written.Count == 0 ? null : pass.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             WorkMovePlanResponse move => move.Written.Count == 0 ? null : move.Written[^1],
             ReleaseReviewBriefResponse review => review.Assignment,
@@ -127,7 +128,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
-        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -214,6 +215,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/documents/{id}/sections"] = null,
         ["GET /v1/documents/{id}/sections/{section}/brief"] = null,
         ["POST /v1/documents/new"] = typeof(DocumentNewRequest),
+        ["GET /v1/documents/pass/{version}"] = null,
+        ["POST /v1/documents/pass/{version}/assignments"] = typeof(DocumentPassAssignRequest),
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
         ["POST /v1/documents/pin"] = typeof(DocumentPinRequest),
         ["GET /v1/asks"] = null,
@@ -336,6 +339,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(DecisionNewRequest)] = (_, r, d) => Acting(((DecisionNewRequest)r).By, d),
         [typeof(DocumentPinRequest)] = (_, r, d) => Acting(((DocumentPinRequest)r).By, d),
         [typeof(DocumentNewRequest)] = (_, r, d) => Acting(((DocumentNewRequest)r).By, d),
+        [typeof(DocumentPassAssignRequest)] = (_, r, d) => Acting(((DocumentPassAssignRequest)r).By, d),
         [typeof(GoalProposeRequest)] = (_, r, d) => Acting(((GoalProposeRequest)r).By, d),
         [typeof(GoalActionRequest)] = (_, r, d) => Acting(((GoalActionRequest)r).By, d),
         [typeof(GoalEvaluateRequest)] = (_, r, d) => Acting(((GoalEvaluateRequest)r).By, d),
