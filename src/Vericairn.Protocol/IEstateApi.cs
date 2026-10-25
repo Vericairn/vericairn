@@ -264,6 +264,10 @@ public partial interface IEstateApi
     /// <summary>Ask a run to stop, and report what was observed: requested, transmitted, acknowledged, escalated and contained, each only once observed.</summary>
     RunStopResponse RunStop(string run, RunStopRequest request);
 
+    /// <summary>Settle an exited run from retained local observations, with the same authority as stopping it.</summary>
+    RunSettleResponse RunSettle(string run, RunSettleRequest request) => new(run, "none", "This API implementation does not support run settlement recovery.", false,
+        Problem: new("unsupported", "Run settlement recovery is unavailable.", []));
+
     /// <summary>Move the complete expected set of planned work, validating every revision before any is stored.</summary>
     WorkMovePlanResponse WorkMovePlan(string key, WorkMovePlanRequest request) => new([], new("unsupported", "This API implementation does not support planned-work moves.", []));
 

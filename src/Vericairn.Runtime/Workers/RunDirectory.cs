@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 
@@ -58,6 +59,18 @@ public sealed class RunObservedState
 
     /// <summary>When its exit was observed.</summary>
     public string? ExitedAt { get; set; }
+
+    /// <summary>The complete exit observation, retained before attempting settlement.</summary>
+    public RunOutcome? Outcome { get; set; }
+
+    /// <summary>The final workspace audit, when retained; absence never means a clean audit.</summary>
+    public RunScope? Scope { get; set; }
+
+    /// <summary>Whether the worker finished retaining both scope and attempt audits before settlement.</summary>
+    public bool SettlementPrepared { get; set; }
+
+    /// <summary>The accounting minute used by the observing worker, in ticks; absent in older observations.</summary>
+    public long? MinuteTicks { get; set; }
 
     /// <summary>The stop's facts as observed so far.</summary>
     public RunStop? Stop { get; set; }
@@ -153,6 +166,25 @@ public sealed class RunDirectory
 
     /// <summary>What the supervising worker observed, or null when absent. An unreadable snapshot throws after bounded retries of sharing or access failures.</summary>
     public RunObservedState? Read() => ReadJson<RunObservedState>(StateFile);
+
+    // Recovery must distinguish missing facts from the CLR defaults used for partial live observations.
+    internal RunObservedState? ReadForSettlement()
+    {
+        JsonObject? snapshot = ReadJson<JsonObject>(StateFile);
+        if (snapshot is null) return null;
+        Require(snapshot, "run", "heartbeats", "heartbeatSeconds", "signals");
+        if (snapshot["outcome"] is JsonObject outcome)
+            Require(outcome, "exitCode", "launchedAt", "exitedAt", "heartbeats", "elapsed", "signals");
+        if (snapshot["scope"] is JsonObject scope) Require(scope, "changed", "outsideCount", "outside");
+        return snapshot.Deserialize<RunObservedState>(ProtocolJson.Options)
+            ?? throw new JsonException("A run snapshot must contain an object.");
+
+        static void Require(JsonObject json, params ReadOnlySpan<string> names)
+        {
+            foreach (string name in names)
+                if (json[name] is null) throw new JsonException("The retained run observation is incomplete.");
+        }
+    }
 
     /// <summary>Writes what the supervising worker observed, whole, so that a reader never sees half of it.</summary>
     public void Write(RunObservedState state)

@@ -382,6 +382,10 @@ public sealed partial class VericairnClient
     public Task<RunStopResponse> RunStopAsync(string run, RunStopRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<RunStopResponse>(nameof(RunStop), async token => (await PostAsync<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(RunStop)), cancellationToken);
 
+    /// <summary>The cancellable settlement recovery operation, with a deadline covering the complete response.</summary>
+    public Task<RunSettleResponse> RunSettleAsync(string run, RunSettleRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<RunSettleResponse>(nameof(RunSettle), async token => (await PostAsync<RunSettleRequest, RunSettleResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/settle", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(RunSettle)), cancellationToken);
+
     /// <summary>The cancellable WorkMovePlan operation, with a deadline covering the complete response.</summary>
     public Task<WorkMovePlanResponse> WorkMovePlanAsync(string key, WorkMovePlanRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WorkMovePlanResponse>(nameof(WorkMovePlan), async token => (await PostAsync<WorkMovePlanRequest, WorkMovePlanResponse>("/v1/work/" + Uri.EscapeDataString(key) + "/move-plan", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WorkMovePlan)), cancellationToken);

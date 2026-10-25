@@ -15,6 +15,7 @@ internal sealed class WorkerCommand : Command
         Subcommands.Add(new WorkerQualifyCommand(context));
         Subcommands.Add(new WorkerRunCommand(context));
         Subcommands.Add(new WorkerStopCommand(context));
+        Subcommands.Add(new WorkerSettleCommand(context));
         Subcommands.Add(new WorkerRunsCommand(context));
     }
 }

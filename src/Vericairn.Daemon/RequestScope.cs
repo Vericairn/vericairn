@@ -115,6 +115,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         {
             WriteOutcome { Written: RecordWritten record } => record,
             WorkProgressResponse { Ok: true, Written: RecordWritten record } => record,
+            RunSettleResponse { Operation: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
@@ -124,7 +125,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
-        if (value is WorkMovePlanResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -223,6 +224,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs"] = typeof(RunStartRequest),
         ["POST /v1/harness-qualifications"] = typeof(HarnessQualifyRequest),
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
+        ["POST /v1/runs/{id}/settle"] = typeof(RunSettleRequest),
         ["POST /v1/work/{key}/move-plan"] = typeof(WorkMovePlanRequest),
         ["POST /v1/releases/withdraw"] = typeof(ReleaseWithdrawRequest),
         ["POST /v1/releases/check"] = typeof(ReleaseSubmitRequest),
@@ -323,6 +325,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
+        [typeof(RunSettleRequest)] = (_, r, d) => Acting(((RunSettleRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
 
         // No principal acts in these: the rotation's authority is the operation's, and the pairing exchange is the code's.

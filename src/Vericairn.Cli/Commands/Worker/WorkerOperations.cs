@@ -147,6 +147,20 @@ internal sealed class WorkerOperations(CommandContext context)
         return response.Ok ? Clean : HasErrors;
     });
 
+    /// <summary>Retries an exited run's settlement from retained facts and reports any unresolved reason.</summary>
+    public int WorkerSettle(string root, string run, string by, bool json) => context.WithApi(root, api =>
+    {
+        RunSettleResponse response = api.RunSettle(run, new RunSettleRequest(by));
+        if (json) context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+        else
+        {
+            context.Output.WriteLine($"run {response.Run}  {response.Status}");
+            context.Output.WriteLine("  " + response.Message);
+        }
+        // A refused or unresolved settlement fails the command, as a refused stop does.
+        return response.Ok ? Clean : Failed;
+    });
+
     /// <summary>Lists the agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
     public int WorkerRuns(string root, bool json) => context.WithApi(root, api =>
     {

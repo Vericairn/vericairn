@@ -33,4 +33,7 @@ public sealed partial class EstateService
 
     /// <inheritdoc />
     public RunStopResponse RunStop(string run, RunStopRequest request) => runDispatch.RunStop(run, request);
+
+    /// <inheritdoc />
+    public RunSettleResponse RunSettle(string run, RunSettleRequest request) => runDispatch.RunSettle(run, request);
 }

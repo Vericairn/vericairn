@@ -41,6 +41,54 @@ public sealed class WorkerJourneyTests : IDisposable
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnExitedRunCanBeSettledLaterFromTheCommandLine(bool json)
+    {
+        string root = CliHarness.TempDirectory("worker-settle");
+        string scratch = CliHarness.TempDirectory("worker-settle-scratch");
+        try
+        {
+            (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
+            using EstateService service = EstateService.Open(root);
+            service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100) };
+            service.BeforeValidatingRecords = records =>
+            {
+                if (records.Any(r => r.Envelope.Type == "operation" && r.Envelope.Body.GetProperty("status").GetString() == "observed-success"))
+                    throw new IOException("Synthetic failed settlement.");
+            };
+            RunResponse started = service.RunStart(new(assignment, "generic", builder, op, resource,
+                Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("generic", Path.Combine(scratch, "settle.jsonl")) }));
+            Assert.True(started.Ok, started.Message);
+            var directory = new RunDirectory(service.Session.Manifest.Estate, started.Run);
+            using var changed = new FileSignal(root, directory.Path);
+            changed.Until(() => directory.Read() is { ExitedAt: not null, Problem: not null }, "the failed settlement", TestContext.Current.CancellationToken);
+            string[] arguments = ["--estate", root, .. (json ? new[] { "--json" } : []), "worker", "settle", started.Run, "--by", op];
+            CliHarness.Outcome unresolved = CliHarness.RunWithApi(service, null, arguments);
+            Assert.Equal(2, unresolved.Code);
+            Assert.Contains("could not be recorded", unresolved.Out, StringComparison.Ordinal);
+            if (json) Assert.Equal("unresolved", unresolved.Json.GetProperty("problem").GetProperty("code").GetString());
+
+            service.BeforeValidatingRecords = null;
+            CliHarness.Outcome recovered = CliHarness.RunWithApi(service, null, arguments);
+            Assert.Equal(0, recovered.Code);
+            Assert.Contains("observed-success", recovered.Out, StringComparison.Ordinal);
+            Assert.Null(directory.Read()!.Problem);
+            if (json)
+            {
+                Assert.True(recovered.Json.GetProperty("ok").GetBoolean());
+                Assert.Equal(started.Run, recovered.Json.GetProperty("run").GetString());
+                Assert.Equal("operation", service.Record(recovered.Json.GetProperty("operation").GetProperty("id").GetString()!)!.Envelope.GetProperty("type").GetString());
+            }
+            CliHarness.Outcome again = CliHarness.RunWithApi(service, null, arguments);
+            Assert.Equal(2, again.Code);
+            Assert.Contains("nothing to settle", again.Out, StringComparison.Ordinal);
+            Assert.Equal(0, service.Check().Errors);
+        }
+        finally { CliHarness.Delete(root, scratch); }
+    }
+
+    [Theory]
     [InlineData("printenv VERICAIRN_HOME", false)]
     [InlineData("echo $VERICAIRN_HOME", false)]
     [InlineData("cat \"$VERICAIRN_HOME/keys/device\"", true)]
@@ -251,6 +299,9 @@ public sealed class WorkerJourneyTests : IDisposable
             Assert.Contains("A stop that is not observed stays requested", stopped.Out, StringComparison.Ordinal);
             Assert.Contains("stop requested at", CliHarness.Ok("--estate", root, "worker", "runs").Out, StringComparison.Ordinal);
             Assert.Equal(2, CliHarness.Run("--estate", root, "worker", "stop", "01M4TRNE1GYEK4P8MXQAB3C8Q4", "--by", op).Code);
+            CliHarness.Outcome unsettled = CliHarness.Run("--estate", root, "--json", "worker", "settle", run, "--by", op);
+            Assert.Equal(2, unsettled.Code);
+            Assert.Equal("in-flight", unsettled.Json.GetProperty("problem").GetProperty("code").GetString());
         }
         finally
         {
@@ -288,6 +339,7 @@ public sealed class WorkerJourneyTests : IDisposable
         string clone = Path.Combine(scratch, "widget");
         Directory.CreateDirectory(clone);
         Git(clone, "init", "-q", "-b", "main");
+        Git(clone, "config", "core.autocrlf", "false");
         File.WriteAllText(Path.Combine(clone, "README.md"), "widget\n");
         Git(clone, "add", "README.md");
         Git(clone, "commit", "-q", "-m", "The first commit");

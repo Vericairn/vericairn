@@ -107,6 +107,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/runs", () => Results.Json(service.Runs(), ProtocolJson.Options));
         app.MapPost($"{v}/runs", (RunStartRequest request) => Results.Json(service.RunStart(request), ProtocolJson.Options));
         app.MapPost($"{v}/runs/{{id}}/stop", (string id, RunStopRequest request) => Results.Json(service.RunStop(id, request), ProtocolJson.Options));
+        app.MapPost($"{v}/runs/{{id}}/settle", (string id, RunSettleRequest request) => Results.Json(service.RunSettle(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/work/{{key}}/move-plan", (string key, WorkMovePlanRequest request) => Results.Json(service.WorkMovePlan(key, request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/withdraw", (ReleaseWithdrawRequest request) => Results.Json(service.ReleaseWithdraw(request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/check", (ReleaseSubmitRequest request) => Results.Json(service.ReleaseCheck(request), ProtocolJson.Options));

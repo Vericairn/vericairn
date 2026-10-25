@@ -483,6 +483,12 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<RunStopResponse> RunStopAsync(string run, RunStopRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.RunStopAsync(run, request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public RunSettleResponse RunSettle(string run, RunSettleRequest request) => inner.RunSettleAsync(run, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<RunSettleResponse> RunSettleAsync(string run, RunSettleRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.RunSettleAsync(run, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public WorkMovePlanResponse WorkMovePlan(string key, WorkMovePlanRequest request) => inner.WorkMovePlanAsync(key, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

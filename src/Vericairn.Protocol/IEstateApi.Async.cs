@@ -317,6 +317,10 @@ public partial interface IEstateApi
     Task<RunStopResponse> RunStopAsync(string run, RunStopRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(RunStop), () => RunStop(run, request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="RunSettle"/>; cancellation does not undo a recorded settlement.</summary>
+    Task<RunSettleResponse> RunSettleAsync(string run, RunSettleRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(RunSettle), () => RunSettle(run, request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable WorkMovePlan operation.</summary>
     Task<WorkMovePlanResponse> WorkMovePlanAsync(string key, WorkMovePlanRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(WorkMovePlan), () => WorkMovePlan(key, request), true, this as IClientOperationLifetime, cancellationToken);

@@ -554,6 +554,19 @@ public sealed record HarnessQualifyRequest(string Launcher, string By, IReadOnly
 /// <param name="GraceSeconds">How long the harness has to stop once the stop is transmitted before its process tree is killed; the worker's default when omitted.</param>
 public sealed record RunStopRequest(string By, string? Reason = null, int? GraceSeconds = null);
 
+/// <summary>Settle an exited run from the worker's retained observation.</summary>
+/// <param name="By">A principal permitted to stop the run.</param>
+public sealed record RunSettleRequest(string By);
+
+/// <summary>The result of recovering a run's unrecorded settlement.</summary>
+/// <param name="Run">The original run's id.</param>
+/// <param name="Status">The recorded operation status, or none when no run was resolved.</param>
+/// <param name="Message">What was recorded or why recovery remains unresolved.</param>
+/// <param name="Ok">Whether the settlement was recorded.</param>
+/// <param name="Operation">The settlement revision written.</param>
+/// <param name="Problem">Why no settlement was written.</param>
+public sealed record RunSettleResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, Problem? Problem = null);
+
 /// <summary>
 /// A stop's facts, each one present only once observed: requested, transmitted to the harness, acknowledged by it, escalated, and
 /// observed as contained. A stop that is not observed is reported as requested.

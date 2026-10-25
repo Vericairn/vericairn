@@ -51,7 +51,9 @@ public class LocalCompanionTests
             Assert.Null(entry.List);
             Failed(LocalCompanions.Inspect(kind, JsonSerializer.SerializeToElement(new { }), At), DocumentGenerationStatus.Unavailable);
         }
-        string[] excluded = ["supervisor", "processId", "escalationFailure", "problem"];
+        // Recovery caches are storage internals: they duplicate selected observations and retain raw audit text
+        // and scope paths. Their bounded exclusion is exercised below without dropping any existing field.
+        string[] excluded = ["supervisor", "processId", "escalationFailure", "problem", "outcome", "scope", "settlementPrepared", "minuteTicks"];
         Assert.Equal(typeof(RunObservedState).GetProperties().Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order(StringComparer.Ordinal),
             LocalCompanionSchemas.All["run-state"].Select(f => f.Name).Concat(excluded).Order(StringComparer.Ordinal));
     }
@@ -184,6 +186,27 @@ public class LocalCompanionTests
         Assert.DoesNotContain(hidden, text, StringComparison.Ordinal);
         payload["originals"]![0]!["hash"] = null;
         Assert.Contains("hash not recorded; no current revision substituted", Text(LocalCompanions.Inspect("retained-context", Element(payload), At)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RecoveryStorageDoesNotChangeTheInspectorBytesOrTheirDigests()
+    {
+        string hidden = Guid.NewGuid().ToString("N");
+        DateTimeOffset at = DateTimeOffset.Parse(At, CultureInfo.InvariantCulture);
+        var state = new RunObservedState { Run = Id, HeartbeatSeconds = 0.5, Heartbeat = At, Heartbeats = 2 };
+        DocumentRendition original = LocalCompanions.Run(state, At);
+        Assert.Equal(DocumentGenerationStatus.Success, original.Status);
+        state.MinuteTicks = TimeSpan.TicksPerMinute;
+        state.SettlementPrepared = true;
+        state.Outcome = new(0, at, at, 2, 10, 3, "USD", new(At, "worker", hidden), EscalationFailure: hidden,
+            Signals: [new("execution", "warning", At, hidden)]);
+        state.Scope = new(1, 1, [hidden], hidden);
+        DocumentRendition retained = LocalCompanions.Run(state, At);
+        Assert.Equal(DocumentGenerationStatus.Success, retained.Status);
+        Assert.Equal(original.ContentHash, retained.ContentHash);
+        Assert.Equal(original.InputDigest, retained.InputDigest);
+        Assert.Equal(original.Bytes, retained.Bytes);
+        Assert.DoesNotContain(hidden, Text(retained), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -397,6 +397,7 @@ public class SecondReviewTests
                 Assert.False(refused.Ok);
                 Assert.Equal("refused", refused.Problem!.Code);
                 Assert.Contains("may not stop run", refused.Problem.Message, StringComparison.Ordinal);
+                Assert.Equal("refused", lan.RunSettle(run, new(bystander)).Problem!.Code);
             }
 
             using (VericairnClient loopback = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(local)!))
@@ -407,6 +408,7 @@ public class SecondReviewTests
 
             // The run's own agent did not start it and decides nothing for its goal: refused as well, on the local socket too.
             Assert.Equal("refused", harness.Socket.RunStop(run, new RunStopRequest(builder, "Mine.", 8)).Problem!.Code);
+            Assert.Equal("refused", harness.Socket.RunSettle(run, new(builder)).Problem!.Code);
             Assert.True(clock.GetElapsedTime(began) < TimeSpan.FromSeconds(8), $"The refusals took {clock.GetElapsedTime(began)}.");
             Assert.Equal("dispatched", harness.Socket.Runs().Runs.Single(r => r.Run == run).Status);
 
