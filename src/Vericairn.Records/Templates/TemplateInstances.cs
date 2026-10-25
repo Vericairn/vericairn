@@ -92,7 +92,8 @@ public static class TemplateInstances
             if (action == "add")
             {
                 if (found.Element is not null) throw new InvalidOperationException("An added section must have a new identifier.");
-                JsonNode added = JsonNode.Parse(TJson.Object(change, "definition").GetRawText())!;
+                if (JsonNode.Parse(TJson.Object(change, "definition").GetRawText()) is not JsonObject added)
+                    throw new InvalidOperationException("An added section needs a complete definition object.");
                 if (added["id"]?.GetValue<string>() != id) throw new InvalidOperationException("The added section must match the override's identifier.");
                 root["sections"]!.AsArray().Add(added);
             }

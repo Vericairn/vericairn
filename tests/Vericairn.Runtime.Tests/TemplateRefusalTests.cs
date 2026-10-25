@@ -17,6 +17,25 @@ namespace Vericairn.Runtime.Tests;
 public sealed class TemplateRefusalTests
 {
     [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public void AnInvalidAddedSectionIsRefusedBeforeAnyDeclarationOrFileIsStored(string value)
+    {
+        using var estate = new TestEstate(3);
+        TemplateDefinition definition = Install(estate, Contract(Section("answer")));
+        using EstateService service = EstateService.Open(estate.Root);
+        JsonElement overrides = JsonDocument.Parse("[{\"section\":\"extra\",\"action\":\"add\",\"reason\":\"Add context.\",\"definition\":" + value + "}]").RootElement.Clone();
+        DocumentNewResponse response = service.DocumentNew(new(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "docs/example.md", "Example", Overrides: overrides));
+        Assert.False(response.Ok); Assert.Null(response.Declaration);
+        Assert.Empty(service.Session.Load().OfType("living-document"));
+        Assert.False(File.Exists(Path.Combine(estate.Root, "docs/example.md")));
+        JsonObject raw = Declaration(estate, definition); raw["template"]!["overrides"] = JsonNode.Parse(overrides.GetRawText());
+        Assert.False(service.NewRecord(new("living-document", estate.OperatorId, Element(raw))).Ok);
+        Assert.Empty(service.Session.Load().OfType("living-document"));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void InterruptedCreationRecoversItsOriginalBytesAndPreservesConflictingEdits(bool conflict)

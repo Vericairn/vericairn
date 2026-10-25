@@ -147,8 +147,12 @@ public static class TemplateDocuments
             bool available = bytes is not null;
             if (bytes is not null)
             {
-                using JsonDocument json = CanonicalJson.Parse(bytes);
-                available = ContentHash.Sha256(CanonicalJson.SerializeUtf8(json.RootElement, RecordParser.HashExcludedKeys)) == reference.Hash;
+                try
+                {
+                    using JsonDocument json = CanonicalJson.Parse(bytes);
+                    available = ContentHash.Sha256(CanonicalJson.SerializeUtf8(json.RootElement, RecordParser.HashExcludedKeys)) == reference.Hash;
+                }
+                catch (CanonicalJsonException) { available = false; }
             }
             sources.Add(new("record/" + reference.Id, "original-record", reference.ToString(), ContentHash.Sha256(bytes ?? []), bytes?.LongLength ?? 0,
                 available ? new UTF8Encoding(false, true).GetString(bytes!) : null, available ? "available" : "unavailable", [reference]));

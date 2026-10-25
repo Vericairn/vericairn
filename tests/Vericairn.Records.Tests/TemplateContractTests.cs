@@ -16,6 +16,22 @@ namespace Vericairn.Records.Tests;
 public sealed class TemplateContractTests
 {
     [Fact]
+    public void DamagedRequiredOriginalsMakeTheBriefExplicitlyIncomplete()
+    {
+        using TestEstate estate = RecordedFixture();
+        EstateModel model = estate.Load();
+        RecordEnvelope declaration = model.Current("living-document").Single();
+        RecordFile[] files = EstateLoader.EnumerateRecordFiles(estate.Root)
+            .Select(f => f.Path == declaration.ExpectedPath ? f with { Bytes = Encoding.UTF8.GetBytes("{damaged") } : f).ToArray();
+        TemplateSectionBrief brief = TemplateDocuments.Brief(model, declaration, "answer", recordFiles: files);
+        Assert.False(brief.Complete);
+        TemplateSource original = Assert.Single(brief.Sources, s => s.Id == "record/" + declaration.Id);
+        Assert.Equal("unavailable", original.Status); Assert.Null(original.Content);
+        Assert.Contains(brief.Sources, s => s.Kind == "template" && s.Content is not null);
+        Assert.True(brief.Bytes > 0);
+    }
+
+    [Fact]
     public void CanonicalPinsRetainTheCompleteContractAndUnknownPropertiesOrPrimitivesAreRefused()
     {
         JsonObject contract = Contract(Section("answer"));
