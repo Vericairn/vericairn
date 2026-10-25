@@ -30,12 +30,13 @@ public sealed class PromptMcpTests
 
         AssignRequest assignment = writer.Assignment();
         var op = new ToolRegistry(writer.Api, writer.Operator);
-        var arguments = new JsonObject { ["topic"] = "the assigned evidence", ["_expected"] = row.Hash,
+        var arguments = new JsonObject { ["topic"] = "the assigned evidence", ["_expected"] = row.Hash, ["_favor"] = "true",
             ["_target"] = new JsonObject { ["assignment"] = JsonSerializer.SerializeToNode(assignment, ProtocolJson.Options) }.ToJsonString() };
         JsonObject result = await op.PromptGetAsync(row.Identity, arguments, TestContext.Current.CancellationToken);
         Assert.Equal("user", result["messages"]![0]!["role"]!.GetValue<string>());
         Assert.Contains("the assigned evidence", result["messages"]![0]!["content"]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.True(writer.Model.ById.ContainsKey(result["_meta"]!["vericairn/record"]!.GetValue<string>()));
+        Assert.Equal(row.Identity, Assert.Single(writer.Api.Prompts(new(writer.Operator, Favorites: true)).Prompts).Identity);
         PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Operator, row.Identity, Disabled: true)));
         int count = writer.Model.Records.Count;
         await Assert.ThrowsAsync<ArgumentException>(() => op.PromptGetAsync(row.Identity, arguments, TestContext.Current.CancellationToken));

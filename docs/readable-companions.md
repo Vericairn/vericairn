@@ -1,5 +1,11 @@
 # Readable companion contracts
 
+Saved prompts and prompt preferences have record readers and collection coverage.
+Assignment, run-operation and ask-answer readers retain the exact prompt source,
+revision or version, definition, placeholder values and rendered text. Nested
+placeholder, tag, role and value collections are registered with the same coverage
+inventory. Records without a prompt use keep their existing rendering.
+
 Vericairn 0.8.0 exposes the immutable generator and verification
 contracts through the docs commands, API, SDK, MCP and Workbench. These are read
 models, with no new record type or record field. Source selection and authorization

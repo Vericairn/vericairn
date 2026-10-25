@@ -25,6 +25,36 @@ and `Problem`; a storage interruption can return `Written` receipts alongside a 
 problem. Older servers have no fallback route. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
 for the selection contract and recovery behavior.
 
+## Saved prompts (PROMPT-01)
+
+`IEstateApi` adds `Prompts(PromptQuery)`, `PromptSave(PromptSaveRequest)`,
+`PromptPreference(PromptPreferenceRequest)`, `PromptCopy(PromptCopyRequest)` and
+`PromptUse(PromptUseRequest)`, plus each operation's `Async` counterpart with an
+optional cancellation token. All ten interface members have default
+implementations: synchronous methods return an explicit unsupported response;
+asynchronous methods use the cancellable bridge. There is no new interface member
+without a default implementation. `CancellationBoundApi` forwards all ten members.
+`EstateService` implements the operations and `VericairnClient` exposes the same
+synchronous and asynchronous routes. No existing API constructor is removed.
+
+New protocol records are `PromptRow`, `PromptsResponse`, `PromptQuery`,
+`PromptSaveRequest`, `PromptPreferenceRequest`, `PromptCopyRequest`,
+`PromptSelection`, `PromptUseRequest` and `PromptUseResponse`. `PromptUseRequest`
+has optional init property `Favor`; existing `AssignRequest` and `RunStartRequest`
+gain optional init property `Prompt` while retaining their positional constructors
+and deconstruction contracts. The new prompt request types refuse unknown fields.
+
+`ProviderRegistry.Prompts` owns the runtime's `PromptCatalog`, whose registration
+accepts immutable versioned contributions. `SoftwarePrompts.All` supplies the
+software pack's review drafts. `ToolRegistry` adds `PromptsListAsync` and
+`PromptGetAsync`; MCP advertises standard prompts with no change notifications.
+Saved definitions, preferences and uses are additive within record format 3.
+
+See [Saved prompts](prompts.md) for request fields, authority rules, receipts and
+the explicit partial outcome when a use succeeds but its favorite write fails.
+An older server has no prompt fallback route. Cancellation after a write was sent
+can leave its outcome unknown; inspect the target before repeating the action.
+
 ## Worker settlement recovery (FIX-65)
 
 | Added member | Purpose |

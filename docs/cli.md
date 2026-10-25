@@ -1,5 +1,9 @@
 # CLI reference additions
 
+The 0.8.4 development build adds `prompt list`, `show`, `add`, `revise`, `retire`,
+`favor`, `hide`, `disable`, `copy` and `use`. See [Saved prompts](prompts.md) for
+category discovery, reversible preferences and recorded uses with new work.
+
 Revision 4, October 23, 2026. Point to the operator's guide for 0.8.3's command additions.
 
 Revision 3, October 20, 2026. Add package registry observations and account-holder intents, and document exact-byte document pinning and policy definition hashing in the development build.
