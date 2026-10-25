@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
@@ -81,6 +82,70 @@ public sealed class PublishedDependencyCommandsTests
             }
         }
         finally { ProviderRegistry.Current.VericairnReleases = previous; CliHarness.Delete(root, download); }
+    }
+
+    [Theory]
+    [InlineData("repository-synced")]
+    [InlineData("local-only")]
+    public void RequiringSignaturesAfterReleaseInitKeepsTheCheckCleanAcrossCharterRevisions(string profile)
+    {
+        string root = CliHarness.TempDirectory("published-charter"), scratch = CliHarness.TempDirectory("published-charter-inputs");
+        using var fixture = new PublishedReleaseFixture();
+        try
+        {
+            fixture.WriteDirectory(scratch);
+            CliHarness.Outcome initialized = Run(fixture.Build.Identity, null,
+                [.. InitArgs(root), "--release", "--from", scratch, "--profile", profile]);
+            Assert.True(initialized.Code == 0, initialized.Out + initialized.Err);
+            EstateModel model = CommandContext.LoadCopy(root);
+            RecordEnvelope original = model.CurrentEstate!;
+            RecordEnvelope release = Assert.Single(model.OfType("observation"));
+            byte[] manifest = File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath));
+            Dictionary<string, string> records = EstateLoader.EnumerateRecordFiles(root).ToDictionary(file => file.Path, file => ContentHash.Sha256(file.Bytes));
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", original.By,
+                "--name", "Operator device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", original.By, "--note", "The first authority.");
+
+            RecordEnvelope current = original;
+            for (int revision = 1; revision <= 2; revision++)
+            {
+                JsonObject body = JsonNode.Parse(current.Body.GetRawText())!.AsObject();
+                body["policies"]!["signatures"] = "required";
+                body["purpose"] = $"Signed charter revision {revision}.";
+                string charter = CliHarness.WriteJson(scratch, "charter.json", body.ToJsonString());
+                CliHarness.Outcome revised = CliHarness.Ok("--estate", root, "--json", "records", "new", "estate",
+                    "--by", original.By, "--body", charter, "--supersedes", current.Id);
+                CliHarness.Outcome check = CliHarness.Ok("--estate", root, "estate", "check");
+                Assert.Empty(check.Err);
+                Assert.Contains($"{5 + revision} records: 0 errors, 0 warnings", check.Out, StringComparison.Ordinal);
+                Assert.DoesNotContain("record.subject-stale", check.Out, StringComparison.Ordinal);
+
+                model = CommandContext.LoadCopy(root);
+                current = model.CurrentEstate!;
+                Assert.Equal(revised.Id, current.Id);
+                Assert.Single(current.Signatures);
+                Assert.Equal(release.Reference, model.Manifest!.Release);
+                Assert.Equal(original.Reference, model.ById[release.Id].Subject);
+                Assert.Equal(manifest, File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath)));
+                Assert.All(records, pair => Assert.Equal(pair.Value, ContentHash.Sha256File(Path.Combine(root, pair.Key))));
+                Assert.All(model.Records, record => Assert.Equal(3, record.Format));
+            }
+
+            string observationBody = CliHarness.WriteJson(scratch, "observation.json",
+                """{"kind":"repository","asOf":"2026-10-13T12:00:00Z","summary":"Observed the original charter.","facts":{},"limitations":[]}""");
+            CliHarness.Outcome observed = CliHarness.Ok("--estate", root, "--json", "records", "new", "observation",
+                "--by", original.By, "--body", observationBody, "--subject", $"estate:{original.Id}:{original.ComputedHash}");
+            CliHarness.Outcome stale = CliHarness.Ok("--estate", root, "--json", "estate", "check");
+            Assert.Empty(stale.Err);
+            Assert.Equal(0, stale.Json.GetProperty("errors").GetInt32());
+            Assert.Equal(1, stale.Json.GetProperty("warnings").GetInt32());
+            JsonElement finding = Assert.Single(stale.Json.GetProperty("findings").EnumerateArray());
+            Assert.Equal("record.subject-stale", finding.GetProperty("Code").GetString());
+            Assert.Equal("warning", finding.GetProperty("severity").GetString());
+            Assert.Equal(observed.Json.GetProperty("path").GetString(), finding.GetProperty("Location").GetString());
+            Assert.Equal(8, CommandContext.LoadCopy(root).Records.Count);
+        }
+        finally { CliHarness.Delete(root, scratch); }
     }
 
     [Theory]
