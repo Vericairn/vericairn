@@ -2,9 +2,11 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Providers;
@@ -16,11 +18,15 @@ namespace Vericairn.Cli.Tests;
 public sealed class PublishedDependencyCommandsTests
 {
     [Theory]
-    [InlineData("repository-synced", false)]
-    [InlineData("repository-synced", true)]
-    [InlineData("local-only", false)]
-    [InlineData("local-only", true)]
-    public void InitReleaseUsesRecordedResponsesOrOfflineFilesAndPinsTheObservation(string profile, bool offline)
+    [InlineData("repository-synced", false, true)]
+    [InlineData("repository-synced", true, true)]
+    [InlineData("local-only", false, true)]
+    [InlineData("local-only", true, true)]
+    [InlineData("repository-synced", false, false)]
+    [InlineData("repository-synced", true, false)]
+    [InlineData("local-only", false, false)]
+    [InlineData("local-only", true, false)]
+    public void InitReleaseUsesRecordedResponsesOrOfflineFilesAndPinsTheObservation(string profile, bool offline, bool json)
     {
         string root = CliHarness.TempDirectory("published-init"), download = CliHarness.TempDirectory("published-download");
         using var fixture = new PublishedReleaseFixture();
@@ -32,7 +38,7 @@ public sealed class PublishedDependencyCommandsTests
             fixture.BeforeResponse = _ => Assert.Empty(Directory.EnumerateFileSystemEntries(root));
             fixture.WriteDirectory(download);
             CliHarness.Outcome result = Run(fixture.Build.Identity, null,
-                [.. InitArgs(root), "--release", "--profile", profile, .. offline ? new[] { "--from", download } : []]);
+                [.. InitArgs(root, json), "--release", "--profile", profile, .. offline ? new[] { "--from", download } : []]);
             Assert.Equal(0, result.Code);
             Assert.Empty(result.Err);
             EstateModel model = CommandContext.LoadCopy(root);
@@ -44,6 +50,31 @@ public sealed class PublishedDependencyCommandsTests
             RecordEnvelopeAssertion(model);
             Assert.Equal(offline ? 0 : 5, fixture.Requests.Count);
             Assert.Equal(profile == "repository-synced", Directory.Exists(Path.Combine(root, "records")));
+
+            RecordEnvelope operatorRecord = Assert.Single(model.OfType("principal"));
+            RecordEnvelope estateRecord = Assert.Single(model.OfType("estate"));
+            RecordEnvelope observation = Assert.Single(model.OfType("observation"));
+            if (json)
+            {
+                JsonElement output = result.Json;
+                Assert.Equal(["operator", "estate", "manifest", "release"], output.EnumerateObject().Select(p => p.Name));
+                Assert.Equal(operatorRecord.Id, output.GetProperty("operator").GetString());
+                Assert.Equal(estateRecord.Id, output.GetProperty("estate").GetString());
+                Assert.Equal(EstateLayout.ManifestPath, output.GetProperty("manifest").GetString());
+                JsonElement receipt = output.GetProperty("release");
+                Assert.Equal(["path", "id", "hash"], receipt.EnumerateObject().Select(p => p.Name));
+                Assert.Equal(observation.ExpectedPath, receipt.GetProperty("path").GetString());
+                Assert.Equal(observation.Id, receipt.GetProperty("id").GetString());
+                Assert.Equal(observation.ComputedHash, receipt.GetProperty("hash").GetString());
+            }
+            else
+            {
+                Assert.Equal(
+                    $"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}{Environment.NewLine}"
+                    + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
+                    + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}"
+                    + $"release   {observation.Id}  {observation.ExpectedPath}  {observation.ComputedHash}{Environment.NewLine}", result.Out);
+            }
         }
         finally { ProviderRegistry.Current.VericairnReleases = previous; CliHarness.Delete(root, download); }
     }
@@ -137,7 +168,7 @@ public sealed class PublishedDependencyCommandsTests
         Assert.Equal(Assert.Single(model.OfType("observation")).Reference, model.Manifest!.Release);
     }
 
-    private static string[] InitArgs(string root) => ["--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example",
+    private static string[] InitArgs(string root, bool json = true) => ["--estate", root, .. json ? new[] { "--json" } : [], "estate", "init", "--name", "Example", "--slug", "example",
         "--purpose", "Use a published dependency.", "--operator-name", "Operator", "--organization", "Example"];
 
     private static CliHarness.Outcome Run(string version, IEstateApi? api, string[] arguments)

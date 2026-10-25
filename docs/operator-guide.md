@@ -74,6 +74,32 @@ in release mode and pins that observation by hash. It creates no product or prod
 `--release`; omit `--release` to retain ordinary offline source initialization. `--from <download-directory>` supplies downloaded
 publication evidence and archive bytes for offline verification; see [offline inputs](install.md#offline-inputs).
 
+In 0.8.4, successful `estate init --release` also prints the observation's receipt after the operator,
+estate and manifest lines:
+
+```text
+release   <observation id>  records/observation/<YYYY-MM>/<observation id>.json  sha256:<hash>
+```
+
+With `--json`, the existing `operator`, `estate` and `manifest` fields are joined by a `release` object:
+
+```json
+{
+  "operator": "<operator id>",
+  "estate": "<estate id>",
+  "manifest": "estate/manifest.json",
+  "release": {
+    "path": "records/observation/<YYYY-MM>/<observation id>.json",
+    "id": "<observation id>",
+    "hash": "sha256:<hash>"
+  }
+}
+```
+
+The receipt identifies the exact observation pinned by the manifest in either storage profile. Its
+path is the record's portable path; with `local-only`, the record stays in the live store. Without
+`--release`, both output formats remain unchanged and no release receipt is included.
+
 Optional charter signatures do not waive record-specific requirements. Policy and writing changes,
 duty results/reviews, strict generated declarations and the operator one-step action still require
 their admitted signatures and exact authority.

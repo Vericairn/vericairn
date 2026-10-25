@@ -4,6 +4,7 @@
 using System.CommandLine;
 using System.Reflection;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Cli.Tests;
 
@@ -24,6 +25,36 @@ public sealed class EstateInitCommandTests
             CliHarness.Outcome outcome = WithVersion("0.8.3+" + Commit, Arguments(root, profile));
             AssertPin(root, outcome, Commit, profile);
             Assert.False(Directory.Exists(Path.Combine(root, ".git")));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
+    [Theory]
+    [InlineData("repository-synced", false)]
+    [InlineData("repository-synced", true)]
+    [InlineData("local-only", false)]
+    [InlineData("local-only", true)]
+    public void SourceInitKeepsTheExistingOutput(string profile, bool json)
+    {
+        string root = CliHarness.TempDirectory("init-source-output");
+        try
+        {
+            CliHarness.Outcome outcome = WithVersion("0.8.3+" + Commit, Arguments(root, profile, json));
+            Assert.Equal(0, outcome.Code);
+            Assert.Empty(outcome.Err);
+            EstateModel estate = CommandContext.LoadCopy(root);
+            Assert.False(estate.Findings.HasErrors, string.Join('\n', estate.Findings));
+            Assert.Equal(2, estate.Records.Count);
+            Assert.Equal("source", estate.Manifest!.Mode);
+            Assert.Null(estate.Manifest.Release);
+            RecordEnvelope operatorRecord = Assert.Single(estate.OfType("principal"));
+            RecordEnvelope estateRecord = Assert.Single(estate.OfType("estate"));
+            string expected = json
+                ? $"{{\"operator\":\"{operatorRecord.Id}\",\"estate\":\"{estateRecord.Id}\",\"manifest\":\"{EstateLayout.ManifestPath}\"}}{Environment.NewLine}"
+                : $"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}{Environment.NewLine}"
+                    + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
+                    + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}";
+            Assert.Equal(expected, outcome.Out);
         }
         finally { CliHarness.Delete(root); }
     }
@@ -137,8 +168,8 @@ public sealed class EstateInitCommandTests
         finally { CliHarness.Delete(root); }
     }
 
-    private static string[] Arguments(string root, string profile = "repository-synced") =>
-        ["--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example",
+    private static string[] Arguments(string root, string profile = "repository-synced", bool json = true) =>
+        ["--estate", root, .. json ? new[] { "--json" } : [], "estate", "init", "--name", "Example", "--slug", "example",
             "--purpose", "Prove initialization.", "--operator-name", "Operator", "--organization", "Example", "--profile", profile];
 
     private static CliHarness.Outcome WithVersion(string version, string[] arguments)
