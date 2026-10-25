@@ -17,6 +17,20 @@ public sealed class PresentationTemplateTests
     public static IEnumerable<object[]> Variants => PresentationTemplates.Definitions.SelectMany(d =>
         Depths.Select(depth => new object[] { d.Id, depth }));
 
+    [Fact]
+    public void CompiledContractsMatchEveryVersionedSourceWithoutAddingAssemblyResources()
+    {
+        string[] files = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "PresentationTemplates"), "*.json");
+        Assert.Equal(4, files.Length);
+        foreach (string file in files)
+        {
+            using JsonDocument source = JsonDocument.Parse(File.ReadAllBytes(file));
+            TemplateDefinition definition = TemplateDefinition.Read(source.RootElement);
+            Assert.Equal(definition.Content.GetRawText(), PresentationTemplates.Definitions.Single(d => d.Id == definition.Id).Content.GetRawText());
+        }
+        Assert.Empty(typeof(TemplateDefinition).Assembly.GetManifestResourceNames());
+    }
+
     [Theory]
     [MemberData(nameof(Variants))]
     public void EveryDepthKeepsEveryRequiredFactAndOriginalReference(string id, string depth)
@@ -77,6 +91,31 @@ public sealed class PresentationTemplateTests
         basis.Remove("originals");
         Assert.Throws<InvalidOperationException>(() => PresentationTemplates.Render(pin, "short", estate.Estate.Reference, basis));
         Assert.Equal("not-performed", TemplatePrimitives.Check("vericairn.templates/complete-source")!.Check("anything", []).Outcome);
+    }
+
+    [Fact]
+    public void AdoptionCannotGrantItsOwnAuthorityAndItsReadableHistoryRetainsThePinAndChoice()
+    {
+        using var estate = new TestEstate(3);
+        TemplateDefinition definition = PresentationTemplates.Definitions[0];
+        RecordEnvelope enabled = Adopt(estate, definition);
+        RecordEnvelope disabled = Adopt(estate, definition, "disabled", enabled.Id);
+        foreach (RecordEnvelope choice in new[] { enabled, disabled })
+        {
+            string text = System.Net.WebUtility.HtmlDecode(RecordCompanionTests.Text(RecordCompanionTests.Render([DocumentSourceSnapshot.Record(choice)])));
+            Assert.Contains(choice.ComputedHash, text);
+            Assert.Contains(definition.Hash, text);
+            Assert.Contains(choice.Body.GetProperty("options").GetProperty("adoption").GetString()!, text);
+        }
+        using var unauthorized = new TestEstate(3);
+        var body = new JsonObject
+        {
+            ["template"] = Pin(definition), ["scope"] = new JsonObject { ["kind"] = "estate" },
+            ["options"] = new JsonObject { ["adoption"] = "enabled" }, ["reason"] = "A contributor cannot grant authority by selecting a template.",
+        };
+        unauthorized.Add("template-defaults", unauthorized.BuilderId, body.ToJsonString());
+        Assert.Contains(unauthorized.Load().Findings, f => f.Code == "template.defaults-author");
+        Assert.Throws<InvalidOperationException>(() => PresentationTemplates.Adoption(unauthorized.Load(), definition.Id));
     }
 
     [Theory]

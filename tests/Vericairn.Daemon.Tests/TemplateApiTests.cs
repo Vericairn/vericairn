@@ -24,6 +24,58 @@ public sealed class TemplateApiTests
     public TemplateApiTests() => DaemonTestHome.Ensure();
 
     [Fact]
+    public async Task PresentationRouteAndClientsPreservePinsChecksAndReadOnlyCancellation()
+    {
+        using var estate = new TestEstate(3);
+        var (result, _) = Vericairn.Runtime.Tests.PresentationTemplateServiceTests.Source(estate);
+        var definition = Vericairn.Records.Templates.PresentationTemplates.Definitions.Single(d => d.Id == Vericairn.Records.Templates.PresentationTemplates.Review);
+        PresentationTemplateTests.Adopt(estate, definition);
+        using EstateService service = EstateService.Open(estate.Root);
+        using var handler = new RouteHandler(service);
+        using var sdk = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") });
+        var bound = new CancellationBoundApi(sdk, TestContext.Current.CancellationToken);
+        var request = Vericairn.Runtime.Tests.PresentationTemplateServiceTests.Request(estate, definition, result, "short");
+        int count = service.Session.Load().Records.Count;
+        foreach (IEstateApi api in new IEstateApi[] { sdk, bound })
+        {
+            TemplateRenderResponse prepared = api.TemplateRender(request);
+            Assert.Null(prepared.Problem);
+            Assert.Equal(definition.Hash, prepared.Use!.Template.Hash);
+            Assert.All(prepared.Checks, c => Assert.Equal("passed", c.Outcome));
+            TemplateRenderResponse read = await api.TemplateRenderAsync(request with { Candidate = prepared.Text }, TestContext.Current.CancellationToken);
+            Assert.Equal(prepared.Text, read.Text); Assert.Null(read.Problem);
+            TemplateRenderResponse failed = api.TemplateRender(request with { Candidate = prepared.Text!.Replace("not-performed", "passed", StringComparison.Ordinal) });
+            Assert.Equal("failed-check", failed.Problem!.Code);
+        }
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        ClientCancelledException exception = await Assert.ThrowsAsync<ClientCancelledException>(() => sdk.TemplateRenderAsync(request, cancelled.Token));
+        Assert.False(exception.OutcomeUnknown);
+        Assert.Equal(count, service.Session.Load().Records.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PresentationPreparationUsesNoWriteLedgerOrSigningPath(bool localNetwork)
+    {
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        string scratch = Path.Combine(Path.GetTempPath(), "vericairn-presentation-ledger-" + Guid.NewGuid().ToString("N"));
+        int writes = 0;
+        var scope = new RequestScope(service, new LocalNetworkLedger(scratch), beforeWrite: () => writes++);
+        var context = new DefaultHttpContext(); context.Request.Method = "POST"; context.Request.Path = "/v1/templates/render";
+        context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice("device", estate.BuilderId, "public-key", localNetwork);
+        var request = new TemplateRenderRequest(new("example/template", "1.0.0", "hash"), new("result", "subject", "hash"));
+        var expected = new TemplateRenderResponse(null, null, null, null, [], new("refused", "No adoption.", []));
+        try
+        {
+            object? response = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, request), _ => ValueTask.FromResult<object?>(expected));
+            Assert.Same(expected, response); Assert.Equal(0, writes); Assert.False(Directory.Exists(scratch));
+        }
+        finally { if (Directory.Exists(scratch)) Directory.Delete(scratch, true); }
+    }
+
+    [Fact]
     public async Task RealRoutesCreateReadAndReviewOneSectionAndReturnIncompleteBriefsAndRefusals()
     {
         using var estate = new TestEstate(3);
@@ -31,7 +83,10 @@ public sealed class TemplateApiTests
         using EstateService service = EstateService.Open(estate.Root);
         using var handler = new RouteHandler(service);
         using var sdk = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") });
-        var template = Assert.Single((await sdk.TemplatesAsync(TestContext.Current.CancellationToken)).Templates);
+        var templates = (await sdk.TemplatesAsync(TestContext.Current.CancellationToken)).Templates;
+        Assert.Equal(5, templates.Count);
+        Assert.Equal(Vericairn.Records.Templates.PresentationTemplates.Definitions.Select(d => d.Id).Order(), templates.Where(t => t.Pin.Id != definition.Id).Select(t => t.Pin.Id).Order());
+        var template = Assert.Single(templates, t => t.Pin.Id == definition.Id);
         Assert.Equal(definition.Hash, template.Pin.Hash);
         var request = new DocumentNewRequest(estate.OperatorId, template.Pin, "docs/example.md", "Example");
         DocumentNewResponse created = await sdk.DocumentNewAsync(request, TestContext.Current.CancellationToken);

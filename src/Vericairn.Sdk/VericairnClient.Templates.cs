@@ -9,6 +9,11 @@ namespace Vericairn.Sdk;
 public sealed partial class VericairnClient
 {
     /// <inheritdoc />
+    public TemplateRenderResponse TemplateRender(TemplateRenderRequest request) => Post<TemplateRenderRequest, TemplateRenderResponse>("/v1/templates/render", request)!;
+    /// <inheritdoc />
+    public Task<TemplateRenderResponse> TemplateRenderAsync(TemplateRenderRequest request, CancellationToken cancellationToken = default) => RunOperationAsync(nameof(TemplateRender),
+        async token => (await PostAsync<TemplateRenderRequest, TemplateRenderResponse>("/v1/templates/render", request, token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(TemplateRender)), cancellationToken);
+    /// <inheritdoc />
     public TemplatesResponse Templates() => Get<TemplatesResponse>("/v1/templates")!;
     /// <inheritdoc />
     public DocumentSectionsResponse DocumentSections(string declaration, string? commit = null) => Get<DocumentSectionsResponse>(SectionsPath(declaration, commit))!;

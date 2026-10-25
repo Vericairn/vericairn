@@ -267,10 +267,12 @@ ordinary results and reviews; there is no template-instantiation MCP write.
 The Workbench section inspector and section review editor remain follow-on work;
 use the CLI or API for these workflows.
 
-The estate's design, roadmap, release and communication templates are separate
+The estate's design, roadmap and release templates are separate
 content adoption. Their builders supply contracts, sources, registered generators
 or checks, recorded role standing, explicit options and migration decisions.
-The mechanism does not install estate-specific templates or infer process
-adoption. The [format-3 additions](record-format-v3.md#template-instances-and-section-evidence)
+The mechanism never infers process adoption. Four first-party
+[presentation templates](presentation-templates.md) add communication, context,
+commit and review forms with explicit, reversible estate adoption.
+The [format-3 additions](record-format-v3.md#template-instances-and-section-evidence)
 and [generated record reference](reference/record-reference.md) describe the
 retained record fields and readable companions.

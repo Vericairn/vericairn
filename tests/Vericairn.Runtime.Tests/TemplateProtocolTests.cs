@@ -18,10 +18,37 @@ namespace Vericairn.Runtime.Tests;
 public sealed class TemplateProtocolTests
 {
     private static readonly string[] BriefParameters = ["commit", "id", "maxBytes", "section"];
+
+    [Fact]
+    public async Task PresentationMcpToolOnlyReadsAndCatchesLostRequiredContent()
+    {
+        using var estate = new TestEstate(3);
+        var (result, _) = PresentationTemplateServiceTests.Source(estate);
+        var definition = Vericairn.Records.Templates.PresentationTemplates.Definitions.Single(d => d.Id == Vericairn.Records.Templates.PresentationTemplates.Communication);
+        PresentationTemplateTests.Adopt(estate, definition);
+        using EstateService service = EstateService.Open(estate.Root);
+        var registry = new ToolRegistry(service, estate.BuilderId);
+        Assert.False(registry.Visible().Single(t => t.Name == "template_render").Writes);
+        Assert.False(registry.All.Single(t => t.Name == "template_render").Writes);
+        int count = service.Session.Load().Records.Count;
+        var request = PresentationTemplateServiceTests.Request(estate, definition, result, "short");
+        ToolCallResult prepared = await registry.CallAsync("template_render", new JsonObject { ["request"] = JsonSerializer.SerializeToNode(request, ProtocolJson.Options) }, TestContext.Current.CancellationToken);
+        Assert.False(prepared.IsError, prepared.Text);
+        TemplateRenderResponse rendered = JsonSerializer.Deserialize<TemplateRenderResponse>(prepared.Text, ProtocolJson.Options)!;
+        Assert.Equal(definition.Hash, rendered.Use!.Template.Hash);
+        Assert.All(rendered.Checks, c => Assert.Equal("passed", c.Outcome));
+        ToolCallResult failed = await registry.CallAsync("template_render", new JsonObject
+        {
+            ["request"] = JsonSerializer.SerializeToNode(request with { Candidate = rendered.Text!.Replace(result.ComputedHash, "missing", StringComparison.Ordinal) }, ProtocolJson.Options),
+        }, TestContext.Current.CancellationToken);
+        Assert.True(failed.IsError);
+        Assert.Equal("failed-check", JsonSerializer.Deserialize<TemplateRenderResponse>(failed.Text, ProtocolJson.Options)!.Problem!.Code);
+        Assert.Equal(count, service.Session.Load().Records.Count);
+    }
     [Fact]
     public void EveryAddedInterfaceMemberHasADefaultAndOpenApiDescribesEveryContractProperty()
     {
-        foreach (string name in new[] { "Templates", "DocumentSections", "SectionBrief", "DocumentNew" })
+        foreach (string name in new[] { "Templates", "DocumentSections", "SectionBrief", "DocumentNew", "TemplateRender" })
         {
             Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
             Assert.False(typeof(IEstateApi).GetMethod(name + "Async")!.IsAbstract);
@@ -32,6 +59,7 @@ public sealed class TemplateProtocolTests
         {
             ("GET", "/v1/templates", "TemplatesResponse"), ("GET", "/v1/documents/{id}/sections", "DocumentSectionsResponse"),
             ("GET", "/v1/documents/{id}/sections/{section}/brief", "SectionBriefResponse"), ("POST", "/v1/documents/new", "DocumentNewResponse"),
+            ("POST", "/v1/templates/render", "TemplateRenderResponse"),
         })
         {
             Assert.Contains((method, path), OpenApiDocument.Routes);
@@ -40,7 +68,8 @@ public sealed class TemplateProtocolTests
         }
         foreach (Type contract in new[] { typeof(DocumentNewRequest), typeof(DocumentNewResponse), typeof(TemplatesResponse), typeof(TemplateDto), typeof(TemplatePinDto),
             typeof(TemplateRecordReference), typeof(TemplateSourceDto), typeof(TemplateCheckDto), typeof(TemplateSectionDto), typeof(TemplateBriefDto), typeof(DocumentSectionsResponse),
-            typeof(SectionBriefResponse), typeof(DocumentSectionReview), typeof(DocumentSectionJudgment), typeof(DocumentReviewRequest) })
+            typeof(SectionBriefResponse), typeof(DocumentSectionReview), typeof(DocumentSectionJudgment), typeof(DocumentReviewRequest),
+            typeof(TemplateRenderRequest), typeof(TemplateRenderResponse), typeof(PresentationTemplateUse) })
             Assert.Equal(contract.GetProperties().Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order(),
                 document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(contract.Name).GetProperty("properties").EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal(BriefParameters, document.RootElement.GetProperty("paths").GetProperty("/v1/documents/{id}/sections/{section}/brief")

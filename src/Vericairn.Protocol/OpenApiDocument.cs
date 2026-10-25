@@ -85,6 +85,7 @@ public static class OpenApiDocument
         ("GET", "/v1/releases"),
         ("GET", "/v1/documents"),
         ("GET", "/v1/templates"),
+        ("POST", "/v1/templates/render"),
         ("POST", "/v1/documents/new"),
         ("GET", "/v1/documents/{id}/sections"),
         ("GET", "/v1/documents/{id}/sections/{section}/brief"),
@@ -399,11 +400,11 @@ public static class OpenApiDocument
                 };
             responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DecisionNewRequest." };
         }
-        else if (path is "/v1/templates" or "/v1/documents/new" or "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
+        else if (path is "/v1/templates" or "/v1/templates/render" or "/v1/documents/new" or "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
         {
             string schema = path switch
             {
-                "/v1/templates" => "TemplatesResponse", "/v1/documents/new" => "DocumentNewResponse",
+                "/v1/templates" => "TemplatesResponse", "/v1/templates/render" => "TemplateRenderResponse", "/v1/documents/new" => "DocumentNewResponse",
                 "/v1/documents/{id}/sections" => "DocumentSectionsResponse", _ => "SectionBriefResponse",
             };
             responses["200"] = new JsonObject
@@ -681,7 +682,7 @@ public static class OpenApiDocument
             ["ResourceResponse"] = Object(("content", "string"), ("mimeType", "string"), ("hash", "string"), ("sourceHash", "string"), ("problem", "object")),
             ["PromptUseResponse"] = Object(("ok", "boolean"), ("text", "string"), ("written", "object"), ("run", "object"), ("problem", "object")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
-            ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
+            ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string"), ("template", "object")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
@@ -703,6 +704,9 @@ public static class OpenApiDocument
             ["DocumentNewRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string")),
             ["DocumentNewResponse"] = Object(("declaration", "object"), ("path", "string"), ("contentHash", "string"), ("problem", "object"), ("ok", "boolean")),
             ["TemplatesResponse"] = Object(("templates", "array"), ("problem", "object")),
+            ["PresentationTemplateUse"] = Object(("template", "object"), ("adoption", "object"), ("depth", "string")),
+            ["TemplateRenderRequest"] = Object(("template", "object"), ("subject", "object"), ("depth", "string"), ("authored", "object"), ("explanation", "string"), ("maxBytes", "integer"), ("candidate", "string"), ("adoption", "object")),
+            ["TemplateRenderResponse"] = Object(("use", "object"), ("text", "string"), ("hash", "string"), ("bytes", "integer"), ("checks", "array"), ("problem", "object")),
             ["TemplateDto"] = Object(("pin", "object"), ("definition", "object")),
             ["TemplatePinDto"] = Object(("id", "string"), ("version", "string"), ("hash", "string")),
             ["TemplateRecordReference"] = Object(("type", "string"), ("id", "string"), ("hash", "string")),
@@ -713,7 +717,7 @@ public static class OpenApiDocument
             ["DocumentSectionReview"] = Object(("id", "string"), ("outcome", "string"), ("fidelity", "string"), ("judgments", "array")),
             ["DocumentSectionJudgment"] = Object(("rule", "string"), ("verdict", "string"), ("summary", "string"), ("evidence", "array")),
             ["DocumentSectionsResponse"] = Object(("declaration", "string"), ("path", "string"), ("sections", "array"), ("problem", "object")),
-            ["SectionBriefResponse"] = Object(("brief", "object"), ("problem", "object")),
+            ["SectionBriefResponse"] = Object(("brief", "object"), ("problem", "object"), ("presentation", "object")),
             ["DocumentPassPin"] = Object(("id", "string"), ("hash", "string")),
             ["DocumentPassAssignRequest"] = new JsonObject
             {
@@ -861,6 +865,7 @@ public static class OpenApiDocument
         "/v1/documents/pin" => "DocumentPinRequest",
         "/v1/documents/new" => "DocumentNewRequest",
         "/v1/documents/pass/{version}/assignments" => "DocumentPassAssignRequest",
+        "/v1/templates/render" => "TemplateRenderRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
@@ -977,6 +982,7 @@ public static class OpenApiDocument
         ("GET", "/v1/releases") => "Current release records.",
         ("GET", "/v1/documents") => "The declared living documents with their derived state: current, due with every trigger newer than the latest clearance, or unavailable with the contributions no installed pack provides.",
         ("GET", "/v1/templates") => "Available exact template contracts. Installing or reading a template grants no authority.",
+        ("POST", "/v1/templates/render") => "Read-only preparation or checking against a separately bound exact subject and recorded adoption; complete required content at every depth, without review or acceptance.",
         ("POST", "/v1/documents/new") => "Create a document and its living declaration from an exact template version. Records all effective choices and explicit overrides; existing files are never overwritten. A receipt with a problem requires reconciliation before retrying.",
         ("GET", "/v1/documents/{id}/sections") => "Each section's derived state, required fidelity, exact sources, checks and evaluator judgments. A passed check grants no authority.",
         ("GET", "/v1/documents/{id}/sections/{section}/brief") => "The complete measured section brief. Optional maxBytes refuses overflow without truncating required originals; commit selects the external repository revision.",

@@ -56,10 +56,26 @@ public sealed partial class EstateService
             try
             {
                 TemplateSectionBrief brief = TemplateDocuments.Brief(model, document, section, maxBytes, commit, session.Files());
-                return new(new(brief.Declaration, brief.DeclarationHash, new(brief.Template.Id, brief.Template.Version, brief.Template.Hash), brief.Section,
+                var response = new SectionBriefResponse(new(brief.Declaration, brief.DeclarationHash, new(brief.Template.Id, brief.Template.Version, brief.Template.Hash), brief.Section,
                     brief.Purpose, brief.Role, brief.RoleBrief, brief.Fidelity, brief.Quality, brief.Options, brief.Sources.Select(SourceDto).ToArray(),
                     brief.Cohesion.Select(CheckDto).ToArray(), brief.Bytes, brief.Complete, brief.Problem),
                     brief.Complete ? null : new Problem("incomplete", brief.Problem!, []));
+                if (!brief.Complete || PresentationUse(model, PresentationTemplates.Context) is not { } use) return response;
+                var sections = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["basis"] = System.Text.Json.JsonSerializer.Serialize(new { brief.Declaration, brief.DeclarationHash, brief.Template, brief.Section, brief.Role, brief.RoleBrief, brief.Fidelity, brief.Quality, brief.Options }, ProtocolJson.Options),
+                    ["required-sources"] = TemplatePresentation.Brief(response),
+                    ["originals"] = JsonSerializer.Serialize(brief.Sources, ProtocolJson.Options),
+                    ["source-identities"] = JsonSerializer.Serialize(brief.Sources.Select(s => new { s.Id, s.Kind, s.Identity, s.Hash, s.Bytes, s.Status, s.Records }), ProtocolJson.Options),
+                    ["withheld"] = "[]\nScope: this section brief and every declared source; no claim about unselected estate material.",
+                };
+                try
+                {
+                    TemplatePresentationResult rendered = PresentationTemplates.Render(new(use.Template.Id, use.Template.Version, use.Template.Hash), use.Depth,
+                        new(use.Adoption.Type, use.Adoption.Id, use.Adoption.Hash), sections, maxBytes);
+                    return response with { Presentation = new(use, rendered.Text, rendered.Hash, rendered.Bytes, rendered.Checks.Select(CheckDto).ToArray()) };
+                }
+                catch (InvalidOperationException error) { return response with { Problem = new("incomplete", error.Message, []) }; }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
             { return new(null, new Problem("unavailable", "The requested section and its complete evidence could not be read.", [])); }
@@ -86,6 +102,7 @@ public sealed partial class EstateService
                 string file = GeneratedDocumentVerification.SafeFile(session.Root, request.Path);
                 if (File.Exists(file) || Directory.Exists(file)) return NewRefused("The destination already exists; instantiation never overwrites existing work.");
                 TemplateDefinition definition = TemplateCatalog.Resolve(model, new(request.Template.Id, request.Template.Version, request.Template.Hash));
+                if (PresentationTemplates.Definitions.Any(d => d.Id == definition.Id)) return NewRefused("Use templates render with an exact subject and explicit adoption for these content forms; they are not living-document declarations.");
                 if (!TemplateCatalog.All(model).Any(t => t.Id == definition.Id && t.Version == definition.Version)) return NewRefused("The template version is retired for new instances.");
                 IReadOnlyDictionary<string, string> options = TemplateInstances.Options(model, definition, request.Scope ?? default, request.Options ?? default);
                 var template = new JsonObject

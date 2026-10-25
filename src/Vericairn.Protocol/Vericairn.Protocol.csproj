@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../Shared/PresentationContent.cs" Link="PresentationContent.cs" />
+    <Compile Include="../Shared/PresentationContracts.cs" Link="PresentationContracts.cs" />
     <InternalsVisibleTo Include="vericairn-workbench" />
     <InternalsVisibleTo Include="Vericairn.Runtime" />
     <InternalsVisibleTo Include="Vericairn.Sdk" />

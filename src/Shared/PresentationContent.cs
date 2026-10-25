@@ -27,14 +27,10 @@ internal static class PresentationContent
     private static Dictionary<string, (JsonElement, string)> Load()
     {
         var result = new Dictionary<string, (JsonElement, string)>(StringComparer.Ordinal);
-        foreach (string id in Ids)
+        foreach (string content in PresentationContracts.Canonical)
         {
-            using Stream stream = typeof(PresentationContent).Assembly.GetManifestResourceStream("PresentationTemplates." + id[(id.IndexOf('/') + 1)..] + ".json")
-                ?? throw new InvalidOperationException("An installed presentation contract is unavailable.");
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            string content = reader.ReadToEnd();
             using JsonDocument document = JsonDocument.Parse(content);
-            result.Add(id, (document.RootElement.Clone(), Digest(content)));
+            result.Add(document.RootElement.GetProperty("id").GetString()!, (document.RootElement.Clone(), Digest(content)));
         }
         return result;
     }
@@ -59,7 +55,9 @@ internal static class PresentationContent
         while (true)
         {
             sections["budget"] = Json(new { bytes, maxBytes, units = "UTF-8 bytes", tokens = "unknown", scope = "complete presentation including this accounting", fit = "not claimed" });
-            var text = new StringBuilder().Append(id).Append(" 1.0.0 at ").Append(Hash(id)).Append('\n')
+            var text = new StringBuilder();
+            if (id is Commit or Review && sections.TryGetValue(id == Commit ? "outcome" : "verdict", out string? lead)) text.Append(lead).Append("\n\n");
+            text.Append(id).Append(" 1.0.0 at ").Append(Hash(id)).Append('\n')
                 .Append("Adoption: ").Append(adoption).Append("\nDepth: ").Append(depth).Append('\n');
             if (depth != "short") text.Append("Required content and original references remain complete. This presentation grants no acceptance or authority.\n");
             if (depth == "comprehensive") text.Append("The source identities, withheld list and measured budget follow with the complete selected originals.\n");
@@ -76,6 +74,7 @@ internal static class PresentationContent
                 text.Append("<!-- vericairn:").Append(generated ? "generated " : "section ").Append(key).Append(" -->\n")
                     .Append(Block(content)).Append("<!-- vericairn:").Append(generated ? "end " : "section-end ").Append(key).Append(" -->\n");
             }
+            if (id == Commit && sections.TryGetValue("attribution", out string? attribution)) text.Append('\n').Append(attribution).Append('\n');
             string rendered = text.ToString();
             long measured = Encoding.UTF8.GetByteCount(rendered);
             if (bytes == measured)

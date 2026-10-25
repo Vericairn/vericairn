@@ -32,7 +32,12 @@ public sealed record TemplatesResponse(IReadOnlyList<TemplateDto> Templates, Pro
 /// <summary>A document's section states and their exact evidence, or a lookup problem.</summary>
 public sealed record DocumentSectionsResponse(string? Declaration, string? Path, IReadOnlyList<TemplateSectionDto> Sections, Problem? Problem = null);
 /// <summary>A measured complete section brief, or an explicit unavailable/refused result.</summary>
-public sealed record SectionBriefResponse(TemplateBriefDto? Brief, Problem? Problem = null);
+public sealed record SectionBriefResponse(TemplateBriefDto? Brief, Problem? Problem = null)
+{
+    /// <summary>Complete context-template presentation, only after explicit estate adoption; measured separately from the source brief.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public TemplateRenderResponse? Presentation { get; init; }
+}
 /// <summary>Creates one estate document from an exact template, recording effective choices and explicit overrides.</summary>
 public sealed record DocumentNewRequest(string By, TemplatePinDto Template, string Path, string Title, JsonElement? Options = null,
     JsonElement? Scope = null, JsonElement? Overrides = null, string Level = "warn");
