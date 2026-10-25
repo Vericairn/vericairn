@@ -1330,3 +1330,22 @@ before probes or record writes, even when acting for an authorized human or supp
 override. The local socket and signed loopback retain the existing human authority checks. A qualification
 record can be used on another machine only when that machine's exact local probe digests match; the record
 does not permit network-triggered probes. Remote remains unbuilt.
+
+## Templates and section evidence in 0.8.4 development
+
+| Route | Contract |
+| --- | --- |
+| `GET /v1/templates` | `TemplatesResponse` with available exact pins and complete definitions. Retired versions remain resolvable by existing instances. |
+| `POST /v1/documents/new` | `DocumentNewRequest` with by, exact template pin, path, title, optional options/scope/overrides and level; `DocumentNewResponse` preserves declaration receipt, content hash and any problem. |
+| `GET /v1/documents/{id}/sections` | `DocumentSectionsResponse` with every derived section state and evidence; optional `commit`. |
+| `GET /v1/documents/{id}/sections/{section}/brief` | `SectionBriefResponse` with complete measured context; optional `commit` and positive `maxBytes`. |
+
+These routes return HTTP 200 with structured problems for refusals; callers
+inspect `Problem`, and creation's `Ok`. `{id}` may select a declaration or an
+escaped estate document path. `DocumentReviewRequest` gains optional `Sections`
+without changing its constructor; the existing review route receives
+`[{id, outcome, fidelity, judgments?}]`. A judgment is
+`{rule, verdict, summary, evidence}`. The runtime binds evidence and runs checks;
+a client cannot manufacture passing results or clear siblings by omission.
+SDK and cancellation wrappers expose synchronous and asynchronous equivalents.
+See [Templates](templates.md) and [API compatibility](api-compatibility-0.8.4.md).

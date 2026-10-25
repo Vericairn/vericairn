@@ -185,8 +185,8 @@ public class DocsTests
             foreach (string command in new[] { "templates list", "templates show", "docs new", "docs sections", "docs brief" }) Assert.Contains(command, commands);
             foreach (string route in new[] { "GET /v1/templates", "POST /v1/documents/new", "GET /v1/documents/{id}/sections", "GET /v1/documents/{id}/sections/{section}/brief" })
                 Assert.Contains(route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
-            string records = File.ReadAllText(Path.Combine(output, "record-reference.md"));
-            foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "section.document" }) Assert.Contains(field, records, StringComparison.Ordinal);
+            string records = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "record-reference.md")));
+            foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "From format 3 an optional section contains id and document" }) Assert.Contains(field, records, StringComparison.Ordinal);
             Assert.Contains("docs check", commands);
             Assert.Contains("docs pin", commands);
             Assert.Contains("POST /v1/documents/pin", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));

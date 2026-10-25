@@ -265,3 +265,19 @@ through MCP; `estate_check` can report the cached `manifest.release-behind` warn
 preparation and handshake diagnostics apply when MCP reaches a daemon through TLS. The stock
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not built or qualified by these features.
+
+## Template sections in 0.8.4 development
+
+`document_sections` reads a template instance's sections by `document` declaration
+id or estate path, optionally at an exact repository `commit`. `section_brief`
+reads `document` and `section`, with optional `commit` and `maxBytes` as a positive
+decimal string. It returns complete source material with measured canonical
+bytes. Unavailable originals or insufficient allocation return an error result
+and explicit incomplete context; source text is never silently truncated.
+
+The existing `document_review` tool accepts an optional `sections` array with
+`id`, `outcome`, `fidelity` and optional `judgments`. Each judgment names `rule`,
+`verdict`, `summary` and exact `evidence` hashes. Existing admission, signing,
+recorded roles and reviewer independence still apply. Agents identify produced
+section bytes in ordinary result outputs. These additions introduce no new MCP
+write capability and never supply acceptance. See [Templates](templates.md).

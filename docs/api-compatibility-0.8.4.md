@@ -112,3 +112,59 @@ Guided decisions add optional `answer` and `changeSet` fields to decision bodies
 The complete proposed decision and pin set passes ordinary estate validation before storage. Pins use the same preparation as `docs pin`. The storage journal can report a partial batch; receipts accompanied by `reconcile-required` must be inspected before retrying. No receipt is rolled back. An older API server has no fallback route; the SDK reports a missing operation. The [CLI contract](cli.md#vericairn-decisions-new) specifies response status and all request fields.
 
 Decision companion implementation `vericairn.records/decisions/2` and generic record reader implementation `vericairn.records/readers/3` account for the added answer and change-set fields. Their implementation hashes change, so declarations pinned to older generator implementations need the ordinary explicit generator update before regeneration.
+
+## Templates and section workflows (TPL-01)
+
+All eight added `IEstateApi` members have default implementations. Existing API
+implementations continue to load; synchronous defaults return a structured
+`unsupported` problem, and asynchronous defaults bridge their synchronous
+counterparts with the existing cancellation lifetime.
+
+| Added interface member | Default and operation |
+| --- | --- |
+| `Templates()` | Unsupported catalogue response; read. |
+| `TemplatesAsync(CancellationToken = default)` | Cancellable bridge; read. |
+| `DocumentSections(string declaration, string? commit = null)` | Unsupported sections response; read. |
+| `DocumentSectionsAsync(string declaration, string? commit = null, CancellationToken = default)` | Cancellable bridge; read. |
+| `SectionBrief(string declaration, string section, long? maxBytes = null, string? commit = null)` | Unsupported brief response; read. |
+| `SectionBriefAsync(string declaration, string section, long? maxBytes = null, string? commit = null, CancellationToken = default)` | Cancellable bridge; read. |
+| `DocumentNew(DocumentNewRequest request)` | Unsupported creation response; write. |
+| `DocumentNewAsync(DocumentNewRequest request, CancellationToken = default)` | Cancellable bridge; write. |
+
+`EstateService`, `VericairnClient` and `CancellationBoundApi` implement these
+operations. The HTTP routes are `GET /v1/templates`, `POST /v1/documents/new`,
+`GET /v1/documents/{id}/sections` and
+`GET /v1/documents/{id}/sections/{section}/brief`. The existing document review
+route retains its method and path. The new routes return HTTP 200 with their
+response, including refusals; callers inspect `Problem` and creation's `Ok`.
+An older daemon has no route fallback. Cancellation after sending creation or a
+review can leave its outcome unknown; inspect the original operation before
+retrying.
+
+`DocumentReviewRequest` gains an optional init-only `Sections` property of
+`IReadOnlyList<DocumentSectionReview>`. Its existing six-parameter constructor and
+deconstruction remain unchanged. `DocumentSectionReview` carries `Id`, `Outcome`,
+`Fidelity` and optional `Judgments`; `DocumentSectionJudgment` carries `Rule`,
+`Verdict`, `Summary` and `Evidence`. Section reviews bind exact runtime-read bytes
+and do not clear unselected sections.
+
+The other new DTOs are `TemplatePinDto`, `TemplateDto`, `TemplateRecordReference`,
+`TemplateSourceDto`, `TemplateCheckDto`, `TemplateSectionDto`, `TemplateBriefDto`,
+`TemplatesResponse`, `DocumentSectionsResponse`, `SectionBriefResponse`,
+`DocumentNewRequest` and `DocumentNewResponse`. They live in Protocol without a
+Records dependency. OpenAPI lists their properties and route/query contracts.
+`DocumentNewResponse.Declaration` preserves the stored receipt alongside a
+`reconcile-required` problem after interrupted output publication; `Ok` remains
+false until the operation is complete. Brief responses preserve complete source
+material and flag an insufficient allocation as `incomplete`.
+
+`ITemplateCheck` is a new opt-in extension interface, with required `Id` and
+`Check(string content, IReadOnlyList<TemplateSource> sources)` members. These have
+no defaults because each new check must supply its identity and behavior. No
+existing interface gains a required member. Template/primitive registration
+methods install vocabulary and implementations without assigning authority.
+
+The additive record fields remain in format 3. The readable record companion
+implementation advances to `vericairn.records/readers/3`; prior golden versions
+remain retained. See [Templates](templates.md) and the
+[generated record reference](reference/record-reference.md).
