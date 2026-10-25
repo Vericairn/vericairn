@@ -610,6 +610,57 @@ public sealed class SdkOperationsTests
         Assert.Equal(1, calls);
     }
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"written\":null}")]
+    [InlineData("{\"written\":[]}")]
+    [InlineData("{\"written\":[null]}")]
+    [InlineData("{\"written\":[{}]}")]
+    [InlineData("{\"written\":[{\"path\":\"acceptance.json\",\"id\":\"acceptance\",\"hash\":\"hash\"}],\"problem\":{\"code\":\"refused\",\"message\":\"Not written.\",\"findings\":[]}}")]
+    public async Task AnIncompleteOperatorCloseResponseIsUncertainAndNeverRetried(string shape)
+    {
+        int requests = 0;
+        using var client = Client((_, _) =>
+        {
+            requests++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(shape) });
+        });
+        var request = new OperatorCloseRequest("operator", [new("STEP-1", new("order", "hash"), new("result", "hash"), [new("review", "hash")])]);
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() => client.OperatorCloseAsync(request, TestContext.Current.CancellationToken));
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task OperatorClosePreservesReceiptsThatNeedBatchReconciliation()
+    {
+        var receipt = new RecordWritten("acceptance.json", "acceptance", "hash");
+        var response = new OperatorCloseResponse([receipt], new("reconcile-required", "Inspect the original batch.", []));
+        using var client = Client((_, _) => Task.FromResult(Json(response)));
+        var request = new OperatorCloseRequest("operator", [
+            new("STEP-1", new("order", "hash"), new("result", "hash"), [new("review", "hash")]),
+            new("STEP-2", new("other-order", "hash"), new("other-result", "hash"), [new("other-review", "hash")]),
+        ]);
+        OperatorCloseResponse synchronous = client.OperatorClose(request);
+        OperatorCloseResponse asynchronous = await client.OperatorCloseAsync(request, TestContext.Current.CancellationToken);
+        Assert.False(synchronous.Ok);
+        Assert.False(asynchronous.Ok);
+        Assert.Equal(receipt, Assert.Single(synchronous.Written));
+        Assert.Equal(receipt, Assert.Single(asynchronous.Written));
+        Assert.Equal("reconcile-required", asynchronous.Problem!.Code);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task AnUnreadableOperatorCloseRejectionDoesNotClaimAnUncertainWrite(HttpStatusCode status)
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") }));
+        var request = new OperatorCloseRequest("operator", []);
+        ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => client.OperatorCloseAsync(request, TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
+    }
+
     [Fact]
     public async Task EmbeddedEffectMayFinishAfterCancellationWithoutBeingCalledAgain()
     {

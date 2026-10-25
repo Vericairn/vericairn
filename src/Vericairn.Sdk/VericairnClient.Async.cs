@@ -559,6 +559,8 @@ public sealed partial class VericairnClient
                 or DocumentPinResponse { Written: not null, Revision: null or <= 0 }
                 or DocumentPinResponse { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
                 throw new JsonException("The runtime returned no definite write outcome.");
+            if (result is OperatorCloseResponse close && request is OperatorCloseRequest closeRequest)
+                _ = CloseOutcome(closeRequest, close);
             return result;
         }
         catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))

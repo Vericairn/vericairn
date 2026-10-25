@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Text.Json.Nodes;
 using Vericairn.Cli;
 using Vericairn.Protocol;
 using Vericairn.Runtime.Tests;
@@ -113,6 +114,51 @@ public sealed class OperatorCloseCommandTests
         Assert.Equal(2, Run(f, "--select", "STEP-1", "--select", "STEP-1", "--by", f.Estate.OperatorId).Code);
         Assert.Equal(before, f.Estate.Load().Records.Count);
         Assert.Empty(f.Estate.Load().OfType("acceptance"));
+    }
+
+    [Fact]
+    public void ASavedPartialSelectionClosesThePinnedResultEvenWhenAnUnselectedReviewMoved()
+    {
+        using var f = new OperatorCloseFixture();
+        var first = f.Add("STEP-1");
+        var second = f.Add("STEP-2");
+        string scratch = CliHarness.TempDirectory("operator-close-saved");
+        try
+        {
+            string saved = CliHarness.WriteJson(scratch, "listing.json", Run(f, "--json").Out);
+            f.Review(second.Result, "fail", second.Review.Id);
+            CliHarness.Outcome response = Run(f, "--json", "--select", "STEP-1", "--by", f.Estate.OperatorId, "--from", saved);
+            Assert.Equal(0, response.Code);
+            Assert.True(response.Json.GetProperty("ok").GetBoolean());
+            Assert.Single(response.Json.GetProperty("written").EnumerateArray());
+            Assert.Equal(first.Result.Id, Assert.Single(f.Estate.Load().OfType("acceptance")).Subject!.Id);
+            Assert.Contains(first.Review.ComputedHash, response.Err, StringComparison.Ordinal);
+            Assert.DoesNotContain(second.Result.Id, response.Err, StringComparison.Ordinal);
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Theory]
+    [InlineData("summary")]
+    [InlineData("exitQuestion")]
+    public void AlteredSavedDescriptionsCannotBeDisplayedAsThePinnedEvidence(string field)
+    {
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        string scratch = CliHarness.TempDirectory("operator-close-altered");
+        try
+        {
+            JsonNode listing = JsonNode.Parse(Run(f, "--json").Out)!;
+            listing["items"]![0]![field] = "A different description.";
+            string saved = CliHarness.WriteJson(scratch, "listing.json", listing.ToJsonString());
+            f.Api.BeforeSigningRecord = () => Assert.Fail("Altered descriptions must refuse before signing.");
+            CliHarness.Outcome response = Run(f, "--json", "--all", "--by", f.Estate.OperatorId, "--from", saved);
+            Assert.Equal(1, response.Code);
+            Assert.False(response.Json.GetProperty("ok").GetBoolean());
+            Assert.DoesNotContain("A different description.", response.Err, StringComparison.Ordinal);
+            Assert.Empty(f.Estate.Load().OfType("acceptance"));
+        }
+        finally { CliHarness.Delete(scratch); }
     }
 
     private static CliHarness.Outcome Run(OperatorCloseFixture fixture, params string[] arguments) =>
