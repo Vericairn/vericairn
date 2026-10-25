@@ -33,9 +33,10 @@ public sealed partial class VericairnClient
     public Task<PromptUseResponse> PromptUseAsync(PromptUseRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<PromptUseResponse>(nameof(PromptUse), async token => (await PostAsync<PromptUseRequest, PromptUseResponse>("/v1/prompts/use", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PromptUse)), cancellationToken);
 
-    private static string PromptPath(PromptQuery query)
+    // A missing query is the unfiltered one, as an empty query string is to the route.
+    private static string PromptPath(PromptQuery? query)
     {
-        ArgumentNullException.ThrowIfNull(query);
+        query ??= new PromptQuery();
         var values = new Dictionary<string, string?> { ["person"] = query.Person, ["category"] = query.Category, ["role"] = query.Role,
             ["favorites"] = query.Favorites ? "true" : "false", ["includeUnavailable"] = query.IncludeUnavailable ? "true" : "false" };
         return "/v1/prompts?" + string.Join('&', values.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
