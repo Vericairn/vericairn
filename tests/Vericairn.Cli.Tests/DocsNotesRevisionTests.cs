@@ -101,7 +101,7 @@ public class DocsNotesRevisionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void CurrentResultsNameTheirRevisionsWithoutChangingAcceptanceClassification(bool accepted)
+    public void CurrentResultsKeepTheirExistingSelectionAndAcceptanceRules(bool accepted)
     {
         using var notes = new NotesFixture();
         TestEstate estate = notes.Estate;
@@ -118,7 +118,8 @@ public class DocsNotesRevisionTests
         string result = Assert.Single(rendered.Split('\n'), line => line.StartsWith("Result ", StringComparison.Ordinal));
 
         Assert.Contains($"Result {current.Id}", result, StringComparison.Ordinal);
-        Assert.Contains($"Corrected wording (revised; replaces {original.Id})", result, StringComparison.Ordinal);
+        Assert.Contains("Corrected wording", result, StringComparison.Ordinal);
+        Assert.DoesNotContain(original.Id, rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("Original wording", rendered, StringComparison.Ordinal);
         Assert.Contains(accepted ? "## Work accepted\n\n### W-1:" : "## Work recorded, not yet accepted", rendered, StringComparison.Ordinal);
         if (accepted)

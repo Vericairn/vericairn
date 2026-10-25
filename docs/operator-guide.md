@@ -646,8 +646,8 @@ From 0.8.4, decisions, work orders, acceptances, identity and policy records, an
 once per supersession chain, at the revision current when the window ends. Revised entries name all
 replaced revision IDs, earliest first, including those recorded before the window. A later revision does
 not replace the wording in an earlier window. Document revisions and both release history sections still
-list each revision; candidates and publications remain separate entries. Current results also name their
-replaced revisions, with their existing selection and acceptance rules below.
+list each revision; candidates and publications remain separate entries. Result sections retain their
+existing selection and acceptance rules below.
 
 FIX-13 gives accepted work one entry per work order, naming the latest accepted current result in the
 window by recorded time and then identifier, with its acceptance. Earlier results and attempts remain

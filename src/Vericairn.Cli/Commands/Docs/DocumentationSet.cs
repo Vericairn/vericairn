@@ -328,7 +328,7 @@ internal static partial class Docs
 
         foreach (ReleaseContents.Accepted result in acceptedResults)
         {
-            Result(lines, model, result.Result, result.Order);
+            Result(lines, result.Result, result.Order);
             lines.Add($"Acceptance {result.Acceptance.Id} pins {(result.Acceptance.Subject?.Type == "result" ? "this result" : "the current work-order revision")}.");
             if (result.Order is not null)
             {
@@ -346,7 +346,7 @@ internal static partial class Docs
             lines.Add(string.Empty);
             foreach (RecordEnvelope result in openResults)
             {
-                Result(lines, model, result, ReleaseContents.OrderOf(model, result));
+                Result(lines, result, ReleaseContents.OrderOf(model, result));
             }
         }
 
@@ -406,11 +406,11 @@ internal static partial class Docs
         lines.Add(string.Empty);
     }
 
-    private static void Result(List<string> lines, EstateModel model, RecordEnvelope result, RecordEnvelope? order)
+    private static void Result(List<string> lines, RecordEnvelope result, RecordEnvelope? order)
     {
         lines.Add("### " + (order is null ? "Result " + result.Id : Str(order.Body, "key") + ": " + Str(order.Body, "title")));
         lines.Add(string.Empty);
-        lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}{RevisionNote(model, result)}");
+        lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}");
         List<string> limitations = Strings(result.Body, "limitations");
         if (limitations.Count > 0)
         {

@@ -492,7 +492,7 @@ supersession chain in the window, using the revision current at its inclusive en
 the revisions it replaces, earliest first, including revisions recorded before the window. A revision dated
 after the window leaves the entry at the wording current at that end. The document revision section and
 both release history sections keep listing each revision, including candidates and publications. Result
-entries name their replaced revisions while retaining the current-state acceptance rules described below.
+sections retain their existing selection and current-state acceptance rules described below.
 
 The "Milestone and release acceptances" section includes each operator acceptance of a release in that
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
