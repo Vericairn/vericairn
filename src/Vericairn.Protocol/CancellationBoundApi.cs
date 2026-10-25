@@ -351,6 +351,12 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<WriteOutcome> DocumentReviewAsync(string declaration, DocumentReviewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DocumentReviewAsync(declaration, request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request) => inner.DecisionFromAskAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<DecisionNewResponse> DecisionFromAskAsync(DecisionNewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DecisionFromAskAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public DocumentPinResponse DocumentPin(DocumentPinRequest request) => inner.DocumentPinAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

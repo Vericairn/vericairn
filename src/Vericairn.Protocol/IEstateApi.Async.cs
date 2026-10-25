@@ -5,6 +5,10 @@ namespace Vericairn.Protocol;
 
 public partial interface IEstateApi
 {
+    /// <summary>The cancellable guided decision write; cancellation never undoes a stored batch.</summary>
+    Task<DecisionNewResponse> DecisionFromAskAsync(DecisionNewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(DecisionFromAsk), () => DecisionFromAsk(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable PolicyAccess operation.</summary>
     Task<IReadOnlyList<string>> PolicyAccessAsync(string principal, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(PolicyAccess), () => PolicyAccess(principal), false, this as IClientOperationLifetime, cancellationToken);

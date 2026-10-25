@@ -44,6 +44,8 @@ public sealed class DecisionType : IRecordType
         new("answers", "ulid[]", false, "The asks this decision answers; an ask is answered by the principal it was put to, and never by waiting.", 2),
         new("obligations", "object[]", false, "What the answer leaves owed: key, summary, owner (ulid), resolution (action|evidence|review|decision), discharge (what discharges it) and optionally gates (the operation or work it holds); each stays open until a discharge record names it.", 2),
         new("documents", "string[]", false, "The living documents this decision changes, by path or by declaration id; each becomes due until it is cleared.", 2),
+        new("answer", "object", false, "Guided answer: exact ask revision id, hash and the operator's answer time (at). Supplied words remain in statement.", 2),
+        new("changeSet", "object", false, "Guided change: baseCommit, observed head and exact document pins (path, id, hash), matching documents.", 2),
         new("policies", "object[]", false, "Keyed declare/revise/retire requirements: policy key or identity, priorHash for changes, change and optional exact definitionHash. A requirement does not grant authority.", 3),
     ];
 
@@ -78,6 +80,7 @@ public sealed class DecisionType : IRecordType
         IReadOnlyList<string>? answers = body.Since(2, "answers") ? body.StringArray("answers", false, allowEmpty: false, maxItemLength: Identity.Ulid.Length) : null;
         IReadOnlyList<BodyReader>? obligations = body.Since(2, "obligations") ? body.NestedArray("obligations", false, allowEmpty: false) : null;
         IReadOnlyList<string>? documents = body.Since(2, "documents") ? body.StringArray("documents", false, allowEmpty: false, maxItemLength: 500) : null;
+        GuidedDecision.Validate(context, answers, documents);
         body.NoOtherKeys();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader obligation in obligations ?? [])

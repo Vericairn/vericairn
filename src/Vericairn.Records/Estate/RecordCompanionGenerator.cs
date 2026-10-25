@@ -12,7 +12,7 @@ namespace Vericairn.Records.Estate;
 internal sealed class RecordCompanionGenerator : IDocumentGenerator
 {
     internal const string Name = "vericairn.records/items";
-    private const string Implementation = "vericairn.records/readers/2";
+    private const string Implementation = "vericairn.records/readers/3";
     public string Id => Name;
     public DocumentGeneratorDescriptor Descriptor { get; } = new(Name, 1, Implementation,
         CompanionImplementation.Hash(Implementation),

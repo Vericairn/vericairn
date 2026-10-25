@@ -309,6 +309,17 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
+    public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request)
+    {
+        // Transport and parse failures reach the caller unchanged, as other synchronous operations' do; a success reply without a
+        // definite outcome leaves the write unknown, as the asynchronous call reports it.
+        DecisionNewResponse? response = Post<DecisionNewRequest, DecisionNewResponse>("/v1/decisions/new", request);
+        return response is null || InvalidDecisionOutcome(response)
+            ? throw new ClientUnavailableException(true, new JsonException("The runtime returned no definite write outcome."))
+            : response;
+    }
+
+    /// <inheritdoc />
     public DocumentPinResponse DocumentPin(DocumentPinRequest request) => Post<DocumentPinRequest, DocumentPinResponse>("/v1/documents/pin", request)!;
 
     /// <inheritdoc />
@@ -569,6 +580,10 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         response.EnsureSuccessStatusCode();
         return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
     }
+
+    private static bool InvalidDecisionOutcome(object? result) => result is DecisionNewResponse response
+        && (response.Pins is null || response.Written is null && response.Problem is null
+            || (response.Written is not null || response.Pins.Count > 0) && response.Problem is not null and not { Code: "reconcile-required" });
 
     private (TResponse? Response, Problem? Problem) PostOrProblem<TRequest, TResponse>(string path, TRequest request)
         where TResponse : class

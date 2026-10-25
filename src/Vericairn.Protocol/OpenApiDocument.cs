@@ -53,6 +53,7 @@ public static class OpenApiDocument
         ("GET", "/v1/records/{id}"),
         ("GET", "/v1/records"),
         ("POST", "/v1/records"),
+        ("POST", "/v1/decisions/new"),
         ("GET", "/v1/decisions"),
         ("GET", "/v1/decisions/{id}"),
         ("GET", "/v1/work/{key}/brief"),
@@ -317,6 +318,16 @@ public static class OpenApiDocument
             };
             responses["400"] = new JsonObject { ["description"] = "The request is not valid JSON or cannot bind to PolicyHashRequest." };
         }
+        else if (path == "/v1/decisions/new")
+        {
+            foreach (string code in new[] { "200", "422" })
+                responses[code] = new JsonObject
+                {
+                    ["description"] = "DecisionNewResponse: decision and pin receipts, or a refusal. A problem with receipts requires reconciliation before retrying.",
+                    ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/DecisionNewResponse" } } },
+                };
+            responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DecisionNewRequest." };
+        }
         else if (path == "/v1/documents/pin")
         {
             foreach (string code in new[] { "200", "422" })
@@ -472,6 +483,13 @@ public static class OpenApiDocument
             return new JsonObject { ["type"] = "object", ["properties"] = props };
         }
 
+        JsonObject decisionNew = Object(("by", "string"), ("ask", "string"), ("statement", "string"), ("answeredAt", "string"),
+            ("baseCommit", "string"), ("title", "string"), ("summary", "string"), ("synthesis", "string"),
+            ("effects", "array"), ("documents", "array"), ("stake", "string"), ("affects", "array"), ("notAuthorized", "array"),
+            ("decidedAt", "string"), ("expectedAsk", "string"));
+        decisionNew["required"] = new JsonArray("by", "ask", "statement", "answeredAt", "baseCommit", "title", "summary", "synthesis", "effects", "documents");
+        foreach (string field in new[] { "effects", "documents", "affects", "notAuthorized" })
+            decisionNew["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
         JsonObject policyHashRequest = Object(("body", "object"));
         policyHashRequest["required"] = new JsonArray("body");
         JsonObject policyHashResponse = Object(("definitionHash", "string"), ("problem", "object"));
@@ -547,6 +565,8 @@ public static class OpenApiDocument
             ["DeviceRotateRequest"] = Object(("device", "string"), ("custody", "string"), ("presence", "boolean")),
             ["RevokeRequest"] = Object(("device", "string"), ("by", "string"), ("reason", "string"), ("recovery", "string"), ("passphrase", "string")),
             ["DocumentReviewRequest"] = Object(("by", "string"), ("outcome", "string"), ("summary", "string"), ("findings", "array"), ("commit", "string"), ("independence", "string")),
+            ["DecisionNewRequest"] = decisionNew,
+            ["DecisionNewResponse"] = Object(("written", "object"), ("pins", "array"), ("problem", "object"), ("ok", "boolean")),
             ["DocumentPinRequest"] = new JsonObject
             {
                 ["type"] = "object", ["required"] = new JsonArray("path", "by", "summary"),
@@ -665,6 +685,7 @@ public static class OpenApiDocument
         "/v1/devices/rotate" => "DeviceRotateRequest",
         "/v1/devices/recovery" => "DeviceRecoveryRequest",
         "/v1/documents/{id}/reviews" => "DocumentReviewRequest",
+        "/v1/decisions/new" => "DecisionNewRequest",
         "/v1/documents/pin" => "DocumentPinRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
@@ -747,6 +768,7 @@ public static class OpenApiDocument
         ("GET", "/v1/records/{id}") => "A record by id.",
         ("GET", "/v1/records") => "The current records of one type, oldest first.",
         ("POST", "/v1/records") => "Author a record; signed with the author's admitted device on the runtime's machine; rejected with findings when the estate would be invalid.",
+        ("POST", "/v1/decisions/new") => "Record an operator answer with its words, answer time and exact changed design document pins.",
         ("GET", "/v1/decisions") => "Current decisions.",
         ("GET", "/v1/decisions/{id}") => "One decision by the id of any of its revisions.",
         ("GET", "/v1/work/{key}/brief") => "The brief of a work order: everything a contributor needs, from the records alone.",

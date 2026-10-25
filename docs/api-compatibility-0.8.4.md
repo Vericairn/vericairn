@@ -59,3 +59,26 @@ current standing and ordinary record validation. Unreadable or insufficient
 observations keep the reservation and appear with their reason in `worker runs`.
 The command is `vericairn worker settle <run> --by <principal>`; `--json` preserves
 both successful responses and refusals. See the [worker guide](software.md#coding-agents-the-worker-and-its-launchers).
+
+## Guided decisions from operator answers (CODE-10)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.DecisionFromAsk(DecisionNewRequest)` | Record an answer and the complete changed design document pins. Default returns an `unsupported` problem with no receipts. |
+| `IEstateApi.DecisionFromAskAsync(DecisionNewRequest, CancellationToken)` | Default cancellable bridge, classified as a write. |
+| `EstateService.DecisionFromAsk` | Validate the supplied answer, derive the change set, and store the signed decision and pins as one journaled batch. |
+| `VericairnClient.DecisionFromAsk` / `DecisionFromAskAsync` | Call `POST /v1/decisions/new`. |
+| `CancellationBoundApi.DecisionFromAsk` / `DecisionFromAskAsync` | Forward with the caller's cancellation lifetime. |
+| `ISourceAdapter.InspectDesignChanges(string root, string baseCommit)` | Read the complete changed design files from an exact local base through the working tree. Default returns null (unsupported). |
+| `GitCommandAdapter.InspectDesignChanges` | Observe local Git membership and exact current file hashes without fetching or writing. |
+| `DesignChangeSet`, `DesignFileChange` | Carry the base, observed head, relative paths and file hashes. |
+| `DecisionNewRequest`, `DecisionNewResponse` | Supplied answer and decision fields; decision and pin receipts, problem and completion status. |
+| `DecisionContent.BlockedProseField` | Inspect prose against execution identities derived from recorded runs and qualification evidence; returns only the field name. |
+
+Every new interface member has a default implementation. Existing implementations remain loadable; an unavailable adapter refuses the guided write. New positional records also expose their named properties and generated record members. Existing constructors are unchanged.
+
+Guided decisions add optional `answer` and `changeSet` fields to decision bodies in record formats 2 and 3. `answer` holds `ask`, `hash` and `at`; `changeSet` holds `baseCommit`, `head` and `pins`, whose members hold `path`, `id` and `hash`. Both are required together. Existing decisions without these fields keep their validation rules. Older builds that do not know these fields cannot validate guided decision records; upgrade readers before sharing them.
+
+The complete proposed decision and pin set passes ordinary estate validation before storage. Pins use the same preparation as `docs pin`. The storage journal can report a partial batch; receipts accompanied by `reconcile-required` must be inspected before retrying. No receipt is rolled back. An older API server has no fallback route; the SDK reports a missing operation. The [CLI contract](cli.md#vericairn-decisions-new) specifies response status and all request fields.
+
+Decision companion implementation `vericairn.records/decisions/2` and generic record reader implementation `vericairn.records/readers/3` account for the added answer and change-set fields. Their implementation hashes change, so declarations pinned to older generator implementations need the ordinary explicit generator update before regeneration.
