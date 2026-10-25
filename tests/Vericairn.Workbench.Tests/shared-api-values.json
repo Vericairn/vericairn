@@ -381,7 +381,8 @@
     "qualify",
     "manage-estate-policies",
     "grant-policy-exceptions",
-    "manage-writing-exceptions"
+    "manage-writing-exceptions",
+    "manage-prompts"
   ],
   "Vericairn.Records.Types.VerificationType.EvidenceClasses": [
     "observation",
