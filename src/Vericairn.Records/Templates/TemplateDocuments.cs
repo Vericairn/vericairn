@@ -47,6 +47,15 @@ public static class TemplateDocuments
             if (content is null) throw new InvalidOperationException("A required quoted or generated source is unavailable.");
             text = string.Concat(text.AsSpan(0, part.Start), content, text.AsSpan(part.Start + part.Length));
         }
+        IReadOnlyDictionary<string, TemplateSectionContent> filled = TemplateSections.Read(text, definition.Elements);
+        if (filled.Count != parts.Count) throw new InvalidOperationException("Filled content obscures another section's locator; use explicit section markers for quoted text.");
+        foreach (JsonElement section in definition.Elements.Where(e => TJson.Text(TJson.Object(e, "synthesis"), "mode") == "quoted"))
+        {
+            string id = TJson.Text(section, "id")!;
+            string? expected = TemplateEvidence.Sources(model, declaration, section, filled, null)
+                .SingleOrDefault(s => s.Id == TJson.Text(TJson.Object(section, "synthesis"), "source"))?.Content;
+            if (filled[id].Content != expected) throw new InvalidOperationException("A quoted section's locator does not preserve its source bytes; use explicit section markers.");
+        }
         return text;
     }
 
@@ -170,7 +179,7 @@ public static class TemplateDocuments
         string reviewer, IReadOnlyList<TemplateSectionReview> requests)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        if (requests.Count == 0 || requests.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != requests.Count)
+        if (requests.Count == 0 || requests.Any(r => r is null) || requests.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != requests.Count)
             throw new InvalidOperationException("A section review names distinct sections and at least one section.");
         IReadOnlyList<TemplateSectionState> states = Sections(model, declaration, commit, text);
         var sections = new JsonArray();
@@ -191,7 +200,7 @@ public static class TemplateDocuments
             var judgments = new JsonArray();
             var supplied = (request.Judgments ?? []).ToArray();
             var declared = TJson.Array(state.Definition, "cohesion").ToArray();
-            if (supplied.Select(j => j.Rule).Distinct(StringComparer.Ordinal).Count() != supplied.Length
+            if (supplied.Any(j => j is null || j.Evidence is null) || supplied.Select(j => j.Rule).Distinct(StringComparer.Ordinal).Count() != supplied.Length
                 || supplied.Any(j => !declared.Any(r => TJson.Text(r, "id") == j.Rule && TJson.Text(r, "kind") == "judgment")))
                 throw new InvalidOperationException("Judgments name distinct declared evaluator rules; deterministic rules cannot be replaced by judgments.");
             foreach (JsonElement rule in declared)

@@ -120,12 +120,21 @@ internal static class TemplateEvidence
         string? type = TJson.Text(section, "type");
         bool valid = type switch
         {
-            "number" => decimal.TryParse(content.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out _),
+            "number" => decimal.TryParse(content.Trim(), NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out _),
             "date" => DateOnly.TryParseExact(content.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _),
             "list" => content.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).All(l => l.TrimStart().StartsWith("- ", StringComparison.Ordinal)),
-            "table" => content.Split('\n').Count(l => l.TrimStart().StartsWith('|')) >= 2,
+            "table" => Table(content),
             _ => true,
         };
         return new("field-type", valid ? "passed" : "failed", valid ? "The field has its declared representation." : "The field does not have its declared representation.");
+    }
+
+    private static bool Table(string content)
+    {
+        string[] rows = content.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Trim()).ToArray();
+        if (rows.Length < 2 || rows.Any(r => !r.StartsWith('|') || !r.EndsWith('|'))) return false;
+        string[][] cells = rows.Select(r => r[1..^1].Split('|').Select(c => c.Trim()).ToArray()).ToArray();
+        if (cells[0].Length == 0 || cells.Any(r => r.Length != cells[0].Length)) return false;
+        return cells[1].All(c => c.Trim(':') is { Length: >= 3 } separator && separator.All(ch => ch == '-'));
     }
 }

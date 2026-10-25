@@ -49,7 +49,7 @@ public static partial class TemplateSections
             if (fence == '\0')
             {
                 Match heading = Heading().Match(line.TrimStart('\uFEFF'));
-                if (heading.Success) headings.Add((heading.Groups[2].Value.TrimEnd(), heading.Groups[1].Length, offset, end));
+                if (heading.Success) headings.Add((ClosingHashes().Replace(heading.Groups[2].Value, "").TrimEnd(), heading.Groups[1].Length, offset, end));
                 foreach (Match marker in Marker().Matches(line))
                 {
                     string id = marker.Groups[2].Value;
@@ -76,7 +76,9 @@ public static partial class TemplateSections
             {
                 if (GeneratedRegions.Find(text, id) is { } region)
                     result.Add(id, new(id, text[region.From..region.To], region.From, region.To - region.From));
-                else throw new InvalidOperationException("A generated section has invalid or missing generated-region markers.");
+                else if (!GeneratedRegions.ValidMarkers(text) || text.Contains(GeneratedRegions.Start(id), StringComparison.Ordinal)
+                    || text.Contains(GeneratedRegions.End(id), StringComparison.Ordinal))
+                    throw new InvalidOperationException("A generated section has invalid or incomplete generated-region markers.");
             }
             else if (TJson.Flag(element, "marker"))
             {
@@ -131,6 +133,8 @@ public static partial class TemplateSections
 
     [GeneratedRegex(@"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex Heading();
+    [GeneratedRegex(@"[ \t]+#+[ \t]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex ClosingHashes();
     [GeneratedRegex(@"^ {0,3}(`{3,}|~{3,})", RegexOptions.CultureInvariant)]
     private static partial Regex Fence();
     [GeneratedRegex(@"<!-- vericairn:section(-end)? ([a-z0-9]+(?:-[a-z0-9]+)*) -->", RegexOptions.CultureInvariant)]

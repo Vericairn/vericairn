@@ -2083,7 +2083,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
-        if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By) is { } templateRefusal)
+        if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {

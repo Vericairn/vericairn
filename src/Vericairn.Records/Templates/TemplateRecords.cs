@@ -262,7 +262,7 @@ public static class TemplateRecords
     }
 
     /// <summary>Checks current evidence before any authoring route stores template-bearing records.</summary>
-    public static string? AuthoringRefusal(EstateModel model, string type, JsonElement body, RecordReference? subject, string by)
+    public static string? AuthoringRefusal(EstateModel model, string type, JsonElement body, RecordReference? subject, string by, string? supersedes = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         try
@@ -270,7 +270,11 @@ public static class TemplateRecords
             if (type == "living-document" && TJson.Object(body, "template").ValueKind == JsonValueKind.Object)
             {
                 JsonElement template = TJson.Object(body, "template");
-                TemplateCatalog.Resolve(model, new(TJson.Text(template, "id") ?? "", TJson.Text(template, "version") ?? "", TJson.Text(template, "hash") ?? ""));
+                var pin = new TemplatePin(TJson.Text(template, "id") ?? "", TJson.Text(template, "version") ?? "", TJson.Text(template, "hash") ?? "");
+                TemplateCatalog.Resolve(model, pin);
+                bool retained = supersedes is not null && model.ById.TryGetValue(supersedes, out RecordEnvelope? previous) && TemplateCatalog.Pin(previous) == pin;
+                if (!retained && !TemplateCatalog.All(model).Any(t => t.Id == pin.Id && t.Version == pin.Version))
+                    return "A retired template version is retained for existing instances and cannot be selected for a new instance or upgrade.";
             }
             if (type == "template-defaults")
             {
@@ -299,6 +303,14 @@ public static class TemplateRecords
                     return "A section output must pin its current exact instance declaration.";
                 TemplateSectionState? state = TemplateDocuments.Sections(model, declared).SingleOrDefault(s => s.Id == TJson.Text(section, "id"));
                 if (state?.ContentHash != TJson.Text(output, "hash") || state is null || state.State == "missing") return "A section output must name the actual available section bytes.";
+                if (output.TryGetProperty("bytes", out JsonElement size))
+                {
+                    TemplateDefinition definition = TemplateInstances.Effective(TemplateCatalog.Resolve(model, TemplateCatalog.Pin(declared)!), declared);
+                    byte[] documentBytes = TemplateEvidence.Document(model, declared, null) ?? throw new InvalidOperationException("The document is unavailable.");
+                    TemplateSectionContent actual = TemplateSections.Read(new UTF8Encoding(false, true).GetString(documentBytes), definition.Elements)[state.Id];
+                    if (!size.TryGetInt64(out long count) || count != Encoding.UTF8.GetByteCount(actual.Content))
+                        return "A section output's byte count must equal its exact UTF-8 payload.";
+                }
                 string? mode = TJson.Text(TJson.Object(state.Definition, "synthesis"), "mode");
                 if (mode is "quoted" or "generated" && state.Checks.Any(c => c.Outcome != "passed")) return "Quoted and generated outputs must pass their byte comparisons.";
             }
