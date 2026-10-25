@@ -15,6 +15,18 @@ internal static class PackageRecordRules
     internal static bool IsAction(RecordEnvelope record) => EstateModel.BodyString(record, "action") is "package-unlist" or "package-deprecate";
     internal static string? Text(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object
         && value.TryGetProperty(key, out JsonElement text) && text.ValueKind == JsonValueKind.String ? text.GetString() : null;
+    internal static bool Has(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out _);
+    internal static bool DeclaresReserved(RecordEnvelope product, string? version) => product.Body.TryGetProperty("packages", out JsonElement packages)
+        && packages.ValueKind == JsonValueKind.Object && packages.TryGetProperty("reserved", out JsonElement reserved) && reserved.ValueKind == JsonValueKind.Array
+        && reserved.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && string.Equals(item.GetString(), version, StringComparison.OrdinalIgnoreCase));
+
+    // A reserved version's package records anchor on the product declaration, as a release's anchor on the release.
+    internal static bool PinsReserved(RecordEnvelope record) => record.Type switch
+    {
+        "observation" => EstateModel.BodyString(record, "kind") == "package" && record.Body.TryGetProperty("facts", out JsonElement facts) && Has(facts, "reserved"),
+        "operation" => IsAction(record) && record.Body.TryGetProperty("target", out JsonElement target) && Has(target, "reserved"),
+        _ => false,
+    };
 
     internal static void Observation(ValidationContext context, string? kind, BodyReader? facts)
     {
@@ -66,13 +78,15 @@ internal static class PackageRecordRules
         if (subject is { Type: "operation" } && IsAction(subject) && subject.Supersedes is null)
         {
             JsonElement target = subject.Body.GetProperty("target");
-            foreach (string field in new[] { "product", "productHash", "release", "releaseHash", "package", "version", "provider" })
-                if (Text(facts.Element, field) != Text(target, field)) context.Error("observation.package-intent", "The observation must keep the original intent's package and release pins.");
+            foreach (string field in new[] { "product", "productHash", "release", "releaseHash", "reserved", "package", "version", "provider" })
+                if (Text(facts.Element, field) != Text(target, field)) context.Error("observation.package-intent", "The observation must keep the original intent's package and version pins.");
             if (string.CompareOrdinal(EstateModel.BodyString(context.Record, "asOf"), subject.At) < 0)
                 context.Error("observation.package-intent", "The observed outcome follows its recorded intent.");
         }
-        else if (subject is not { Type: "release" } || subject.Id != Text(facts.Element, "release"))
-            context.Error("observation.package-subject", "A package observation pins its release or the original account-holder intent.");
+        else if (Has(facts.Element, "reserved")
+            ? subject is not { Type: "product" } || context.Record.Subject != subject.Reference || subject.Id != Text(facts.Element, "product")
+            : subject is not { Type: "release" } || subject.Id != Text(facts.Element, "release"))
+            context.Error("observation.package-subject", "A package observation pins its release, its reserved version's exact product declaration, or the original account-holder intent.");
         if (string.CompareOrdinal(EstateModel.BodyString(context.Record, "asOf"), context.Record.At) > 0)
             context.Error("observation.future", "A package observation cannot report a future state.");
     }
@@ -95,9 +109,11 @@ internal static class PackageRecordRules
                 || Text(target, "alternateRange") is not null && Text(target, "alternatePackage") is null)
                 context.Error("operation.package-deprecation", "An alternate range belongs to a named alternate package.");
         }
+        string subjectField = Has(target, "reserved") ? "product" : "release";
         if (EstateModel.BodyString(context.Record, "provider") != "nuget-org"
-            || context.Record.Subject?.Id != Text(target, "release") || context.Record.Subject?.Hash != Text(target, "releaseHash"))
-            context.Error("operation.package-target", "The operation pins the release and the nuget.org provider.");
+            || context.Record.Subject?.Id != Text(target, subjectField) || context.Record.Subject?.Hash != Text(target, subjectField + "Hash")
+            || context.Record.Subject?.Type != subjectField)
+            context.Error("operation.package-target", "The operation pins the release or reserved version's exact product declaration and the nuget.org provider.");
         string? status = EstateModel.BodyString(context.Record, "status");
         if (status is not ("not-started" or "uncertain" or "observed-success") || context.Record.Body.TryGetProperty("dispatchedAt", out _))
             context.Error("operation.package-status", "An account-holder operation records intent and observed outcome, never a claimed registry dispatch.");
@@ -133,7 +149,7 @@ internal static class PackageRecordRules
     private static void Pins(ValidationContext context, JsonElement value)
     {
         if (Text(value, "provider") != "nuget-org" || !PackageIdentity.ValidId(Text(value, "package")) || !PackageIdentity.ValidVersion(Text(value, "version")))
-            context.Error("package.identity", "Registry facts name nuget-org, a package id and a release version.");
+            context.Error("package.identity", "Registry facts name nuget-org, a package id and a valid NuGet version.");
         RecordEnvelope? product = context.Find(Text(value, "product"));
         RecordEnvelope? release = context.Find(Text(value, "release"));
         if (product is not { Type: "product" } || product.ComputedHash != Text(value, "productHash")
@@ -141,6 +157,15 @@ internal static class PackageRecordRules
             || !declaration.TryGetProperty("ids", out JsonElement ids) || ids.ValueKind != JsonValueKind.Array
             || !ids.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && string.Equals(id.GetString(), Text(value, "package"), StringComparison.OrdinalIgnoreCase)))
             context.Error("package.product", "Registry facts pin a product declaration containing this package.");
+        if (Has(value, "reserved"))
+        {
+            string? reserved = Text(value, "reserved");
+            if (Has(value, "release") || Has(value, "releaseHash") || !PackageIdentity.ValidVersion(reserved)
+                || !string.Equals(reserved, Text(value, "version"), StringComparison.OrdinalIgnoreCase)
+                || product is not { Type: "product" } || !DeclaresReserved(product, reserved))
+                context.Error("package.reserved", "Reserved registry facts name a version declared reserved in the exact pinned product, without release pins.");
+            return;
+        }
         if (release is not { Type: "release" } || release.ComputedHash != Text(value, "releaseHash")
             || !string.Equals(EstateModel.BodyString(release, "version"), Text(value, "version"), StringComparison.OrdinalIgnoreCase)
             || product is null || release.Subject is null || !context.Model.Chain(product).Contains(release.Subject.Id, StringComparer.Ordinal))

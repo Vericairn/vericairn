@@ -3,15 +3,27 @@
 
 namespace Vericairn.Protocol;
 
-/// <summary>Observe every declared package for a product release, or the package pinned by an original operation.</summary>
-public sealed record PackagesObserveRequest(string By, string? Product = null, string? Version = null, string? Operation = null);
+/// <summary>Observe every declared package for a product version, or the package pinned by an original operation.</summary>
+public sealed record PackagesObserveRequest(string By, string? Product = null, string? Version = null, string? Operation = null)
+{
+    /// <summary>Select a declared reserved version instead of a release. Cannot be combined with Operation.</summary>
+    public bool Reserved { get; init; }
+}
 
 /// <summary>Record an account holder's intended unlisting; this request never changes the registry.</summary>
-public sealed record PackagesUnlistRequest(string Product, string Version, string Package, string By);
+public sealed record PackagesUnlistRequest(string Product, string Version, string Package, string By)
+{
+    /// <summary>Select a declared reserved version instead of a release; omitted or false keeps release selection.</summary>
+    public bool Reserved { get; init; }
+}
 
 /// <summary>Record the exact intended deprecation before the account holder changes nuget.org.</summary>
 public sealed record PackagesDeprecateRequest(string Product, string Version, string Package, string By,
-    IReadOnlyList<string> Reasons, string? Message = null, string? AlternatePackage = null, string? AlternateRange = null);
+    IReadOnlyList<string> Reasons, string? Message = null, string? AlternatePackage = null, string? AlternateRange = null)
+{
+    /// <summary>Select a declared reserved version instead of a release; omitted or false keeps release selection.</summary>
+    public bool Reserved { get; init; }
+}
 
 /// <summary>A digest of the exact response body received at a public registry URL.</summary>
 public sealed record RegistryEvidence(string Url, string Hash, int Status, long Bytes, string Encoding = "identity");

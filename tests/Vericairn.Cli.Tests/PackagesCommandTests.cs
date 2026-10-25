@@ -23,6 +23,8 @@ public sealed class PackagesCommandTests
             Assert.DoesNotContain(command.Options, o => o.Name.Contains("key", StringComparison.OrdinalIgnoreCase));
         }
         Command deprecate = packages.Subcommands.Single(c => c.Name == "deprecate");
+        foreach (Command command in packages.Subcommands)
+            Assert.IsType<Option<bool>>(Assert.Single(command.Options, o => o.Name == "--reserved" && !o.Required));
         Assert.True(deprecate.Options.Single(o => o.Name == "--reason").Required);
         foreach (string name in new[] { "--message", "--alternate-package", "--alternate-range" })
             Assert.Contains(deprecate.Options, o => o.Name == name && !o.Required);
@@ -69,5 +71,70 @@ public sealed class PackagesCommandTests
         Assert.Equal(1, refused.Code);
         Assert.Equal("refused", refused.Json.GetProperty("status").GetString());
         Assert.Equal(before, f.Service.Session.Load().Records.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReservedCommandsObservePublicationAndIntentOutcomesWithoutARelease(bool deprecate)
+    {
+        Assert.Equal(0, CliHarness.Run("packages", "--help").Code);
+        using var f = new PackageTestEstate(reserved: true);
+        string[] selection = ["--product", f.Product.Id, "--version", f.Version, "--reserved", "--by", f.Estate.OperatorId];
+        CliHarness.Outcome publication = CliHarness.RunWithApi(f.Service, null,
+            ["--estate", f.Service.Session.Root, "--json", "packages", "observe", .. selection]);
+        Assert.Equal(0, publication.Code);
+        Assert.Equal(f.Version, publication.Json.GetProperty("packages")[0].GetProperty("state").GetProperty("version").GetString());
+        string[] action = ["--estate", f.Service.Session.Root, "--json", "packages", deprecate ? "deprecate" : "unlist", .. selection, "--package", "Example.Widget"];
+        if (deprecate) action = [.. action, "--reason", "Legacy", "Other", "--message", "Use the replacement package.", "--alternate-package", "Example.Replacement", "--alternate-range", "[2.0.0,)"];
+        CliHarness.Outcome intent = CliHarness.RunWithApi(f.Service, null, action);
+        Assert.Equal(0, intent.Code);
+        string id = intent.Json.GetProperty("intent").GetProperty("id").GetString()!;
+        Assert.Equal("not-started", intent.Json.GetProperty("status").GetString());
+        Assert.Contains($"https://www.nuget.org/packages/example.widget/{f.Version}/", intent.Json.GetProperty("instruction").GetString(), StringComparison.Ordinal);
+        f.Handler.Registration = deprecate ? "deprecated" : "unlisted";
+        CliHarness.Outcome observed = CliHarness.RunWithApi(f.Service, null, "--estate", f.Service.Session.Root, "packages", "observe", "--operation", id, "--by", f.Estate.OperatorId);
+        Assert.Equal(0, observed.Code);
+        Assert.Contains(deprecate ? "published, listed, deprecated" : "published, unlisted, not-deprecated", observed.Out, StringComparison.Ordinal);
+        Assert.Empty(f.Service.Session.Load().OfType("release"));
+        Assert.Equal("observed-success", EstateModel.BodyString(f.Service.Session.Load().Current("operation").Single(), "status"));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("observe", false)]
+    [InlineData("unlist", false)]
+    [InlineData("deprecate", false)]
+    [InlineData("observe", true)]
+    [InlineData("unlist", true)]
+    [InlineData("deprecate", true)]
+    public void ReservedSelectionIsExplicitAndUndeclaredVersionsAreRefused(string action, bool reserved)
+    {
+        Assert.Equal(0, CliHarness.Run("packages", "--help").Code);
+        using var f = new PackageTestEstate(reserved: true);
+        string[] arguments = ["--estate", f.Service.Session.Root, "--json", "packages", action, "--product", f.Product.Id,
+            "--version", reserved ? "2.0.0" : f.Version, "--by", f.Estate.OperatorId];
+        if (reserved) arguments = [.. arguments, "--reserved"];
+        if (action != "observe") arguments = [.. arguments, "--package", "Example.Widget"];
+        if (action == "deprecate") arguments = [.. arguments, "--reason", "Legacy"];
+        int before = f.Service.Session.Load().Records.Count;
+        CliHarness.Outcome response = CliHarness.RunWithApi(f.Service, null, arguments);
+        Assert.Equal(1, response.Code);
+        Assert.Equal("refused", response.Json.GetProperty("status").GetString());
+        Assert.Equal(before, f.Service.Session.Load().Records.Count);
+        Assert.Empty(f.Handler.Requests);
+    }
+
+    [Fact]
+    public void ReservedCannotBeCombinedWithOperationSelection()
+    {
+        Assert.Equal(0, CliHarness.Run("packages", "--help").Code);
+        using var f = new PackageTestEstate(reserved: true);
+        string intent = f.Service.PackagesUnlist(f.Unlist).Intent!.Id;
+        int before = f.Service.Session.Load().Records.Count;
+        CliHarness.Outcome response = CliHarness.RunWithApi(f.Service, null, "--estate", f.Service.Session.Root, "--json", "packages", "observe", "--operation", intent, "--reserved", "--by", f.Estate.OperatorId);
+        Assert.Equal(1, response.Code);
+        Assert.Equal(before, f.Service.Session.Load().Records.Count);
+        Assert.Empty(f.Handler.Requests);
     }
 }

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Microsoft.AspNetCore.Http;
+using Vericairn.Records.Estate;
 using Vericairn.Protocol;
 using Vericairn.Sdk;
 using Vericairn.TestSupport;
@@ -122,4 +123,51 @@ public sealed class PackagesApiTests
         Assert.Equal("Example.Replacement", Assert.Single(deprecated.Packages).State.Details!.AlternatePackage);
         Assert.Equal(0, f.Service.Validate().Errors);
     }, TestContext.Current.CancellationToken);
+
+    [Fact(Timeout = 30000)]
+    public async Task ReservedRequestsTraverseTheSdkAndMappedRoutesWithoutARelease()
+    {
+        using var f = new PackageTestEstate(reserved: true);
+        using var handler = new PolicyAdoptionApiTests.RouteHandler(f.Service);
+        using var transport = new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") };
+        using var api = new VericairnClient(transport);
+        PackagesResponse published = await api.PackagesObserveAsync(f.Observe, TestContext.Current.CancellationToken);
+        Assert.True(published.Ok, published.Message);
+        Assert.Equal(f.Version, Assert.Single(published.Packages).State.Version);
+        Assert.Equal(f.Product.Reference, f.Service.Session.Load().ById[published.Packages[0].Observation.Id].Subject);
+        PackagesResponse unlist = api.PackagesUnlist(f.Unlist);
+        Assert.Equal("not-started", unlist.Status);
+        Assert.Equal(unlist.Intent, (await api.PackagesUnlistAsync(f.Unlist, TestContext.Current.CancellationToken)).Intent);
+        f.Handler.Registration = "unlisted";
+        PackagesResponse unlisted = api.PackagesObserve(new(f.Estate.OperatorId, Operation: unlist.Intent!.Id));
+        Assert.True(unlisted.Ok, unlisted.Message);
+        PackagesResponse deprecate = await api.PackagesDeprecateAsync(f.Deprecate, TestContext.Current.CancellationToken);
+        Assert.Equal("not-started", deprecate.Status);
+        Assert.Equal(deprecate.Intent, api.PackagesDeprecate(f.Deprecate).Intent);
+        f.Handler.Registration = "deprecated";
+        PackagesResponse deprecated = await api.PackagesObserveAsync(new(f.Estate.OperatorId, Operation: deprecate.Intent!.Id), TestContext.Current.CancellationToken);
+        Assert.True(deprecated.Ok, deprecated.Message);
+        Assert.All(f.Service.Session.Load().Current("operation"), operation => Assert.Equal("observed-success", EstateModel.BodyString(operation, "status")));
+        Assert.Empty(f.Service.Session.Load().OfType("release"));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory(Timeout = 30000)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApiRefusesImplicitReservedSelectionAndUndeclaredVersions(bool reserved)
+    {
+        using var f = new PackageTestEstate(reserved: true);
+        using var handler = new PolicyAdoptionApiTests.RouteHandler(f.Service);
+        using var transport = new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") };
+        using var api = new VericairnClient(transport);
+        string version = reserved ? "2.0.0" : f.Version;
+        int before = f.Service.Session.Load().Records.Count;
+        PackagesResponse observation = await api.PackagesObserveAsync(f.Observe with { Version = version, Reserved = reserved }, TestContext.Current.CancellationToken);
+        PackagesResponse unlist = await api.PackagesUnlistAsync(f.Unlist with { Version = version, Reserved = reserved }, TestContext.Current.CancellationToken);
+        PackagesResponse deprecate = await api.PackagesDeprecateAsync(f.Deprecate with { Version = version, Reserved = reserved }, TestContext.Current.CancellationToken);
+        Assert.All(new[] { observation, unlist, deprecate }, response => Assert.False(response.Ok));
+        Assert.Equal(before, f.Service.Session.Load().Records.Count);
+        Assert.Empty(f.Handler.Requests);
+    }
 }

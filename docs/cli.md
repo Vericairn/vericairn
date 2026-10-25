@@ -134,7 +134,9 @@ Hashing checks the body structure and canonical JSON representation. Declaration
 ## `vericairn packages`
 
 Observe nuget.org's public state, or record an intent for its account holder. These commands require
-a valid estate at record format 3, a product's `packages` declaration and a recorded release version.
+a valid estate at record format 3 and a product's `packages` declaration. By default they select a
+recorded release version. From 0.8.4, `--reserved` explicitly selects a placeholder version declared
+in `packages.reserved`, without requiring or creating a release record.
 The [operator procedure](operator-actions.md#package-publication-unlisting-and-deprecation) gives the declaration and the order of actions.
 
 ```sh
@@ -147,9 +149,10 @@ vericairn packages observe --operation <original-intent-id> --by <operator-id> -
 | Command and option | Meaning |
 |---|---|
 | `observe --product <id> --version <version>` | Observe every package in the current product declaration for this recorded release version. Both options are required together. |
-| `observe --operation <id>` | Observe the package and original release pins of an unlisting or deprecation intent. Use instead of `--product` and `--version`; any revision identifies the original intent. |
+| `observe --operation <id>` | Observe the package and original release or reserved-version pins of an unlisting or deprecation intent. Use instead of `--product`, `--version` and `--reserved`; any revision identifies the original intent. |
 | `observe --by <id>` | Required observing principal. Recording an intent's outcome requires the estate operator. |
 | `unlist`, `deprecate`: `--product <id> --version <version> --package <id> --by <id>` | All required. Record one package version's intent as the estate operator and print the nuget.org step. These commands perform no registry write and make no registry request. |
+| `observe`, `unlist`, `deprecate`: `--reserved` | Optional, default false. Require `--version` to be declared reserved in the current product; pin that exact declaration and version in place of a release. Cannot accompany `observe --operation`. |
 | `deprecate --reason <reason>` | Required. `Legacy`, `CriticalBugs` or `Other`; repeat the option or supply multiple values. |
 | `deprecate --message <text>` | Optional exact message, at most 500 characters. Omitted means no message. |
 | `deprecate --alternate-package <id>` | Optional replacement package. Omitted means no replacement. |
@@ -165,7 +168,22 @@ HTTP status, byte count and content encoding, beside the observation record. Has
 body bytes before gzip decoding. Deprecation details retain NuGet's reasons,
 message and alternate id/range when present. A missing version is `not-found` with `unknown` listing
 and deprecation. That successful observation exits 0. Refusal or an unconfirmed intended outcome
-exits 2. Failed network reads create no observation; an existing intent remains available to resume.
+exits 1. Failed network reads create no observation; an existing intent remains available to resume.
+
+For example, after declaring `"reserved": ["0.0.1-reserved"]` in the product's `packages` member:
+
+```sh
+vericairn packages observe --product <product-id> --version 0.0.1-reserved --reserved --by <principal-id>
+vericairn packages unlist --product <product-id> --version 0.0.1-reserved --reserved --package Example.Widget --by <operator-id>
+vericairn packages deprecate --product <product-id> --version 0.0.1-reserved --reserved --package Example.Widget --by <operator-id> --reason Legacy --message "Use the first release, 1.0.0." --alternate-package Example.Widget --alternate-range "[1.0.0,)"
+```
+
+Reserved declarations contain one to eight distinct valid NuGet versions, compared without case.
+A reserved version cannot also be a recorded release of the same product. Without `--reserved`,
+the recorded-release requirement remains; with it, an undeclared version is refused. Reserved
+observations retain the same service-index, registration and package-content response evidence,
+time checks and outcome confirmation as release observations. Use the printed `observe --operation`
+command after each account-holder act; its original pins survive later declaration changes.
 
 An identical intent command returns its original identity, including after restarting the runtime.
 Changing the intended deprecation metadata under that identity is refused. Observe the original
@@ -179,6 +197,10 @@ historical success.
 | `POST /v1/packages/observe` with `PackagesObserveRequest` | `PackagesObserve`, `PackagesObserveAsync` |
 | `POST /v1/packages/unlist` with `PackagesUnlistRequest` | `PackagesUnlist`, `PackagesUnlistAsync` |
 | `POST /v1/packages/deprecate` with `PackagesDeprecateRequest` | `PackagesDeprecate`, `PackagesDeprecateAsync` |
+
+Each request also accepts optional JSON `reserved` (boolean, default false), exposed by the SDK as
+the init-only `Reserved` property; existing constructors are unchanged. Set it when selecting a
+declared placeholder by product and version. Operation observation keeps the original intent's selection.
 
 All return `PackagesResponse`; the API binds `by` to the authenticated acting device like the other
 record-writing operations. `GET /v1/providers` and `release providers` list the `nuget-org` package

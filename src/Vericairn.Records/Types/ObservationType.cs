@@ -32,7 +32,7 @@ public sealed class ObservationType : IRecordType
         new("kind", string.Join('|', Kinds), true, "What was observed; estate requires record format 2, a human author and an exact estate subject."),
         new("asOf", "timestamp", true, "When the observation was made."),
         new("summary", "string", true, "The observation in a sentence."),
-        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash. An operator-request observation requires outcome (done), destination, location and evidenceHash, and its signed exact request subject."),
+        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash. An operator-request observation requires outcome (done), destination, location and evidenceHash, and its signed exact request subject. Format-3 package facts pin provider, product, productHash, package and version, with either release and releaseHash or reserved (the same version declared reserved in that exact product, with no release pins). The subject is the exact release, reserved product declaration or original account-holder intent."),
         new("limitations", "string[]", true, "What the observation does not establish; may be empty."),
         new("evidence", "object[]", false, "For package observations: exact public registry url, response-body hash, HTTP status, byte count and content encoding for each response; hashes cover bytes before gzip decoding.", 3),
     ];
