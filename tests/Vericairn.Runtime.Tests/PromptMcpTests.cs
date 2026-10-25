@@ -8,6 +8,7 @@ using System.Net.Http.Json;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Tests;
+using Vericairn.Records.Estate;
 using Vericairn.Sdk;
 
 namespace Vericairn.Runtime.Tests;
@@ -39,6 +40,9 @@ public sealed class PromptMcpTests
         Assert.Equal("user", result["messages"]![0]!["role"]!.GetValue<string>());
         Assert.Contains("the assigned evidence", result["messages"]![0]!["content"]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.True(writer.Model.ById.ContainsKey(result["_meta"]!["vericairn/record"]!.GetValue<string>()));
+        JsonElement use = writer.Model.ById[result["_meta"]!["vericairn/record"]!.GetValue<string>()].Body.GetProperty("promptUse");
+        Assert.Equal(SavedPrompts.Addendum(use), result["messages"]![0]!["content"]!["text"]!.GetValue<string>());
+        Assert.Contains("Untrusted", result["_meta"]!["vericairn/trust"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Equal(row.Identity, Assert.Single(writer.Api.Prompts(new(writer.Operator, Favorites: true)).Prompts).Identity);
         PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Operator, row.Identity, Disabled: true)));
         int count = writer.Model.Records.Count;
@@ -61,6 +65,62 @@ public sealed class PromptMcpTests
     }
 
     [Fact]
+    public async Task StandardPromptVisibilityMatchesTheReadToolAndRefreshesHiddenDisabledAndRetiredChoices()
+    {
+        using var writer = new PromptWriter();
+        PromptRow row = writer.Add();
+        var builder = new ToolRegistry(writer.Api, writer.Builder);
+        var op = new ToolRegistry(writer.Api, writer.Operator);
+        var anonymous = new ToolRegistry(writer.Api, null);
+        async Task<string[]> Names(ToolRegistry registry)
+        {
+            JsonObject listing = await registry.PromptsListAsync(TestContext.Current.CancellationToken);
+            ToolCallResult tool = await registry.CallAsync("prompts_list", null, TestContext.Current.CancellationToken);
+            Assert.False(tool.IsError);
+            string[] expected = JsonSerializer.Deserialize<PromptsResponse>(tool.Text, ProtocolJson.Options)!.Prompts.Select(p => p.Identity).ToArray();
+            string[] actual = listing["prompts"]!.AsArray().Select(p => p!["name"]!.GetValue<string>()).ToArray();
+            Assert.Equal(expected, actual);
+            return actual;
+        }
+        Assert.Contains(row.Identity, await Names(builder));
+        PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Builder, row.Identity, Hidden: true)));
+        Assert.DoesNotContain(row.Identity, await Names(builder));
+        Assert.Contains(row.Identity, await Names(op));
+        PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Operator, row.Identity, Disabled: true)));
+        Assert.DoesNotContain(row.Identity, await Names(op));
+        Assert.DoesNotContain(row.Identity, await Names(anonymous));
+        PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Operator, row.Identity, Disabled: false)));
+        PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Builder, row.Identity, Hidden: false)));
+        Assert.Contains(row.Identity, await Names(builder));
+        JsonObject retired = JsonNode.Parse(row.Definition.GetRawText())!.AsObject();
+        retired["state"] = "retired";
+        PromptLibraryTests.Ok(writer.Api.PromptSave(new(writer.Operator, PolicyFixture.Element(retired), row.Hash)));
+        Assert.DoesNotContain(row.Identity, await Names(builder));
+    }
+
+    [Fact]
+    public async Task StandardGetUsesTheSameOperatorBoundaryAsPromptUseAndRechecksPersonalHiding()
+    {
+        using var writer = new PromptWriter();
+        PromptRow row = writer.Add();
+        AssignRequest assignment = writer.Assignment();
+        var arguments = new JsonObject { ["topic"] = "evidence", ["_expected"] = row.Hash,
+            ["_target"] = new JsonObject { ["assignment"] = JsonSerializer.SerializeToNode(assignment, ProtocolJson.Options) }.ToJsonString() };
+        var builder = new ToolRegistry(writer.Api, writer.Builder);
+        int before = writer.Model.Records.Count;
+        Assert.True((await builder.CallAsync("prompt_use", new() { ["body"] = new JsonObject() }, TestContext.Current.CancellationToken)).Unknown);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => builder.PromptGetAsync(row.Identity, arguments, TestContext.Current.CancellationToken));
+        Assert.Equal(before, writer.Model.Records.Count);
+        PromptLibraryTests.Ok(writer.Api.PromptPreference(new(writer.Operator, row.Identity, Hidden: true)));
+        before = writer.Model.Records.Count;
+        JsonObject reply = Assert.Single(await ResourceMcpTests.DriveAsync(writer.Api, writer.Operator, true,
+            ResourceMcpTests.Request("prompts/get", new() { ["name"] = row.Identity, ["arguments"] = arguments })));
+        Assert.NotNull(reply["error"]);
+        Assert.Null(reply["result"]);
+        Assert.Equal(before, writer.Model.Records.Count);
+    }
+
+    [Fact]
     public void ServerAdvertisesAndServesStandardPromptsOverItsExistingTransport()
     {
         using var writer = new PromptWriter();
@@ -74,6 +134,28 @@ public sealed class PromptMcpTests
         JsonObject[] replies = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(s => JsonNode.Parse(s)!.AsObject()).ToArray();
         Assert.NotNull(replies[0]["result"]!["capabilities"]!["prompts"]);
         Assert.Contains(replies[1]["result"]!["prompts"]!.AsArray(), p => p!["name"]!.GetValue<string>() == "estate:review");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StandardGetOnTheWireReturnsTheExactRecordedAddendum(bool asynchronous)
+    {
+        using var writer = new PromptWriter();
+        PromptRow row = writer.Add();
+        var arguments = new JsonObject { ["topic"] = "café and 漢字", ["_expected"] = row.Hash,
+            ["_target"] = new JsonObject { ["assignment"] = JsonSerializer.SerializeToNode(writer.Assignment(), ProtocolJson.Options) }.ToJsonString() };
+        int before = writer.Model.Records.Count;
+        JsonObject reply = Assert.Single(await ResourceMcpTests.DriveAsync(writer.Api, writer.Operator, asynchronous,
+            ResourceMcpTests.Request("prompts/get", new() { ["name"] = row.Identity, ["arguments"] = arguments })));
+        JsonNode result = ResourceMcpTests.Result(reply);
+        JsonNode message = Assert.Single(result["messages"]!.AsArray())!;
+        Assert.Equal("user", message["role"]!.GetValue<string>());
+        Assert.Equal("text", message["content"]!["type"]!.GetValue<string>());
+        var recorded = writer.Model.ById[result["_meta"]!["vericairn/record"]!.GetValue<string>()];
+        Assert.Equal(SavedPrompts.Addendum(recorded.Body.GetProperty("promptUse")), message["content"]!["text"]!.GetValue<string>());
+        Assert.Equal(recorded.ComputedHash, result["_meta"]!["vericairn/hash"]!.GetValue<string>());
+        Assert.Equal(before + 1, writer.Model.Records.Count);
     }
 
     [Fact]
@@ -105,6 +187,7 @@ public sealed class PromptMcpTests
         {
             object response;
             if (request.RequestUri!.AbsolutePath == "/v1/devices") response = writer.Api.Devices();
+            else if (request.RequestUri.AbsolutePath == "/v1/records") response = writer.Api.Records("principal");
             else if (request.RequestUri.AbsolutePath == "/v1/prompts") response = writer.Api.Prompts(new(writer.Operator));
             else
             {

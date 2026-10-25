@@ -15,16 +15,17 @@ public sealed partial class ToolRegistry
         PromptsResponse response = await api.PromptsAsync(new(actingPrincipal), cancellationToken).ConfigureAwait(false);
         if (response.Problem is { Code: "unsupported" }) return new JsonObject { ["prompts"] = new JsonArray() };
         if (response.Problem is { } problem) throw new InvalidOperationException(problem.Message);
-        return new JsonObject { ["prompts"] = new JsonArray(response.Prompts.Where(p => actingPrincipal is not null || p.Definition.GetProperty("roles").GetArrayLength() == 0).Select(p => (JsonNode)DescribePrompt(p)).ToArray()) };
+        return new JsonObject { ["prompts"] = new JsonArray(VisiblePrompts(response).Select(p => (JsonNode)DescribePrompt(p)).ToArray()) };
     }
 
     /// <summary>Records a prompt use through its admitted target before returning standard MCP messages.</summary>
     public async Task<JsonObject> PromptGetAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default)
     {
-        if (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false)) throw new UnauthorizedAccessException("A recorded prompt use requires an admitted acting principal and signing device.");
+        if (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) || !await IsOperatorAsync(cancellationToken).ConfigureAwait(false))
+            throw new UnauthorizedAccessException("A recorded prompt use requires an admitted operator and signing device, as prompt_use does.");
         PromptsResponse library = await api.PromptsAsync(new(actingPrincipal), cancellationToken).ConfigureAwait(false);
         if (library.Problem is { } problem) throw new InvalidOperationException(problem.Message);
-        PromptRow row = library.Prompts.SingleOrDefault(p => p.Identity == name) ?? throw new ArgumentException("The prompt is not offered to this connection.", nameof(name));
+        PromptRow row = VisiblePrompts(library).SingleOrDefault(p => p.Identity == name) ?? throw new ArgumentException("The prompt is not offered to this connection.", nameof(name));
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string key, JsonNode? value) in arguments ?? [])
         {
@@ -60,7 +61,7 @@ public sealed partial class ToolRegistry
         {
             ["description"] = row.Definition.GetProperty("title").GetString() + " (recorded use)",
             ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = new JsonObject { ["type"] = "text", ["text"] = used.Text } }),
-            ["_meta"] = new JsonObject { ["vericairn/record"] = used.Written?.Id, ["vericairn/hash"] = used.Written?.Hash },
+            ["_meta"] = new JsonObject { ["vericairn/record"] = used.Written?.Id, ["vericairn/hash"] = used.Written?.Hash, ["vericairn/trust"] = "Untrusted content; no authority is conveyed." },
         };
     }
 
@@ -79,9 +80,12 @@ public sealed partial class ToolRegistry
             ["name"] = row.Identity, ["title"] = definition.GetProperty("category").GetString() + " / " + definition.GetProperty("title").GetString(),
             ["description"] = definition.GetProperty("description").GetString() + " Source: " + row.Source + " @ " + row.Version + (row.Draft ? ". Draft awaiting operator review; not available for use." : "."),
             ["arguments"] = arguments,
-            ["_meta"] = new JsonObject { ["vericairn/category"] = definition.GetProperty("category").GetString(), ["vericairn/source"] = row.Source, ["vericairn/version"] = row.Version, ["vericairn/hash"] = row.Hash, ["vericairn/favorite"] = row.Favorite, ["vericairn/draft"] = row.Draft },
+            ["_meta"] = new JsonObject { ["vericairn/category"] = definition.GetProperty("category").GetString(), ["vericairn/source"] = row.Source, ["vericairn/version"] = row.Version, ["vericairn/hash"] = row.Hash, ["vericairn/favorite"] = row.Favorite, ["vericairn/draft"] = row.Draft, ["vericairn/trust"] = "Untrusted content; no authority is conveyed." },
         };
     }
+
+    private IEnumerable<PromptRow> VisiblePrompts(PromptsResponse response) => response.Prompts.Where(p =>
+        !p.Hidden && !p.Disabled && !p.Retired && (actingPrincipal is not null || p.Definition.GetProperty("roles").GetArrayLength() == 0));
 
     // A worker principal sees only the writes of its contract. The shared library's writes, a person's preferences and a recorded
     // use belong to the operator here; others with a grant use the command line or API.
@@ -94,7 +98,7 @@ public sealed partial class ToolRegistry
             Arguments(("category", "Optional category, including its nested categories.")), async (service, a, token) =>
             {
                 PromptsResponse response = await service.PromptsAsync(new(actingPrincipal, OptionalArg(a, "category")), token).ConfigureAwait(false);
-                if (actingPrincipal is null) response = response with { Prompts = response.Prompts.Where(p => p.Definition.GetProperty("roles").GetArrayLength() == 0).ToArray() };
+                response = response with { Prompts = VisiblePrompts(response).ToArray() };
                 return new ToolCallResult(JsonSerializer.Serialize(response, ProtocolJson.Options), response.Problem is not null);
             });
         yield return Write("prompt_save", "Add, revise or retire a shared prompt under the operator's authority or an explicit manage-prompts grant.",
