@@ -23,6 +23,7 @@ public sealed partial class EstateService
             EstateModel model = session.Load();
             Problem? problem = PrepareDocumentPin(request, model, out RecordDraft? draft, out long revision);
             if (problem is not null) return new(null, null, problem);
+            if (request.RenderTemplate) return PinTemplate(request, model, draft!, revision);
             WriteOutcome outcome = WriteLocked(draft!, model);
             return new(outcome.Written, outcome.Written is null ? null : revision, outcome.Problem);
         }
@@ -34,7 +35,7 @@ public sealed partial class EstateService
         draft = null;
         revision = 0;
         if (!Ulid.IsValid(request.By)) return Refused("The authoring principal must be a ULID.");
-        if (string.IsNullOrWhiteSpace(request.Path) || !Patterns.DocumentPath.IsMatch(request.Path)
+        if (string.IsNullOrWhiteSpace(request.Path) || !(request.RenderTemplate ? Patterns.TemplateDocumentPath : Patterns.DocumentPath).IsMatch(request.Path)
             || !DocumentPatterns.IsSafePath(request.Path))
             return Refused("A document pin needs a normalized repository-relative file path under design/ or docs/.");
         if (string.IsNullOrWhiteSpace(request.Summary)) return Refused("A document pin needs a summary.");
@@ -66,7 +67,7 @@ public sealed partial class EstateService
         }
 
         string hash = ContentHash.Sha256(bytes);
-        if (previous is not null && EstateModel.BodyString(previous, "hash") == hash)
+        if (!request.RenderTemplate && previous is not null && EstateModel.BodyString(previous, "hash") == hash)
             return Refused($"{request.Path} has unchanged bytes; nothing to pin (current pin {previous.Id}).");
         revision = previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1;
         string title = request.Title ?? (previous is null ? null : EstateModel.BodyString(previous, "title"))

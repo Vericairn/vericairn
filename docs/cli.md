@@ -83,19 +83,20 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 | `--summary <text>` | Required. What this revision is or changes. |
 | `--title <text>` | Override the title. Otherwise carry the current pin's title; a first pin uses the file name without its extension. |
 | `--expected <id>` | Require this exact record id to be the current pin for the path. An old, unrelated or unknown id refuses the write. |
+| `--render-template` | Default false. Refresh only an existing instance's declared generated regions and pin the resulting bytes in one recoverable batch. Also admits root `README.md` in format 3. |
 | `--json` | Print the record receipt as `{"path":"records/document-revision/...","id":"...","hash":"sha256:..."}`. The hash identifies the record; its body holds the document's byte hash. |
 | `--estate <root>`, `-e <root>` | Select the estate; the runtime reads the file in that estate's repository. |
 | `--help`, `-h`, `-?`, `/?`, `/h` | Show command help. |
 
 The first pin is revision 1. Each later pin increments the current revision and supersedes that record. The runtime computes SHA-256 and byte count from one byte read, preserving line endings and any byte-order mark. Media type follows the file extension: Markdown, plain text, JSON, YAML, HTML, XML, CSV, PDF, SVG, PNG and JPEG are recognized; other extensions use `application/octet-stream`.
 
-Unchanged bytes refuse even if the title or summary differs. Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
+By default, unchanged bytes refuse even if the title or summary differs. Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
 
 If two branches pin the same predecessor, their merged records form a fork. Both `estate check` and `docs pin` identify the conflicting pins and predecessor. Record a `reconciliation` that keeps one successor and withdraws the others, settle the document text, then pin the combined bytes with the kept id as `--expected`. Neither branch wins automatically, and all revision records remain.
 
-Text output prints the document revision, record id and record hash. Exit 0 means the pin was recorded; a refusal exits 2 with a diagnostic or validation findings. A receipt accompanied by a companion-recovery problem also exits 2: reconcile the stored operation before retrying. The command does not edit the document or its hand-written revision line. See [Living documents](operator-guide.md#16-living-documents).
+Text output prints the document revision, record id and record hash. Exit 0 means the pin was recorded; a refusal exits 2 with a diagnostic or validation findings. A receipt accompanied by a companion-recovery problem also exits 2: reconcile the stored operation before retrying. Without `--render-template`, the command does not edit the document or its hand-written revision line. The explicit option preserves authored text and refreshes only generated payloads, including the new revision's metadata. See [Living documents](operator-guide.md#16-living-documents) and [template adoption](templates.md#adopt-an-existing-estate-document).
 
-The matching API is `POST /v1/documents/pin`, with JSON fields `path`, `by`, `summary`, optional `title` and optional `expected`. It returns `DocumentPinResponse`: `written` (the record receipt), `revision`, `problem` and `ok`. A refusal returns HTTP 422 with no `written` or `revision`; a stored receipt returns HTTP 200, including when a companion problem needs reconciliation. SDK clients use `DocumentPin(DocumentPinRequest)` or `DocumentPinAsync(DocumentPinRequest, CancellationToken)`:
+The matching API is `POST /v1/documents/pin`, with JSON fields `path`, `by`, `summary`, optional `title`, optional `expected` and optional `renderTemplate` (default false). It returns `DocumentPinResponse`: `written` (the record receipt), `revision`, `problem` and `ok`. A refusal returns HTTP 422 with no `written` or `revision`; a stored receipt returns HTTP 200, including when a companion problem needs reconciliation. SDK clients use `DocumentPin(DocumentPinRequest)` or `DocumentPinAsync(DocumentPinRequest, CancellationToken)`:
 
 ```csharp
 var result = await client.DocumentPinAsync(
@@ -205,3 +206,14 @@ A brief exceeding `--max-bytes` exits 2 with explicit incomplete evidence and no
 silent truncation. Creation interrupted after declaration storage also exits 2
 and preserves its receipt for reconciliation. See [Templates](templates.md) for
 the contract, defaults, overrides, review rules and recovery.
+
+For an existing file, `docs adopt <template> <path> --version <version> --by
+<owner> --expected-content <file hash>` preserves authored bytes and history.
+An existing living declaration also requires `--expected-declaration <record
+hash>`. Optional `--configuration`, `--title` and `--level` supply the same
+choices; existing duties remain unchanged. `--preview` returns the unsigned
+proposal as JSON. `--with-regions` explicitly includes generated ownership and
+requires prepared markers and any existing migration review. After adoption,
+`docs pin --render-template` refreshes those regions. See the complete
+[adoption workflow](templates.md#adopt-an-existing-estate-document) before
+transferring a hand-maintained table to records.

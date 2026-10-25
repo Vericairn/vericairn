@@ -22,6 +22,8 @@ public sealed partial class VericairnClient
     /// <inheritdoc />
     public DocumentNewResponse DocumentNew(DocumentNewRequest request) => Post<DocumentNewRequest, DocumentNewResponse>("/v1/documents/new", request)!;
     /// <inheritdoc />
+    public DocumentAdoptResponse DocumentAdopt(DocumentAdoptRequest request) => Post<DocumentAdoptRequest, DocumentAdoptResponse>("/v1/documents/adopt", request)!;
+    /// <inheritdoc />
     public Task<TemplatesResponse> TemplatesAsync(CancellationToken cancellationToken = default) => RunOperationAsync(nameof(Templates),
         async token => (await GetAsync<TemplatesResponse>("/v1/templates", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Templates)), cancellationToken);
     /// <inheritdoc />
@@ -33,6 +35,9 @@ public sealed partial class VericairnClient
     /// <inheritdoc />
     public Task<DocumentNewResponse> DocumentNewAsync(DocumentNewRequest request, CancellationToken cancellationToken = default) => RunOperationAsync(nameof(DocumentNew),
         async token => (await PostAsync<DocumentNewRequest, DocumentNewResponse>("/v1/documents/new", request, token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DocumentNew)), cancellationToken);
+    /// <inheritdoc />
+    public Task<DocumentAdoptResponse> DocumentAdoptAsync(DocumentAdoptRequest request, CancellationToken cancellationToken = default) => RunOperationAsync(nameof(DocumentAdopt),
+        async token => (await PostAsync<DocumentAdoptRequest, DocumentAdoptResponse>("/v1/documents/adopt", request, token).ConfigureAwait(false))!, !request.Preview, OperationTimeout?.Invoke(nameof(DocumentAdopt)), cancellationToken);
 
     private static string SectionsPath(string declaration, string? commit) => "/v1/documents/" + Uri.EscapeDataString(declaration) + "/sections"
         + (commit is null ? "" : "?commit=" + Uri.EscapeDataString(commit));

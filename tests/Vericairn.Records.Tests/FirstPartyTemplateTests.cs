@@ -3,8 +3,10 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Templates;
 using static Vericairn.Records.Tests.TemplateFixture;
 
@@ -12,6 +14,26 @@ namespace Vericairn.Records.Tests;
 
 public sealed class FirstPartyTemplateTests
 {
+    public static TestEstate RecordedFixture()
+    {
+        var estate = new TestEstate(3);
+        TemplateDefinition definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/readme");
+        RecordEnvelope declaration = Declare(estate, definition, "README.md");
+        Revision(estate, "README.md", TemplateDocuments.NewContent(estate.Load(), declaration));
+        AssertValid(estate);
+        return estate;
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ReadmePinsRemainUnavailableInEarlierFormats(long format)
+    {
+        using var estate = new TestEstate(format);
+        Revision(estate, "README.md", "# Retained README\n");
+        Assert.Contains(estate.Load().Findings, f => f.Code == "body.pattern");
+    }
+
     [Fact]
     public void AllSixContractsShipWithTheirVersionedGeneratorsAndChecks()
     {
@@ -78,6 +100,26 @@ public sealed class FirstPartyTemplateTests
 
         string PlacementCheck(string content) => TemplateDocuments.Sections(model, declaration, text: content).Single(s => s.Id == "releases")
             .Checks.Single(c => c.Id == "vericairn.estate/roadmap-placements-v1").Outcome;
+    }
+
+    [Fact]
+    public void QuotedRecordsRetainExactBytesEvenWhenMarkdownWouldNormalizeThemOrReadThemAsMarkers()
+    {
+        using var estate = new TestEstate(3);
+        string[] words = ["Keep a trailing space. \r\nAnd a tab.\t\r\n", "Before.\n<!-- vericairn:generated releases -->\nAfter."];
+        foreach (string value in words) estate.Add("decision", estate.OperatorId, Decision(estate, value).ToJsonString());
+        var definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/open-decisions");
+        RecordEnvelope declaration = Declare(estate, definition, "design/open-decisions.md");
+        string text = TemplateDocuments.NewContent(estate.Load(), declaration);
+        Assert.True(GeneratedRegions.ValidMarkers(text));
+        foreach (string value in words)
+        {
+            Assert.Contains(JsonSerializer.Serialize(value), text, StringComparison.Ordinal);
+            Assert.Contains(ContentHash.Sha256(Encoding.UTF8.GetBytes(value)), text, StringComparison.Ordinal);
+        }
+        TemplateSectionState state = TemplateDocuments.Sections(estate.Load(), declaration, text: text).Single(s => s.Id == "decisions");
+        Assert.All(state.Checks.Concat(state.Cohesion), c => Assert.Equal("passed", c.Outcome));
+        AssertValid(estate);
     }
 
     [Fact]

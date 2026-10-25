@@ -18,6 +18,8 @@ public partial interface IEstateApi
     SectionBriefResponse SectionBrief(string declaration, string section, long? maxBytes = null, string? commit = null) => new(null, new Problem("unsupported", "Section briefs are unavailable.", []));
     /// <summary>Creates an estate document and its pinned living declaration within ordinary authoring authority.</summary>
     DocumentNewResponse DocumentNew(DocumentNewRequest request) => new(null, null, null, new Problem("unsupported", "Template instantiation is unavailable.", []));
+    /// <summary>Previews or records an exact template attachment, preserving existing document bytes and history.</summary>
+    DocumentAdoptResponse DocumentAdopt(DocumentAdoptRequest request) => new(null, null, null, false, null, null, [], new Problem("unsupported", "Template adoption is unavailable.", []));
     /// <summary>Cancellable catalogue read.</summary>
     Task<TemplatesResponse> TemplatesAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Templates), Templates, false, this as IClientOperationLifetime, cancellationToken);
@@ -30,4 +32,7 @@ public partial interface IEstateApi
     /// <summary>Cancellable instantiation write; an interrupted write must be inspected before retrying.</summary>
     Task<DocumentNewResponse> DocumentNewAsync(DocumentNewRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(DocumentNew), () => DocumentNew(request), true, this as IClientOperationLifetime, cancellationToken);
+    /// <summary>Cancellable adoption; an interrupted write must be inspected before retrying.</summary>
+    Task<DocumentAdoptResponse> DocumentAdoptAsync(DocumentAdoptRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(DocumentAdopt), () => DocumentAdopt(request), !request.Preview, this as IClientOperationLifetime, cancellationToken);
 }

@@ -27,6 +27,26 @@ public sealed record TemplateSectionBrief(string Declaration, string Declaration
 public static class TemplateDocuments
 {
     private static readonly JsonSerializerOptions BriefJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    /// <summary>Refreshes only existing generated payloads of a pinned instance, preserving every other character.</summary>
+    public static string RefreshGenerated(EstateModel model, RecordEnvelope declaration, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        TemplateDefinition definition = TemplateInstances.Effective(TemplateCatalog.Resolve(model, TemplateCatalog.Pin(declaration)
+            ?? throw new InvalidOperationException("The document is not a template instance.")), declaration);
+        foreach (JsonElement section in definition.Elements)
+        {
+            JsonElement synthesis = TJson.Object(section, "synthesis");
+            if (TJson.Text(synthesis, "mode") != "generated") continue;
+            string id = TJson.Text(section, "id")!;
+            DocumentRenderResult rendered = DocumentRepair.Region(model, declaration, TJson.Text(synthesis, "generator")!, id, TJson.Strings(synthesis, "inputs").ToArray());
+            if (rendered.Status != DocumentGenerationStatus.Success || rendered.Content is null)
+                throw new InvalidOperationException("A required template generator is unavailable.");
+            text = GeneratedRegions.Replace(text, id, rendered.Content)
+                ?? throw new InvalidOperationException("Locate each generated section with unique balanced markers before refreshing it.");
+        }
+        _ = TemplateSections.Read(text, definition.Elements);
+        return text;
+    }
     /// <summary>Prepares an instance's initial bytes, filling quotes and generated sections from exact available sources.</summary>
     public static string NewContent(EstateModel model, RecordEnvelope declaration)
     {

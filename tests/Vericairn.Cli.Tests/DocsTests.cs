@@ -200,8 +200,8 @@ public class DocsTests
             foreach (JsonElement reference in inventory.RootElement.GetProperty("references").EnumerateArray())
                 Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
-            foreach (string command in new[] { "templates list", "templates show", "docs new", "docs sections", "docs brief" }) Assert.Contains(command, commands);
-            foreach (string route in new[] { "GET /v1/templates", "POST /v1/documents/new", "GET /v1/documents/{id}/sections", "GET /v1/documents/{id}/sections/{section}/brief" })
+            foreach (string command in new[] { "templates list", "templates show", "docs new", "docs adopt", "docs sections", "docs brief" }) Assert.Contains(command, commands);
+            foreach (string route in new[] { "GET /v1/templates", "POST /v1/documents/new", "POST /v1/documents/adopt", "GET /v1/documents/{id}/sections", "GET /v1/documents/{id}/sections/{section}/brief" })
                 Assert.Contains(route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             string records = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "record-reference.md")));
             foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "From format 3 an optional section contains id and document" }) Assert.Contains(field, records, StringComparison.Ordinal);
@@ -213,7 +213,7 @@ public class DocsTests
             Assert.True(pinStart >= 0);
             int pinEnd = pinReference.IndexOf("\n#", pinStart + 1, StringComparison.Ordinal);
             string pinSection = System.Net.WebUtility.HtmlDecode(pinEnd < 0 ? pinReference[pinStart..] : pinReference[pinStart..pinEnd]);
-            foreach (string option in new[] { "--by", "--summary", "--title", "--expected" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
+            foreach (string option in new[] { "--by", "--summary", "--title", "--expected", "--render-template" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
             Assert.Contains("exact estate file bytes", pinSection, StringComparison.Ordinal);
             Assert.Contains("forks", pinSection, StringComparison.Ordinal);
             Assert.Contains("docs companions", commands);

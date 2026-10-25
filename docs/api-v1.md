@@ -1346,15 +1346,21 @@ does not permit network-triggered probes. Remote remains unbuilt.
 | --- | --- |
 | `GET /v1/templates` | `TemplatesResponse` with available exact pins and complete definitions. Retired versions remain resolvable by existing instances. |
 | `POST /v1/documents/new` | `DocumentNewRequest` with by, exact template pin, path, title, optional options/scope/overrides and level; `DocumentNewResponse` preserves declaration receipt, content hash and any problem. |
+| `POST /v1/documents/adopt` | `DocumentAdoptRequest` with by, exact template pin, path, expectedContentHash, optional expectedDeclaration/title/options/scope/overrides/level/preview/includeRegions; `DocumentAdoptResponse` preserves original content identity, exact proposal, migration evidence and stored declaration/pin receipts. |
 | `GET /v1/documents/{id}/sections` | `DocumentSectionsResponse` with every derived section state and evidence; optional `commit`. |
 | `GET /v1/documents/{id}/sections/{section}/brief` | `SectionBriefResponse` with complete measured context; optional `commit` and positive `maxBytes`. |
 
 These routes return HTTP 200 with structured problems for refusals; callers
-inspect `Problem`, and creation's `Ok`. `{id}` may select a declaration or an
+inspect `Problem`, and creation or adoption's `Ok`. Adoption preview leaves `Ok`
+false and has no receipts; a successful preview has no problem. `{id}` may select a declaration or an
 escaped estate document path. `DocumentReviewRequest` gains optional `Sections`
 without changing its constructor; the existing review route receives
 `[{id, outcome, fidelity, judgments?}]`. A judgment is
 `{rule, verdict, summary, evidence}`. The runtime binds evidence and runs checks;
 a client cannot manufacture passing results or clear siblings by omission.
 SDK and cancellation wrappers expose synchronous and asynchronous equivalents.
+The existing pin request gains optional `renderTemplate` (default false) to
+refresh declared template regions and pin their output together. See the
+[adoption workflow](templates.md#adopt-an-existing-estate-document) for exact
+defaults, preparatory markers, independent migration review and recovery.
 See [Templates](templates.md) and [API compatibility](api-compatibility-0.8.4.md).

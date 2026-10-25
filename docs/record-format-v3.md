@@ -345,3 +345,12 @@ creation.
 contracts. Registered readable companions cover the new type and nested
 collections, retaining every source, check, judgment and option rather than
 reducing them to a summary.
+
+TPL-02 additionally admits root `README.md` as a `document-revision.path` in
+format 3, so the estate's README template can retain exact revision history.
+The `design/` and `docs/` grammar is unchanged, and formats 1 and 2 do not admit
+the extra path. This adds no field or type and does not change the record format.
+The registered `records describe document-revision` entry and the development
+reference include that value; generic readable companions retain the complete
+pin. [Adoption](templates.md#adopt-an-existing-estate-document) keeps existing
+records and authored bytes and explicitly prepares any generated regions.

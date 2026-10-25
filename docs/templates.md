@@ -37,7 +37,10 @@ their `answers` identify the related asks. Work orders select those decisions'
 `affects` references or work inputs naming revisions of the document. Open
 decisions use ask identities, which survive revisions; historical numbering
 remains authored context. Quoted statements retain their full wording inside
-fences. A release view can be limited with the existing `scope.product` choice.
+fences, with their exact UTF-8 byte counts and hashes. If Markdown normalization
+would alter whitespace, or the text resembles a generated-region marker, the
+quote is an escaped JSON string that decodes to the exact original bytes. A
+release view can be limited with the existing `scope.product` choice.
 
 `design-document` has `changes-records: no` by default. Set it to `yes` when
 records change, making the compatibility section required. Semantic coverage of
@@ -71,7 +74,10 @@ optional `--level remind|warn|refuse` defaults to `warn`. The optional
 Creation lays out every section's purpose and fills quoted and generated parts.
 It records no document revision, review or acceptance.
 
-Write authored parts normally and pin the document with `docs pin`. An agent's
+Write authored parts normally and pin the document with `docs pin`. Use
+`docs pin --render-template` to refresh the instance's declared generated regions
+and pin the resulting bytes together; its revision line then names the new pin.
+An agent's
 ordinary result identifies each produced section using its exact payload hash,
 optional UTF-8 byte count, document path and exact living-document reference.
 The hash excludes the heading and section boundary markers. Whitespace and line
@@ -98,6 +104,115 @@ contains the declaration receipt and `reconcile-required`, and the CLI exits 2.
 Keep that identity. Reopening the estate verifies the original template, prepared
 bytes and destination before recovery. An intervening file edit is preserved and
 holds further writes. Reconcile the original batch before retrying creation.
+
+## Adopt an existing estate document
+
+`docs adopt` attaches an exact template to an existing authored estate file under
+`design/` or `docs/`, or to root `README.md`. Its default preserves every file
+byte, existing revision record and existing living-document duty. It adds a new
+declaration, superseding an existing untemplated declaration when present. It
+does not infer which authored passages should become generated, rewrite headings
+or grant a review. Missing template sections remain visibly missing.
+
+Inspect the template, exact file hash and current declaration first. For a
+document that is already living, `--expected-declaration` is its current **record
+hash**; `--expected-content` is the SHA-256 of the complete file bytes, including
+line endings and any BOM. Both hashes use the `sha256:` prefix.
+
+```sh
+vericairn templates show vericairn.estate/roadmap --version 1.0.0 --json
+vericairn docs adopt vericairn.estate/roadmap design/roadmap.md --version 1.0.0 --by <owner> --expected-content <file hash> --expected-declaration <declaration hash> --configuration roadmap-options.json --preview
+vericairn docs adopt vericairn.estate/roadmap design/roadmap.md --version 1.0.0 --by <owner> --expected-content <file hash> --expected-declaration <declaration hash> --configuration roadmap-options.json
+vericairn docs sections design/roadmap.md --json
+```
+
+Omit `--expected-declaration` for an undeclared file. Omit `--configuration` when
+the default headings and choices fit. A configuration contains only `options`,
+`scope` and reasoned `overrides`. For example, a numbered design heading can be
+kept without editing its text:
+
+```json
+{
+  "options": { "changes-records": "yes" },
+  "overrides": [
+    { "section": "answer", "action": "rename", "heading": "1. The answer, and what this document decides", "reason": "Retain the document's authored numbering." }
+  ]
+}
+```
+
+The exact version and `--by` are required; the author becomes the instance owner.
+`--title` defaults to the current declaration's title, or the file name without
+extension. `--level remind|warn|refuse` defaults to `warn` and affects only a new
+declaration's decision trigger. Existing triggers, levels, checks, clearers and
+generated regions are copied in full. `--preview` defaults to false and always
+returns JSON when selected. It signs and stores nothing. Its response includes
+`proposedDeclaration`, `templateContent` (a complete scaffold) and any problem.
+It may return `incomplete` while still supplying the scaffold needed to prepare
+the missing markers. Apply rechecks the exact file and declaration hashes.
+
+To adopt generated ownership in the same operation, add `--with-regions` to both
+preview and apply. This defaults to false. Prepare the file explicitly before
+applying: use the scaffold's balanced generated-region markers for each generated
+section, keep authored paragraphs and revision history outside those markers,
+and retain a former hand-maintained table in authored history if it carries
+information absent from records. Reasoned heading overrides map the remaining
+authored sections. For example, the roadmap's generated table sits inside:
+
+```html
+<!-- vericairn:generated releases -->
+<!-- vericairn:end releases -->
+```
+
+For an existing design document, prepare all of `revision`, `operator-words`,
+`implementation` and `decisions`. The index uses `designs`; open decisions use
+`decisions`; release notes and the README use `releases`. The scaffold is the
+authority for each exact version's complete section layout. Pin any preparatory
+authored edit under `design/` or `docs/` with ordinary `docs pin`, recompute the
+file hash, and preview again with `--with-regions`. The preview's `preparedContent`
+shows the exact replacement, including the next revision line where applicable.
+Unmarked text stays unchanged. When refreshing changes bytes, apply retains the
+whole original in the content-addressed object store and appends a new document
+revision in the same journaled batch as the declaration.
+
+Changing an existing declaration's generated regions requires the existing
+independent migration review. The preview supplies `migrationBasis` and
+`migrationPreview` as base64 bytes and `retainedPins` as exact record references.
+Decode and retain both byte sequences; put their SHA-256 hashes in ordinary
+result outputs named `living-document-migration` and
+`living-document-migration-preview`. Include every retained pin's hash and
+record path in the result's evidence. Submit through `work result <attempt>
+--by <contributor> --body <result file>` and have an independent operator review
+that exact result through the existing review workflow. An approval of different
+bytes, incomplete history or stale sources does not authorize adoption. Repeat
+the inspected `docs adopt` command without `--preview`; a fresh comparison must
+still match the review. Adoption supplies no document-section clearance.
+
+An instance attached without `--with-regions` can acquire its generated regions
+later through `docs declare --body <complete declaration> --supersedes <current
+declaration id> --by <owner>` and that same reviewed migration contract. Repeating
+`docs adopt` on an instance is refused; template upgrades remain explicit.
+
+After adoption, refresh and inspect with:
+
+```sh
+vericairn docs pin design/roadmap.md --by <owner> --summary "Follow recorded placements." --expected <current pin id> --render-template
+vericairn docs sections design/roadmap.md --json
+vericairn docs brief design/roadmap.md --section releases --json
+```
+
+`--render-template` requires an existing instance and matching declared regions;
+it cannot bypass migration review. It replaces only existing generated payloads,
+preserves authored bytes, and rejects unstable generation that depends on its
+own output hash. This option also permits a root `README.md` pin in format 3.
+Ordinary `docs pin` retains its original path and unchanged-byte refusals.
+
+Apply returns `declaration` and, when needed, `pin` receipts, even if a later batch
+step fails. `contentHash` always identifies the retained original. A non-null
+problem makes the CLI exit 2; `reconcile-required` means inspect the original
+batch before any retry. Reopening can recover pending outputs once every record
+is present; intervening authored edits stay intact and hold recovery. JSON and
+human output both retain every stored receipt. A successful preview exits 0
+without claiming adoption; inspect `problem` before using its proposal.
 
 ## Contract grammar
 
@@ -288,6 +403,7 @@ content remains necessary to inspect earlier instances.
 ## Client and extension contract
 
 The API adds `GET /v1/templates`, `POST /v1/documents/new`,
+`POST /v1/documents/adopt`,
 `GET /v1/documents/{id}/sections`, and
 `GET /v1/documents/{id}/sections/{section}/brief`. Reads accept declaration ids or
 estate document paths; section reads accept `commit`, and briefs also accept
@@ -302,12 +418,11 @@ ordinary results and reviews; there is no template-instantiation MCP write.
 The Workbench section inspector and section review editor remain follow-on work;
 use the CLI or API for these workflows.
 
-The estate's design, roadmap and release templates are separate
-content adoption. Their builders supply contracts, sources, registered generators
-or checks, recorded role standing, explicit options and migration decisions.
-The mechanism never infers process adoption. Four first-party
+The six first-party document templates ship with this build. An estate's owner
+chooses adoption, supplies its recorded sources and role standing, and reviews
+its migration and authored sections. Four first-party
 [presentation templates](presentation-templates.md) add communication, context,
-commit and review forms with explicit, reversible estate adoption.
-The [format-3 additions](record-format-v3.md#template-instances-and-section-evidence)
+commit and review forms with explicit, reversible estate adoption. Process-profile
+adoption remains separate work. The [format-3 additions](record-format-v3.md#template-instances-and-section-evidence)
 and [generated record reference](reference/record-reference.md) describe the
 retained record fields and readable companions.

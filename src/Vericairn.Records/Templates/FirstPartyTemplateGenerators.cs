@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Templates;
@@ -115,13 +116,19 @@ internal sealed class FirstPartyTemplateGenerators : IDocumentGenerator
         return text.Length == 0 ? "No matching asks or decisions have been recorded.\n" : text.ToString();
     }
 
-    // A longer fence preserves the exact quoted payload, including its own Markdown. No paraphrase or trimming.
+    // Ordinary words remain readable in a longer fence. Escaped JSON retains bytes that canonical Markdown
+    // would otherwise normalize, or that resemble ownership markers. The byte hash distinguishes terminal newlines.
     private static string Verbatim(string value)
     {
         int longest = 0, run = 0;
         foreach (char c in value) { run = c == '`' ? run + 1 : 0; longest = Math.Max(longest, run); }
         string fence = new('`', Math.Max(3, longest + 1));
-        return fence + "text\n" + value + (value.EndsWith('\n') ? "" : "\n") + fence + "\n\n";
+        string quoted = fence + "text\n" + value + (value.EndsWith('\n') ? "" : "\n") + fence + "\n\n";
+        byte[] bytes = new UTF8Encoding(false, true).GetBytes(value);
+        if (Encoding.UTF8.GetString(DocumentMarkdown.Bytes(quoted)) != quoted.TrimEnd('\n') + "\n"
+            || value.Contains("<!-- vericairn:", StringComparison.Ordinal))
+            quoted = "Exact text as a JSON string:\n\n```json\n" + JsonSerializer.Serialize(value) + "\n```\n\n";
+        return "Recorded text: " + bytes.Length.ToString(CultureInfo.InvariantCulture) + " UTF-8 bytes; " + ContentHash.Sha256(bytes) + ".\n\n" + quoted;
     }
 
     private static string Work(EstateModel model, string path, IReadOnlyList<RecordEnvelope> decisions)

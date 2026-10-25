@@ -2,7 +2,10 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Text;
 using Vericairn.Cli;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Tests;
 using Vericairn.Records.Templates;
 using Vericairn.Runtime.Service;
@@ -25,10 +28,77 @@ public sealed class TemplateCommandsTests
         Command docs = root.Subcommands.Single(c => c.Name == "docs");
         Command create = Assert.IsType<DocsNewCommand>(docs.Subcommands.Single(c => c.Name == "new"));
         foreach (string name in new[] { "--by", "--version", "--title" }) Assert.True(create.Options.Single(o => o.Name == name).Required);
+        Command adopt = Assert.IsType<DocsAdoptCommand>(docs.Subcommands.Single(c => c.Name == "adopt"));
+        foreach (string name in new[] { "--by", "--version", "--expected-content" }) Assert.True(adopt.Options.Single(o => o.Name == name).Required);
+        foreach (string name in new[] { "--expected-declaration", "--preview", "--with-regions", "--configuration" }) Assert.False(adopt.Options.Single(o => o.Name == name).Required);
         Assert.IsType<DocsSectionsCommand>(docs.Subcommands.Single(c => c.Name == "sections"));
         Assert.IsType<DocsBriefCommand>(docs.Subcommands.Single(c => c.Name == "brief"));
         Command review = docs.Subcommands.Single(c => c.Name == "review");
         foreach (string name in new[] { "--section", "--fidelity", "--judgments" }) Assert.False(review.Options.Single(o => o.Name == name).Required);
+    }
+
+    [Fact]
+    public void AdoptionPreviewsAndAttachesWithoutReplacingTheExistingRoadmap()
+    {
+        using var estate = new TestEstate(3);
+        const string text = "# Roadmap\n\nRevision 2: preserve this history.\n\n## Direction\n\nKeep the authored narrative.\n\n| Release | Work |\n|---|---|\n| Later | EXAMPLE-1 |\n";
+        TemplateFixture.Revision(estate, "design/roadmap.md", text);
+        using EstateService api = EstateService.Open(estate.Root);
+        string[] arguments = ["docs", "adopt", "vericairn.estate/roadmap", "design/roadmap.md", "--version", "1.0.0",
+            "--by", estate.OperatorId, "--expected-content", ContentHash.Sha256(Encoding.UTF8.GetBytes(text))];
+        CliHarness.Outcome Run(params string[] extra) => CliHarness.RunWithApi(api, null, ["--estate", estate.Root, "--json", .. arguments, .. extra]);
+        Assert.Equal(0, Run("--preview").Code);
+        Assert.Empty(api.Session.Load().OfType("living-document"));
+        Assert.Equal(0, Run().Code);
+        Assert.Equal(text, File.ReadAllText(Path.Combine(estate.Root, "design", "roadmap.md")));
+        Assert.Single(api.Session.Load().OfType("document-revision"));
+        Assert.Single(api.Session.Load().Current("living-document"));
+        Assert.Contains(api.DocumentSections("design/roadmap.md").Sections, s => s.Id == "releases" && s.State == "missing");
+        Assert.Equal(2, Run().Code);
+    }
+
+    [Fact]
+    public void InterruptedAdoptionPrintsTheStoredPinEvenWhenNoDeclarationWasStored()
+    {
+        using var estate = new TestEstate(3);
+        const string path = "design/roadmap.md";
+        string text = "# Roadmap\n\n## Direction\n\nRetain this narrative.\n\n## Releases\n\n"
+            + GeneratedRegions.Start("releases") + "\nOld rows.\n" + GeneratedRegions.End("releases") + "\n";
+        estate.WriteFile(path, text);
+        using EstateService api = EstateService.Open(estate.Root);
+        api.BeforeStoringTogether = record =>
+        {
+            if (record.Envelope.Type == "living-document") throw new IOException("Injected interruption after the pin.");
+        };
+        CliHarness.Outcome result = CliHarness.RunWithApi(api, null, "--estate", estate.Root, "docs", "adopt", "vericairn.estate/roadmap", path,
+            "--version", "1.0.0", "--by", estate.OperatorId, "--expected-content", ContentHash.Sha256(Encoding.UTF8.GetBytes(text)), "--with-regions");
+        Assert.Equal(2, result.Code);
+        var pin = Assert.Single(api.Session.Load().OfType("document-revision"));
+        Assert.Empty(api.Session.Load().OfType("living-document"));
+        Assert.Contains(pin.Id, result.Out, StringComparison.Ordinal);
+        Assert.Contains(pin.ComputedHash, result.Out, StringComparison.Ordinal);
+        Assert.Contains("Reconcile the original batch", result.Out, StringComparison.Ordinal);
+        Assert.Equal(text, File.ReadAllText(Path.Combine(estate.Root, path)));
+    }
+
+    [Fact]
+    public void ExplicitTemplatePinRefreshesTheRecordedRevisionAndKeepsTheAuthoredAnswer()
+    {
+        using var estate = new TestEstate(3);
+        using EstateService api = EstateService.Open(estate.Root);
+        CliHarness.Outcome Run(params string[] args) => CliHarness.RunWithApi(api, null, ["--estate", estate.Root, "--json", .. args]);
+        Assert.Equal(0, Run("docs", "new", "vericairn.estate/design-document", "design/example.md", "--version", "1.0.0", "--by", estate.OperatorId, "--title", "Example").Code);
+        var definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/design-document");
+        string file = Path.Combine(estate.Root, "design", "example.md");
+        File.WriteAllText(file, TemplateFixture.Fill(File.ReadAllText(file), definition, "answer", "Keep every authored word.\n"));
+        CliHarness.Outcome pinned = Run("docs", "pin", "design/example.md", "--by", estate.OperatorId, "--summary", "Record the fresh template.", "--render-template");
+        Assert.Equal(0, pinned.Code);
+        string content = File.ReadAllText(file);
+        Assert.Equal("Keep every authored word.\n", TemplateSections.Read(content, definition.Elements)["answer"].Content);
+        Assert.StartsWith("Revision 1, ", TemplateSections.Read(content, definition.Elements)["revision"].Content, StringComparison.Ordinal);
+        Assert.Equal(ContentHash.Sha256File(file), api.Session.Load().ById[pinned.Id].Body.GetProperty("hash").GetString());
+        Assert.Equal(2, Run("docs", "pin", "design/example.md", "--by", estate.OperatorId, "--summary", "Ordinary pins retain their default.").Code);
+        Assert.Single(api.Session.Load().OfType("document-revision"));
     }
 
     [Fact]

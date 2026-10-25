@@ -333,3 +333,46 @@ the existing `template-defaults` pin, scope, options and reason. The existing
 record reference and readable companion already cover these complete fields.
 See [presentation templates](presentation-templates.md) for preparation, checking,
 depth guarantees and the boundary between content checks and reviewer judgment.
+
+## First-party templates and adoption (TPL-02)
+
+`IEstateApi.DocumentAdopt(DocumentAdoptRequest)` has a default that returns an
+`unsupported` problem. `DocumentAdoptAsync(DocumentAdoptRequest,
+CancellationToken = default)` has the existing cancellable bridge, classified
+as a read for `Preview` and a write otherwise. Both new interface members have
+defaults. `EstateService`, `VericairnClient` and `CancellationBoundApi` implement
+both forms through `POST /v1/documents/adopt`. The route enforces the requesting
+principal's existing standing, as creation does. There is no new MCP write tool.
+
+`DocumentAdoptRequest` carries required `By`, `Template`, `Path` and
+`ExpectedContentHash`; optional `ExpectedDeclaration`, `Title`, `Options`,
+`Scope`, `Overrides`, `Level` (default `warn`), `Preview` (default false) and
+`IncludeRegions` (default false). `DocumentAdoptResponse` carries `Declaration`,
+`ContentHash`, `ProposedDeclaration`, `MigrationRequired`, `MigrationBasis`,
+`MigrationPreview`, `RetainedPins` and `Problem`, with init-only `TemplateContent`,
+`PreparedContent` and `Pin`. The new positional records expose their named
+properties and generated record members. `Ok` requires a stored declaration
+without a problem; preview success intentionally leaves `Ok` false and has no
+receipts. The original file's hash and prior pins remain distinguishable from a
+newly rendered document revision.
+
+`DocumentPinRequest` gains optional init-only `bool RenderTemplate` (default
+false), retaining its existing five-parameter constructor and deconstruction.
+Its existing route, response, SDK methods and ordinary behavior remain intact.
+Opting in refreshes declared generated regions and pins the new bytes as one
+recoverable operation. `TemplateDocuments.RefreshGenerated(EstateModel,
+RecordEnvelope, string)` prepares those payloads without changing other content.
+The declaration-aware `IDocumentGenerator.GenerateRegion` default is described
+above. No existing interface gains an abstract member.
+
+Adoption returns HTTP 200 with its typed response, including refusals. Callers
+inspect `Problem`, not just the HTTP status. An interrupted batch preserves every
+stored `Declaration` or `Pin` receipt alongside `reconcile-required`; reconcile
+the original batch before retrying. Cancellation after dispatch can leave a
+write's outcome unknown. An older daemon has no adoption route fallback.
+
+Format 3 additionally permits root `README.md` in `document-revision.path`;
+formats 1 and 2 keep their original grammar. No record type, field or record
+format is added by TPL-02. Existing generic record companions retain the complete
+revision body. The [adoption guide](templates.md#adopt-an-existing-estate-document)
+documents exact commands, defaults, migration evidence and recovery.

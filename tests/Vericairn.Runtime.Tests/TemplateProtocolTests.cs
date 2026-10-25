@@ -48,27 +48,30 @@ public sealed class TemplateProtocolTests
     [Fact]
     public void EveryAddedInterfaceMemberHasADefaultAndOpenApiDescribesEveryContractProperty()
     {
-        foreach (string name in new[] { "Templates", "DocumentSections", "SectionBrief", "DocumentNew", "TemplateRender" })
+        foreach (string name in new[] { "Templates", "DocumentSections", "SectionBrief", "DocumentNew", "TemplateRender", "DocumentAdopt" })
         {
             Assert.False(typeof(IEstateApi).GetMethod(name)!.IsAbstract);
             Assert.False(typeof(IEstateApi).GetMethod(name + "Async")!.IsAbstract);
         }
         Assert.Single(typeof(DocumentReviewRequest).GetConstructors(), c => c.GetParameters().Length == 6);
+        Assert.Single(typeof(DocumentPinRequest).GetConstructors(), c => c.GetParameters().Length == 5);
+        Assert.False(typeof(IDocumentGenerator).GetMethod("GenerateRegion")!.IsAbstract);
         using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
         foreach ((string method, string path, string response) in new[]
         {
             ("GET", "/v1/templates", "TemplatesResponse"), ("GET", "/v1/documents/{id}/sections", "DocumentSectionsResponse"),
             ("GET", "/v1/documents/{id}/sections/{section}/brief", "SectionBriefResponse"), ("POST", "/v1/documents/new", "DocumentNewResponse"),
             ("POST", "/v1/templates/render", "TemplateRenderResponse"),
+            ("POST", "/v1/documents/adopt", "DocumentAdoptResponse"),
         })
         {
             Assert.Contains((method, path), OpenApiDocument.Routes);
             JsonElement operation = document.RootElement.GetProperty("paths").GetProperty(path).GetProperty(method.ToLowerInvariant());
             Assert.Equal("#/components/schemas/" + response, operation.GetProperty("responses").GetProperty("200").GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
         }
-        foreach (Type contract in new[] { typeof(DocumentNewRequest), typeof(DocumentNewResponse), typeof(TemplatesResponse), typeof(TemplateDto), typeof(TemplatePinDto),
+        foreach (Type contract in new[] { typeof(DocumentNewRequest), typeof(DocumentNewResponse), typeof(DocumentAdoptRequest), typeof(DocumentAdoptResponse), typeof(TemplatesResponse), typeof(TemplateDto), typeof(TemplatePinDto),
             typeof(TemplateRecordReference), typeof(TemplateSourceDto), typeof(TemplateCheckDto), typeof(TemplateSectionDto), typeof(TemplateBriefDto), typeof(DocumentSectionsResponse),
-            typeof(SectionBriefResponse), typeof(DocumentSectionReview), typeof(DocumentSectionJudgment), typeof(DocumentReviewRequest),
+            typeof(SectionBriefResponse), typeof(DocumentSectionReview), typeof(DocumentSectionJudgment), typeof(DocumentReviewRequest), typeof(DocumentPinRequest),
             typeof(TemplateRenderRequest), typeof(TemplateRenderResponse), typeof(PresentationTemplateUse) })
             Assert.Equal(contract.GetProperties().Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order(),
                 document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(contract.Name).GetProperty("properties").EnumerateObject().Select(p => p.Name).Order());

@@ -17,6 +17,9 @@ public static partial class Patterns
     /// <summary>Repository-relative path under design/ or docs/ with forward slashes.</summary>
     public static Regex DocumentPath => DocumentPathRegex();
 
+    /// <summary>Format-3 document pins also cover the estate's root README template instance.</summary>
+    public static Regex TemplateDocumentPath => TemplateDocumentPathRegex();
+
     /// <summary>GitHub owner/name.</summary>
     public static Regex GitHubRepository => GitHubRepositoryRegex();
 
@@ -43,6 +46,9 @@ public static partial class Patterns
 
     [GeneratedRegex(@"^(design|docs)/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.[A-Za-z0-9]+$")]
     private static partial Regex DocumentPathRegex();
+
+    [GeneratedRegex(@"^(README\.md|(design|docs)/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.[A-Za-z0-9]+)$")]
+    private static partial Regex TemplateDocumentPathRegex();
 
     [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$")]
     private static partial Regex GitHubRepositoryRegex();
