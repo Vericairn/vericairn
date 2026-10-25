@@ -68,7 +68,9 @@ Expected observation: `status` shows the estate's name, the operator principal, 
 From 0.8.4, both forms of `estate init` also write `bootstrap` and `bootstrap.ps1` at the estate root.
 These are the first-party copies embedded in the installed command line, whose source of truth is
 `src/Vericairn.Cli/Bootstrap/` in the product repository. Both have LF line endings, and `bootstrap`
-is executable on Linux and macOS. Commit them with the estate, and keep `.vericairn/` in its
+is executable on Linux and macOS, and both commands keep them LF on every checkout by adding
+`bootstrap text eol=lf` and `bootstrap.ps1 text eol=lf` to `.gitattributes` when those lines are missing.
+Commit them and `.gitattributes` with the estate, and keep `.vericairn/` in its
 `.gitignore` for the bootstrap's local downloads. A fresh estate or clone can run `./bootstrap estate check`
 on Linux and macOS, or `./bootstrap.ps1 estate check` in Windows PowerShell 5.1 or PowerShell 7.
 The scripts use the manifest's source or release pin; [Route A](install.md#1-route-a-as-part-of-an-estate-through-its-bootstrap)
@@ -88,8 +90,9 @@ even with `--force`. Refreshing the scripts keeps the estate's records and manif
 Initialization also refuses an existing differing copy before creating the estate; keep a copy of
 any customizations and move the file aside before retrying initialization.
 
-Both commands name the two files in their receipt. Human output adds lines such as `written   bootstrap`
-and `written   bootstrap.ps1`; `--json` adds a `bootstrap` array of `path` and `status` objects.
+Both commands name the two scripts and `.gitattributes` in their receipt. Human output adds lines such as
+`written   bootstrap`, `written   bootstrap.ps1` and `written   .gitattributes`; `--json` adds a `bootstrap`
+array of `path` and `status` objects.
 
 0.8.3 also adds opt-in `estate init --release`. Run the published target release's own command line,
 adding `--release` to the command above. It verifies the
@@ -121,7 +124,8 @@ With `--json`, the existing `operator`, `estate` and `manifest` fields are joine
   },
   "bootstrap": [
     { "path": "bootstrap", "status": "written" },
-    { "path": "bootstrap.ps1", "status": "written" }
+    { "path": "bootstrap.ps1", "status": "written" },
+    { "path": ".gitattributes", "status": "written" }
   ]
 }
 ```

@@ -11,7 +11,7 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class EstateBootstrapTests
 {
-    internal const string WrittenJson = """[{"path":"bootstrap","status":"written"},{"path":"bootstrap.ps1","status":"written"}]""";
+    internal const string WrittenJson = """[{"path":"bootstrap","status":"written"},{"path":"bootstrap.ps1","status":"written"},{"path":".gitattributes","status":"written"}]""";
     private static readonly string[] JsonOption = ["--json"];
     private static readonly string[] ForceOption = ["--force"];
 
@@ -37,7 +37,7 @@ public sealed class EstateBootstrapTests
         using var estate = new TestEstate(3);
         string[] before = EstateFiles(estate.Root);
         CliHarness.Outcome written = Run(estate.Root, json);
-        AssertReceipt(written, json, "written", "written");
+        AssertReceipt(written, json, "written", "written", "written");
         AssertInstalled(estate.Root);
         Assert.Equal(before, EstateFiles(estate.Root));
         Assert.Empty(EstateChecks.Run(estate.Load()));
@@ -48,8 +48,8 @@ public sealed class EstateBootstrapTests
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(Path.Combine(estate.Root, "bootstrap"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-        AssertReceipt(Run(estate.Root, json), json, "unchanged", "unchanged");
-        AssertReceipt(Run(estate.Root, json, force: true), json, "unchanged", "unchanged");
+        AssertReceipt(Run(estate.Root, json), json, "unchanged", "unchanged", "unchanged");
+        AssertReceipt(Run(estate.Root, json, force: true), json, "unchanged", "unchanged", "unchanged");
         AssertInstalled(estate.Root);
         foreach (string name in new[] { "bootstrap", "bootstrap.ps1" })
             Assert.Equal(timestamp, File.GetLastWriteTimeUtc(Path.Combine(estate.Root, name)));
@@ -77,7 +77,7 @@ public sealed class EstateBootstrapTests
         Assert.False(File.Exists(Path.Combine(estate.Root, other)));
         Assert.Equal(before, EstateFiles(estate.Root));
 
-        AssertReceipt(Run(estate.Root, json, force: true), json, "written", "written");
+        AssertReceipt(Run(estate.Root, json, force: true), json, "written", "written", "written");
         AssertInstalled(estate.Root);
         Assert.Equal(before, EstateFiles(estate.Root));
         Assert.Empty(EstateChecks.Run(estate.Load()));
@@ -89,10 +89,10 @@ public sealed class EstateBootstrapTests
     public void MissingCopyIsWrittenWhileItsIdenticalCompanionIsUnchanged(string missing)
     {
         using var estate = new TestEstate(3);
-        AssertReceipt(Run(estate.Root, json: true), true, "written", "written");
+        AssertReceipt(Run(estate.Root, json: true), true, "written", "written", "written");
         File.Delete(Path.Combine(estate.Root, missing));
         AssertReceipt(Run(estate.Root, json: true), true,
-            missing == "bootstrap" ? "written" : "unchanged", missing == "bootstrap.ps1" ? "written" : "unchanged");
+            missing == "bootstrap" ? "written" : "unchanged", missing == "bootstrap.ps1" ? "written" : "unchanged", "unchanged");
         AssertInstalled(estate.Root);
     }
 
@@ -102,7 +102,7 @@ public sealed class EstateBootstrapTests
     public void RefreshingADifferingCopyLeavesItsIdenticalCompanionUntouched(string changed)
     {
         using var estate = new TestEstate(3);
-        AssertReceipt(Run(estate.Root, json: true), true, "written", "written");
+        AssertReceipt(Run(estate.Root, json: true), true, "written", "written", "written");
         string other = changed == "bootstrap" ? "bootstrap.ps1" : "bootstrap";
         string companion = Path.Combine(estate.Root, other);
         var timestamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -117,9 +117,21 @@ public sealed class EstateBootstrapTests
         Assert.Equal(timestamp, File.GetLastWriteTimeUtc(companion));
 
         AssertReceipt(Run(estate.Root, json: true, force: true), true,
-            changed == "bootstrap" ? "written" : "unchanged", changed == "bootstrap.ps1" ? "written" : "unchanged");
+            changed == "bootstrap" ? "written" : "unchanged", changed == "bootstrap.ps1" ? "written" : "unchanged", "unchanged");
         AssertInstalled(estate.Root);
         Assert.Equal(timestamp, File.GetLastWriteTimeUtc(companion));
+    }
+
+    [Fact]
+    public void ExistingAttributesKeepTheirLinesAndGainOnlyTheMissingOnes()
+    {
+        using var estate = new TestEstate(3);
+        estate.WriteFile(".gitattributes", "* text=auto eol=lf\nbootstrap.ps1 text eol=lf");
+        AssertReceipt(Run(estate.Root, json: true), true, "written", "written", "written");
+        Assert.Equal("* text=auto eol=lf\nbootstrap.ps1 text eol=lf\nbootstrap text eol=lf\n", File.ReadAllText(Path.Combine(estate.Root, ".gitattributes")));
+        AssertReceipt(Run(estate.Root, json: true), true, "unchanged", "unchanged", "unchanged");
+        AssertInstalled(estate.Root);
+        Assert.Empty(EstateChecks.Run(estate.Load()));
     }
 
     [Theory]
@@ -175,6 +187,10 @@ public sealed class EstateBootstrapTests
             Assert.Equal(ShippedBytes(name), written);
             Assert.DoesNotContain((byte)'\r', written);
         }
+        // Git for Windows converts text to CRLF on checkout by default; the estate's attributes keep both scripts LF.
+        string[] attributes = File.ReadAllLines(Path.Combine(root, ".gitattributes"));
+        Assert.Contains("bootstrap text eol=lf", attributes);
+        Assert.Contains("bootstrap.ps1 text eol=lf", attributes);
         if (!OperatingSystem.IsWindows())
         {
             UnixFileMode execute = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
@@ -185,7 +201,7 @@ public sealed class EstateBootstrapTests
     private static CliHarness.Outcome Run(string root, bool json, bool force = false) =>
         CliHarness.Run(["--estate", root, .. json ? JsonOption : [], "estate", "bootstrap", .. force ? ForceOption : []]);
 
-    private static void AssertReceipt(CliHarness.Outcome outcome, bool json, string shellStatus, string powershellStatus)
+    private static void AssertReceipt(CliHarness.Outcome outcome, bool json, string shellStatus, string powershellStatus, string attributesStatus)
     {
         Assert.Equal(0, outcome.Code);
         Assert.Empty(outcome.Err);
@@ -193,14 +209,14 @@ public sealed class EstateBootstrapTests
         {
             Assert.Equal(["bootstrap"], outcome.Json.EnumerateObject().Select(p => p.Name));
             JsonElement[] files = outcome.Json.GetProperty("bootstrap").EnumerateArray().ToArray();
-            Assert.Equal(["bootstrap", "bootstrap.ps1"], files.Select(f => f.GetProperty("path").GetString()));
-            Assert.Equal([shellStatus, powershellStatus], files.Select(f => f.GetProperty("status").GetString()));
+            Assert.Equal(["bootstrap", "bootstrap.ps1", ".gitattributes"], files.Select(f => f.GetProperty("path").GetString()));
+            Assert.Equal([shellStatus, powershellStatus, attributesStatus], files.Select(f => f.GetProperty("status").GetString()));
             Assert.All(files, file => Assert.Equal(["path", "status"], file.EnumerateObject().Select(p => p.Name)));
         }
-        else Assert.Equal($"{shellStatus,-9} bootstrap\n{powershellStatus,-9} bootstrap.ps1\n", outcome.Out);
+        else Assert.Equal($"{shellStatus,-9} bootstrap\n{powershellStatus,-9} bootstrap.ps1\n{attributesStatus,-9} .gitattributes\n", outcome.Out);
     }
 
     private static string[] EstateFiles(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-        .Where(path => Path.GetRelativePath(root, path) is not ("bootstrap" or "bootstrap.ps1"))
+        .Where(path => Path.GetRelativePath(root, path) is not ("bootstrap" or "bootstrap.ps1" or ".gitattributes"))
         .Select(path => Path.GetRelativePath(root, path) + " " + ContentHash.Sha256File(path)).Order(StringComparer.Ordinal).ToArray();
 }

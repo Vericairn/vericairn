@@ -56,7 +56,7 @@ public sealed class EstateInitCommandTests
                 : $"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}{Environment.NewLine}"
                     + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
                     + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}"
-                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}";
+                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}written   .gitattributes{Environment.NewLine}";
             Assert.Equal(expected, outcome.Out);
         }
         finally { CliHarness.Delete(root); }
@@ -210,7 +210,7 @@ public sealed class EstateInitCommandTests
             }
             CliHarness.Outcome outcome = WithVersion("0.8.3+" + Commit, Arguments(root, profile));
             AssertPin(root, outcome, Commit, profile);
-            Assert.Equal("""[{"path":"bootstrap","status":"unchanged"},{"path":"bootstrap.ps1","status":"unchanged"}]""",
+            Assert.Equal("""[{"path":"bootstrap","status":"unchanged"},{"path":"bootstrap.ps1","status":"unchanged"},{"path":".gitattributes","status":"written"}]""",
                 outcome.Json.GetProperty("bootstrap").GetRawText());
             foreach (string name in new[] { "bootstrap", "bootstrap.ps1" })
                 Assert.Equal(timestamp, File.GetLastWriteTimeUtc(Path.Combine(root, name)));

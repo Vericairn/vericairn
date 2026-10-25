@@ -77,7 +77,7 @@ public sealed class PublishedDependencyCommandsTests
                     + $"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}{Environment.NewLine}"
                     + $"manifest  {EstateLayout.ManifestPath}{Environment.NewLine}"
                     + $"release   {observation.Id}  {observation.ExpectedPath}  {observation.ComputedHash}{Environment.NewLine}"
-                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}", result.Out);
+                    + $"written   bootstrap{Environment.NewLine}written   bootstrap.ps1{Environment.NewLine}written   .gitattributes{Environment.NewLine}", result.Out);
             }
         }
         finally { ProviderRegistry.Current.VericairnReleases = previous; CliHarness.Delete(root, download); }
