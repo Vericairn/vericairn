@@ -289,7 +289,8 @@
     "workflow-run",
     "estate",
     "package",
-    "vericairn-release"
+    "vericairn-release",
+    "operator-request"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",

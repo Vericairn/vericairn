@@ -16,6 +16,23 @@ namespace Vericairn.Records.Tests;
 public class RecordCompanionTests
 {
     [Fact]
+    public void RequestCompanionsPreserveTheDraftHashesAndTheAgentsVerbatimCitation()
+    {
+        using PolicyFixture f = OperatorRequestTests.RecordedFixture();
+        EstateModel model = f.Estate.Load();
+        RecordEnvelope request = model.OfType("operator-request").First();
+        string draft = System.Net.WebUtility.HtmlDecode(Text(Render([DocumentSourceSnapshot.Record(request)])));
+        Assert.Contains("Exact draft.", draft, StringComparison.Ordinal);
+        Assert.Contains(request.Body.GetProperty("content")[0].GetProperty("hash").GetString()!, draft, StringComparison.Ordinal);
+        Assert.Contains(request.Body.GetProperty("sourceAskHash").GetString()!, draft, StringComparison.Ordinal);
+        RecordEnvelope close = Assert.Single(model.OfType("operator-request-close"));
+        string outcome = System.Net.WebUtility.HtmlDecode(Text(Render([DocumentSourceSnapshot.Record(close)])));
+        Assert.Contains("I have done it.", outcome, StringComparison.Ordinal);
+        Assert.Contains("Operator conversation, message 4", outcome, StringComparison.Ordinal);
+        Assert.Contains(f.Estate.BuilderId, outcome, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryAdmittedTypeAndNestedCollectionHasInstalledItemAndListCoverage()
     {
         Assert.Equal(RecordTypeRegistry.All.Select(t => t.Name).Order(StringComparer.Ordinal), RecordCompanions.Types.Order(StringComparer.Ordinal));

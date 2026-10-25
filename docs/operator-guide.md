@@ -1404,3 +1404,17 @@ to stderr without replacing normal JSON. Worker following and runtime serving
 retain their explicit-stop behavior. Synchronous SDK methods retain their prior
 contracts. [Client operations](client-operations.md) and [CLI outcomes](cli-client-outcomes.md)
 describe deadlines, refusal and uncertain outcomes across transports.
+
+## 30. Durable operator requests
+
+The 0.8.4 request commands keep the actions a builder or agent asks the operator
+to perform. `vericairn operator list`, status and Workbench attention deliver the
+oldest three open requests with their recommendation first and identify the rest
+in order. `operator done <request-revision> --by <operator-id>` records completion;
+`operator dismiss <request-revision> --by <operator-id> --reason "No longer needed."`
+records dismissal. Each is one signed step, with the original request retained.
+
+The [operator request guide](operator-requests.md) explains exact draft hashes,
+publication intent and observed destinations, cited operator words for an agent's
+close, observations that close a request, and carrying existing open asks over.
+Request closure does not accept work or answer a decision question.

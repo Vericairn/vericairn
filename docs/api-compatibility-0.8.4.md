@@ -31,6 +31,34 @@ these optional fields. Upgrade the estate before recording them. The
 [release review guide](software.md#preparing-a-release-review-084) gives the selection,
 worker requirements and record format.
 
+## Operator requests (OPS-03)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.OperatorRequests(string? principal = null)` | Read the complete open queue, delivering up to three full requests. The default throws `NotSupportedException`. |
+| `IEstateApi.OperatorRequestWrite(OperatorRequestWriteRequest)` | Create or revise a request with exact content and subject pins. The default returns an `unsupported` problem. |
+| `IEstateApi.OperatorRequestCarry(string, OperatorRequestCarryRequest)` | Carry one exact open ask into a request. The default returns an `unsupported` problem. |
+| `IEstateApi.OperatorRequestDone(string, OperatorRequestCloseRequest)` | Record one signed done outcome. The default returns an `unsupported` problem. |
+| `IEstateApi.OperatorRequestDismiss(string, OperatorRequestCloseRequest)` | Record one signed dismissal with a reason. The default returns an `unsupported` problem. |
+| The five matching `IEstateApi` members ending in `Async`, with an optional final `CancellationToken` | Default cancellable bridges; authoring and closure are classified as writes. |
+| The five synchronous members on `EstateService` | Implement the record-derived reads and validated authoring. |
+| The five synchronous and five asynchronous members on `VericairnClient` and `CancellationBoundApi` | Carry the same values and cancellation lifetime through the API. |
+| `OperatorRequestsResponse`, `OperatorRequestWriteRequest`, `OperatorRequestCarryRequest`, `OperatorRequestCloseRequest`, `OperatorRequestWords` | Carry the queue, exact drafts, expected hashes, outcomes and attributed operator citations. Positional records include their constructors, properties and generated record members. |
+| `OperatorRequestType`, `OperatorRequestCloseType` | Additive format-3 record schemas, validators and readable companion coverage. |
+| `OperatorRequests.PerDelivery`, `Closures`, `Carried`, `Open`, `Derive`, `RenderText`, `Item` | Shared record derivation and presentation of the request queue. |
+| `ObservationType.Kinds` | Adds `operator-request`; its signed observation pins the request and records proof of its effect. |
+
+All ten new interface members have default implementations. Existing constructors
+and abstract interface obligations are unchanged. No record-format increase is
+required. New status JSON includes `operatorRequests`; operator actions JSON gains
+`operator-request` items with direct done and dismiss commands. Existing ask and
+acceptance operations remain available. No MCP write is added.
+
+The new write routes return `WriteOutcome` with HTTP 200 or 422, using the existing
+write-response contract. Older servers have no fallback route. See the
+[operator request guide](operator-requests.md) for record fields, carry-over,
+publication intent and interrupted-write recovery.
+
 ## Operator close (OPS-02)
 
 | Added member | Purpose |

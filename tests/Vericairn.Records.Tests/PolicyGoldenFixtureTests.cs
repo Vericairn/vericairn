@@ -31,13 +31,16 @@ public class PolicyGoldenFixtureTests
         using PolicyFixture reviews = ReleaseReviewRecordTests.RecordedFixture();
         EstateModel reviewModel = reviews.Estate.Load();
         Assert.False(reviewModel.Findings.HasErrors, string.Join('\n', reviewModel.Findings));
+        using PolicyFixture requests = OperatorRequestTests.RecordedFixture();
+        EstateModel requestModel = requests.Estate.Load();
+        Assert.False(requestModel.Findings.HasErrors, string.Join('\n', requestModel.Findings));
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));

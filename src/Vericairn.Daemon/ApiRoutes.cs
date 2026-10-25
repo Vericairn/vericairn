@@ -96,6 +96,11 @@ public static class ApiRoutes
         app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
         app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
             Results.Json(service.OperatorActions(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
+        app.MapGet($"{v}/operator/requests", (string? to) => Results.Json(service.OperatorRequests(to), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/requests", (OperatorRequestWriteRequest request) => Outcome(service.OperatorRequestWrite(request)));
+        app.MapPost($"{v}/operator/asks/{{id}}/carry", (string id, OperatorRequestCarryRequest request) => Outcome(service.OperatorRequestCarry(id, request)));
+        app.MapPost($"{v}/operator/requests/{{id}}/done", (string id, OperatorRequestCloseRequest request) => Outcome(service.OperatorRequestDone(id, request)));
+        app.MapPost($"{v}/operator/requests/{{id}}/dismiss", (string id, OperatorRequestCloseRequest request) => Outcome(service.OperatorRequestDismiss(id, request)));
         app.MapPost($"{v}/operator/record", async (OperatorRecordRequest request, HttpContext context) => Results.Json(await service.OperatorRecordAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet($"{v}/operator/close", () => Results.Json(service.OperatorCloseCandidates(), ProtocolJson.Options));
         app.MapPost($"{v}/operator/close", async (OperatorCloseRequest request, HttpContext context) => Results.Json(await service.OperatorCloseAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));

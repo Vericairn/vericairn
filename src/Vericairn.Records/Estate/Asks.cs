@@ -73,7 +73,7 @@ public static class Asks
     {
         ArgumentNullException.ThrowIfNull(model);
         return model.Current("ask")
-            .Where(a => IsWaiting(State(model, a).State) && (to is null || EstateModel.BodyString(a, "to") == to))
+            .Where(a => IsWaiting(State(model, a).State) && OperatorRequests.Carried(model, a) is null && (to is null || EstateModel.BodyString(a, "to") == to))
             .Select(a => (Ask: a, First: model.ById[model.Chain(a)[0]]))
             .GroupBy(a => EstateModel.BodyString(a.Ask, "to") ?? "?", StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)

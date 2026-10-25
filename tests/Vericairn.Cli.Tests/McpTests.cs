@@ -51,6 +51,8 @@ public class McpTests
             Assert.Contains("asks_list", names);
             Assert.Contains("prompts_list", names);
             Assert.DoesNotContain("prompt_use", names);
+            Assert.Contains("requests_list", names);
+            Assert.False(new ToolRegistry(api, null).All.Single(tool => tool.Name == "requests_list").Writes);
             Assert.Contains("release_submit_check", names);
             Assert.DoesNotContain(names, name => name.StartsWith("operator_", StringComparison.Ordinal));
             Assert.DoesNotContain(new ToolRegistry(api, null).All, tool => tool.Name.StartsWith("operator_", StringComparison.Ordinal));

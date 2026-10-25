@@ -3,6 +3,12 @@
 Vericairn 0.8.0 adds `vericairn operator list`. It shows the complete queue of what the records say
 waits on the estate's operators:
 
+Durable action requests join this queue in 0.8.4. They show their recommendation
+first, with three delivered at once and every remaining identity queued in order.
+Use `operator done` or `operator dismiss` for one signed outcome. See
+[Operator requests](operator-requests.md) for creation, revision, carry-over and
+agent citations.
+
 ```sh
 vericairn operator list
 vericairn operator list --json

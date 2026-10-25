@@ -24,6 +24,7 @@ internal sealed class AttentionDerivation(
     internal IReadOnlyList<CommunicationAttention> Derive(string? recipient)
     {
         Read("asks", () => Asks(recipient));
+        Read("operator requests", () => Requests(recipient));
         foreach (string type in new[] { "verification", "result", "review", "operation" })
         {
             Read(type, () =>
@@ -269,6 +270,7 @@ internal sealed class AttentionDerivation(
     internal IReadOnlyList<CommunicationAttention> AskItems(string? recipient)
     {
         Read("asks", () => Asks(recipient));
+        Read("operator requests", () => Requests(recipient));
         return items;
     }
 
@@ -287,6 +289,35 @@ internal sealed class AttentionDerivation(
                     "A decision is required; open the ask for its recommendation, alternatives and no-answer consequence." + (queued == 0 ? string.Empty : $" {queued} more asks wait in the queue.")), reference: new("ask", id, Str(ask, "hash")));
             }
         }
+    }
+
+    private void Requests(string? recipient)
+    {
+        IReadOnlyList<RecordResponse> closes = Current("operator-request-close");
+        IReadOnlyList<RecordResponse> observations = Current("observation");
+        List<RecordResponse> open = Current("operator-request").Where(r => (recipient is null || Str(Body(r), "to") == recipient) &&
+            !closes.Concat(observations.Where(o => Str(Body(o), "kind") == "operator-request")).Any(c => Subject(c)?.Id == r.Id))
+            .OrderBy(r => First(r).At, StringComparer.Ordinal).ThenBy(r => First(r).Id, StringComparer.Ordinal).ToList();
+        foreach (RecordResponse request in open.Take(3))
+        {
+            JsonElement body = Body(request);
+            string text = $"Recommendation: {Str(body, "recommendation")}\n  Action: {Str(body, "action")}\n  Why: {Str(body, "why")}\n  Destination: {Str(body, "destination")}\n  If unanswered: {Str(body, "consequence")}\n";
+            items.Add(new CommunicationAttention("operator-request", text, request.Id, "operator-request")
+            {
+                Hash = request.Hash, Subject = Subject(request), State = "open", AsOf = At(request),
+                Command = "vericairn operator list", Target = Reference(request),
+            });
+        }
+        if (open.Count > 3)
+            items.Add(new CommunicationAttention("operator-request", "Requests waiting in order: " + string.Join(", ", open.Skip(3).Select(r => r.Id)), RecordType: "operator-request")
+            { State = "queued", Command = "vericairn operator list" });
+    }
+
+    private (string? At, string Id) First(RecordResponse record)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (Str(record.Envelope, "supersedes") is string previous && seen.Add(record.Id)) record = Required(previous);
+        return (At(record), record.Id);
     }
 
     private void Runs()

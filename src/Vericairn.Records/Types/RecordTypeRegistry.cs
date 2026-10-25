@@ -42,6 +42,8 @@ public static class RecordTypeRegistry
         new GoalStatusType(),
         new RosterType(),
         new AskType(),
+        new OperatorRequestType(),
+        new OperatorRequestCloseType(),
         new CustodyExceptionType(),
         new PossibilityType(),
         new DischargeType(),

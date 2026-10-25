@@ -6,6 +6,12 @@ ask-answer decisions. These additions stay within format 3; older records and
 their original bytes remain valid. See [Saved prompts](prompts.md) and the
 [generated reference additions](prompt-record-reference.md).
 
+The 0.8.4 operator-request feature adds `operator-request`,
+`operator-request-close`, and the `operator-request` observation kind within this
+format. Exact content hashes, signed outcomes, agent citations and carry-over
+links are described in [Operator requests](operator-requests.md). Existing record
+bytes and their validation remain unchanged; no format migration is needed.
+
 Record format 3 adds attributable policy definitions, bounded exceptions and recurring-duty evidence. It is
 the POLICY-01 record and migration contract for 0.8.0. A manifest at format 3 makes a
 format-2 reader refuse the estate before opening a writable runtime. Each older record retains its original
