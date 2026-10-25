@@ -87,6 +87,7 @@ public static class OpenApiDocument
         ("GET", "/v1/templates"),
         ("POST", "/v1/templates/render"),
         ("POST", "/v1/documents/new"),
+        ("POST", "/v1/documents/adopt"),
         ("GET", "/v1/documents/{id}/sections"),
         ("GET", "/v1/documents/{id}/sections/{section}/brief"),
         ("GET", "/v1/documents/pass/{version}"),
@@ -400,11 +401,12 @@ public static class OpenApiDocument
                 };
             responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DecisionNewRequest." };
         }
-        else if (path is "/v1/templates" or "/v1/templates/render" or "/v1/documents/new" or "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
+        else if (path is "/v1/templates" or "/v1/templates/render" or "/v1/documents/new" or "/v1/documents/adopt" or "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
         {
             string schema = path switch
             {
                 "/v1/templates" => "TemplatesResponse", "/v1/templates/render" => "TemplateRenderResponse", "/v1/documents/new" => "DocumentNewResponse",
+                "/v1/documents/adopt" => "DocumentAdoptResponse",
                 "/v1/documents/{id}/sections" => "DocumentSectionsResponse", _ => "SectionBriefResponse",
             };
             responses["200"] = new JsonObject
@@ -703,6 +705,8 @@ public static class OpenApiDocument
             ["DecisionNewResponse"] = Object(("written", "object"), ("pins", "array"), ("problem", "object"), ("ok", "boolean")),
             ["DocumentNewRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string")),
             ["DocumentNewResponse"] = Object(("declaration", "object"), ("path", "string"), ("contentHash", "string"), ("problem", "object"), ("ok", "boolean")),
+            ["DocumentAdoptRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("expectedContentHash", "string"), ("expectedDeclaration", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string"), ("preview", "boolean"), ("includeRegions", "boolean")),
+            ["DocumentAdoptResponse"] = Object(("declaration", "object"), ("contentHash", "string"), ("proposedDeclaration", "object"), ("migrationRequired", "boolean"), ("migrationBasis", "string"), ("migrationPreview", "string"), ("retainedPins", "array"), ("problem", "object"), ("templateContent", "string"), ("preparedContent", "string"), ("pin", "object"), ("ok", "boolean")),
             ["TemplatesResponse"] = Object(("templates", "array"), ("problem", "object")),
             ["PresentationTemplateUse"] = Object(("template", "object"), ("adoption", "object"), ("depth", "string")),
             ["TemplateRenderRequest"] = Object(("template", "object"), ("subject", "object"), ("depth", "string"), ("authored", "object"), ("explanation", "string"), ("maxBytes", "integer"), ("candidate", "string"), ("adoption", "object")),
@@ -741,6 +745,7 @@ public static class OpenApiDocument
                     ["summary"] = new JsonObject { ["type"] = "string" },
                     ["title"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Defaults to the current title or the first pin's file name without extension." },
                     ["expected"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Expected current pin record id; a mismatch writes nothing." },
+                    ["renderTemplate"] = new JsonObject { ["type"] = "boolean", ["default"] = false, ["description"] = "Explicitly refresh existing template regions and pin the resulting bytes together. Authored bytes outside markers are preserved." },
                 },
             },
             ["DocumentPinResponse"] = new JsonObject
@@ -866,6 +871,7 @@ public static class OpenApiDocument
         "/v1/documents/new" => "DocumentNewRequest",
         "/v1/documents/pass/{version}/assignments" => "DocumentPassAssignRequest",
         "/v1/templates/render" => "TemplateRenderRequest",
+        "/v1/documents/adopt" => "DocumentAdoptRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
@@ -984,6 +990,7 @@ public static class OpenApiDocument
         ("GET", "/v1/templates") => "Available exact template contracts. Installing or reading a template grants no authority.",
         ("POST", "/v1/templates/render") => "Read-only preparation or checking against a separately bound exact subject and recorded adoption; complete required content at every depth, without review or acceptance.",
         ("POST", "/v1/documents/new") => "Create a document and its living declaration from an exact template version. Records all effective choices and explicit overrides; existing files are never overwritten. A receipt with a problem requires reconciliation before retrying.",
+        ("POST", "/v1/documents/adopt") => "Preview or attach an exact template to existing authored bytes. Expected content and declaration hashes guard adoption; existing checks, history and migration review requirements remain in force.",
         ("GET", "/v1/documents/{id}/sections") => "Each section's derived state, required fidelity, exact sources, checks and evaluator judgments. A passed check grants no authority.",
         ("GET", "/v1/documents/{id}/sections/{section}/brief") => "The complete measured section brief. Optional maxBytes refuses overflow without truncating required originals; commit selects the external repository revision.",
         ("GET", "/v1/documents/pass/{version}") => "The documents still due for this exact publication, their covered paths and release changes, assignments and proposed front-document patches. Reads records and local registered clones; writes, fetches and commits nothing.",

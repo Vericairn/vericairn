@@ -22,5 +22,7 @@ internal static class TemplateRoutes
             Results.Json(await service.SectionBriefAsync(Uri.UnescapeDataString(id), Uri.UnescapeDataString(section), maxBytes, commit, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapPost("/v1/documents/new", async (DocumentNewRequest request, HttpContext context) =>
             Results.Json(await service.DocumentNewAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        app.MapPost("/v1/documents/adopt", async (DocumentAdoptRequest request, HttpContext context) =>
+            Results.Json(await service.DocumentAdoptAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
     }
 }

@@ -24,6 +24,7 @@ public sealed class DocsPinCommandTests
         Assert.True(pin.Options.Single(o => o.Name == "--summary").Required);
         Assert.False(pin.Options.Single(o => o.Name == "--title").Required);
         Assert.False(pin.Options.Single(o => o.Name == "--expected").Required);
+        Assert.False(pin.Options.Single(o => o.Name == "--render-template").Required);
     }
 
     [Fact]

@@ -2147,7 +2147,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         => StoreTogetherLocked(records, purpose, workOrder, null);
 
     private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder,
-        Func<EstateModel, Problem?>? precondition)
+        Func<EstateModel, Problem?>? precondition, IReadOnlyList<DocumentOutputChange>? additionalOutputs = null)
     {
         if (RequestDeviceRefusal(session.Load()) is Problem denied)
         {
@@ -2162,6 +2162,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         DocumentChangePlan generated = PrepareDocuments(session.Load(), records);
         if (generated.Status != DocumentGenerationStatus.Success)
             return ([], new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
+
+        if (additionalOutputs is not null)
+        {
+            if (generated.Changes.Concat(additionalOutputs).Select(o => o.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != generated.Changes.Length + additionalOutputs.Count)
+                return ([], new Problem("refused", "Prepared document outputs overlap.", []));
+            generated = generated with { Changes = [.. generated.Changes, .. additionalOutputs] };
+        }
 
         // Recheck displayed evidence after signing, validation and generation, before even a batch journal is stored.
         if (precondition?.Invoke(session.Load()) is Problem changed) return ([], changed);

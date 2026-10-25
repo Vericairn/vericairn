@@ -1,9 +1,9 @@
 # Template record reference
 
 [record-reference.md](record-reference.md) is a generated development reference
-for the four record contracts affected by templates: `living-document`,
-`document-review`, `result` and `template-defaults`. It retains every field of each
-selected type, including fields that predate templates.
+for the five record contracts affected by templates: `living-document`,
+`document-review`, `document-revision`, `result` and `template-defaults`. It retains
+every field of each selected type, including fields that predate templates.
 
 The build's registered type descriptions supply the canonical selected input in
 [inputs/record-types.json](inputs/record-types.json). The standard
@@ -14,7 +14,7 @@ working reference for the 0.8.4 development additions, not an issued release set
 Frozen references continue to describe their own published builds.
 
 To regenerate, build the committed source, generate references with the existing
-documentation tooling into ignored build output, select these four complete type
+documentation tooling into ignored build output, select these five complete type
 entries from its `inputs/record-types.json`, and render that canonical selection
 through the same record-reference companion. Retain the selected input beside
 the generated reference. Do not hand-edit the generated Markdown or modify a

@@ -23,7 +23,7 @@ public sealed class DocumentRevisionType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("path", "path", true, "Repository-relative path under design/ or docs/."),
+        new("path", "path", true, "Repository-relative path under design/ or docs/; format 3 also admits README.md for the estate's template instance."),
         new("title", "string", true, "Document title."),
         new("hash", "hash", true, "sha256 of the file bytes."),
         new("bytes", "integer", true, "File size in bytes."),
@@ -37,7 +37,8 @@ public sealed class DocumentRevisionType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
-        string? path = body.Text("path", true, 500, Patterns.DocumentPath, "a repository-relative path under design/ or docs/");
+        string? path = body.Text("path", true, 500, context.Record.Format >= 3 ? Patterns.TemplateDocumentPath : Patterns.DocumentPath,
+            "a repository-relative path under design/ or docs/ (also README.md in format 3)");
         body.Text("title", true, 300);
         body.Hash("hash", true);
         body.Number("bytes", true, 0, 1L << 40);

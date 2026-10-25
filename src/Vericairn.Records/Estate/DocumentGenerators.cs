@@ -21,6 +21,9 @@ public interface IDocumentGenerator
 
     /// <summary>The whole document (region null) or one region's content; null when this generator makes neither.</summary>
     string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs) => null;
+
+    /// <summary>Renders a region with its owning declaration; existing generators retain their original contract.</summary>
+    string? GenerateRegion(EstateModel model, RecordEnvelope declaration, string region, IReadOnlyList<string> inputs) => Generate(model, region, inputs);
 }
 
 /// <summary>The generators installed here: the foundation's, and those packs register. Registering one makes its name available.</summary>
@@ -36,6 +39,7 @@ public static class DocumentGenerators
     static DocumentGenerators()
     {
         foreach (var register in RevisionCompanionGenerator.Registers.Where(r => r.Id != ReleasesTable.Name)) Register(new RevisionCompanionGenerator(register.Id));
+        foreach (IDocumentGenerator generator in Templates.FirstPartyTemplateGenerators.All) Register(generator);
     }
 
     /// <summary>Installs a generator; a pack registers its own.</summary>

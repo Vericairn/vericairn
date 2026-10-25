@@ -102,7 +102,7 @@ public static class DocumentRepair
             if (generator is null) return DocumentRenderResult.Unavailable("The region generator is unavailable.");
             if (!inputs.Any(i => i.StartsWith("format=", StringComparison.Ordinal)))
             {
-                string? legacy = generator.Generate(model, region, inputs);
+                string? legacy = generator.GenerateRegion(model, declaration, region, inputs);
                 if (legacy is null) return DocumentRenderResult.Unavailable("The legacy region contract is unavailable.");
                 return DocumentRenderResult.Success(GeneratedDocumentContract.UsesStrictRegions(model, declaration)
                     ? Encoding.UTF8.GetString(DocumentMarkdown.Bytes(legacy)) : GeneratedRegions.Normalize(legacy));

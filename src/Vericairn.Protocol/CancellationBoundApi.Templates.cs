@@ -18,6 +18,8 @@ public sealed partial class CancellationBoundApi
     /// <inheritdoc />
     public DocumentNewResponse DocumentNew(DocumentNewRequest request) => inner.DocumentNewAsync(request, cancellationToken).GetAwaiter().GetResult();
     /// <inheritdoc />
+    public DocumentAdoptResponse DocumentAdopt(DocumentAdoptRequest request) => inner.DocumentAdoptAsync(request, cancellationToken).GetAwaiter().GetResult();
+    /// <inheritdoc />
     public Task<TemplatesResponse> TemplatesAsync(CancellationToken cancellationToken = default) => ForwardAsync(inner.TemplatesAsync, cancellationToken);
     /// <inheritdoc />
     public Task<DocumentSectionsResponse> DocumentSectionsAsync(string declaration, string? commit = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DocumentSectionsAsync(declaration, commit, token), cancellationToken);
@@ -25,4 +27,6 @@ public sealed partial class CancellationBoundApi
     public Task<SectionBriefResponse> SectionBriefAsync(string declaration, string section, long? maxBytes = null, string? commit = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.SectionBriefAsync(declaration, section, maxBytes, commit, token), cancellationToken);
     /// <inheritdoc />
     public Task<DocumentNewResponse> DocumentNewAsync(DocumentNewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DocumentNewAsync(request, token), cancellationToken);
+    /// <inheritdoc />
+    public Task<DocumentAdoptResponse> DocumentAdoptAsync(DocumentAdoptRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.DocumentAdoptAsync(request, token), cancellationToken);
 }

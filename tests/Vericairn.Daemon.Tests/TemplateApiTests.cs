@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Routing.Template;
 using Microsoft.Extensions.DependencyInjection;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
@@ -83,10 +85,11 @@ public sealed class TemplateApiTests
         using EstateService service = EstateService.Open(estate.Root);
         using var handler = new RouteHandler(service);
         using var sdk = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") });
-        var templates = (await sdk.TemplatesAsync(TestContext.Current.CancellationToken)).Templates;
-        Assert.Equal(5, templates.Count);
-        Assert.Equal(Vericairn.Records.Templates.PresentationTemplates.Definitions.Select(d => d.Id).Order(), templates.Where(t => t.Pin.Id != definition.Id).Select(t => t.Pin.Id).Order());
-        var template = Assert.Single(templates, t => t.Pin.Id == definition.Id);
+        var catalogue = (await sdk.TemplatesAsync(TestContext.Current.CancellationToken)).Templates;
+        Assert.Equal(11, catalogue.Count);
+        Assert.Equal(Vericairn.Records.Templates.PresentationTemplates.Definitions.Concat(Vericairn.Records.Templates.FirstPartyTemplates.Definitions).Select(d => d.Hash).Order(StringComparer.Ordinal),
+            catalogue.Where(t => t.Pin.Id != definition.Id).Select(t => t.Pin.Hash).Order(StringComparer.Ordinal));
+        var template = Assert.Single(catalogue, t => t.Pin.Id == definition.Id);
         Assert.Equal(definition.Hash, template.Pin.Hash);
         var request = new DocumentNewRequest(estate.OperatorId, template.Pin, "docs/example.md", "Example");
         DocumentNewResponse created = await sdk.DocumentNewAsync(request, TestContext.Current.CancellationToken);
@@ -113,17 +116,21 @@ public sealed class TemplateApiTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task InstantiationUsesTheAuthenticatedPrincipalsExistingStanding(bool localNetwork)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task TemplateWritesUseTheAuthenticatedPrincipalsExistingStanding(bool localNetwork, bool adopt)
     {
         using var estate = new TestEstate(3);
         var definition = Install(estate, Contract(Section("answer")));
         using EstateService service = EstateService.Open(estate.Root);
         var scope = new RequestScope(service, new LocalNetworkLedger(estate.Root));
-        var context = new DefaultHttpContext(); context.Request.Method = "POST"; context.Request.Path = "/v1/documents/new";
+        var context = new DefaultHttpContext(); context.Request.Method = "POST"; context.Request.Path = adopt ? "/v1/documents/adopt" : "/v1/documents/new";
         context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice("device", estate.BuilderId, "public-key", localNetwork);
-        var request = new DocumentNewRequest(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "docs/example.md", "Example");
+        object request = adopt
+            ? new DocumentAdoptRequest(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "docs/example.md", "sha256:" + new string('0', 64))
+            : new DocumentNewRequest(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "docs/example.md", "Example");
         bool reached = false;
         object? response = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, request), _ =>
         { reached = true; return ValueTask.FromResult<object?>(null); });
@@ -131,6 +138,30 @@ public sealed class TemplateApiTests
         Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(response).StatusCode);
         Assert.Empty(service.Session.Load().OfType("living-document"));
         Assert.False(File.Exists(Path.Combine(estate.Root, "docs/example.md")));
+    }
+
+    [Fact]
+    public async Task AdoptionUsesTheRealRouteAndCancellationAdapterWithoutChangingAuthoredBytes()
+    {
+        using var estate = new TestEstate(3);
+        const string text = "# Roadmap\n\nRevision 7: keep this history.\n\n## Direction\n\nKeep this narrative.\n";
+        Revision(estate, "design/roadmap.md", text);
+        using EstateService service = EstateService.Open(estate.Root);
+        using var handler = new RouteHandler(service);
+        using var sdk = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("http://fixture.invalid") });
+        var api = new CancellationBoundApi(sdk, TestContext.Current.CancellationToken);
+        var definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/roadmap");
+        var request = new DocumentAdoptRequest(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), "design/roadmap.md",
+            ContentHash.Sha256File(Path.Combine(estate.Root, "design", "roadmap.md")));
+        DocumentAdoptResponse preview = await api.DocumentAdoptAsync(request with { Preview = true }, TestContext.Current.CancellationToken);
+        Assert.Null(preview.Problem); Assert.Null(preview.Declaration);
+        Assert.Empty(service.Session.Load().OfType("living-document"));
+        DocumentAdoptResponse adopted = api.DocumentAdopt(request);
+        Assert.True(adopted.Ok, adopted.Problem?.Message);
+        Assert.Equal(text, File.ReadAllText(Path.Combine(estate.Root, "design", "roadmap.md")));
+        Assert.Equal("refused", (await api.DocumentAdoptAsync(request, TestContext.Current.CancellationToken)).Problem!.Code);
+        Assert.Single(service.Session.Load().Current("living-document"));
+        Assert.Single(service.Session.Load().OfType("document-revision"));
     }
 
     [Fact]

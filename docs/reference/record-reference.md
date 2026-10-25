@@ -18,6 +18,22 @@ Subject type: living&#45;document; subject hash required: true; introduced in re
 | checks | object&#91;&#93; | true | 2 | The declared checks that ran&#58; name&#44; outcome &#40;passed&#124;failed&#124;skipped&#124;not&#45;performed&#41;&#44; summary&#59; a failed check refuses the clearance&#59; may be empty&#46; |
 | sections | object&#91;&#93; | false | 3 | Exact section reviews&#58; id&#44; hash&#44; sourceDigest&#44; outcome&#44; fidelity &#40;sketch&#124;draft&#124;final&#41;&#44; sources &#40;id&#44; kind&#44; identity&#44; hash&#44; bytes&#44; status and exact records&#41;&#44; checks and per&#45;rule cohesion verdicts&#46; Evaluator judgments name their exact evidence hashes and require independence&#46; A section review clears no other section&#46; |
 
+## `document-revision`
+
+Pins a design or docs file at an exact content hash and revision number&#59; editing the file requires a new revision record&#46;
+
+Subject type: null; subject hash required: false; introduced in record format: 1.
+
+| Field | Kind | Required | Introduced in format | Meaning |
+|---|---|---|---|---|
+| path | path | true | 1 | Repository&#45;relative path under design&#47; or docs&#47;&#59; format 3 also admits README&#46;md for the estate&#39;s template instance&#46; |
+| title | string | true | 1 | Document title&#46; |
+| hash | hash | true | 1 | sha256 of the file bytes&#46; |
+| bytes | integer | true | 1 | File size in bytes&#46; |
+| mediaType | string | true | 1 | For example text&#47;markdown&#46; |
+| revision | integer | true | 1 | 1 for the first revision&#59; later revisions supersede the previous record&#46; |
+| summary | string | true | 1 | What this revision is or changes&#46; |
+
 ## `living-document`
 
 Declares a living document&#58; its path and repository&#44; whether it is authored or generated&#44; the triggers that make it due and at which level &#40;remind&#44; warn or refuse&#41;&#44; its generated regions&#44; its checks and who may clear it&#46;
@@ -74,16 +90,16 @@ Subject type: null; subject hash required: false; introduced in record format: 3
 
 Reserved for later releases: &#91;&#34;object&#34;&#93;.
 
-Build version: 0&#46;8&#46;3; provenance instant: 2026&#45;10&#45;25T06&#58;16&#58;52Z.
+Build version: 0&#46;8&#46;3; provenance instant: 2026&#45;10&#45;25T13&#58;41&#58;32Z.
 
 ## Generation basis
 
-Build commit: `d882d002a391418a02d7cb35409702d3fe917f61`.
+Build commit: `929789563c0a57364c96d6b8da57a17e23807c00`.
 
 Generator: `vericairn.software/record-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:6203cd471571e986e7257e7d8bf033aef714b677f2980a7d9f26d465517bebf6`.
 
-Input digest: `sha256:b26aeb47a93cb9eda0dab78c4decb27735ebbe55b0409769098ea9412bf1c8f4`.
+Input digest: `sha256:01e9391ca985aa6b01b3abfe4a8372c4a996d1eb44f83454b7ab7a862ae3f934`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;record&#45;types&#46;json | `sha256:3ad3dbc5d4df0969ff98062495a61f40436e6864038f5e3c54eaebb35bac8eae` | 9033 |
+| inputs&#47;record&#45;types&#46;json | `sha256:ea3b0fd7b3e193c6a3bbef47b54061dd19a616443a1dcb89aa70e3e95121533a` | 10155 |
