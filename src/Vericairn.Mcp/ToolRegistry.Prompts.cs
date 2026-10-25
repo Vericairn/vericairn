@@ -83,7 +83,11 @@ public sealed partial class ToolRegistry
         };
     }
 
-    private IEnumerable<ToolDefinition> PromptTools()
+    // A worker principal sees only the writes of its contract. The shared library's writes, a person's preferences and a recorded
+    // use belong to the operator here; others with a grant use the command line or API.
+    private IEnumerable<ToolDefinition> PromptTools() => PromptToolDefinitions().Select(t => t.Writes ? t with { OperatorOnly = true } : t);
+
+    private IEnumerable<ToolDefinition> PromptToolDefinitions()
     {
         string by = actingPrincipal ?? string.Empty;
         yield return Read("prompts_list", "List the connected principal's prompts by category, with exact source, version and personal preferences. Reads record no use.",

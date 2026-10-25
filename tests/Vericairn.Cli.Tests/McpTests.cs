@@ -106,7 +106,8 @@ public class McpTests
                 """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"work_attempt","arguments":{"assignment":"@ASSIGNMENT@","workspace":"example repository, main","note":"Start."}}}""".Replace("@ASSIGNMENT@", assignment, StringComparison.Ordinal));
             Assert.Contains("work_attempt", ToolNames(replies[0]));
             Assert.Contains("work_result", ToolNames(replies[0]));
-            Assert.Contains("prompt_use", ToolNames(replies[0]));
+            // A worker sees only the writes of its contract; recording a prompt use is the operator's through MCP.
+            Assert.DoesNotContain("prompt_use", ToolNames(replies[0]));
             Assert.DoesNotContain(ToolNames(replies[0]), name => name.StartsWith("changes_", StringComparison.Ordinal));
             JsonObject attempt = replies[1];
             Assert.False(attempt["result"]!["isError"]!.GetValue<bool>(), attempt.ToJsonString());

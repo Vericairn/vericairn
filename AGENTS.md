@@ -36,10 +36,10 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 | `docs_sources` | read | Inspect the exact authorized source basis for a reader selection without generating. Local-only inspectors remain local. |
 | `docs_compare` | read | Fresh byte and complete membership comparison for a declared generated document or register. Writes no repair, output pin, review or record. |
 | `prompts_list` | read | List the connected principal's prompts by category, with exact source, version and personal preferences. Reads record no use. |
-| `prompt_save` | write, signed by the acting principal's device | Add, revise or retire a shared prompt under the operator's authority or an explicit manage-prompts grant. |
-| `prompt_preference` | write, signed by the acting principal's device | Change this principal's favorite or hidden choice, or disable estate-wide when the operator acts. Choices are reversible and retain history. |
-| `prompt_copy` | write, signed by the acting principal's device | Copy a reviewed built-in into the estate with its exact origin; requires shared prompt writing authority. |
-| `prompt_use` | write, signed by the acting principal's device | Record a prompt together with a new run, assignment or ask answer. It cannot change authority; changes require an amendment. |
+| `prompt_save` | operator write, signed by the acting principal's device | Add, revise or retire a shared prompt under the operator's authority or an explicit manage-prompts grant. |
+| `prompt_preference` | operator write, signed by the acting principal's device | Change this principal's favorite or hidden choice, or disable estate-wide when the operator acts. Choices are reversible and retain history. |
+| `prompt_copy` | operator write, signed by the acting principal's device | Copy a reviewed built-in into the estate with its exact origin; requires shared prompt writing authority. |
+| `prompt_use` | operator write, signed by the acting principal's device | Record a prompt together with a new run, assignment or ask answer. It cannot change authority; changes require an amendment. |
 | `policies_list` | read | Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record. |
 | `policy_kinds` | read | Installed policy kind versions, implementation hashes, selections, sources and bounds. |
 | `policy_access` | read | Policy write actions currently admitted for the connected principal. Exact bounds are rechecked for every write. |

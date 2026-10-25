@@ -186,8 +186,10 @@ user text message with the addendum and `_meta` carrying the recorded id and
 hash. Merely listing or inspecting a definition does not answer an ask.
 
 The additional tools are `prompts_list`, `prompt_save`, `prompt_preference`,
-`prompt_copy` and `prompt_use`. Write tools use the connection's author and
-ordinary runtime authority. A client should refresh discovery after a change;
+`prompt_copy` and `prompt_use`. The four write tools appear only on the operator's
+connection, never on a worker's, whose writes stay those of its contract; others
+with a manage-prompts grant use the command line or API. Write tools use the
+connection's author and ordinary runtime authority. A client should refresh discovery after a change;
 there are no list-change notifications in this version. See the generated
 [record reference additions](prompt-record-reference.md) and
 [API compatibility](api-compatibility-0.8.4.md).
