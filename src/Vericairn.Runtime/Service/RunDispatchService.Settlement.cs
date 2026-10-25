@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
@@ -76,6 +77,7 @@ internal sealed partial class RunDispatchService
             return Unresolved("The retained launch time differs from the recorded dispatch; settlement remains unresolved.");
 
         RunScope scope = observed.Scope ?? new RunScope(0, 0, [], "The final workspace scope audit was not retained; scope is unverified.");
+        string? recoveryNote = null;
         if (observed.Outcome is null || observed.Scope is null || !observed.SettlementPrepared)
         {
             // Older snapshots contain exit and usage observations, but no final scope audit, price or monotonic
@@ -85,10 +87,12 @@ internal sealed partial class RunDispatchService
                 : "Settlement recovered before all final audits were retained.";
             if (observed.Scope is null) summary += " The final scope audit is unverified.";
             if (!observed.SettlementPrepared) summary += " The final attempt audit is unverified.";
+            recoveryNote = summary;
             List<RunSignal> signals = [.. outcome!.Signals ?? []];
-            int existing = signals.FindIndex(s => s.Code == "audit-unverified" && s.Severity == "warning");
-            if (existing < 0) signals.Add(new RunSignal("audit-unverified", "warning", observed.ExitedAt, summary));
-            else signals[existing] = signals[existing] with { Summary = signals[existing].Summary + " " + summary };
+            // Keep an existing observation whole, including a summary already at its record limit.
+            // The evidence below always discloses recovery's gaps without rewriting that signal.
+            if (!signals.Any(s => s.Code == "audit-unverified" && s.Severity == "warning"))
+                signals.Add(new RunSignal("audit-unverified", "warning", observed.ExitedAt, summary));
             outcome = outcome with { Signals = signals };
         }
 
@@ -101,8 +105,13 @@ internal sealed partial class RunDispatchService
                 WriteOutcome dispatch = RecordDispatch(run.Id, by, outcome!.LaunchedAt);
                 if (!dispatch.Ok) return Unresolved("The observed dispatch could not be recorded: " + dispatch.Problem?.Message, dispatch.Problem?.Findings);
             }
-            settled = Revise(run.Id, by, previous => status = Settle(previous, outcome!, scope,
-                TimeSpan.FromTicks(observed.MinuteTicks ?? TimeSpan.TicksPerMinute), observed.HeartbeatSeconds)["status"]!.GetValue<string>());
+            settled = Revise(run.Id, by, previous =>
+            {
+                JsonObject body = Settle(previous, outcome!, scope,
+                    TimeSpan.FromTicks(observed.MinuteTicks ?? TimeSpan.TicksPerMinute), observed.HeartbeatSeconds);
+                if (recoveryNote is not null) body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = recoveryNote });
+                status = body["status"]!.GetValue<string>();
+            });
             if (!settled.Ok) return Unresolved("The observed settlement could not be recorded: " + settled.Problem?.Message, settled.Problem?.Findings);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)

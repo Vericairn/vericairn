@@ -162,16 +162,26 @@ public class LocalCompanionTests
     public void RunAndRetainedContextKeepFactsAccountingAndUnknownsWithoutPayloads()
     {
         string hidden = Guid.NewGuid().ToString("N");
+        DateTimeOffset at = DateTimeOffset.Parse(At, CultureInfo.InvariantCulture);
         var state = new RunObservedState
         {
             Run = Id, HeartbeatSeconds = 0.5, Heartbeat = At, Heartbeats = 2, Problem = hidden, EscalationFailure = hidden,
             Stop = new(At, "worker", hidden, AcknowledgedAt: At), Signals = [new("execution", "warning", At, hidden)],
             Execution = Element(new JsonObject { ["reports"] = new JsonArray(new JsonObject { ["effort"] = "standard", ["environment"] = hidden }), ["unknown"] = new JsonArray("model", "complete-report") }),
+            MinuteTicks = TimeSpan.TicksPerMinute, SettlementPrepared = true,
+            Outcome = new(0, at, at, 2, 10, 3, "USD", new(At, "worker", hidden), EscalationFailure: hidden,
+                Signals: [new("execution", "warning", At, hidden)]),
+            Scope = new(1, 1, [hidden], hidden),
         };
         string text = Text(LocalCompanions.Run(state, At));
         Assert.Contains("Heartbeat Seconds: 0.5", text, StringComparison.Ordinal);
         Assert.Contains("Acknowledged At", text, StringComparison.Ordinal);
         Assert.Contains("complete-report", text, StringComparison.Ordinal);
+        Assert.Contains("Settlement Prepared: Yes", text, StringComparison.Ordinal);
+        Assert.Contains("Minute Ticks: 600000000", text, StringComparison.Ordinal);
+        Assert.Contains("Price: 3", text, StringComparison.Ordinal);
+        Assert.Contains("Price Unit: USD", text, StringComparison.Ordinal);
+        Assert.Contains("Outside Count: 1", text, StringComparison.Ordinal);
         Assert.DoesNotContain(hidden, text, StringComparison.Ordinal);
         var payload = Example(LocalCompanionSchemas.All["retained-context"]);
         payload["originals"]![0]!["content"] = hidden;

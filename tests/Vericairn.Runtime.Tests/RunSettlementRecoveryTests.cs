@@ -192,8 +192,10 @@ public sealed class RunSettlementRecoveryTests
         Assert.Equal(2, AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions.Count);
     }
 
-    [Fact]
-    public void OlderExitObservationsRecoverOnlyTheFactsTheyRetained()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OlderExitObservationsRecoverOnlyTheFactsTheyRetained(bool existingAudit)
     {
         using var run = new RunEstate("""{"wallMinutes":60,"tokens":5000,"currency":{"amount":1000,"unit":"USD"},"attemptsPerStep":3}""");
         run.Service.BeforeValidatingRecords = RefuseSettlement;
@@ -204,7 +206,8 @@ public sealed class RunSettlementRecoveryTests
         JsonObject state = JsonNode.Parse(File.ReadAllText(directory.StateFile))!.AsObject();
         foreach (string field in new[] { "outcome", "scope", "minuteTicks", "settlementPrepared" }) state.Remove(field);
         // Older workers retained event-stream signals, but not settlement-only attempt/scope audits.
-        state["signals"] = new JsonArray();
+        var original = new RunSignal("audit-unverified", "warning", state["exitedAt"]!.GetValue<string>(), new string('a', 2000));
+        state["signals"] = existingAudit ? JsonSerializer.SerializeToNode(new[] { original }, ProtocolJson.Options) : new JsonArray();
         File.WriteAllText(directory.StateFile, state.ToJsonString());
         using EstateService restarted = EstateService.Open(run.Estate.Root);
         RunRow row = Assert.Single(restarted.Runs().Runs);
@@ -213,7 +216,10 @@ public sealed class RunSettlementRecoveryTests
         Assert.Equal(1000, row.Charged.GetProperty("currency").GetProperty("amount").GetInt64());
         Assert.Equal(["currency"], row.Usage!.Value.GetProperty("unreported").EnumerateArray().Select(v => v.GetString()));
         Assert.Contains("not retained", row.Scope!.Problem, StringComparison.Ordinal);
-        Assert.Contains("UTC launch and exit", Assert.Single(row.Signals!).Summary, StringComparison.Ordinal);
+        if (existingAudit) Assert.Equal(original, Assert.Single(row.Signals!));
+        else Assert.Contains("UTC launch and exit", Assert.Single(row.Signals!).Summary, StringComparison.Ordinal);
+        Assert.Contains(AgentRuns.Find(run.Estate.Load(), started.Run)!.Latest.Body.GetProperty("evidence").EnumerateArray(),
+            evidence => evidence.GetProperty("summary").GetString()!.Contains("UTC launch and exit", StringComparison.Ordinal));
         Assert.Null(directory.Read()!.Problem);
         Assert.Equal(0, restarted.Check().Errors);
     }
