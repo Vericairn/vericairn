@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -14,6 +15,10 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class PromptCommandsTests
 {
+    // The harness moves per-user state to its own home when first used. The prompt writer's devices must be created there, or the
+    // command line holds none of their keys and cannot sign; without this the outcome depended on which test ran first.
+    static PromptCommandsTests() => RuntimeHelpers.RunClassConstructor(typeof(CliHarness).TypeHandle);
+
     [Fact]
     public void CategoriesSourcesAndReversibleChoicesRemainVisibleThroughTheCommandLine()
     {
