@@ -26,6 +26,7 @@ public static class OperatorActions
             .Select(p => model.Chain(p)[0]).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         Dictionary<string, string> states = EstateStatus.WorkItems(model).ToDictionary(w => w.Id, w => w.Status, StringComparer.Ordinal);
 
+        AddRequests(model, items);
         AddAsks(model, items);
         AddAcceptances(model, items, operators, states);
         AddPublications(model, items, operators);
@@ -69,8 +70,28 @@ public static class OperatorActions
         ArgumentNullException.ThrowIfNull(report);
         JsonArray items = report["items"]!.AsArray();
         var text = new StringBuilder("What waits on the operator: ").Append(items.Count.ToString(CultureInfo.InvariantCulture)).Append(" items\n");
+        int requests = 0;
         foreach (JsonObject item in items.OfType<JsonObject>())
         {
+            if (item["kind"]!.GetValue<string>() == "operator-request")
+            {
+                if (++requests > OperatorRequests.PerDelivery)
+                {
+                    text.Append("  Request waiting in order: ").Append(item["id"]!.GetValue<string>()).Append('\n');
+                    continue;
+                }
+                text.Append("\nRecommendation: ").Append(item["recommendation"]!.GetValue<string>()).Append('\n')
+                    .Append("  Action: ").Append(item["title"]!.GetValue<string>()).Append('\n')
+                    .Append("  Why: ").Append(item["why"]!.GetValue<string>()).Append('\n')
+                    .Append("  Destination: ").Append(item["destination"]!.GetValue<string>()).Append('\n')
+                    .Append("  Asked by: ").Append(item["askedBy"]!.GetValue<string>()).Append("; to: ").Append(item["to"]!.GetValue<string>()).Append('\n')
+                    .Append("  If unanswered: ").Append(item["consequence"]!.GetValue<string>()).Append('\n')
+                    .Append("  Inspect: ").Append(item["inspect"]!.GetValue<string>()).Append('\n');
+                foreach (JsonObject command in item["commands"]!.AsArray().OfType<JsonObject>())
+                    text.Append("  Command: ").Append(command["command"]!.GetValue<string>()).Append('\n');
+                foreach (JsonNode? wait in item["waitsOn"]!.AsArray()) text.Append("  Waits on: ").Append(wait!.GetValue<string>()).Append('\n');
+                continue;
+            }
             text.Append('\n').Append(item["kind"]!.GetValue<string>()).Append(": ").Append(item["title"]!.GetValue<string>()).Append('\n');
             if (item["recommendation"] is JsonNode recommendation) text.Append("  Recommendation: ").Append(recommendation.GetValue<string>()).Append('\n');
             text.Append("  Why: ").Append(item["why"]!.GetValue<string>()).Append(" State: ").Append(item["state"]!.GetValue<string>()).Append(".\n");
@@ -114,6 +135,30 @@ public static class OperatorActions
                 }, "Record your decision, including its actual time and stake; the recommendation is not your answer.");
                 items.Add(item);
             }
+        }
+    }
+
+    private static void AddRequests(EstateModel model, JsonArray items)
+    {
+        foreach (RecordEnvelope request in OperatorRequests.Open(model))
+        {
+            string to = EstateModel.BodyString(request, "to") ?? "?";
+            JsonObject item = Item("operator-request", request, EstateModel.BodyString(request, "action") ?? "Request", "open",
+                EstateModel.BodyString(request, "why") ?? "Unknown", [], [request]);
+            foreach (string field in new[] { "recommendation", "consequence", "destination", "askedBy", "to" }) item[field] = EstateModel.BodyString(request, field) ?? "unknown";
+            item["request"] = OperatorRequests.Item(model, request);
+            foreach (string action in new[] { "done", "dismiss" })
+            {
+                List<string> arguments = ["operator", action, request.Id, "--by", to, "--expected", request.ComputedHash];
+                if (action == "dismiss") arguments.AddRange(["--reason", "<your-reason>"]);
+                else if (EstateModel.BodyString(request, "kind") == "publication") arguments.AddRange(["--link", "<observed-destination>"]);
+                item["commands"]!.AsArray().Add(new JsonObject
+                {
+                    ["by"] = to, ["command"] = "vericairn " + string.Join(' ', arguments), ["arguments"] = Strings(arguments),
+                    ["purpose"] = "Record one signed outcome; replace any placeholder with your words or observed destination. No external action is dispatched.",
+                });
+            }
+            items.Add(item);
         }
     }
 

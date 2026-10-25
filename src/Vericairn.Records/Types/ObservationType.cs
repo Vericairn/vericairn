@@ -12,7 +12,7 @@ namespace Vericairn.Records.Types;
 public sealed class ObservationType : IRecordType
 {
     /// <summary>What kinds of subject are observed so far.</summary>
-    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package", "vericairn-release"];
+    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package", "vericairn-release", "operator-request"];
 
     /// <inheritdoc />
     public string Name => "observation";
@@ -32,7 +32,7 @@ public sealed class ObservationType : IRecordType
         new("kind", string.Join('|', Kinds), true, "What was observed; estate requires record format 2, a human author and an exact estate subject."),
         new("asOf", "timestamp", true, "When the observation was made."),
         new("summary", "string", true, "The observation in a sentence."),
-        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash."),
+        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash. An operator-request observation requires outcome (done), destination, location and evidenceHash, and its signed exact request subject."),
         new("limitations", "string[]", true, "What the observation does not establish; may be empty."),
         new("evidence", "object[]", false, "For package observations: exact public registry url, response-body hash, HTTP status, byte count and content encoding for each response; hashes cover bytes before gzip decoding.", 3),
     ];
@@ -46,6 +46,7 @@ public sealed class ObservationType : IRecordType
         string? asOf = body.Timestamp("asOf", true);
         body.Text("summary", true, 4000);
         BodyReader? facts = body.Nested("facts", true);
+        if (kind == "operator-request") OperatorRequestRules.Observation(context, facts, asOf);
         if (facts is not null)
         {
             if (kind == "vericairn-release") VericairnReleaseObservation.Validate(context, facts);

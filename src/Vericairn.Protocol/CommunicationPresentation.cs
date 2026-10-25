@@ -150,7 +150,7 @@ public static class CommunicationPresentation
                 IReadOnlyList<CommunicationAttention>? attention = observed.Deserialize<List<CommunicationAttention>>(ProtocolJson.Options);
                 if (attention is not null && attention.All(a => a is not null && !string.IsNullOrWhiteSpace(a.Kind) && !string.IsNullOrWhiteSpace(a.Text) && a.State is not null && a.Command is not null))
                 {
-                    return recipient is null ? attention : [.. derivation.AskItems(recipient), .. attention.Where(a => a.RecordType != "ask")];
+                    return recipient is null ? attention : [.. derivation.AskItems(recipient), .. attention.Where(a => a.RecordType is not ("ask" or "operator-request"))];
                 }
             }
             catch (JsonException) { }

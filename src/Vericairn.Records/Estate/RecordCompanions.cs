@@ -15,7 +15,7 @@ public static class RecordCompanions
         "acceptance", "admission", "amendment", "ask", "assignment", "attempt", "authority", "communication-delegation",
         "communication-setting", "credential-reference", "custody-exception", "decision", "device", "discharge", "document-review",
         "document-revision", "estate", "estate-policy", "goal", "goal-status", "harness-qualification", "living-document", "migration",
-        "observation", "operation", "policy-exception", "possibility", "principal", "product", "qualification", "reconciliation",
+        "observation", "operation", "operator-request", "operator-request-close", "policy-exception", "possibility", "principal", "product", "qualification", "reconciliation",
         "prompt-preference", "release", "resource", "result", "retirement", "review", "roster", "saved-prompt", "template-defaults", "verification", "work-order", "work-progress", "work-status", "writing-exception",
     ];
 

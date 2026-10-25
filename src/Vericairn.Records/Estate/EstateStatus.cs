@@ -135,6 +135,7 @@ public static class EstateStatus
             }
         }
 
+        if (OperatorRequests.Open(model).Count > 0) text.Append(OperatorRequests.RenderText(model));
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -221,6 +222,7 @@ public static class EstateStatus
         RecordEnvelope? observed = LastObservationByPerson(model);
         var status = new JsonObject
         {
+            ["operatorRequests"] = OperatorRequests.Derive(model),
             ["lastObservedByPerson"] = observed is null ? null : new JsonObject
             {
                 ["at"] = EstateModel.BodyString(observed, "asOf"),

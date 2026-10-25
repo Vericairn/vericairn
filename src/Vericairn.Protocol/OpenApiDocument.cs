@@ -90,6 +90,11 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
         ("GET", "/v1/operator/actions"),
+        ("GET", "/v1/operator/requests"),
+        ("POST", "/v1/operator/requests"),
+        ("POST", "/v1/operator/asks/{id}/carry"),
+        ("POST", "/v1/operator/requests/{id}/done"),
+        ("POST", "/v1/operator/requests/{id}/dismiss"),
         ("POST", "/v1/operator/record"),
         ("GET", "/v1/operator/close"),
         ("POST", "/v1/operator/close"),
@@ -237,7 +242,7 @@ public static class OpenApiDocument
                     ["schema"] = new JsonObject { ["type"] = name is "favorites" or "includeUnavailable" ? "boolean" : "string" },
                 }).ToArray());
             }
-            if (method == "GET" && path == "/v1/asks")
+            if (method == "GET" && path is "/v1/asks" or "/v1/operator/requests")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
             }
@@ -400,6 +405,14 @@ public static class OpenApiDocument
                     ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/DocumentPinResponse" } } },
                 };
             responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DocumentPinRequest." };
+        }
+        else if (path == "/v1/operator/requests" && method == "GET")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "Every open request identity, with up to three delivered bodies and the rest queued in order. Reading writes nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("OperatorRequestsResponse") } },
+            };
         }
         else if (path == "/v1/operator/actions")
         {
@@ -589,6 +602,18 @@ public static class OpenApiDocument
         JsonObject closeResponse = Object(("written", "array"), ("ok", "boolean"), ("problem", "object"));
         closeResponse["properties"]!["written"]!["items"] = Object(("path", "string"), ("id", "string"), ("hash", "string"));
 
+        JsonObject requestWrite = Object(("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("expected", "string"));
+        requestWrite["required"] = new JsonArray("by", "body", "subject");
+        JsonObject requestCarry = Object(("by", "string"), ("expected", "string"), ("body", "object"), ("subject", "string"));
+        requestCarry["required"] = new JsonArray("by", "expected", "body", "subject");
+        JsonObject requestWords = Object(("by", "string"), ("statement", "string"), ("source", "string"), ("at", "string"));
+        requestWords["required"] = new JsonArray("by", "statement", "source", "at");
+        JsonObject requestClose = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("link", "string"), ("evidence", "array"), ("operatorWords", "object"));
+        requestClose["required"] = new JsonArray("by");
+        requestClose["properties"]!["operatorWords"] = SchemaReference("OperatorRequestWords");
+        requestClose["properties"]!["evidence"]!["items"] = Object(("summary", "string"), ("hash", "string"), ("location", "string"));
+        requestClose["properties"]!["evidence"]!["items"]!["required"] = new JsonArray("summary");
+
         JsonObject workNewRequest = Object(("by", "string"), ("key", "string"), ("title", "string"), ("intent", "string"),
             ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"));
         workNewRequest["required"] = new JsonArray("by", "key", "title", "intent", "scope", "exitQuestion", "deliverables");
@@ -696,6 +721,11 @@ public static class OpenApiDocument
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["OperatorRecordRequest"] = operatorRecordRequest,
+            ["OperatorRequestsResponse"] = Object(("text", "string"), ("json", "object"), ("hasErrors", "boolean")),
+            ["OperatorRequestWriteRequest"] = requestWrite,
+            ["OperatorRequestCarryRequest"] = requestCarry,
+            ["OperatorRequestCloseRequest"] = requestClose,
+            ["OperatorRequestWords"] = requestWords,
             ["OperatorClosePin"] = Object(("id", "string"), ("hash", "string")),
             ["OperatorCloseReview"] = Object(("id", "string"), ("hash", "string"), ("independence", "string"), ("summary", "string")),
             ["OperatorCloseSelection"] = closeSelection,
@@ -802,6 +832,9 @@ public static class OpenApiDocument
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
         "/v1/operator/record" => "OperatorRecordRequest",
+        "/v1/operator/requests" => "OperatorRequestWriteRequest",
+        "/v1/operator/asks/{id}/carry" => "OperatorRequestCarryRequest",
+        "/v1/operator/requests/{id}/done" or "/v1/operator/requests/{id}/dismiss" => "OperatorRequestCloseRequest",
         "/v1/operator/close" => "OperatorCloseRequest",
         "/v1/changes/open" => "ChangesOpenRequest",
         "/v1/changes/merge" => "ChangesMergeRequest",
@@ -825,6 +858,11 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/operator/requests") => "Every open operator request, oldest first; at most three complete requests delivered with the recommendation first, and all remaining identities queued in order. Reading writes nothing.",
+        ("POST", "/v1/operator/requests") => "Record an operator request or a superseding draft with exact content hashes, destination and work or release subject. Revisions require the expected predecessor hash. Nothing is dispatched.",
+        ("POST", "/v1/operator/asks/{id}/carry") => "Carry one exact open ask into a request, preserving its wording, requester and hash. The original remains readable and its decision semantics are unchanged.",
+        ("POST", "/v1/operator/requests/{id}/done") => "Record one signed done outcome for an exact open request. An agent cites the operator's verbatim words. A publication retains its observed link. No acceptance, publication or other external effect occurs.",
+        ("POST", "/v1/operator/requests/{id}/dismiss") => "Record one signed dismissal for an exact open request, with a reason. An agent cites the addressed operator's verbatim words. Prior records are retained.",
         ("POST", "/v1/documents/pin") => "Pin exact estate document bytes as the next revision, superseding the current pin. Unchanged bytes, generated documents, stale expected record ids and forked current pins refuse without writing. Does not edit the document.",
         ("GET", "/v1/companions") => "Installed readable coverage, exact collection snapshots and declared destinations; no adoption is inferred.",
         ("GET", "/v1/companions/render") => "Render one explicitly selected authorized item or collection; currentness describes its exact basis, not acceptance.",

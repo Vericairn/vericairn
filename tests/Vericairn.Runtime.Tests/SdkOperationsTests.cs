@@ -208,7 +208,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(118, synchronous.Length);
+        Assert.Equal(123, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.WorkNew));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DecisionFromAsk));
         foreach (string prompt in new[] { nameof(IEstateApi.Prompts), nameof(IEstateApi.PromptSave), nameof(IEstateApi.PromptPreference), nameof(IEstateApi.PromptCopy), nameof(IEstateApi.PromptUse) })
@@ -219,6 +219,12 @@ public sealed class SdkOperationsTests
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.OperatorClose));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseReviewBrief));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseReviewAssign));
+        foreach (string name in new[] { nameof(IEstateApi.OperatorRequests), nameof(IEstateApi.OperatorRequestWrite), nameof(IEstateApi.OperatorRequestCarry), nameof(IEstateApi.OperatorRequestDone), nameof(IEstateApi.OperatorRequestDismiss) })
+        {
+            Assert.Single(synchronous, method => method.Name == name);
+            Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
+            Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name + "Async").IsAbstract);
+        }
         foreach (string name in new[] { nameof(IEstateApi.OperatorCloseCandidates), nameof(IEstateApi.OperatorClose), nameof(IEstateApi.OperatorCloseCandidatesAsync), nameof(IEstateApi.OperatorCloseAsync) })
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
         foreach (string name in new[] { nameof(IEstateApi.Templates), nameof(IEstateApi.DocumentSections), nameof(IEstateApi.SectionBrief), nameof(IEstateApi.DocumentNew) })

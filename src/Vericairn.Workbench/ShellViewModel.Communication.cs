@@ -78,7 +78,7 @@ public sealed partial class ShellViewModel
             {
                 var row = new Presentation.AttentionItem(kind, item.Record ?? "Required attention", item.Text, state,
                     item.AsOf ?? "unknown", item.Command ?? "vericairn status", item.Target?.Type ?? item.RecordType, item.Target?.Id ?? item.Record);
-                if (item.RecordType == "ask") { Attention.Insert(deliveredAsks++, row); }
+                if (item.RecordType is "ask" or "operator-request") { Attention.Insert(deliveredAsks++, row); }
                 else { Attention.Add(row); }
             }
         }

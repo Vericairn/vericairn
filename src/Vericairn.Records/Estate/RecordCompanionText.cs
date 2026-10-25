@@ -19,6 +19,8 @@ internal static class RecordCompanionText
         "acceptance" => "Recorded acceptance of its exact subject. It does not accept a later revision.",
         "observation" or "verification" or "qualification" or "harness-qualification" => "Recorded evidence within its stated method, scope and limitations. Unknowns and non-claims remain unknown.",
         "operation" => "Recorded intent and observations. A dispatch or transport receipt does not prove the intended effect succeeded.",
+        "operator-request" => "An exact requested action and draft. A publication request records intent before effect; it grants no publication authority and dispatches nothing. Read its outcome separately.",
+        "operator-request-close" => "A signed outcome for the exact request. An agent's citation preserves the operator's words while retaining the agent as author. This closes no acceptance or decision question.",
         "estate-policy" => "Recorded policy terms, including duty schedules and debt dispositions. Current findings require the policy evaluator and an explicit instant.",
         "policy-exception" => "Recorded grant or revocation terms. Expiry is exclusive; effectiveness requires the policy evaluator at an explicit instant. An exception does not complete work or discharge debt.",
         "writing-exception" => "Persistent exact-token terms and any recorded removal. There is no expiry; current match counts belong to the writing checker.",

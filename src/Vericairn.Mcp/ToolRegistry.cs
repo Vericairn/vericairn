@@ -222,6 +222,13 @@ public sealed partial class ToolRegistry
                     "json" => new ToolCallResult((await api.AsksAsync(OptionalArg(a, "to"), cancellationToken: token).ConfigureAwait(false)).Json.GetRawText(), false),
                     string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                 }),
+            Read("requests_list", "Every open operator request, with the recommendation first and at most three delivered at once; the remaining identities wait in order. Reads sign, close and publish nothing. Use record_get for exact content or retained outcomes.", Arguments(("to", "Optional addressed operator id."), ("form", "text (default) or json.")),
+                async (api, a, token) => OptionalArg(a, "form") switch
+                {
+                    null or "text" => new ToolCallResult((await api.OperatorRequestsAsync(OptionalArg(a, "to"), cancellationToken: token).ConfigureAwait(false)).Text, false),
+                    "json" => new ToolCallResult((await api.OperatorRequestsAsync(OptionalArg(a, "to"), cancellationToken: token).ConfigureAwait(false)).Json.GetRawText(), false),
+                    string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                }),
             Write("policy_declare", "PolicyDeclare: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
                 Arguments(("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["expected", "body"],
                 async (api, a, token) => Outcome(await api.PolicyDeclareAsync(new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "declare" },
