@@ -487,7 +487,14 @@ previous end is refused before writing either file, as is a previous set whose e
 For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
 notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
 explicit start). Until the version's publication is recorded they end at the second before they are generated.
-The "Milestone and release acceptances" section includes every operator acceptance of a release in that
+From 0.8.4, decisions, work orders, acceptances, identity and policy records, and migrations appear once per
+supersession chain in the window, using the revision current at its inclusive end. Each revised entry names
+the revisions it replaces, earliest first, including revisions recorded before the window. A revision dated
+after the window leaves the entry at the wording current at that end. The document revision section and
+both release history sections keep listing each revision, including candidates and publications. Result
+entries name their replaced revisions while retaining the current-state acceptance rules described below.
+
+The "Milestone and release acceptances" section includes each operator acceptance of a release in that
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
