@@ -10,6 +10,41 @@ standing. Its owner records responsibility, and its options cannot authorize an
 operation. Installation, synthesis, generation, a passing check and a section
 review never supply acceptance, publication permission or a policy exception.
 
+## First-party contracts
+
+The development build ships these six contracts at `1.0.0`. They are available
+through `templates list` and `templates show` without copying files into an estate.
+Each generated section names its installed `vericairn.estate/*-v1` implementation
+and `version=1`; changing emitted meaning requires another version.
+
+| Template under `vericairn.estate/` | Authored parts | Generated parts |
+| --- | --- | --- |
+| `design-document` | Answer, vocabulary, design body, records and compatibility, journeys and implementation notes | Recorded revision, verbatim operator words, linked work orders and decisions |
+| `open-decisions` | Optional context and historical numbering | Current asks, their recommendations, consequences, states, answer links and decision statements |
+| `design-index` | Optional catalogue narrative | Every current pinned Markdown document under `design/`, ordered by path |
+| `release-notes` | Release outcome, changes, compatibility, validation and limitations | Recorded published releases |
+| `readme` | Overview, getting started and navigation | Recorded published releases |
+| `roadmap` | Direction and sequencing | Complete release-placement rows |
+
+The roadmap groups only typed `work-order.placement` values with `kind: release`,
+by product identity, exact version and carrier identity. It neither infers a
+placement from prose nor includes backlog or unplaced work in those rows. Fresh
+generation and `vericairn.estate/roadmap-placements-v1` both check the complete
+selection, including removals, duplicate keys and incorrect groups.
+
+Design decisions select records whose `documents` list names the instance path;
+their `answers` identify the related asks. Work orders select those decisions'
+`affects` references or work inputs naming revisions of the document. Open
+decisions use ask identities, which survive revisions; historical numbering
+remains authored context. Quoted statements retain their full wording inside
+fences. A release view can be limited with the existing `scope.product` choice.
+
+`design-document` has `changes-records: no` by default. Set it to `yes` when
+records change, making the compatibility section required. Semantic coverage of
+records, journeys, proposed work and agreement between answer and body requires
+independent evaluator judgments with exact evidence. No generator invents those
+judgments or an authored clearance.
+
 ## Create, write and review an instance
 
 Retain template JSON under `docs/templates/` in the estate, or install an immutable

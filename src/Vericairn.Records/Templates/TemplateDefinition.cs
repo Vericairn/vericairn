@@ -264,6 +264,10 @@ public interface ITemplateCheck
 public static class TemplatePrimitives
 {
     private static readonly Dictionary<string, ITemplateCheck> Checks = new(StringComparer.Ordinal);
+    static TemplatePrimitives()
+    {
+        foreach (ITemplateCheck check in FirstPartyTemplateChecks.All) RegisterCheck(check);
+    }
     private static readonly HashSet<string> RoleNames = new(Types.Roles.All.Concat(RosterType.KnownRoles), StringComparer.Ordinal);
     private static readonly Dictionary<string, string> RoleBriefs = RoleNames.ToDictionary(r => r, r => r switch
     {

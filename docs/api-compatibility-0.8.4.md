@@ -284,6 +284,13 @@ no defaults because each new check must supply its identity and behavior. No
 existing interface gains a required member. Template/primitive registration
 methods install vocabulary and implementations without assigning authority.
 
+First-party template regions add `IDocumentGenerator.GenerateRegion(EstateModel,
+RecordEnvelope, string, IReadOnlyList<string>)`. Its default implementation calls
+the existing `Generate(EstateModel, string?, IReadOnlyList<string>)`, so existing
+generators need no change. An implementation can inspect the owning declaration
+to select its document's revision, decisions or product. The versioned whole-file
+renderer and its prohibition on output-pin dependencies retain their contract.
+
 The additive record fields remain in format 3. The readable record companion
 implementation advances to `vericairn.records/readers/3`; prior golden versions
 remain retained. See [Templates](templates.md) and the
