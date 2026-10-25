@@ -10,9 +10,11 @@ namespace Vericairn.Cli;
 
 internal sealed class WorkOperations(CommandContext context)
 {
-    public int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null) => context.WithApi(root, api =>
+    public int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null, bool agentContext = false, long? maxBytes = null) => context.WithApi(root, api =>
     {
-        BriefResponse? brief = json ? api.Brief(key) : api.BriefFor(key, presentation?.Recipient, presentation?.Assignment, presentation?.Values("handoff"));
+        BriefResponse? brief = agentContext || maxBytes is not null
+            ? api.BriefContext(key, maxBytes, presentation?.Recipient, presentation?.Assignment, presentation?.Values("handoff"))
+            : json ? api.Brief(key) : api.BriefFor(key, presentation?.Recipient, presentation?.Assignment, presentation?.Values("handoff"));
         if (brief is null)
         {
             return context.Fail($"No current work order has key or id {key}.");

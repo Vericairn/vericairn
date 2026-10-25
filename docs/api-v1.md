@@ -1,5 +1,14 @@
 # API version 1
 
+The 0.8.4 development build also exposes `GET /v1/resources` and
+`POST /v1/resources/read` for the MCP adapter. Both are reads with the existing
+estate read permission; the POST has no signature, presence or write ledger.
+The catalogue returns `ResourcesResponse`; retrieval accepts `ResourceRequest`
+and returns exact base64 bytes, their SHA-256 and media type in `ResourceResponse`.
+Typed refusals use HTTP 200 with `Problem` and no bytes. See the
+[resource contract](mcp.md#resources-084-development) and
+[API compatibility additions](api-compatibility-0.8.4.md#mcp-resources-mcp-02).
+
 The 0.8.4 development build adds `/v1/prompts`, `/v1/prompts/preferences`,
 `/v1/prompts/copy` and `/v1/prompts/use`. [Saved prompts](prompts.md#api-and-sdk)
 describes the requests, receipts, preference history and recorded uses.

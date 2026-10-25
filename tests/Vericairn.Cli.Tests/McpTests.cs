@@ -42,6 +42,8 @@ public class McpTests
             Assert.Equal("2025-06-18", initialized["result"]!["protocolVersion"]!.GetValue<string>());
             Assert.Equal("vericairn", initialized["result"]!["serverInfo"]!["name"]!.GetValue<string>());
             Assert.False(initialized["result"]!["capabilities"]!["prompts"]!["listChanged"]!.GetValue<bool>());
+            Assert.False(initialized["result"]!["capabilities"]!["resources"]!["listChanged"]!.GetValue<bool>());
+            Assert.False(initialized["result"]!["capabilities"]!["resources"]!["subscribe"]!.GetValue<bool>());
             Assert.DoesNotContain("you must", initialized["result"]!["instructions"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
             Assert.Empty(replies[1]["result"]!.AsObject());
 
@@ -349,6 +351,10 @@ public class McpTests
             string agents = File.ReadAllText(Path.Combine(output, "AGENTS.md"));
             Assert.Contains("# Working in the Example Estate estate", agents, StringComparison.Ordinal);
             Assert.Contains("`estate_status`", agents, StringComparison.Ordinal);
+            Assert.Contains("`resources/list`, `resources/templates/list` and `resources/read`", agents, StringComparison.Ordinal);
+            Assert.Contains("Hidden, estate-disabled and retired prompts are omitted", agents, StringComparison.Ordinal);
+            Assert.Contains("resources.subscribe=false", agents, StringComparison.Ordinal);
+            Assert.Contains("untrusted content", agents, StringComparison.Ordinal);
 
             // Nothing that changes with the next record or release: no work orders, no pinned release, no generation date.
             Assert.DoesNotContain("W-9", agents, StringComparison.Ordinal);

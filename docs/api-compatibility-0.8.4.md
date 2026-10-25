@@ -90,6 +90,36 @@ methods and the cancellation-bound wrapper classify interrupted writes as uncert
 The command line's explicit `--output` writes proposed patch files; application and review
 remain separate. See [Living documents](living-documents.md#after-a-publication).
 
+## MCP resources (MCP-02)
+
+`IEstateApi` adds `Resources()`, `ResourceRead(ResourceRequest)`,
+`ResourcesAsync(CancellationToken = default)` and
+`ResourceReadAsync(ResourceRequest, CancellationToken = default)`. All four
+members have default implementations: synchronous reads return an explicit
+`unsupported` problem, and asynchronous reads use the cancellable read bridge.
+There is no added interface member without a default implementation.
+`EstateService`, `VericairnClient` and `CancellationBoundApi` implement or forward
+the operations. The routes are `GET /v1/resources` and `POST /v1/resources/read`;
+both are reads with no record, signature, presence or write ledger.
+
+New protocol records are `ResourceRequest`, `ResourceEntry`, `ResourcesResponse`
+and `ResourceResponse`, with their named properties, constructors and generated
+record members. Requests select `kind`, `key`, optional `maxBytes`, `recipient`,
+`assignment`, `form` and `estate`; unknown fields are refused. Response content
+is a byte array (base64 in JSON) with its exact SHA-256, media type and optional
+source hash. A problem carries no bytes. Existing constructors and record
+formats are unchanged. HTTP responses use status 200 for these typed results,
+including refusals; callers inspect `Problem`. An older server has no fallback
+route. Cancellation is a read interruption and cannot leave an unknown write.
+
+`ToolRegistry` adds `ResourcesListAsync`, `ResourceTemplates` and
+`ResourceReadAsync`. `McpServer` advertises the three standard resource methods,
+with `subscribe: false` and `listChanged: false`. Existing prompt definitions,
+categories, arguments and recorded-use behavior are retained. The ordinary CLI
+brief is unchanged; its new `--agent-context` and `--max-bytes` options select the
+measured MCP representation. See [MCP resources](mcp.md#resources-084-development)
+for exact URI, representation, hash and permission contracts.
+
 ## Operator close (OPS-02)
 
 | Added member | Purpose |
