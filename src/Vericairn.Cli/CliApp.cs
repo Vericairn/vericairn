@@ -19,6 +19,7 @@ internal static class CliApp
         var context = new CommandContext(cancellationToken: cancellationToken) { BorrowedApi = borrowedApi };
         var root = new VericairnCommand(context);
         root.Subcommands.Add(new CommunicationCommand(context));
+        root.Subcommands.Add(new PromptCommand(context));
         root.Subcommands.Add(new RecordsCommand(context));
         root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(new PoliciesCommand(context));

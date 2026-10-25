@@ -128,7 +128,7 @@ public sealed class WorkNewApiTests
     }
 
     // The real route delegates, binding and responses, with no host or sockets.
-    private sealed class WorkRouteHandler : HttpMessageHandler
+    internal sealed class WorkRouteHandler : HttpMessageHandler
     {
         private readonly ServiceProvider services = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
         private readonly RouteEndpoint[] endpoints;
@@ -145,6 +145,7 @@ public sealed class WorkNewApiTests
             var context = new DefaultHttpContext { RequestServices = services, RequestAborted = cancellationToken };
             context.Request.Method = request.Method.Method;
             context.Request.Path = request.RequestUri!.AbsolutePath;
+            context.Request.QueryString = new QueryString(request.RequestUri.Query);
             byte[] bytes = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             context.Request.Body = new MemoryStream(bytes);
             context.Request.ContentLength = bytes.Length;

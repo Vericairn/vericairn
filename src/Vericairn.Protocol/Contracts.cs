@@ -128,7 +128,11 @@ public sealed record ObserveResponse(string Text, JsonElement Json);
 /// <param name="By">Assigning principal.</param>
 /// <param name="Brief">The brief object.</param>
 /// <param name="Note">Free text.</param>
-public sealed record AssignRequest(string WorkOrder, string Contributor, string By, JsonElement Brief, string? Note = null);
+public sealed record AssignRequest(string WorkOrder, string Contributor, string By, JsonElement Brief, string? Note = null)
+{
+    /// <summary>An optional exact saved prompt, recorded as a comment with this new assignment.</summary>
+    public PromptSelection? Prompt { get; init; }
+}
 
 /// <summary>Record the start of an attempt.</summary>
 /// <param name="Assignment">Assignment id.</param>
@@ -540,7 +544,11 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="Execution">Explicit execution choices; never ambient defaults.</param>
 /// <param name="Allocation">Input tokens and output reserve, separate from measured usage; optional maxBytes bounds the context payload independently.</param>
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; the intent always pins the actual package.</param>
-public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
+public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null)
+{
+    /// <summary>An optional exact saved prompt, recorded with the admitted intent and included in its measured brief.</summary>
+    public PromptSelection? Prompt { get; init; }
+}
 
 /// <summary>A human requests local native harness probes and a signed exact-version qualification; no agent is launched.</summary>
 /// <param name="Launcher">codex or claude-code.</param>

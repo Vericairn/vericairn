@@ -1,5 +1,11 @@
 # The MCP server
 
+The 0.8.4 development build adds standard `prompts/list` and `prompts/get`, plus
+library management tools. Offers are grouped by category and filtered for the
+connected principal. `prompts/get` records a use with a new assignment, run or
+ask answer before returning its message. See [MCP prompts](prompts.md#mcp-prompts)
+for the required target and exact-definition arguments.
+
 From 0.8.3, `release_submit_check` is a read tool available without an admitted
 signing device or presence. Required inputs are `product`, `version`, `by` (the intended submitter),
 `commit`, `expected` (the product hash) and `clientBuild` (the full submitting client build identity).
@@ -58,7 +64,7 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field is a description of what the server is, not a directive), `notifications/initialized`, `ping`, `tools/list` and `tools/call`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Resources, prompts, sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field is a description of what the server is, not a directive), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Resources, sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
 
 ## Tools
 

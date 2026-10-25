@@ -89,7 +89,8 @@ internal static partial class ContextSelection
             r.Type is not ("estate" or "principal" or "device" or "admission" or "authority" or "roster" or "document-revision")).ToList();
         var documents = new HashSet<string>(requiredDocuments, StringComparer.Ordinal);
         documents.UnionWith(naming.SelectMany(References).Where(id => model.ById.TryGetValue(id, out RecordEnvelope? r) && r.Type == "document-revision"));
-        List<string> names = naming.SelectMany(r => Strings(r.Body)).ToList();
+        // Prompt comments cannot select additional documents, records or disclosure scope.
+        List<string> names = naming.SelectMany(r => ContextFields(r).SelectMany(p => Strings(p.Value))).ToList();
         foreach (RecordEnvelope revision in model.Current("document-revision"))
         {
             if (names.Any(value => NamesPath(value, EstateModel.BodyString(revision, "path")!)))
@@ -195,7 +196,7 @@ internal static partial class ContextSelection
         }
 
         // A decision's affected peers are targets of that decision, not extra inputs to this step.
-        foreach (string value in record.Body.EnumerateObject().Where(p => record.Type != "decision" || p.Name != "affects").SelectMany(p => Strings(p.Value)))
+        foreach (string value in ContextFields(record).Where(p => record.Type != "decision" || p.Name != "affects").SelectMany(p => Strings(p.Value)))
         {
             yield return value;
             foreach (Match match in RecordIds().Matches(value))
@@ -204,6 +205,9 @@ internal static partial class ContextSelection
             }
         }
     }
+
+    private static IEnumerable<JsonProperty> ContextFields(RecordEnvelope record) => record.Body.EnumerateObject()
+        .Where(p => p.Name != "promptUse" && !(record.Type == "decision" && record.Body.TryGetProperty("promptUse", out _) && p.Name != "answers"));
 
     [GeneratedRegex(@"\b[0-7][0-9A-HJKMNP-TV-Z]{25}\b", RegexOptions.CultureInvariant)]
     private static partial Regex RecordIds();

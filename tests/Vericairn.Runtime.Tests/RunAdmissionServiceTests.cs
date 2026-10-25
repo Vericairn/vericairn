@@ -98,6 +98,7 @@ public sealed class RunAdmissionServiceTests
             },
             _ => null, (_, _) => throw new InvalidOperationException("Release admission is outside this fixture."));
         return new RunAdmissionService(records, () => run.Service.Providers, () => run.Service.WorkerOptions,
-            (_, _, order, maxBytes, recipient, assignment) => run.Service.BriefContext(order.Id, maxBytes, recipient, assignment)!);
+            (_, _, order, maxBytes, recipient, assignment, _) => run.Service.BriefContext(order.Id, maxBytes, recipient, assignment)!,
+            (_, _, _, _) => throw new InvalidOperationException("This fixture does not select a prompt."));
     }
 }

@@ -1,5 +1,9 @@
 # API version 1
 
+The 0.8.4 development build adds `/v1/prompts`, `/v1/prompts/preferences`,
+`/v1/prompts/copy` and `/v1/prompts/use`. [Saved prompts](prompts.md#api-and-sdk)
+describes the requests, receipts, preference history and recorded uses.
+
 Vericairn 0.8.0 adds policy and writing-exception reads under
 `/v1/estate-policies` and `/v1/writing-exceptions`. [Inspecting estate policies](policies.md)
 lists every route and SDK method, their asynchronous counterparts, explicit preview inputs,

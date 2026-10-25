@@ -9,6 +9,7 @@ namespace Vericairn.Protocol;
 /// <summary>The OpenAPI description of API version 1: the single definition of routes that the daemon serves, the SDK calls and the contract tests check.</summary>
 public static class OpenApiDocument
 {
+    private static readonly string[] PromptParameterNames = ["person", "category", "role", "favorites", "includeUnavailable"];
     private static readonly string[] CommunicationParameterNames = ["recipient", "assignment", "progress", "status", "decision", "result", "handoff"];
     private static readonly string[] PolicyParameterNames = ["asOf", "release"];
 
@@ -37,6 +38,11 @@ public static class OpenApiDocument
         ("POST", "/v1/work/{key}/placement"),
         ("GET", "/v1/health"),
         ("GET", "/v1/communication"),
+        ("GET", "/v1/prompts"),
+        ("POST", "/v1/prompts"),
+        ("POST", "/v1/prompts/preferences"),
+        ("POST", "/v1/prompts/copy"),
+        ("POST", "/v1/prompts/use"),
         ("POST", "/v1/communication"),
         ("POST", "/v1/communication/delegations"),
         ("GET", "/v1/status"),
@@ -208,6 +214,14 @@ public static class OpenApiDocument
                 operation["parameters"] = parameters;
             }
 
+            if (method == "GET" && path == "/v1/prompts")
+            {
+                operation["parameters"] = new JsonArray(PromptParameterNames.Select(name => (JsonNode)new JsonObject
+                {
+                    ["name"] = name, ["in"] = "query", ["required"] = false,
+                    ["schema"] = new JsonObject { ["type"] = name is "favorites" or "includeUnavailable" ? "boolean" : "string" },
+                }).ToArray());
+            }
             if (method == "GET" && path == "/v1/asks")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
@@ -298,6 +312,14 @@ public static class OpenApiDocument
             {
                 ["description"] = "A versioned read result with explicit unavailable, historical, current or different basis. Generation grants no authority or authored clearance.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
+        else if (path == "/v1/prompts/use" || method == "GET" && path == "/v1/prompts")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = path.EndsWith("/use", StringComparison.Ordinal) ? "PromptUseResponse: exact recorded use or a refusal; text is returned only with a successful recorded target." : "PromptsResponse: offers grouped by category with source, version and preference state; reads write nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + (path.EndsWith("/use", StringComparison.Ordinal) ? "PromptUseResponse" : "PromptsResponse") } } },
             };
         }
         else if (path is "/v1/resume")
@@ -547,13 +569,20 @@ public static class OpenApiDocument
             ["WritingExceptionRemoveRequest"] = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("basis", "object")),
             ["WorkPlaceRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedSelection", "string"), ("releasePlan", "string"), ("backlog", "string")),
             ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
+            ["PromptSaveRequest"] = Object(("by", "string"), ("definition", "object"), ("expected", "string")),
+            ["PromptPreferenceRequest"] = Object(("by", "string"), ("prompt", "string"), ("favorite", "boolean"), ("hidden", "boolean"), ("disabled", "boolean"), ("expected", "string")),
+            ["PromptCopyRequest"] = Object(("by", "string"), ("prompt", "string"), ("expected", "string"), ("key", "string")),
+            ["PromptSelection"] = Object(("prompt", "string"), ("expected", "string"), ("values", "object")),
+            ["PromptUseRequest"] = Object(("by", "string"), ("selection", "object"), ("assignment", "object"), ("run", "object"), ("ask", "string"), ("favor", "boolean")),
+            ["PromptsResponse"] = Object(("prompts", "array"), ("problem", "object")),
+            ["PromptUseResponse"] = Object(("ok", "boolean"), ("text", "string"), ("written", "object"), ("run", "object"), ("problem", "object")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["WorkNewRequest"] = workNewRequest,
-            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
+            ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
@@ -627,7 +656,7 @@ public static class OpenApiDocument
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string"), ("withdrawal", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
-            ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
+            ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("prompt", "object")),
             ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer")),
             ["RunSettleRequest"] = Object(("by", "string")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
@@ -666,6 +695,10 @@ public static class OpenApiDocument
         "/v1/work/{key}/placement" => "WorkPlaceRequest",
 
         "/v1/communication" => "CommunicationSetRequest",
+        "/v1/prompts" => "PromptSaveRequest",
+        "/v1/prompts/preferences" => "PromptPreferenceRequest",
+        "/v1/prompts/copy" => "PromptCopyRequest",
+        "/v1/prompts/use" => "PromptUseRequest",
         "/v1/communication/delegations" => "CommunicationDelegateRequest",
         "/v1/status/observations" => "EstateObserveRequest",
         "/v1/resume" => "HandoffPackage",

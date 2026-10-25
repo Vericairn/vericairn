@@ -41,6 +41,7 @@ public class McpTests
             JsonObject initialized = replies[0];
             Assert.Equal("2025-06-18", initialized["result"]!["protocolVersion"]!.GetValue<string>());
             Assert.Equal("vericairn", initialized["result"]!["serverInfo"]!["name"]!.GetValue<string>());
+            Assert.False(initialized["result"]!["capabilities"]!["prompts"]!["listChanged"]!.GetValue<bool>());
             Assert.DoesNotContain("you must", initialized["result"]!["instructions"]!.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
             Assert.Empty(replies[1]["result"]!.AsObject());
 
@@ -48,6 +49,8 @@ public class McpTests
             Assert.Contains("estate_status", names);
             Assert.Contains("work_brief", names);
             Assert.Contains("asks_list", names);
+            Assert.Contains("prompts_list", names);
+            Assert.DoesNotContain("prompt_use", names);
             Assert.Contains("release_submit_check", names);
             Assert.DoesNotContain(names, name => name.StartsWith("operator_", StringComparison.Ordinal));
             Assert.DoesNotContain(new ToolRegistry(api, null).All, tool => tool.Name.StartsWith("operator_", StringComparison.Ordinal));
@@ -103,6 +106,8 @@ public class McpTests
                 """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"work_attempt","arguments":{"assignment":"@ASSIGNMENT@","workspace":"example repository, main","note":"Start."}}}""".Replace("@ASSIGNMENT@", assignment, StringComparison.Ordinal));
             Assert.Contains("work_attempt", ToolNames(replies[0]));
             Assert.Contains("work_result", ToolNames(replies[0]));
+            // A worker sees only the writes of its contract; recording a prompt use is the operator's through MCP.
+            Assert.DoesNotContain("prompt_use", ToolNames(replies[0]));
             Assert.DoesNotContain(ToolNames(replies[0]), name => name.StartsWith("changes_", StringComparison.Ordinal));
             JsonObject attempt = replies[1];
             Assert.False(attempt["result"]!["isError"]!.GetValue<bool>(), attempt.ToJsonString());

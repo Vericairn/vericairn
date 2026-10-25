@@ -31,6 +31,7 @@ public sealed class DecisionType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
+        SavedPrompts.UseField,
         new("title", "string", true, "Short title."),
         new("statement", "string", true, "The operator's words, verbatim."),
         new("summary", "string", true, "What was decided, in one or two sentences, for lists."),
@@ -81,6 +82,7 @@ public sealed class DecisionType : IRecordType
         IReadOnlyList<BodyReader>? obligations = body.Since(2, "obligations") ? body.NestedArray("obligations", false, allowEmpty: false) : null;
         IReadOnlyList<string>? documents = body.Since(2, "documents") ? body.StringArray("documents", false, allowEmpty: false, maxItemLength: 500) : null;
         GuidedDecision.Validate(context, answers, documents);
+        SavedPrompts.ValidateUse(context);
         body.NoOtherKeys();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader obligation in obligations ?? [])

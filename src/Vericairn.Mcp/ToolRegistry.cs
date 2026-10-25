@@ -145,6 +145,7 @@ public sealed partial class ToolRegistry
         return
         [
             .. CompanionTools(),
+            .. PromptTools(),
             Read("policies_list", "Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record.", NoArguments(),
                 async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
             Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),

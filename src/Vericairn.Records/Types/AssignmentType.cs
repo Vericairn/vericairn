@@ -25,6 +25,7 @@ public sealed class AssignmentType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
+        SavedPrompts.UseField,
         new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery."),
@@ -76,6 +77,7 @@ public sealed class AssignmentType : IRecordType
             body.Enum("routedWith", false, RoutedWith);
         }
 
+        SavedPrompts.ValidateUse(context);
         ExecutionPolicy.Read(body);
         body.NoOtherKeys();
         string by = context.Record.By;

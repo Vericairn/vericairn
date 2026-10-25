@@ -1,5 +1,11 @@
 # Record format 3
 
+The 0.8.4 development build adds signed `saved-prompt` and `prompt-preference`
+records, plus optional `promptUse` on assignments, agent-run operations and
+ask-answer decisions. These additions stay within format 3; older records and
+their original bytes remain valid. See [Saved prompts](prompts.md) and the
+[generated reference additions](prompt-record-reference.md).
+
 Record format 3 adds attributable policy definitions, bounded exceptions and recurring-duty evidence. It is
 the POLICY-01 record and migration contract for 0.8.0. A manifest at format 3 makes a
 format-2 reader refuse the estate before opening a writable runtime. Each older record retains its original

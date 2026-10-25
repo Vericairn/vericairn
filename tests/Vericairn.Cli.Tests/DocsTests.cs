@@ -221,6 +221,11 @@ public class DocsTests
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("POST /v1/releases/check", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
+            Assert.Contains("saved-prompt", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
+            Assert.Contains("prompt-preference", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
+            Assert.Contains("prompt use", commands);
+            Assert.Contains("GET /v1/prompts", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("POST /v1/prompts/use", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("operator list", commands);
             Assert.Contains("GET /v1/operator/actions", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Equal(14, manifest.RootElement.GetProperty("documents").GetArrayLength());

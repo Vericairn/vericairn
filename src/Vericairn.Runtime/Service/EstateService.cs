@@ -52,8 +52,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (draft, model) => AuthorLocked(draft, model),
             StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
-            (model, files, order, maxBytes, recipient, assignment) =>
-                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
+            (model, files, order, maxBytes, recipient, assignment, promptUse) =>
+                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse),
+            PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
             AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
@@ -376,6 +377,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var body = new JsonObject { ["contributor"] = request.Contributor, ["brief"] = JsonNode.Parse(request.Brief.GetRawText()) };
+            if (request.Prompt is { } selected)
+            {
+                (JsonObject? use, Problem? problem) = PreparePrompt(model, request.By, selected, request.Contributor);
+                if (problem is not null) return WriteOutcome.Fail(problem);
+                body["promptUse"] = use;
+            }
             if (request.Note is not null)
             {
                 body["note"] = request.Note;
@@ -2058,6 +2065,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
         if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
         {
             return (null, communicationRefusal);

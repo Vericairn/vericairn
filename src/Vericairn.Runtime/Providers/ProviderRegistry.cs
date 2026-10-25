@@ -12,6 +12,9 @@ namespace Vericairn.Runtime.Providers;
 /// </summary>
 public sealed class ProviderRegistry
 {
+    /// <summary>The installed foundation and pack prompt definitions, independently of estate preferences.</summary>
+    public Service.PromptCatalog Prompts { get; } = new();
+
     /// <summary>The anonymous source used to verify a published Vericairn dependency; hosts select it explicitly.</summary>
     public Vericairn.Records.Updates.IReleaseSource? VericairnReleases { get; set; }
 

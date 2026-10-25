@@ -348,6 +348,7 @@ public static class WorkView
             text.Append("### Recovery\n\n").Append(brief.TryGetProperty("recovery", out JsonElement recovery) ? recovery.GetString() : string.Empty).Append("\n\n");
         }
 
+        if (assignment.Body.TryGetProperty("promptUse", out JsonElement promptUse)) text.Append(SavedPrompts.Addendum(promptUse));
         text.Append("### Attempts and results\n\n");
         IReadOnlyList<RecordEnvelope> attempts = AttemptsOf(model, assignment);
         if (attempts.Count == 0)
