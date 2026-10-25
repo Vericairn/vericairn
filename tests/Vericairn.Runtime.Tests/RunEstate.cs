@@ -27,10 +27,10 @@ internal sealed class RunEstate : IDisposable
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
-    public RunEstate(string budget = """{"wallMinutes":60,"attemptsPerStep":3}""", bool keepOperatorKey = false, WorkerOptions? options = null, string? brief = null)
+    public RunEstate(string budget = """{"wallMinutes":60,"attemptsPerStep":3}""", bool keepOperatorKey = false, WorkerOptions? options = null, string? brief = null, long recordFormat = 2)
     {
         TestPrerequisites.RequireGit();
-        Estate = new TestEstate(recordFormat: 2);
+        Estate = new TestEstate(recordFormat);
         Scratch = Path.Combine(Path.GetTempPath(), "vericairn-run-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(Scratch);
         string temporary = Path.Combine(Scratch, "harness-temporary");

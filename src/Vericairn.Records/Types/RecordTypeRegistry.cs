@@ -18,6 +18,8 @@ public static class RecordTypeRegistry
         new WritingExceptionType(),
         new CommunicationSettingType(),
         new CommunicationDelegationType(),
+        new SavedPromptType(),
+        new PromptPreferenceType(),
         new DecisionType(),
         new ProductType(),
         new ResourceType(),

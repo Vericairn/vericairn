@@ -43,6 +43,7 @@ public sealed class OperationType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
+        SavedPrompts.UseField,
         new("provider", "string", true, "The provider the operation goes through, for example github-releases."),
         new("action", "string", true, "The declared operation, for example dispatch-release-workflow."),
         new("identity", "string", true, "The original identity the effect is reconciled under; unique among current operations."),
@@ -459,6 +460,7 @@ public sealed class OperationType : IRecordType
         ChangeOperationRules.Read(context);
         PackageRecordRules.Operation(context);
         ExecutionRecord.Read(context, status);
+        SavedPrompts.ValidateUse(context);
         body.NoOtherKeys();
         if (context.Format >= 2)
         {

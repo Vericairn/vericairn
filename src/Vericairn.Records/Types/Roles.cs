@@ -30,6 +30,9 @@ public static class Roles
 /// <summary>Authority scope names with a defined meaning.</summary>
 public static class Scopes
 {
+    /// <summary>Create, revise and retire shared saved prompts; never change work authority.</summary>
+    public const string ManagePrompts = "manage-prompts";
+
     /// <summary>Engineering inside the estate's repositories: code, tests, documents, records.</summary>
     public const string LocalEngineering = "local-engineering";
 
@@ -61,5 +64,5 @@ public static class Scopes
     public const string ManageWritingExceptions = "manage-writing-exceptions";
 
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly ImmutableArray<string> Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions];
+    public static readonly ImmutableArray<string> Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions, ManagePrompts];
 }

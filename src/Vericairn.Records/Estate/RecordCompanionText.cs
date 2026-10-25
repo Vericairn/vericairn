@@ -55,6 +55,8 @@ internal static class RecordCompanionText
         JsonElement body = source.Body!.Value;
         foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat <= source.RecordFormat))
         {
+            // Preserve earlier rendition bytes when the additive prompt-use field was not recorded.
+            if (field.Name == "promptUse" && !body.TryGetProperty(field.Name, out _)) continue;
             yield return "## " + Label(field.Name) + "\n\n" + DocumentMarkdown.Text(field.Description) + "\n\n";
             if (body.TryGetProperty(field.Name, out JsonElement value))
                 foreach (string block in Value(value, field.Name)) yield return block;

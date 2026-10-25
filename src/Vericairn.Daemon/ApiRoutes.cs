@@ -19,6 +19,7 @@ public static class ApiRoutes
         ArgumentNullException.ThrowIfNull(shutdown);
         string v = ApiVersion.Prefix;
         CompanionRoutes.Map(app, service);
+        PromptRoutes.Map(app, service);
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>

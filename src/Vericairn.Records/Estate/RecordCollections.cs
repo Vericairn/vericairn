@@ -20,6 +20,8 @@ public static class RecordCollections
         var kinds = ImmutableArray.CreateBuilder<DocumentManagedKind>();
         Add("estate", "policies.releaseAcceptance");
         Add("assignment", "brief.sources", "brief.permittedChanges", "brief.prohibitedEffects", "brief.workspace", "brief.limits", "brief.expectedOutputs", "brief.reviewCriteria");
+        foreach (string type in new[] { "assignment", "decision", "operation" })
+            Add(type, "promptUse.definition.placeholders", "promptUse.definition.tags", "promptUse.definition.roles", "promptUse.values");
         Add("product", "changes.requiredChecks", "release.artifacts", "release.artifacts[].platforms");
         Add("release", "recordFormat.reads");
         Add("observation", "facts");

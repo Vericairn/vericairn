@@ -10,8 +10,8 @@ namespace Vericairn.Mcp;
 
 /// <summary>
 /// A Model Context Protocol server over newline-delimited JSON-RPC 2.0 on a pair of text streams (standard input and output
-/// when the CLI hosts it). It implements the subset an agent harness needs to use tools: initialize, ping, tools/list and
-/// tools/call. Every tool is a call through the estate API, so the daemon or the embedded runtime stays the only owner of the
+/// when the CLI hosts it). It implements initialize, ping, tools/list, tools/call, prompts/list and prompts/get.
+/// Every operation is a call through the estate API, so the daemon or the embedded runtime stays the only owner of the
 /// estate's live state and evaluates authority behind every call; the server adds no permission of its own.
 /// </summary>
 public sealed class McpServer
@@ -229,7 +229,7 @@ public sealed class McpServer
                 return Result(id, new JsonObject
                 {
                     ["protocolVersion"] = negotiated,
-                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = false } },
+                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = false }, ["prompts"] = new JsonObject { ["listChanged"] = false } },
                     ["serverInfo"] = new JsonObject { ["name"] = "vericairn", ["version"] = version },
                     ["instructions"] = Description,
                 });
@@ -237,6 +237,12 @@ public sealed class McpServer
                 return Result(id, new JsonObject());
             case "tools/list":
                 return Result(id, new JsonObject { ["tools"] = new JsonArray((await tools.VisibleAsync(cancellationToken).ConfigureAwait(false)).Select(t => (JsonNode)t.Describe()).ToArray()) });
+            case "prompts/list":
+                return Result(id, await tools.PromptsListAsync(cancellationToken).ConfigureAwait(false));
+            case "prompts/get":
+                if (parameters?["name"] is not JsonValue promptName || !promptName.TryGetValue(out string? selectedPrompt))
+                    return Error(id, -32602, "Invalid params: prompt name is required.");
+                return Result(id, await tools.PromptGetAsync(selectedPrompt, parameters["arguments"] as JsonObject, cancellationToken).ConfigureAwait(false));
             case "tools/call":
                 string? toolName = parameters?["name"] is JsonValue n && n.TryGetValue(out string? tn) ? tn : null;
                 if (toolName is null)

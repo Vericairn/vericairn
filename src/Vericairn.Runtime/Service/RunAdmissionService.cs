@@ -26,7 +26,8 @@ internal sealed class RunAdmissionService(
     EstateRecordAccess recordAccess,
     Func<ProviderRegistry> providers,
     Func<WorkerOptions> workerOptions,
-    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, long?, string?, string?, BriefResponse> assembleBrief)
+    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, long?, string?, string?, JsonObject?, BriefResponse> assembleBrief,
+    Func<EstateModel, string, PromptSelection, string?, (JsonObject? Use, Problem? Problem)> preparePrompt)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
@@ -331,6 +332,7 @@ internal sealed class RunAdmissionService(
             }
 
             body["identity"] = "agent-run:" + run;
+            if (plan.PromptUse is not null) body["promptUse"] = plan.PromptUse.DeepClone();
             var draft = new RecordDraft("operation", request.By, Element(body), plan.Assignment.Reference, At: now, Id: run);
             if (routed is null)
             {
@@ -608,7 +610,14 @@ internal sealed class RunAdmissionService(
         // must admit it with the intent before launch. A stranded older batch is reconciled by that write;
         // ordinary briefs and hand-overs still refuse while the batch remains incomplete.
         string? recipient = CommunicationRecipient(model, goal);
-        BriefResponse contextBrief = assembleBrief(model, files, order, maxBytes, recipient, recipient is null ? null : assignment.Id);
+        JsonObject? promptUse = null;
+        if (request.Prompt is { } prompt)
+        {
+            (JsonObject? use, Problem? problem) = preparePrompt(model, request.By, prompt, request.Agent);
+            if (problem is not null) return (null, problem.Message, null);
+            promptUse = use;
+        }
+        BriefResponse contextBrief = assembleBrief(model, files, order, maxBytes, recipient, recipient is null ? null : assignment.Id, promptUse);
         if (contextBrief.Problem is not null)
         {
             return (null, contextBrief.Problem.Message, null);
@@ -630,7 +639,7 @@ internal sealed class RunAdmissionService(
             ["maxBytes"] = JsonNode.Parse(accounting.GetProperty("maxBytes").GetRawText()),
         };
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch) { PromptUse = promptUse }, null, null);
     }
 
     private RunConfiguration? Configuration(IAgentLauncher launcher, string? name) =>
@@ -638,6 +647,11 @@ internal sealed class RunAdmissionService(
 
     private bool SelectionStillCurrent(EstateModel model, RecordEnvelope goal, RunPlan plan, RunConfiguration configuration, IAgentLauncher launcher, RunStartRequest request)
     {
+        if (request.Prompt is { } prompt)
+        {
+            (JsonObject? use, Problem? problem) = preparePrompt(model, request.By, prompt, request.Agent);
+            if (problem is not null || !JsonNode.DeepEquals(use, plan.PromptUse)) return false;
+        }
         try
         {
             RunConfiguration? latest = Configuration(launcher, request.Configuration);
@@ -762,7 +776,10 @@ internal sealed class RunAdmissionService(
         new(run, status, message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    internal sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, JsonElement Context, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
+    internal sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, JsonElement Context, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null)
+    {
+        internal JsonObject? PromptUse { get; init; }
+    }
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     internal sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

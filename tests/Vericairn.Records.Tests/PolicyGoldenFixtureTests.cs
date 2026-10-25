@@ -23,13 +23,16 @@ public class PolicyGoldenFixtureTests
         // Keep the signed policy golden bytes intact; later package fields have their own recorded-response fixture.
         using TestEstate packages = PackageRecordsTests.RecordedFixture();
         EstateModel packageModel = packages.Load();
+        using PolicyFixture prompts = PromptRecordsTests.RecordedFixture();
+        EstateModel promptModel = prompts.Estate.Load();
+        Assert.False(promptModel.Findings.HasErrors, string.Join('\n', promptModel.Findings));
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));
