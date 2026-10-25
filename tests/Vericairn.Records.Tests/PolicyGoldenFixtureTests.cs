@@ -26,13 +26,15 @@ public class PolicyGoldenFixtureTests
         using PolicyFixture prompts = PromptRecordsTests.RecordedFixture();
         EstateModel promptModel = prompts.Estate.Load();
         Assert.False(promptModel.Findings.HasErrors, string.Join('\n', promptModel.Findings));
+        using TestEstate templates = TemplateFixture.RecordedFixture();
+        EstateModel templateModel = templates.Load();
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));

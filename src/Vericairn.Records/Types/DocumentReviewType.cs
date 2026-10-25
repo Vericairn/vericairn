@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Records.Types;
 
@@ -49,6 +50,7 @@ public sealed class DocumentReviewType : IRecordType
         new("summary", "string", true, "What was checked.", 2),
         new("findings", "object[]", true, "severity (error|warning|info), summary, optional location; may be empty.", 2),
         new("checks", "object[]", true, "The declared checks that ran: name, outcome (passed|failed|skipped|not-performed), summary; a failed check refuses the clearance; may be empty.", 2),
+        new("sections", "object[]", false, "Exact section reviews: id, hash, sourceDigest, outcome, fidelity (sketch|draft|final), sources (id, kind, identity, hash, bytes, status and exact records), checks and per-rule cohesion verdicts. Evaluator judgments name their exact evidence hashes and require independence. A section review clears no other section.", 3),
     ];
 
     /// <inheritdoc />
@@ -56,6 +58,7 @@ public sealed class DocumentReviewType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
+        TemplateRecords.Review(context);
         string? outcome = body.Enum("outcome", true, Outcomes);
         BodyReader? content = body.Nested("content", true);
         string? covered = body.Hash("covered", false);
@@ -136,7 +139,7 @@ public sealed class DocumentReviewType : IRecordType
             string? trigger = answer.Text("on", true, 200);
             // Own-file changes are always covered, including declarations with only record triggers. Their content pin
             // supplies that clearance; the separate covered pin remains required only for explicitly declared paths.
-            if (trigger is not null && trigger != "covers" && !on.Contains(trigger))
+            if (trigger is not null && trigger != "covers" && !(trigger == "sections" && TemplateCatalog.Pin(declaration) is not null) && !on.Contains(trigger))
             {
                 answer.Error("document.answers", "on", $"The declaration has no '{trigger}' trigger.");
             }
@@ -180,7 +183,11 @@ public sealed class DocumentReviewType : IRecordType
         RecordEnvelope? reviser = elsewhere
             ? context.Model.OfType("document-review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised" && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
             : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-        bool revised = outcome == "revised" || reviser?.By == context.Record.By;
+        JsonElement[] sections = context.Record.Body.TryGetProperty("sections", out JsonElement selected) && selected.ValueKind == JsonValueKind.Array
+            ? selected.EnumerateArray().ToArray() : [];
+        bool revised = outcome == "revised" || (sections.Length == 0 ? reviser?.By == context.Record.By
+            : sections.Any(s => TJson.Text(s, "outcome") == "revised" || TemplateDocuments.Writer(context.Model, declaration,
+                TJson.Text(s, "id") ?? "", TJson.Text(s, "hash"), context.Record.At) == context.Record.By));
         bool self = revised || (elsewhere && independence == "self");
         string kind = EstateModel.BodyString(reviewer, "kind") ?? string.Empty;
         if (independence is not null)

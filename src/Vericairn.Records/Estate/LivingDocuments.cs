@@ -8,6 +8,7 @@ using System.Text.Json;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Records.Estate;
 
@@ -331,6 +332,13 @@ public static class LivingDocuments
 
         // Keep declared triggers in their established order, including the answers recorded by a review.
         if (comparison?.Reason is { } reason) reasons.Add(reason);
+        if (TemplateCatalog.Pin(declaration) is not null)
+        {
+            string level = Triggers(declaration).Select(t => t.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() ?? "remind";
+            foreach (TemplateSectionState section in TemplateDocuments.Sections(model, declaration, at)
+                .Where(s => (s.Required && s.State != "reviewed") || s.State is "due" or "failing"))
+                reasons.Add(new Reason("sections", level, $"Section {section.Id} is {section.State}: {string.Join(" ", section.Reasons)}", null));
+        }
         string? due = reasons.Count == 0 ? null : reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).Last();
         return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes) { ComparisonCommit = at, Content = comparison };
     }

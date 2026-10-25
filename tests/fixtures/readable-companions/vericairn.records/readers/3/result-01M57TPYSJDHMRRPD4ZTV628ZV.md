@@ -30,7 +30,7 @@ What was done and what changed&#46;
 
 ## Outputs
 
-name&#44; hash &#40;sha256 of the bytes&#41;&#44; optional bytes&#44; mediaType and location &#40;repository&#45;relative&#59; verified when the file is present&#41;&#59; may be empty&#46;
+name&#44; hash &#40;sha256 of the bytes&#41;&#44; optional bytes&#44; mediaType and location &#40;repository&#45;relative&#59; verified when the file is present&#41;&#59; may be empty&#46; From format 3 an optional section contains id and document &#40;an exact living&#45;document reference&#41;&#59; hash and bytes then identify that section&#39;s payload&#46;
 
 - Outputs: None recorded (complete selected list).
 

@@ -4,6 +4,7 @@
 using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Records.Types;
 
@@ -61,6 +62,8 @@ public sealed class LivingDocumentType : IRecordType
         new("clearedBy", string.Join('|', Clearers), false, "Who may clear it: any admitted principal (the default), independent (not the one that revised or wrote its content), or operator.", 2),
         new("checks", "string[]", false, "Checks run at each clearance: names-version, matches-generator, links-resolve, or a pack's named namespace/name.", 2),
         new("summary", "string", true, "Why it is living: the facts it states.", 2),
+        new("template", "object", false, "An exact template instance: id, version, hash, owner, optional scope (domain, product, project), all effective options and overrides (section, action, reason, and heading, definition or exact decision as applicable). Templates grant nothing.", 3),
+        new("templateUpgrade", "object", false, "An owner's explicit version choice: offered (id, version, hash), outcome (accepted|declined), reason. Acceptance revises the pin; decline preserves it.", 3),
     ];
 
     /// <inheritdoc />
@@ -68,6 +71,7 @@ public sealed class LivingDocumentType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
+        TemplateRecords.Declaration(context);
         string? pattern = body.Since(3, "pathPattern") ? body.Text("pathPattern", false, 500) : null;
         string? path = body.Text("path", pattern is null, 500, Patterns.RelativePath, "a normalized repository-relative path");
         string? repository = body.Ulid("repository", false);

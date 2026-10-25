@@ -13,7 +13,8 @@ public static class RecordCollections
 
     /// <summary>Schema-owned maps with open contribution keys; their reader retains every field and nested list.</summary>
     public static bool IsOpenTree(string type, string field) => (type, field) is
-        ("observation", "facts") or ("estate-policy", "rules[].parameters");
+        ("observation", "facts") or ("estate-policy", "rules[].parameters") or ("template-defaults", "options")
+        or ("living-document", "template.options") or ("living-document", "template.overrides[].definition");
 
     private static ImmutableArray<DocumentManagedKind> Build()
     {
@@ -28,6 +29,9 @@ public static class RecordCollections
         Add("review", "conditions[].read");
         Add("goal", "plan.workOrders");
         Add("living-document", "generator.inputs", "regions[].inputs", "triggers[].paths", "triggers[].keys");
+        Add("living-document", "template.options", "template.overrides", "template.overrides[].definition");
+        Add("template-defaults", "options");
+        Add("document-review", "sections[].sources", "sections[].sources[].records", "sections[].checks", "sections[].cohesion", "sections[].cohesion[].evidence");
         Add("estate-policy", "appliesTo.workOrders", "appliesTo.selectors", "rules[].parameters", "rules[].parameters.discharge.checks", "rules[].parameters.discharge.records");
         Add("authority", "bounds[].actions", "bounds[].policies", "bounds[].levels", "bounds[].appliesTo", "bounds[].appliesTo[].workOrders", "bounds[].appliesTo[].selectors", "bounds[].rules", "bounds[].targets", "bounds[].tokens", "bounds[].coverage.paths", "bounds[].coverage.paths[].selectors", "bounds[].coverage.records");
         Add("writing-exception", "scope.paths", "scope.paths[].selectors", "scope.records");
