@@ -35,7 +35,7 @@ public sealed class ProductType : IRecordType
         new("editions", "object[]", true, "name, slug, summary, optional license (SPDX expression)."),
         new("surfaces", "object[]", true, "name, slug, summary: runtime, Workbench, Remote, CLI, SDK, websites."),
         new("changes", "object", false, "Checked repository changes: provider, repository resource id, target branch and requiredChecks (exact host check names, including each required platform). An empty or absent declaration authorizes no merge.", 3),
-        new("packages", "object", false, "Registry observations: provider (nuget-org) and ids (one to sixteen NuGet package ids). Account holders perform registry changes.", 3),
+        new("packages", "object", false, "Registry observations: provider (nuget-org), ids (one to sixteen distinct NuGet package ids), and optional reserved (one to eight distinct NuGet placeholder versions, none recorded as a release of this product). Reserved versions pin this declaration without a release. Account holders perform registry changes.", 3),
         new("release", "object", false, "How the product's releases are made: destination (provider id and its settings, string values), checksums (the asset that lists the others' hashes) and artifacts (name with {version} and optionally {platform}, role distributable|sbom|notices|documentation|other, platforms). Read by release 0.4.2, the first published release to read it, and later (0.4.0, which introduced it, was withdrawn)."),
     ];
 
@@ -140,6 +140,18 @@ public sealed class ProductType : IRecordType
             if (ids is not null && (ids.Count > 16 || ids.Any(id => !PackageIdentity.ValidId(id))
                 || ids.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ids.Count))
                 packages.Error("product.packages", "ids", "Declare one to sixteen distinct NuGet package ids.");
+            IReadOnlyList<string>? reserved = packages.StringArray("reserved", false, allowEmpty: false, maxItemLength: 100);
+            if (reserved is not null)
+            {
+                if (reserved.Count > 8 || reserved.Any(version => !PackageIdentity.ValidVersion(version))
+                    || reserved.Distinct(StringComparer.OrdinalIgnoreCase).Count() != reserved.Count)
+                    packages.Error("product.packages-reserved", "reserved", "Declare one to eight distinct valid NuGet placeholder versions.");
+                IReadOnlyList<string> productChain = context.Model.Chain(context.Model.Latest(context.Record));
+                if (context.Model.OfType("release").Any(record => record.Subject is not null
+                    && productChain.Contains(record.Subject.Id, StringComparer.Ordinal)
+                    && reserved.Contains(Estate.EstateModel.BodyString(record, "version"), StringComparer.OrdinalIgnoreCase)))
+                    packages.Error("product.packages-reserved", "reserved", "A reserved placeholder version cannot also be a recorded release of this product.");
+            }
             packages.NoOtherKeys();
         }
 

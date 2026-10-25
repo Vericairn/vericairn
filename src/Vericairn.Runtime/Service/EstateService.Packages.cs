@@ -17,13 +17,16 @@ namespace Vericairn.Runtime.Service;
 
 public sealed partial class EstateService
 {
-    private sealed record PackageSelection(RecordEnvelope Product, RecordEnvelope Release, IPackageRegistryProvider Provider, string[] Packages);
+    private sealed record PackageSelection(RecordEnvelope Product, RecordEnvelope? Release, string Version, IPackageRegistryProvider Provider, string[] Packages)
+    {
+        internal RecordEnvelope Subject => Release ?? Product;
+    }
 
     /// <inheritdoc />
     public PackagesResponse PackagesUnlist(PackagesUnlistRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return PackageIntent(request.Product, request.Version, request.Package, request.By, null);
+        return PackageIntent(request.Product, request.Version, request.Package, request.By, null, request.Reserved);
     }
 
     /// <inheritdoc />
@@ -37,17 +40,17 @@ public sealed partial class EstateService
             return PackageProblem("Specify distinct NuGet reasons, a message of at most 500 characters and an optional alternate package with its range.");
         return PackageIntent(request.Product, request.Version, request.Package, request.By,
             new(request.Reasons.Order(StringComparer.Ordinal).ToArray(), string.IsNullOrEmpty(request.Message) ? null : request.Message,
-                request.AlternatePackage?.ToLowerInvariant(), request.AlternateRange));
+                request.AlternatePackage?.ToLowerInvariant(), request.AlternateRange), request.Reserved);
     }
 
-    private PackagesResponse PackageIntent(string product, string version, string package, string by, PackageDeprecation? deprecation)
+    private PackagesResponse PackageIntent(string product, string version, string package, string by, PackageDeprecation? deprecation, bool reserved)
     {
         try
         {
             lock (gate)
             {
                 RequirePackageActor(by, accountAction: true);
-                PackageSelection selection = SelectPackages(product, version);
+                PackageSelection selection = SelectPackages(product, version, reserved);
                 if (!selection.Packages.Contains(package, StringComparer.OrdinalIgnoreCase))
                     return PackageProblem("The product does not declare this package.");
                 string action = deprecation is null ? "package-unlist" : "package-deprecate";
@@ -62,6 +65,7 @@ public sealed partial class EstateService
                     // Reruns keep the recorded target even when declarations acquire a newer revision.
                     JsonElement pinned = original.Body.GetProperty("target");
                     if (model.Chain(selection.Product)[0] != model.Chain(model.ById[PackageRecordRules.Text(pinned, "product")!])[0]
+                        || PackageRecordRules.Has(pinned, "reserved") != reserved
                         || PackageRecordRules.DeprecationFields.Any(k => PackageRecordRules.Text(pinned, k) != target[k]?.GetValue<string>()))
                         return PackageProblem("This package action already has a different intent; observe its original operation without replacing its identity.")
                             with { Intent = Written(original), Operation = Written(prior) };
@@ -75,7 +79,7 @@ public sealed partial class EstateService
                     ["target"] = target, ["status"] = "not-started", ["evidence"] = new JsonArray(),
                 };
                 WriteOutcome write = NewRecord(new("operation", by, Element(body),
-                    $"release:{selection.Release.Id}:{selection.Release.ComputedHash}"));
+                    $"{selection.Subject.Type}:{selection.Subject.Id}:{selection.Subject.ComputedHash}"));
                 if (!write.Ok) return PackageProblem("The package intent was refused; nothing was recorded.", write.Problem);
                 RecordEnvelope intent = session.Load().ById[write.Written!.Id];
                 return PackageIntentAnswer(intent, intent);
@@ -101,7 +105,7 @@ public sealed partial class EstateService
                 RequirePackageActor(request.By, accountAction: request.Operation is not null);
                 if (request.Operation is not null)
                 {
-                    if (request.Product is not null || request.Version is not null) return PackageProblem("Observe an operation or a product version, not both.");
+                    if (request.Product is not null || request.Version is not null || request.Reserved) return PackageProblem("Observe an operation or a product version, not both; reserved selection belongs to a product version.");
                     EstateModel model = session.Load();
                     if (!model.ById.TryGetValue(request.Operation, out RecordEnvelope? named) || named.Type != "operation" || !PackageRecordRules.IsAction(named))
                         return PackageProblem("Name a recorded package unlisting or deprecation operation.");
@@ -109,17 +113,17 @@ public sealed partial class EstateService
                     intent = model.ById[model.Chain(operation)[0]];
                     JsonElement target = intent.Body.GetProperty("target");
                     RecordEnvelope product = model.ById[PackageRecordRules.Text(target, "product")!];
-                    RecordEnvelope release = model.ById[PackageRecordRules.Text(target, "release")!];
+                    RecordEnvelope? release = PackageRecordRules.Has(target, "reserved") ? null : model.ById[PackageRecordRules.Text(target, "release")!];
                     IPackageRegistryProvider provider = Providers.PackageRegistry(PackageRecordRules.Text(target, "provider")!)
                         ?? throw new ProviderRefusedException("The original package registry provider is unavailable.");
-                    selection = new(product, release, provider, [PackageRecordRules.Text(target, "package")!]);
+                    selection = new(product, release, PackageRecordRules.Text(target, "version")!, provider, [PackageRecordRules.Text(target, "package")!]);
                 }
-                else selection = SelectPackages(request.Product, request.Version);
+                else selection = SelectPackages(request.Product, request.Version, request.Reserved);
             }
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(TimeSpan.FromMinutes(2));
             var states = new List<PackageRegistryState>();
-            string version = EstateModel.BodyString(selection.Release, "version")!.ToLowerInvariant();
+            string version = selection.Version;
             foreach (string package in selection.Packages)
             {
                 PackageRegistryState state = await selection.Provider.ObserveAsync(package.ToLowerInvariant(), version, deadline.Token).ConfigureAwait(false);
@@ -134,7 +138,7 @@ public sealed partial class EstateService
                 EstateModel model = session.Load();
                 if (operation is not null && model.Latest(operation).Id != operation.Id)
                     return PackageProblem("The operation changed during observation; observe its original identity again.") with { Intent = Written(intent!), Operation = Written(model.Latest(operation)) };
-                if (intent is null && (!model.IsCurrent(selection.Product) || !model.IsCurrent(selection.Release)))
+                if (intent is null && (!model.IsCurrent(selection.Product) || selection.Release is not null && !model.IsCurrent(selection.Release)))
                     return PackageProblem("The product or release changed during observation; repeat with its current declaration.");
                 var authored = new List<AuthoredRecord>();
                 var results = new List<PackageObservationResult>();
@@ -153,7 +157,7 @@ public sealed partial class EstateService
                         ["limitations"] = new JsonArray("Public API state at observation time; registry indexes can change or lag.",
                             "Package bytes, acceptance and the identity of the account holder were not verified."),
                     };
-                    (AuthoredRecord? record, string? refusal) = AuthorLocked(new("observation", request.By, Element(body), (intent ?? selection.Release).Reference), model);
+                    (AuthoredRecord? record, string? refusal) = AuthorLocked(new("observation", request.By, Element(body), (intent ?? selection.Subject).Reference), model);
                     if (record is null) return PackageProblem("The observation could not be authored: " + refusal);
                     authored.Add(record);
                     results.Add(new(state, Written(record.Envelope)));
@@ -198,26 +202,36 @@ public sealed partial class EstateService
         if (RequestDeviceRefusal(model) is not null) throw new ProviderRefusedException("The requesting device cannot record package observations.");
     }
 
-    private PackageSelection SelectPackages(string? product, string? version)
+    private PackageSelection SelectPackages(string? product, string? version, bool reserved)
     {
         EstateModel model = session.Load();
         if (product is null || !model.ById.TryGetValue(product, out RecordEnvelope? declaration) || declaration.Type != "product" || !model.IsCurrent(declaration)
             || !declaration.Body.TryGetProperty("packages", out JsonElement packages) || !PackageIdentity.ValidVersion(version))
-            throw new ProviderRefusedException("Name a current product declaring packages and its recorded release version.");
-        RecordEnvelope? release = model.Current("release").SingleOrDefault(r => r.Subject is not null && model.Chain(declaration).Contains(r.Subject.Id, StringComparer.Ordinal)
+            throw new ProviderRefusedException(reserved ? "Name a current product declaring packages and its reserved version." : "Name a current product declaring packages and its recorded release version.");
+        RecordEnvelope? release = reserved ? null : model.Current("release").SingleOrDefault(r => r.Subject is not null && model.Chain(declaration).Contains(r.Subject.Id, StringComparer.Ordinal)
             && string.Equals(EstateModel.BodyString(r, "version"), version, StringComparison.OrdinalIgnoreCase));
-        if (release is null) throw new ProviderRefusedException("The product has no recorded release of this version.");
+        if (reserved && !PackageRecordRules.DeclaresReserved(declaration, version))
+            throw new ProviderRefusedException("The current product declaration does not reserve this version.");
+        if (!reserved && release is null) throw new ProviderRefusedException("The product has no recorded release of this version.");
         IPackageRegistryProvider provider = Providers.PackageRegistry(packages.GetProperty("provider").GetString()!)
             ?? throw new ProviderRefusedException("The declared package registry provider is unavailable.");
-        return new(declaration, release, provider, packages.GetProperty("ids").EnumerateArray().Select(p => p.GetString()!).ToArray());
+        return new(declaration, release, version!.ToLowerInvariant(), provider, packages.GetProperty("ids").EnumerateArray().Select(p => p.GetString()!).ToArray());
     }
 
-    private static JsonObject PackagePins(PackageSelection selection, string package) => new()
+    private static JsonObject PackagePins(PackageSelection selection, string package)
     {
-        ["provider"] = selection.Provider.Provider, ["product"] = selection.Product.Id, ["productHash"] = selection.Product.ComputedHash,
-        ["release"] = selection.Release.Id, ["releaseHash"] = selection.Release.ComputedHash,
-        ["package"] = package, ["version"] = EstateModel.BodyString(selection.Release, "version")!.ToLowerInvariant(),
-    };
+        JsonObject pins = new()
+        {
+            ["provider"] = selection.Provider.Provider, ["product"] = selection.Product.Id, ["productHash"] = selection.Product.ComputedHash,
+            ["package"] = package, ["version"] = selection.Version,
+        };
+        if (selection.Release is { } release)
+        {
+            pins["release"] = release.Id; pins["releaseHash"] = release.ComputedHash;
+        }
+        else pins["reserved"] = selection.Version;
+        return pins;
+    }
 
     private static void AddDeprecation(JsonObject facts, PackageDeprecation details, bool intent)
     {

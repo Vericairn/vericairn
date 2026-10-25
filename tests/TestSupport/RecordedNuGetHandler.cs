@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Net;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Providers.NuGet;
 using Vericairn.Records.Model;
@@ -16,6 +18,7 @@ internal sealed class RecordedNuGetHandler : HttpMessageHandler
 {
     internal string Registration { get; set; } = "listed";
     internal string Versions { get; set; } = "versions";
+    internal string PackageVersion { get; set; } = "1.0.0";
     internal Action<HttpRequestMessage>? BeforeRequest { get; set; }
     internal Func<string, HttpResponseMessage?>? Override { get; set; }
     internal List<string> Requests { get; } = [];
@@ -34,7 +37,7 @@ internal sealed class RecordedNuGetHandler : HttpMessageHandler
             "https://api.nuget.org/v3/index.json" => "service-index",
             "https://api.nuget.org/v3-flatcontainer/example.widget/index.json" => Versions,
             "https://api.nuget.org/v3/registration5-gz-semver2/example.widget/index.json" => Registration,
-            "https://api.nuget.org/v3/registration5-gz-semver2/example.widget/page/1.0.0/1.0.0.json" => "page",
+            var page when page == $"https://api.nuget.org/v3/registration5-gz-semver2/example.widget/page/{PackageVersion}/{PackageVersion}.json" => "page",
             _ => throw new InvalidOperationException("No recorded response exists for this request."),
         };
         if (name == "timeout")
@@ -49,7 +52,9 @@ internal sealed class RecordedNuGetHandler : HttpMessageHandler
             content.Headers.ContentLength = oversized.RootElement.GetProperty("contentLength").GetInt64();
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         }
-        return Task.FromResult(new HttpResponseMessage(name == "not-found" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = new ByteArrayContent(Fixture(name)) });
+        byte[] bytes = Fixture(name);
+        if (PackageVersion != "1.0.0") bytes = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes).Replace("1.0.0", PackageVersion, StringComparison.Ordinal));
+        return Task.FromResult(new HttpResponseMessage(name == "not-found" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) });
     }
 }
 
@@ -61,15 +66,22 @@ internal sealed class PackageTestEstate : IDisposable
     internal IPackageRegistryProvider Provider { get; }
     internal EstateService Service { get; private set; }
     internal RecordEnvelope Product { get; }
-    internal RecordEnvelope Release { get; }
+    private readonly RecordEnvelope? release;
+    internal RecordEnvelope Release => release ?? throw new InvalidOperationException("A reserved package fixture has no release.");
+    internal bool Reserved { get; }
+    internal string Version => Reserved ? "0.0.1-reserved" : "1.0.0";
 
-    internal PackageTestEstate()
+    internal PackageTestEstate(bool reserved = false)
     {
-        Product = Estate.Add("product", Estate.OperatorId, """
+        Reserved = reserved;
+        Handler.PackageVersion = Version;
+        JsonNode product = JsonNode.Parse("""
             {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],
              "surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],"packages":{"provider":"nuget-org","ids":["Example.Widget"]}}
-            """);
-        Release = Estate.Add("release", Estate.OperatorId, """
+            """)!;
+        if (reserved) product["packages"]!["reserved"] = new JsonArray(Version);
+        Product = Estate.Add("product", Estate.OperatorId, product.ToJsonString());
+        if (!reserved) release = Estate.Add("release", Estate.OperatorId, """
             {"version":"1.0.0","repository":"Example/widget","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"candidate",
              "artifacts":[],"recordFormat":{"reads":[3],"writes":3},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}
             """, Product.Reference);
@@ -78,10 +90,10 @@ internal sealed class PackageTestEstate : IDisposable
         Service = Open();
     }
 
-    internal PackagesObserveRequest Observe => new(Estate.OperatorId, Product.Id, "1.0.0");
-    internal PackagesUnlistRequest Unlist => new(Product.Id, "1.0.0", "Example.Widget", Estate.OperatorId);
-    internal PackagesDeprecateRequest Deprecate => new(Product.Id, "1.0.0", "Example.Widget", Estate.OperatorId,
-        ["Legacy", "Other"], "Use the replacement package.", "Example.Replacement", "[2.0.0,)");
+    internal PackagesObserveRequest Observe => new(Estate.OperatorId, Product.Id, Version) { Reserved = Reserved };
+    internal PackagesUnlistRequest Unlist => new(Product.Id, Version, "Example.Widget", Estate.OperatorId) { Reserved = Reserved };
+    internal PackagesDeprecateRequest Deprecate => new(Product.Id, Version, "Example.Widget", Estate.OperatorId,
+        ["Legacy", "Other"], "Use the replacement package.", "Example.Replacement", "[2.0.0,)") { Reserved = Reserved };
     internal void Reopen() { Service.Dispose(); Service = Open(); }
     private EstateService Open()
     {
