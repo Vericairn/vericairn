@@ -41,6 +41,7 @@ internal sealed class EstateOperations(CommandContext context)
             initialization = initialization with { Release = verified };
             RecordEnvelope operatorRecord;
             RecordEnvelope estateRecord;
+            RecordEnvelope? releaseRecord = null;
             if (profile == "local-only")
             {
                 PreparedEstate prepared = EstateInitializer.Prepare(root, initialization);
@@ -62,21 +63,37 @@ internal sealed class EstateOperations(CommandContext context)
                 }
 
                 (operatorRecord, estateRecord) = (prepared.Operator.Envelope, prepared.Estate.Envelope);
+                releaseRecord = prepared.Release?.Envelope;
             }
             else
             {
                 (operatorRecord, estateRecord) = EstateInitializer.Initialize(root, initialization);
+                if (release)
+                {
+                    EstateModel model = EstateLoader.Load(root);
+                    releaseRecord = model.ById[model.Manifest!.Release!.Id];
+                }
             }
 
             if (json)
             {
-                context.Output.WriteLine(JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath }));
+                context.Output.WriteLine(releaseRecord is null
+                    ? JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath })
+                    : JsonSerializer.Serialize(new
+                    {
+                        @operator = operatorRecord.Id,
+                        estate = estateRecord.Id,
+                        manifest = EstateLayout.ManifestPath,
+                        release = new { path = releaseRecord.ExpectedPath, id = releaseRecord.Id, hash = releaseRecord.ComputedHash },
+                    }));
             }
             else
             {
                 context.Output.WriteLine($"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}");
                 context.Output.WriteLine($"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}");
                 context.Output.WriteLine($"manifest  {EstateLayout.ManifestPath}");
+                if (releaseRecord is not null)
+                    context.Output.WriteLine($"release   {releaseRecord.Id}  {releaseRecord.ExpectedPath}  {releaseRecord.ComputedHash}");
             }
 
             return Clean;
