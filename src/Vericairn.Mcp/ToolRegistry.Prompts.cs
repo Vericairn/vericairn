@@ -49,7 +49,13 @@ public sealed partial class ToolRegistry
             target["favor"] = bool.TryParse(favor, out bool selected) ? selected : throw new ArgumentException("_favor is true or false.", nameof(arguments));
         PromptUseRequest request = target.Deserialize<PromptUseRequest>(ProtocolJson.Options)!;
         PromptUseResponse used = await api.PromptUseAsync(request, cancellationToken).ConfigureAwait(false);
-        if (!used.Ok) throw new InvalidOperationException(used.Problem?.Message ?? used.Run?.Message ?? "The prompt use was not recorded.");
+        if (!used.Ok)
+        {
+            string message = used.Problem?.Message ?? used.Run?.Message ?? "The prompt use did not complete.";
+            if (used.Written is { } written)
+                message = $"Use {written.Id} at {written.Hash} is recorded. Inspect that target before retrying. " + message;
+            throw new InvalidOperationException(message);
+        }
         return new JsonObject
         {
             ["description"] = row.Definition.GetProperty("title").GetString() + " (recorded use)",
