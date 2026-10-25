@@ -182,6 +182,11 @@ public class DocsTests
             foreach (JsonElement reference in inventory.RootElement.GetProperty("references").EnumerateArray())
                 Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
+            foreach (string command in new[] { "templates list", "templates show", "docs new", "docs sections", "docs brief" }) Assert.Contains(command, commands);
+            foreach (string route in new[] { "GET /v1/templates", "POST /v1/documents/new", "GET /v1/documents/{id}/sections", "GET /v1/documents/{id}/sections/{section}/brief" })
+                Assert.Contains(route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            string records = File.ReadAllText(Path.Combine(output, "record-reference.md"));
+            foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "section.document" }) Assert.Contains(field, records, StringComparison.Ordinal);
             Assert.Contains("docs check", commands);
             Assert.Contains("docs pin", commands);
             Assert.Contains("POST /v1/documents/pin", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));

@@ -13,6 +13,9 @@ internal sealed class DocsCommand : Command
         Subcommands.Add(new DocsNotesCommand(context));
         Subcommands.Add(new DocsCheckCommand(context));
         Subcommands.Add(new DocsLivingCommand(context));
+        Subcommands.Add(new DocsNewCommand(context));
+        Subcommands.Add(new DocsSectionsCommand(context));
+        Subcommands.Add(new DocsBriefCommand(context));
         Subcommands.Add(new DocsPinCommand(context));
         Subcommands.Add(new DocsReviewCommand(context));
         Subcommands.Add(new DocsDeclareCommand(context));

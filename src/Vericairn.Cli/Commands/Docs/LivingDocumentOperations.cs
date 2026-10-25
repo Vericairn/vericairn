@@ -48,7 +48,7 @@ internal sealed class LivingDocumentOperations(CommandContext context)
         return Clean;
     });
 
-    public int DocsReview(string root, string path, string by, string outcome, string summary, string[] findings, string? commit, string? independence, bool json) => context.WithApi(root, api =>
+    public int DocsReview(string root, string path, string by, string outcome, string summary, string[] findings, string? commit, string? independence, bool json, string? section = null, string? fidelity = null, string? judgments = null) => context.WithApi(root, api =>
     {
         // A document is named by its path; the estate's own file unless a commit says it is in another repository.
         DocumentRow? row = api.Documents().FirstOrDefault(d => d.Path == path && (commit is null ? d.Repository is null : d.Repository is not null));
@@ -70,7 +70,16 @@ internal sealed class LivingDocumentOperations(CommandContext context)
             parsed.Add(new DocumentFinding(severity, finding[(colon + 1)..].Trim()));
         }
 
-        return context.ReportOutcome(api.DocumentReview(row.Declaration, new DocumentReviewRequest(by, outcome, summary, parsed, commit, independence)), json);
+        if ((section is null) != (fidelity is null) || (judgments is not null && section is null)) return context.Fail("A section review needs both --section and --fidelity; judgments belong to that section.");
+        IReadOnlyList<DocumentSectionJudgment>? verdicts = null;
+        if (judgments is not null)
+        {
+            try { verdicts = JsonSerializer.Deserialize<DocumentSectionJudgment[]>(File.ReadAllBytes(judgments), ProtocolJson.Options) ?? []; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return context.Fail("The judgments file must contain an array of rule, verdict, summary and exact evidence hashes."); }
+        }
+        var request = new DocumentReviewRequest(by, outcome, summary, parsed, commit, independence)
+        { Sections = section is null ? null : [new(section, outcome, fidelity!, verdicts)] };
+        return context.ReportOutcome(api.DocumentReview(row.Declaration, request), json);
     });
 
     public int DocsDeclare(string root, string by, string bodyPath, string? supersedes, bool json) =>

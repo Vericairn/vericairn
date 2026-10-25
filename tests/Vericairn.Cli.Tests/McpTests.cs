@@ -216,6 +216,8 @@ public class McpTests
 
             // The goal tools are reads, and the writes a worker sees are the five of its contract, none of which records a goal's status, evaluation or acceptance.
             var registry = new ToolRegistry(api, builder);
+            foreach (string name in new[] { "document_sections", "section_brief" })
+                Assert.False(registry.Visible().Single(t => t.Name == name).Writes);
             Assert.Equal(["goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
             Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)), t => Assert.False(t.Writes));
             Assert.Equal(["document_review", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));

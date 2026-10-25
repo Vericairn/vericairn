@@ -82,6 +82,10 @@ public static class OpenApiDocument
         ("POST", "/v1/devices/recovery"),
         ("GET", "/v1/releases"),
         ("GET", "/v1/documents"),
+        ("GET", "/v1/templates"),
+        ("POST", "/v1/documents/new"),
+        ("GET", "/v1/documents/{id}/sections"),
+        ("GET", "/v1/documents/{id}/sections/{section}/brief"),
         ("POST", "/v1/documents/pin"),
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
@@ -241,6 +245,17 @@ public static class OpenApiDocument
                 }
             }
 
+            if (method == "GET" && path is "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
+            {
+                var parameters = operation["parameters"]!.AsArray();
+                parameters.Add(new JsonObject { ["name"] = "commit", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "Exact source commit for a document in another repository." });
+                if (path.EndsWith("/brief", StringComparison.Ordinal)) parameters.Add(new JsonObject
+                {
+                    ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 },
+                    ["description"] = "Allocation for the complete canonical JSON brief. Overflow returns an incomplete problem and retains every original without truncation.",
+                });
+            }
+
             if (method == "POST" && path != "/v1/shutdown")
             {
                 operation["requestBody"] = new JsonObject
@@ -349,6 +364,20 @@ public static class OpenApiDocument
                     ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/DecisionNewResponse" } } },
                 };
             responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DecisionNewRequest." };
+        }
+        else if (path is "/v1/templates" or "/v1/documents/new" or "/v1/documents/{id}/sections" or "/v1/documents/{id}/sections/{section}/brief")
+        {
+            string schema = path switch
+            {
+                "/v1/templates" => "TemplatesResponse", "/v1/documents/new" => "DocumentNewResponse",
+                "/v1/documents/{id}/sections" => "DocumentSectionsResponse", _ => "SectionBriefResponse",
+            };
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "The complete typed result, including any refusal, incomplete context or stored receipt requiring reconciliation. Inspect Problem before using it.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+            responses.Remove("404");
         }
         else if (path == "/v1/documents/pin")
         {
@@ -593,9 +622,23 @@ public static class OpenApiDocument
             ["DeviceRenameRequest"] = Object(("device", "string"), ("name", "string")),
             ["DeviceRotateRequest"] = Object(("device", "string"), ("custody", "string"), ("presence", "boolean")),
             ["RevokeRequest"] = Object(("device", "string"), ("by", "string"), ("reason", "string"), ("recovery", "string"), ("passphrase", "string")),
-            ["DocumentReviewRequest"] = Object(("by", "string"), ("outcome", "string"), ("summary", "string"), ("findings", "array"), ("commit", "string"), ("independence", "string")),
+            ["DocumentReviewRequest"] = Object(("by", "string"), ("outcome", "string"), ("summary", "string"), ("findings", "array"), ("commit", "string"), ("independence", "string"), ("sections", "array")),
             ["DecisionNewRequest"] = decisionNew,
             ["DecisionNewResponse"] = Object(("written", "object"), ("pins", "array"), ("problem", "object"), ("ok", "boolean")),
+            ["DocumentNewRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string")),
+            ["DocumentNewResponse"] = Object(("declaration", "object"), ("path", "string"), ("contentHash", "string"), ("problem", "object"), ("ok", "boolean")),
+            ["TemplatesResponse"] = Object(("templates", "array"), ("problem", "object")),
+            ["TemplateDto"] = Object(("pin", "object"), ("definition", "object")),
+            ["TemplatePinDto"] = Object(("id", "string"), ("version", "string"), ("hash", "string")),
+            ["TemplateRecordReference"] = Object(("type", "string"), ("id", "string"), ("hash", "string")),
+            ["TemplateSourceDto"] = Object(("id", "string"), ("kind", "string"), ("identity", "string"), ("hash", "string"), ("bytes", "integer"), ("content", "string"), ("status", "string"), ("records", "array")),
+            ["TemplateCheckDto"] = Object(("id", "string"), ("outcome", "string"), ("summary", "string")),
+            ["TemplateSectionDto"] = Object(("id", "string"), ("state", "string"), ("required", "boolean"), ("requiredFidelity", "string"), ("contentHash", "string"), ("sourceDigest", "string"), ("writer", "string"), ("review", "string"), ("definition", "object"), ("sources", "array"), ("checks", "array"), ("cohesion", "array"), ("reasons", "array")),
+            ["TemplateBriefDto"] = Object(("declaration", "string"), ("declarationHash", "string"), ("template", "object"), ("section", "string"), ("purpose", "string"), ("role", "string"), ("roleBrief", "string"), ("fidelity", "string"), ("quality", "object"), ("options", "object"), ("sources", "array"), ("cohesion", "array"), ("bytes", "integer"), ("complete", "boolean"), ("problem", "string")),
+            ["DocumentSectionReview"] = Object(("id", "string"), ("outcome", "string"), ("fidelity", "string"), ("judgments", "array")),
+            ["DocumentSectionJudgment"] = Object(("rule", "string"), ("verdict", "string"), ("summary", "string"), ("evidence", "array")),
+            ["DocumentSectionsResponse"] = Object(("declaration", "string"), ("path", "string"), ("sections", "array"), ("problem", "object")),
+            ["SectionBriefResponse"] = Object(("brief", "object"), ("problem", "object")),
             ["DocumentPinRequest"] = new JsonObject
             {
                 ["type"] = "object", ["required"] = new JsonArray("path", "by", "summary"),
@@ -720,6 +763,7 @@ public static class OpenApiDocument
         "/v1/documents/{id}/reviews" => "DocumentReviewRequest",
         "/v1/decisions/new" => "DecisionNewRequest",
         "/v1/documents/pin" => "DocumentPinRequest",
+        "/v1/documents/new" => "DocumentNewRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
@@ -824,6 +868,10 @@ public static class OpenApiDocument
         ("POST", "/v1/devices/recovery") => "Make the operator's recovery device: its key is written once, encrypted, for offline keeping, and an admitted device of the operator admits it.",
         ("GET", "/v1/releases") => "Current release records.",
         ("GET", "/v1/documents") => "The declared living documents with their derived state: current, due with every trigger newer than the latest clearance, or unavailable with the contributions no installed pack provides.",
+        ("GET", "/v1/templates") => "Available exact template contracts. Installing or reading a template grants no authority.",
+        ("POST", "/v1/documents/new") => "Create a document and its living declaration from an exact template version. Records all effective choices and explicit overrides; existing files are never overwritten. A receipt with a problem requires reconciliation before retrying.",
+        ("GET", "/v1/documents/{id}/sections") => "Each section's derived state, required fidelity, exact sources, checks and evaluator judgments. A passed check grants no authority.",
+        ("GET", "/v1/documents/{id}/sections/{section}/brief") => "The complete measured section brief. Optional maxBytes refuses overflow without truncating required originals; commit selects the external repository revision.",
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",

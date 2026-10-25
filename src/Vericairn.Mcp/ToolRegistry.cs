@@ -146,6 +146,7 @@ public sealed partial class ToolRegistry
         [
             .. CompanionTools(),
             .. PromptTools(),
+            .. TemplateTools(),
             Read("policies_list", "Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record.", NoArguments(),
                 async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
             Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),
@@ -260,9 +261,10 @@ public sealed partial class ToolRegistry
                 Arguments(("result", "Exact current result id."), ("expected", "Expected current result hash."), ("body", "The ordinary review body: independence, outcome, summary, findings and exact read references.")), ["result", "expected", "body"],
                 async (api, a, token) => Outcome(await api.ReviewResultAsync(new ResultReviewRequest(Arg(a, "result"), by, Body(a, "body"), Arg(a, "expected")), token).ConfigureAwait(false)), ["body"]) with { OperatorOnly = true },
             Write("document_review", "Records the acting principal's review of a living document of the estate, by its path: current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due). The runtime reads the content, records the covered paths' identity and the triggers answered, runs the declared checks, and refuses a clearance that a failed check or the declaration's clearedBy forbids, such as an agent clearing what it revised where independence is asked.",
-                Arguments(("path", "The document's repository-relative path."), ("outcome", "current, revised or needs-change."), ("summary", "What was checked.")), ["path", "outcome", "summary"],
+                TemplateReviewArguments(), ["path", "outcome", "summary"],
                 async (api, a, token) => (await api.DocumentsAsync(cancellationToken: token).ConfigureAwait(false)).FirstOrDefault(d => d.Path == Arg(a, "path") && d.Repository is null) is DocumentRow row
-                    ? Outcome((await api.DocumentReviewAsync(row.Declaration, new DocumentReviewRequest(by, Arg(a, "outcome"), Arg(a, "summary")), cancellationToken: token).ConfigureAwait(false)))
+                    ? Outcome((await api.DocumentReviewAsync(row.Declaration, new DocumentReviewRequest(by, Arg(a, "outcome"), Arg(a, "summary"))
+                        { Sections = a?["sections"]?.Deserialize<DocumentSectionReview[]>(ProtocolJson.Options) }, cancellationToken: token).ConfigureAwait(false)))
                     : NotFound("living document", Arg(a, "path"))),
             Write("work_amend", "Requests a change to an assignment's outcome, scope, target, budget or permitted effects. The request authorizes nothing; a decision admits or declines it.",
                 Arguments(("assignment", "Assignment record id."), ("body", "The amendment body as an object.")), ["assignment", "body"],
