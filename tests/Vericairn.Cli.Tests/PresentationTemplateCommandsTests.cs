@@ -33,7 +33,9 @@ public sealed class PresentationTemplateCommandsTests
         };
         estate.WriteFile("scratch/adoption.json", adoption.ToJsonString());
         string adoptionFile = Path.Combine(estate.Root, "scratch", "adoption.json");
-        Assert.Equal(2, Run("records", "new", "template-defaults", "--by", estate.BuilderId, "--body", adoptionFile).Code);
+        CliHarness.Outcome unauthorized = Run("records", "new", "template-defaults", "--by", estate.BuilderId, "--body", adoptionFile);
+        Assert.Equal(1, unauthorized.Code);
+        Assert.Contains("template.defaults-author", unauthorized.Out, StringComparison.Ordinal);
         Assert.Empty(api.Session.Load().OfType("template-defaults"));
         Assert.Equal(0, Run("records", "new", "template-defaults", "--by", estate.OperatorId, "--body", adoptionFile).Code);
         string adoptionId = Assert.Single(api.Session.Load().OfType("template-defaults")).Id;
