@@ -210,6 +210,29 @@ An agent may record a decision the operator made in conversation, naming the ope
 
 A question for a person is an `ask` record: whom it is put to, the question, the recommendation first, the consequence of leaving it unanswered, and its state (open, notified or withdrawn). A decision that names it in `answers` answers it; waiting never does. An idea worth keeping without approving it is a `possibility`, with its disposition (open, parked, adopted or declined). Both are written with `records new`; `records describe ask` and `record-reference.md` list their fields. `vericairn ask [--to <principal>]` reads the waiting asks, oldest first, delivering at most three per principal and listing the rest as queued. Reading or waiting answers none. Sections 17 and 18 cover the goal runtime and roster routing that can create these asks.
 
+### Record an answered ask with its design changes
+
+In the 0.8.4 development build, `decisions new` records an answer the operator has already supplied in conversation. Supply their exact words and the time they answered. The ask identifies the deciding operator; `--by` identifies the recorder. The command neither chooses an answer nor treats waiting as consent. Recording the decision makes the ask's derived state answered.
+
+```sh
+vericairn decisions new --by <recorder id> --ask <ask id> \
+  --statement "Revise the guide as recommended." --answered-at <UTC answer time> \
+  --base <full base commit> --document design/guide.md \
+  --title "Revise the guide" --summary "Use the revised guide." \
+  --synthesis "The operator accepted the proposed guide revision." \
+  --effect "Revise the guide." --not-authorized "Publication."
+```
+
+Choose the local base commit before this decision's changes. The runtime inspects changes under `design/` from that commit through its estate working tree, including committed, staged, unstaged and untracked files that Git does not ignore. Repeat `--document` for every changed design file; omit it when none changed. Missing, extra or repeated paths refuse the write. Files elsewhere are outside this design document list. Deletions, unresolved conflicts, links and unavailable files refuse because each member needs readable bytes and a pin. Sparse or assume-unchanged design entries also refuse until Git can observe their edits. Staged changes remain in the list even if working bytes were restored; settle those bytes before pinning. No fetch occurs.
+
+The decision time defaults to the answer time. Both must use UTC second precision (`YYYY-MM-DDTHH:MM:SSZ`), the answer must not precede the ask, and neither may be in the future. An explicit `--decided-at` cannot follow the answer. A withdrawn or already answered ask refuses a new decision; inspect its existing answer first. `--expected-ask` can hold the current ask revision to a hash read earlier.
+
+Every changed document gets its next revision through the same preparation as `docs pin`, keeping its current title and using the decision summary. Existing pin rules still apply, including refusal of unchanged bytes, generated outputs and forks. The decision retains the exact ask hash and answer time, base and observed head commits, and each document pin's id and hash. The entire proposed record set is validated before any record is stored. A storage interruption can leave part of a batch: its receipts and retained journal require reconciliation before retrying. No record is removed.
+
+Until configurable writing rules are defined, decision prose is checked case-insensitively against model identities recorded in the estate's run execution history and qualification evidence. This covers title, verbatim statement, summary, synthesis, effects and exclusions. A refusal names the field without repeating the identity. The recorder must resolve the wording with the operator when their verbatim statement is refused; the command never rewrites it.
+
+`--stake` defaults to `low`; `--affects` names affected work orders, and both `--effect` and `--not-authorized` may repeat. Text output includes the decision and pin receipts. `--json` preserves the complete response, including refusals and any receipts requiring reconciliation. See the [CLI options and API contract](cli.md#vericairn-decisions-new).
+
 Standing permission is an authority record based on a decision: a grantee, scopes (`local-engineering`, `repository-write`, `self-accept-ordinary-work`, `accept-work`, `administer`, or free text), the actions reserved to the operator regardless, and conditions. A builder with `self-accept-ordinary-work` may accept its own ordinary work orders; milestones and releases always need the operator. From format 2 a grant may carry an `expires` time: authority is judged at the time each record was authored, so a record authored after the grant expired cannot rely on it. For ordinary scopes the current grants are otherwise used: a later grant or removal can change their derived authority. Format-3 policy scopes use the cited grant at the action's authoring time; a future grant cannot authorize an earlier policy action. Exact signed definition approval remains separate.
 
 ## 5. The work loop: order, brief, assignment, attempt, result

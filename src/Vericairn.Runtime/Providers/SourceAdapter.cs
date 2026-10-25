@@ -31,6 +31,17 @@ public sealed record RepositoryObservation(string Commit, string? Branch, string
 /// <param name="DefaultHead">Commit of the local remote-tracking default branch, or null when unavailable.</param>
 public sealed record ReleaseSourceObservation(bool Clean, string? DefaultBranch, string? DefaultHead);
 
+/// <summary>Exact current bytes of one changed design file, identified without a machine path.</summary>
+/// <param name="Path">Repository-relative design path.</param>
+/// <param name="Hash">SHA-256 of the current file bytes.</param>
+public sealed record DesignFileChange(string Path, string Hash);
+
+/// <summary>A local design change set, including committed, staged, unstaged and untracked files.</summary>
+/// <param name="BaseCommit">Exact local base commit.</param>
+/// <param name="Head">Exact HEAD at observation.</param>
+/// <param name="Documents">Complete changed design-file membership and current content hashes.</param>
+public sealed record DesignChangeSet(string BaseCommit, string Head, IReadOnlyList<DesignFileChange> Documents);
+
 /// <summary>
 /// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
 /// work and never publishes; integration and remote publication are provider operations, not adapter ones.
@@ -54,6 +65,9 @@ public interface ISourceAdapter
 
     /// <summary>Reads cleanliness and the locally known default branch head without fetching or modifying the clone. Null when unsupported or unavailable.</summary>
     ReleaseSourceObservation? InspectRelease(string path) => null;
+
+    /// <summary>Observe design files changed from a full local base commit, without fetching or modifying the repository. Null means unsupported or unavailable.</summary>
+    DesignChangeSet? InspectDesignChanges(string root, string baseCommit) => null;
 
     /// <summary>
     /// Reads a regular file at its exact SHA-256 hash from this repository's local history, without fetching or changing it.

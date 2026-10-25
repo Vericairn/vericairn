@@ -309,6 +309,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
+    public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request) => DecisionFromAskAsync(request).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
     public DocumentPinResponse DocumentPin(DocumentPinRequest request) => Post<DocumentPinRequest, DocumentPinResponse>("/v1/documents/pin", request)!;
 
     /// <inheritdoc />
@@ -569,6 +572,10 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         response.EnsureSuccessStatusCode();
         return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
     }
+
+    private static bool InvalidDecisionOutcome(object? result) => result is DecisionNewResponse response
+        && (response.Pins is null || response.Written is null && response.Problem is null
+            || (response.Written is not null || response.Pins.Count > 0) && response.Problem is not null and not { Code: "reconcile-required" });
 
     private (TResponse? Response, Problem? Problem) PostOrProblem<TRequest, TResponse>(string path, TRequest request)
         where TResponse : class

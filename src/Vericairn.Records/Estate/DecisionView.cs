@@ -82,6 +82,23 @@ public static class DecisionView
             }
         }
 
+        if (decision.Body.TryGetProperty("answer", out JsonElement answer) && answer.ValueKind == JsonValueKind.Object)
+        {
+            text.Append("\n## Recorded answer\n\nAsk ").Append(answer.GetProperty("ask").GetString())
+                .Append(" at ").Append(answer.GetProperty("hash").GetString())
+                .Append("; answered at ").Append(answer.GetProperty("at").GetString()).Append(".\n");
+        }
+        if (decision.Body.TryGetProperty("changeSet", out JsonElement change) && change.ValueKind == JsonValueKind.Object)
+        {
+            text.Append("\n## Design change set\n\nBase commit: ").Append(change.GetProperty("baseCommit").GetString())
+                .Append(". Observed HEAD: ").Append(change.GetProperty("head").GetString()).Append(".\n\n");
+            JsonElement pins = change.GetProperty("pins");
+            if (pins.GetArrayLength() == 0) text.Append("No design files changed.\n");
+            foreach (JsonElement pin in pins.EnumerateArray())
+                text.Append("- ").Append(pin.GetProperty("path").GetString()).Append(": pin ").Append(pin.GetProperty("id").GetString())
+                    .Append(" at ").Append(pin.GetProperty("hash").GetString()).Append('\n');
+        }
+
         if (decision.Body.TryGetProperty("affects", out JsonElement affects) && affects.GetArrayLength() > 0)
         {
             text.Append("\n## Affects\n\n");

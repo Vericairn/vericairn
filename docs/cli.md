@@ -29,6 +29,31 @@ Current signing custody checks presence per acceptance when required. Exit 0 mea
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
 
+## `vericairn decisions new`
+
+The 0.8.4 development build records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).
+
+| Option | Meaning |
+|---|---|
+| `--by <id>` | Required recorder principal. The ask supplies the deciding operator. |
+| `--ask <id>` | Required ask revision id; its current state must still wait for this operator's supplied answer. |
+| `--statement <text>` | Required verbatim operator words, including whitespace. |
+| `--answered-at <timestamp>` | Required UTC answer time, with second precision. |
+| `--base <commit>` | Required full local commit before the design changes. |
+| `--title <text>`, `--summary <text>`, `--synthesis <text>` | Required decision prose. |
+| `--effect <text>` | Repeat for each effect; at least one is required. |
+| `--document <path>` | Repeat for every design file changed from the base through the working tree; omit for an empty set. |
+| `--stake <value>` | `low` (default), `medium`, `high` or `critical`. |
+| `--affects <id>` | Repeat for affected work orders. |
+| `--not-authorized <text>` | Repeat for exclusions. |
+| `--decided-at <timestamp>` | Defaults to the answer time. A later time is refused. |
+| `--expected-ask <hash>` | Optional expected hash of the current ask revision. |
+| `--json` | Complete `DecisionNewResponse`, on success or refusal. |
+
+The API is `POST /v1/decisions/new`. Its `DecisionNewRequest` has required fields `by`, `ask`, `statement`, `answeredAt`, `baseCommit`, `title`, `summary`, `synthesis`, `effects` and `documents`; optional fields are `stake`, `affects`, `notAuthorized`, `decidedAt` and `expectedAsk`. An empty document list is explicit in JSON. SDK operations are `DecisionFromAsk` and `DecisionFromAskAsync`, with the same request.
+
+The response has `written` (decision receipt or null), `pins` (stored document-revision receipts), `problem` and `ok`. HTTP 422 means validation refused with no records stored; HTTP 200 carries success or a partly stored batch. Always inspect `ok` and `problem`. A `reconcile-required` problem preserves the receipts actually stored and requires inspection before retrying. Cancellation after dispatch can also leave an unknown outcome; read the ask and original receipts before sending another write. CLI exit 0 means the complete batch was stored; exit 2 reports a refusal or incomplete batch. The command does not commit, push, publish or change document text.
+
 ## `vericairn docs pin`
 
 Record a document's next revision from the exact bytes in the estate repository:

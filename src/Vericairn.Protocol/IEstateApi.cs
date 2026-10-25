@@ -308,6 +308,9 @@ public partial interface IEstateApi
     /// <summary>Write a verified export to a path on the runtime's machine; a problem when it cannot be written.</summary>
     (ExportResponse? Export, Problem? Problem) Export(ExportRequest request);
 
+    /// <summary>Record a supplied operator answer and its complete design document pins.</summary>
+    DecisionNewResponse DecisionFromAsk(DecisionNewRequest request) => new(null, [], new Problem("unsupported", "This API implementation does not support guided decisions.", []));
+
     /// <summary>Current decisions.</summary>
     DecisionsResponse Decisions();
 

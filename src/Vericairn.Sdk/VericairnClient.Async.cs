@@ -294,6 +294,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> DocumentReviewAsync(string declaration, DocumentReviewRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(DocumentReview), async token => (await PostAsync<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DocumentReview)), cancellationToken);
 
+    /// <summary>The cancellable guided decision write, including its complete response.</summary>
+    public Task<DecisionNewResponse> DecisionFromAskAsync(DecisionNewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<DecisionNewResponse>(nameof(DecisionFromAsk), async token => (await PostAsync<DecisionNewRequest, DecisionNewResponse>("/v1/decisions/new", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DecisionFromAsk)), cancellationToken);
+
     /// <summary>The cancellable DocumentPin operation, with a deadline covering the complete response.</summary>
     public Task<DocumentPinResponse> DocumentPinAsync(DocumentPinRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<DocumentPinResponse>(nameof(DocumentPin), async token => (await PostAsync<DocumentPinRequest, DocumentPinResponse>("/v1/documents/pin", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DocumentPin)), cancellationToken);
@@ -557,7 +561,7 @@ public sealed partial class VericairnClient
                 or DocumentPinResponse { Written: null, Problem: null }
                 or DocumentPinResponse { Written: null, Revision: not null }
                 or DocumentPinResponse { Written: not null, Revision: null or <= 0 }
-                or DocumentPinResponse { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
+                or DocumentPinResponse { Written: not null, Problem: not null and not { Code: "reconcile-required" } } || InvalidDecisionOutcome(result))
                 throw new JsonException("The runtime returned no definite write outcome.");
             if (result is OperatorCloseResponse close && request is OperatorCloseRequest closeRequest)
                 _ = CloseOutcome(closeRequest, close);
