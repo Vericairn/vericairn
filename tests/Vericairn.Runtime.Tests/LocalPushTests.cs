@@ -217,6 +217,8 @@ public sealed class LocalPushTests : IDisposable
         }
         long slot = records + (long)Index(child) * (hashLength + 16) + hashLength;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan((int)slot, 4), (uint)Index(parent));
+        // git writes the commit-graph read-only; clear that (the ReadOnly attribute on Windows, the owner write bit elsewhere) before rewriting it.
+        File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
         File.WriteAllBytes(path, data);
