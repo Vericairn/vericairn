@@ -32,5 +32,12 @@
   "readable-companions.md",
   "reference-inventory.md",
   "release-notes.md",
-  "limitations-and-platforms.md"
+  "limitations-and-platforms.md",
+  "cli.md",
+  "templates.md",
+  "presentation-templates.md",
+  "prompts.md",
+  "prompt-record-reference.md",
+  "operator-requests.md",
+  "api-compatibility-0.8.4.md"
 ]
