@@ -24,6 +24,11 @@ public sealed class GitPushAdapter : IPushAdapter
     private static readonly string[] Routing = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
         "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
+    // Derived object data a clone can write for itself: the commit-graph, reachability bitmaps and the multi-pack-index. A checked
+    // push establishes its range and fast-forward check from the real objects alone, so every git process the adapter runs ignores
+    // these caches; a clone that misreports ancestry in them cannot change where a push goes or what it carries.
+    private static readonly string[] IgnoreDerived = ["-c", "core.commitGraph=false", "-c", "pack.useBitmaps=false", "-c", "core.multiPackIndex=false"];
+
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 
     /// <summary>Each git process has bounded output and a two-minute deadline.</summary>
@@ -181,6 +186,7 @@ public sealed class GitPushAdapter : IPushAdapter
     {
         var info = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         info.ArgumentList.Add("--no-replace-objects");
+        foreach (string setting in IgnoreDerived) info.ArgumentList.Add(setting);
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
         return info;
     }
