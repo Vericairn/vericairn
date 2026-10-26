@@ -31,10 +31,16 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.8.3. It adds `POST /v1/work/new` (CODE-07), `POST /v1/releases/withdraw` and
-`POST /v1/work/{key}/move-plan` (CODE-08), `POST /v1/releases/check` (FIX-55), the upgrade request's `from`
-and `clientBuild` fields (FIX-52) and a diagnosable failure for a retained basis that cannot resolve
-(FIX-58), each described below. 0.8.2 added `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
+This document describes 0.8.4. It adds, in `IEstateApi` and over the daemon, the release-review brief and
+its assignment (CODE-09), the operator-request queue and its signed outcomes (OPS-03), the publication
+documentation pass (DOCS-12), read-only MCP resources and saved-prompt prompts (MCP-02), the `operator
+close` candidates and batch (OPS-02), the saved-prompt library (PROMPT-01), worker-settlement recovery
+(FIX-65), a guided decision from an answered ask (CODE-10) and reserved placeholder package versions
+(FIX-72); every added `IEstateApi` member has a default implementation, so existing implementers stay
+source-compatible, and [API compatibility for 0.8.4](api-compatibility-0.8.4.md) lists them. 0.8.3 added
+`POST /v1/work/new` (CODE-07), `POST /v1/releases/withdraw` and `POST /v1/work/{key}/move-plan` (CODE-08),
+`POST /v1/releases/check` (FIX-55), the upgrade request's `from` and `clientBuild` fields (FIX-52) and a
+diagnosable failure for a retained basis that cannot resolve (FIX-58), each described below. 0.8.2 added `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
 (DOCS-07) and `POST /v1/packages/observe`, `/unlist` and `/deprecate` (DIST-02), with their SDK methods
 and asynchronous counterparts, and over the daemon a record stored while its companion publication was
 interrupted answers as stored, with its recovery problem beside it (FIX-39). 0.8.0 added policy and
@@ -42,12 +48,12 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, and [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, and [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.8.3 package availability
+API route and ordinary SDK calls do not initiate the daily release check. 0.8.4 package availability
 requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
