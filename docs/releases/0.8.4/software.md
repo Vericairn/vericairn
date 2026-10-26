@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This document describes 0.8.3: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.2's and 0.8.3's corrections and
-additions described with their owning flows below. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
+This document describes 0.8.4: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's and 0.8.4's corrections and
+additions described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
-0.8.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.8.4 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -373,7 +373,7 @@ A product that declares no artifacts is read by the generic rule: a platform ide
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
 archive is documentation, and a draft is complete when its checksum file names every other asset.
 
-Before submitting, 0.8.3 offers the whole admission gate without an effect:
+Before submitting, 0.8.4 offers the whole admission gate without an effect:
 
 ```sh
 vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
@@ -498,8 +498,8 @@ The "Milestone and release acceptances" section includes each operator acceptanc
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.8.3 notes from the estate's records, use
-`vericairn docs notes --from 0.8.2 --to 0.8.3 --out docs/releases/0.8.3`.
+To render the 0.8.4 notes from the estate's records, use
+`vericairn docs notes --from 0.8.3 --to 0.8.4 --out docs/releases/0.8.4`.
 The exclusive start follows 0.8.2's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 

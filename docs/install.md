@@ -1,32 +1,31 @@
-# Installing Vericairn 0.8.3
+# Installing Vericairn 0.8.4
 
-The 0.8.3 workflow builds self-contained distributables per platform: no separately installed .NET runtime is required. The operating system's native libraries are still required, and Workbench needs a desktop session. There are two distributables per platform: `vericairn-0.8.3-<platform>` holds the command line (`bin/vericairn`, and on macOS also `bin/vericairn-enclave`, the helper the command line calls for Secure Enclave custody), and `vericairn-workbench-0.8.3-<platform>` holds the desktop (`bin/vericairn-workbench`) with a copy of the command line beside it, because Workbench drives the daemon through that command line. `git` is needed for the commands that read or adopt repositories and for a repository-synced estate; the GitHub CLI `gh`, logged in as you, is needed for release and checked-change providers and for observing workflow runs, because Vericairn never holds a token of its own. On Linux, secret-service custody needs `secret-tool` (from libsecret) and a running secret service such as GNOME Keyring; without them device keys are kept in owner-only files.
+The 0.8.4 workflow builds self-contained distributables per platform: no separately installed .NET runtime is required. The operating system's native libraries are still required, and Workbench needs a desktop session. There are two distributables per platform: `vericairn-0.8.4-<platform>` holds the command line (`bin/vericairn`, and on macOS also `bin/vericairn-enclave`, the helper the command line calls for Secure Enclave custody), and `vericairn-workbench-0.8.4-<platform>` holds the desktop (`bin/vericairn-workbench`) with a copy of the command line beside it, because Workbench drives the daemon through that command line. `git` is needed for the commands that read or adopt repositories and for a repository-synced estate; the GitHub CLI `gh`, logged in as you, is needed for release and checked-change providers and for observing workflow runs, because Vericairn never holds a token of its own. On Linux, secret-service custody needs `secret-tool` (from libsecret) and a running secret service such as GNOME Keyring; without them device keys are kept in owner-only files.
 
 The archives install `vericairn`. Introduced in published 0.7.1, the NuGet tool installs `dotnet-vc`, canonically invoked as `dotnet vc`; the two command lines take the same estate arguments. Workbench is installed by direct download only (section 3). The SDK is a separate NuGet package (section 9).
 
-Use the 0.8.3 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
+Use the 0.8.4 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
 
-0.8.3 follows published 0.8.2 with `estate init` pinning the running build's exact source commit
+0.8.4 follows published 0.8.3 with declarative document templates and their sections, reviews and
+cohesion (TPL-01, TPL-02 and TPL-COMMS-01), a shared library of saved prompts (PROMPT-01), a signed
+`operator close` action (OPS-02) and durable operator requests (OPS-03), a release-review brief
+generated from the records and run as an assignment (CODE-09), a guided decision from an answered ask
+(CODE-10), a release documentation pass (DOCS-12), read-only MCP resources and prompts (MCP-02), the
+first-party bootstrap for every estate (FIX-68), and FIX-64, FIX-65, FIX-66, FIX-69 and FIX-72, with
+time limits on CI steps and jobs (CI-05). It also hardens how a checked push reads its local objects
+(FIX-67), as the release notes' Security section describes.
+0.8.3 followed published 0.8.2 with `estate init` pinning the running build's exact source commit
 (FIX-47), work orders created from flags (CODE-07), candidate withdrawal and moving planned work
-(CODE-08), verified pins of a published Vericairn release, online or offline (FIX-52), a submission
-check that records nothing (FIX-55), the same library builds in every platform's archive (FIX-61), a
-warning when an older background runtime still serves the estate after an upgrade (FIX-62),
-corrections to living documents, work records, retried submissions, retained-basis diagnostics and the
-client-outcomes page (FIX-50 and FIX-56 through FIX-59), and CI that runs each platform's published
-command line and validates API compatibility against the published packages (CI-04). It also corrects
-how a checked push runs git (FIX-60), as the release notes' Security section describes.
-0.8.2 followed published 0.8.0 and carried the work of 0.8.1, whose candidate was withdrawn before
-publication, with the macOS and Linux single-file command lines able to start processes again (FIX-53)
-and a retained basis's record digest rechecked when it is read (FIX-54). That work was the corrections
-from 0.8.0's review (FIX-34 through FIX-38), the
-policy and adoption corrections (FIX-39 through FIX-46 and FIX-48), test timing and the release's packaging
-path in CI (FIX-29, FIX-32, FIX-49, CI-01 and CI-03), the release gate's retained basis by reference
-(FIX-51), package registry observations (DIST-02), the package icon
-(DIST-03), MCP Registry discovery (DIST-04) and exact-byte document pins (DOCS-07).
-0.8.3 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0 or 0.8.2 without a format step. The format-3 upgrade from 0.7.3 preserves historical
-records and requires explicit adoption afterwards. 0.8.2's and 0.8.0's features and earlier corrections
-remain. Earlier sets stay frozen.
+(CODE-08), verified pins of a published Vericairn release (FIX-52), a submission check that records
+nothing (FIX-55), the same library builds in every platform's archive (FIX-61), a warning when an older
+background runtime still serves an upgraded estate (FIX-62), FIX-50 and FIX-56 through FIX-59, CI that
+runs each platform's published command line (CI-04), and a correction to how a checked push runs git
+(FIX-60). Earlier published releases, and the withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and
+0.8.1, are recorded in their own frozen sets.
+0.8.4 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2 or 0.8.3 without a format step. The format-3 upgrade from 0.7.3 preserves
+historical records and requires explicit adoption afterwards. 0.8.3's, 0.8.2's and 0.8.0's features and
+earlier corrections remain. Earlier sets stay frozen.
 
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
@@ -97,10 +96,10 @@ If the manifest pins a source commit instead of a release (the default for `esta
 
 ## 2. Route B: direct download of the command line
 
-1. After publication, from https://github.com/Vericairn/vericairn/releases/tag/v0.8.3 download the distributable for your platform and `SHA256SUMS`.
-2. Verify the download. Linux: `sha256sum -c SHA256SUMS --ignore-missing`. macOS: `shasum -a 256 -c SHA256SUMS --ignore-missing`. Windows PowerShell: `(Get-FileHash .\vericairn-0.8.3-win-x64.zip).Hash` and compare with the line in `SHA256SUMS`. The expected hashes are in the estate's published release record, which is the authority: a tag can be moved, a record cannot.
-3. Unpack: `tar -xzf vericairn-0.8.3-<platform>.tar.gz -C <directory>` on Linux and macOS; `Expand-Archive` on Windows. The archive holds `bin/vericairn` (with `bin/vericairn-enclave` beside it on macOS), `LICENSE`, `NOTICE`, the third-party notices and `licenses/` with the license and notice texts of every component the command line bundles.
-4. Run `<directory>/bin/vericairn version` (`bin\vericairn.exe` on Windows). It prints `0.8.3+<commit>`.
+1. After publication, from https://github.com/Vericairn/vericairn/releases/tag/v0.8.4 download the distributable for your platform and `SHA256SUMS`.
+2. Verify the download. Linux: `sha256sum -c SHA256SUMS --ignore-missing`. macOS: `shasum -a 256 -c SHA256SUMS --ignore-missing`. Windows PowerShell: `(Get-FileHash .\vericairn-0.8.4-win-x64.zip).Hash` and compare with the line in `SHA256SUMS`. The expected hashes are in the estate's published release record, which is the authority: a tag can be moved, a record cannot.
+3. Unpack: `tar -xzf vericairn-0.8.4-<platform>.tar.gz -C <directory>` on Linux and macOS; `Expand-Archive` on Windows. The archive holds `bin/vericairn` (with `bin/vericairn-enclave` beside it on macOS), `LICENSE`, `NOTICE`, the third-party notices and `licenses/` with the license and notice texts of every component the command line bundles.
+4. Run `<directory>/bin/vericairn version` (`bin\vericairn.exe` on Windows). It prints `0.8.4+<commit>`.
 5. Put `bin` on your `PATH` if you want to type `vericairn` alone. Every command takes `--estate <path>`; without it the current directory is the estate. Keep `vericairn-enclave` beside `vericairn`: the command line looks for the helper next to itself, and without it Secure Enclave custody is unavailable.
 
 Platform notes, stated honestly because the build is unsigned:
@@ -111,7 +110,7 @@ Platform notes, stated honestly because the build is unsigned:
 
 ## 3. Workbench, the desktop
 
-1. From the same release page download `vericairn-workbench-0.8.3-<platform>.tar.gz` (`.zip` on Windows) and verify it against `SHA256SUMS` as above.
+1. From the same release page download `vericairn-workbench-0.8.4-<platform>.tar.gz` (`.zip` on Windows) and verify it against `SHA256SUMS` as above.
 2. Unpack it to a directory of its own. It holds `bin/vericairn-workbench` and `bin/vericairn` (with `.exe` on Windows, and with `bin/vericairn-enclave` on macOS), `LICENSE`, `NOTICE`, the third-party notices and `licenses/` with the license and notice texts of every bundled component, the fonts' among them.
 3. Run it:
 
@@ -264,7 +263,7 @@ vericairn worker configure --launcher codex --model <model> --effort max
 vericairn worker configure --launcher codex
 ```
 
-Replace `<model>` with your chosen model selector; Codex accepts `max` in 0.8.3. Use `--launcher claude-code` with one of its supported efforts for Claude Code; model/effort compatibility is checked by the harness at launch. Setting requires both model and effort; omitting choices shows the configuration (`--json` is available). Repeated `--allow-model` and `--allow-effort` options narrow permitted choices and must include their defaults. With no model allowlist only the default model is permitted; with no effort allowlist the launcher's supported efforts are permitted. Each set replaces that launcher's defaults and allowlists. Configuration never widens the qualified inventory or adds tools, servers, environment variables or routes. The stock runtime derives its environment policy only after a baseline or exact current qualification admits the native inventory.
+Replace `<model>` with your chosen model selector; Codex accepts `max` in 0.8.4. Use `--launcher claude-code` with one of its supported efforts for Claude Code; model/effort compatibility is checked by the harness at launch. Setting requires both model and effort; omitting choices shows the configuration (`--json` is available). Repeated `--allow-model` and `--allow-effort` options narrow permitted choices and must include their defaults. With no model allowlist only the default model is permitted; with no effort allowlist the launcher's supported efforts are permitted. Each set replaces that launcher's defaults and allowlists. Configuration never widens the qualified inventory or adds tools, servers, environment variables or routes. The stock runtime derives its environment policy only after a baseline or exact current qualification admits the native inventory.
 
 Configuration is per machine and is never recorded in the estate. Its owner-only files are `worker/codex.json` and `worker/claude-code.json` under the user's Vericairn home. Reads and writes are refused when that home is inside a Git repository or estate. If your home directory is a repository, set `VERICAIRN_HOME` to a machine-local directory outside all repositories and estates for the CLI and daemon before starting them. Both read the configuration for each run and agent goal step; changing its choices needs no daemon restart. Missing configuration refuses before intent and names the setup command. Installing or qualifying a harness alone supplies no model or effort default. Explicit run overrides cannot bypass local allowlists or inherited restrictions.
 
@@ -464,13 +463,13 @@ dotnet vc doctor
 dotnet vc --estate <estate root> status
 ```
 
-Put the global tool directory on PATH if the installer asks. The tool uses the .NET and ASP.NET Core shared runtimes supplied by the SDK; unlike the archives, it is not self-contained. Use `--version 0.8.3` on the install command to pin this release, and `dotnet tool update --global dotnet-vc` to update a global installation to a published version. Installation grants no estate authority.
+Put the global tool directory on PATH if the installer asks. The tool uses the .NET and ASP.NET Core shared runtimes supplied by the SDK; unlike the archives, it is not self-contained. Use `--version 0.8.4` on the install command to pin this release, and `dotnet tool update --global dotnet-vc` to update a global installation to a published version. Installation grants no estate authority.
 
 For a repository-local tool, create a manifest once and commit it:
 
 ```sh
 dotnet new tool-manifest
-dotnet tool install dotnet-vc --version 0.8.3
+dotnet tool install dotnet-vc --version 0.8.4
 dotnet vc version
 ```
 
@@ -479,7 +478,7 @@ A new checkout runs `dotnet tool restore` and then `dotnet vc ...` from that rep
 In a .NET 10 console or library project, add the SDK front door:
 
 ```sh
-dotnet add package Vericairn --version 0.8.3
+dotnet add package Vericairn --version 0.8.4
 ```
 
 `Vericairn` is a dependency-only package that brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`. The namespace and assembly remain `Vericairn.Sdk`; see `api-v1.md` for client construction. The front door does not embed a runtime or daemon. Embedding hosts can add `Vericairn.Runtime` or `Vericairn.Daemon` separately, and adapters can use `Vericairn.Mcp`. These Community packages use Apache-2.0.
@@ -496,11 +495,11 @@ package publication; the registry listing requires the operator's separate
 [publication step](operator-actions.md#mcp-registry-publication). These are publication targets,
 not evidence that either listing is already live.
 
-After 0.8.3 is published, a client with the .NET 10 SDK can start the server without
+After 0.8.4 is published, a client with the .NET 10 SDK can start the server without
 installing a global tool:
 
 ```sh
-dnx dotnet-vc@0.8.3 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+dnx dotnet-vc@0.8.4 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
 ```
 
 Supply an existing estate root and the principal id to act for. Registry clients request both
@@ -610,5 +609,5 @@ reads normally have 30 seconds; longer checks, context, upgrades and release ope
 15 minutes. An interrupted effect can remain unknown and must be reconciled before retrying.
 Synchronous SDK signatures keep their original timeout and exception behavior. Shared public
 vocabularies are immutable and option owners copy supplied collections; source consumers should
-review API compatibility [for 0.8.0](api-compatibility-0.8.0.md), [for 0.8.2](api-compatibility-0.8.2.md) and [for 0.8.3](api-compatibility-0.8.3.md) before rebuilding. The ordinary source version
+review API compatibility [for 0.8.0](api-compatibility-0.8.0.md), [for 0.8.2](api-compatibility-0.8.2.md), [for 0.8.3](api-compatibility-0.8.3.md) and [for 0.8.4](api-compatibility-0.8.4.md) before rebuilding. The ordinary source version
 retains `-dev`; an installed binary is no evidence of publication or qualification.

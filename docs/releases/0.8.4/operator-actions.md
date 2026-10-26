@@ -351,14 +351,14 @@ the release and NuGet workflows do not publish a registry entry.
    [nuget.org](https://www.nuget.org/packages/dotnet-vc). Download that release's `.nupkg` and
    `SHA256SUMS` and verify the package against its checksum. Use the accepted release's package,
    without rebuilding it or substituting a manifest from a checkout.
-2. In a fresh working directory containing that package, extract its manifest. For 0.8.3:
+2. In a fresh working directory containing that package, extract its manifest. For 0.8.4:
 
    ```sh
-   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.3.nupkg").read(".mcp/server.json"))'
+   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.4.nupkg").read(".mcp/server.json"))'
    ```
 
    Inspect `server.json`: the server name must be `io.github.vericairn/vericairn`, both versions
-   must be `0.8.3`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
+   must be `0.8.4`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
    principal inputs as placeholders. For a later release, use that release's version throughout.
 3. Install the registry's `mcp-publisher` from its
    [official release](https://github.com/modelcontextprotocol/registry/releases), following
