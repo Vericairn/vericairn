@@ -39,7 +39,7 @@
     <DebugType>portable</DebugType>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <VersionPrefix>0.8.3</VersionPrefix>
+    <VersionPrefix>0.8.4</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
   </PropertyGroup>
   <ItemGroup>
