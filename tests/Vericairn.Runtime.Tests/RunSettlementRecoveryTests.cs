@@ -253,6 +253,59 @@ public sealed class RunSettlementRecoveryTests
         Assert.True(recovered.Ok, recovered.Message);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnObservationMarkedSettledWithoutARecordSettlesOnlyOnceTheRecordsAreChecked(bool missingFact)
+    {
+        using var run = new RunEstate();
+        run.Service.BeforeValidatingRecords = RefuseSettlement;
+        RunResponse started = run.Start("generic", "generic", run.Report("marked-settlement"));
+        Assert.True(started.Ok, started.Message);
+        RunDirectory directory = Failed(run, started.Run);
+        // Dispose joins the original supervisor before marking its test-owned snapshot as an earlier worker did.
+        run.Service.Dispose();
+        RunObservedState state = directory.Read()!;
+        state.Settled = "observed-success";
+        if (missingFact) state.ExitCode = null;
+        directory.Write(state);
+
+        // Startup never settles a marked observation: its settlement may sit on a branch not yet merged.
+        using EstateService restarted = EstateService.Open(run.Estate.Root);
+        Assert.Equal("dispatched", Assert.Single(restarted.Runs().Runs).Status);
+        RunSettleResponse withoutCheck = restarted.RunSettle(started.Run, new(run.Estate.OperatorId));
+        Assert.False(withoutCheck.Ok);
+        Assert.Equal("unresolved", withoutCheck.Problem!.Code);
+        Assert.Contains("--records-checked", withoutCheck.Message, StringComparison.Ordinal);
+        Assert.Equal(2, AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions.Count);
+
+        RunSettleResponse checkedSettlement = restarted.RunSettle(started.Run, new(run.Estate.OperatorId) { RecordsChecked = true });
+        if (missingFact)
+        {
+            // Confirmation never invents a fact the observation lacks.
+            Assert.False(checkedSettlement.Ok);
+            Assert.Equal("unresolved", checkedSettlement.Problem!.Code);
+            Assert.Equal("dispatched", Assert.Single(restarted.Runs().Runs).Status);
+            Assert.Equal(2, AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions.Count);
+            return;
+        }
+
+        Assert.True(checkedSettlement.Ok, checkedSettlement.Message);
+        RunRow row = Assert.Single(restarted.Runs().Runs);
+        Assert.Equal("observed-success", row.Status);
+        JsonElement recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!.Latest.Body;
+        Assert.Contains(recorded.GetProperty("evidence").EnumerateArray(),
+            e => e.GetProperty("summary").GetString()!.Contains("marked settled as observed-success", StringComparison.Ordinal));
+        int revisions = AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions.Count;
+        Assert.Equal(3, revisions);
+        // A recorded settlement is never written twice, with or without the confirmation, on request or at startup.
+        Assert.Equal("already-settled", restarted.RunSettle(started.Run, new(run.Estate.OperatorId) { RecordsChecked = true }).Problem!.Code);
+        restarted.Dispose();
+        using EstateService again = EstateService.Open(run.Estate.Root);
+        Assert.Equal(revisions, AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions.Count);
+        Assert.Equal(0, again.Check().Errors);
+    }
+
     private static RunDirectory Failed(RunEstate run, string id)
     {
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, id);

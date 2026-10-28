@@ -572,7 +572,15 @@ public sealed record RunStopRequest(string By, string? Reason = null, int? Grace
 
 /// <summary>Settle an exited run from the worker's retained observation.</summary>
 /// <param name="By">A principal permitted to stop the run.</param>
-public sealed record RunSettleRequest(string By);
+public sealed record RunSettleRequest(string By)
+{
+    /// <summary>
+    /// Confirms that no branch or copy of the estate holds a settlement for the run. Required to settle a run whose
+    /// retained observation is already marked settled while these records hold none, because the settlement may sit on
+    /// a branch not yet merged; without it that settlement stays unresolved.
+    /// </summary>
+    public bool RecordsChecked { get; init; }
+}
 
 /// <summary>The result of recovering a run's unrecorded settlement.</summary>
 /// <param name="Run">The original run's id.</param>

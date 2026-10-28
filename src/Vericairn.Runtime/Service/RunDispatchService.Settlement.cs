@@ -32,7 +32,7 @@ internal sealed partial class RunDispatchService
                 return SettlementProblem(found.Id, "refused", refused);
             if (recordAccess.RequestDeviceRefusal(model) is Problem denied)
                 return SettlementProblem(found.Id, denied.Code, denied.Message);
-            return SettleRetained(found, request.By);
+            return SettleRetained(found, request.By, request.RecordsChecked);
         }
     }
 
@@ -44,7 +44,7 @@ internal sealed partial class RunDispatchService
         {
             foreach (AgentRuns.Run run in AgentRuns.All(session.Load()).Where(r => r.InFlight))
             {
-                RunSettleResponse response = SettleRetained(run, run.Intent.By);
+                RunSettleResponse response = SettleRetained(run, run.Intent.By, recordsChecked: false);
                 if (!response.Ok && response.Problem?.Code is not ("in-flight" or "no-observation")) settlementProblems[run.Id] = response.Message;
             }
         }
@@ -52,7 +52,7 @@ internal sealed partial class RunDispatchService
 
     // Caller holds the service gate through the observation, latest-revision check and settlement. An active
     // supervisor owns its final audits until it returns, even after publishing the boundary's exit.
-    private RunSettleResponse SettleRetained(AgentRuns.Run run, string by)
+    private RunSettleResponse SettleRetained(AgentRuns.Run run, string by, bool recordsChecked)
     {
         if (!run.InFlight)
             return SettlementProblem(run.Id, "already-settled", $"Run {run.Id} ended as {run.Status}; there is nothing to settle.", run.Status);
@@ -71,7 +71,12 @@ internal sealed partial class RunDispatchService
                 ? Unresolved("No retained run observation is available on this machine; settlement remains unresolved.")
                 : SettlementProblem(run.Id, "no-observation", "This machine did not supervise the run and retains no observation of it; settle it where it ran.", run.Status);
         if (observed.Run != run.Id) return Unresolved("The retained observation names a different run; settlement remains unresolved.");
-        if (observed.Settled is not null) return Unresolved("The local observation claims settlement but the records do not; reconcile the records before retrying.");
+        // A marker without a settlement record can mean the record sits on a branch or copy not yet merged, so settling
+        // here could record the run twice. Only a requester who has checked every branch and copy settles it, never startup.
+        string? unrecordedMarker = observed.Settled;
+        if (unrecordedMarker is not null && !recordsChecked)
+            return Unresolved($"The local observation is marked settled as {unrecordedMarker}, but these records hold no settlement for run {run.Id}. "
+                + "Merge any branch or copy of the estate that holds it; once none does, retry with --records-checked to record the settlement from the retained observation.");
         if (observed.ExitedAt is null)
             return SettlementProblem(run.Id, "in-flight", "The run's boundary has not been observed exited; no settlement can be established.", run.Status);
         if (supervisions.TryGetValue(run.Id, out var supervision) && !supervision.Task.IsCompleted && observed.Problem is null)
@@ -115,6 +120,8 @@ internal sealed partial class RunDispatchService
                 JsonObject body = Settle(previous, outcome!, scope,
                     TimeSpan.FromTicks(observed.MinuteTicks ?? TimeSpan.TicksPerMinute), observed.HeartbeatSeconds);
                 if (recoveryNote is not null) body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = recoveryNote });
+                if (unrecordedMarker is not null)
+                    body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = $"The retained observation was marked settled as {unrecordedMarker}, but the records held no settlement; the requester confirmed that no branch or copy of the estate holds one, and the settlement is recorded from the retained facts." });
                 status = body["status"]!.GetValue<string>();
             });
             if (!settled.Ok) return Unresolved("The observed settlement could not be recorded: " + settled.Problem?.Message, settled.Problem?.Findings);
