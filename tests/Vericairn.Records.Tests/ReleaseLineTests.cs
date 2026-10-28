@@ -92,6 +92,7 @@ public class ReleaseLineTests
     {
         using var f = new ReleaseLineFixture();
         RecordEnvelope source = f.Publish(ReleaseLineFixture.Body("2.1.0"));
+        f.ReviseProduct(ReleaseLineFixture.ProductBody());
         f.Publish(ReleaseLineFixture.Body("1.9.1", "1.x", channel, source));
         f.AssertValid();
     }
@@ -101,6 +102,7 @@ public class ReleaseLineTests
     [InlineData("lts", "stable")]
     [InlineData("nightly", "stable")]
     [InlineData("nightly", "prerelease")]
+    [InlineData("prerelease", "nightly")]
     [InlineData("stable", "nightly")]
     public void ALineCannotChangeItsChannel(string first, string second)
     {
@@ -119,6 +121,22 @@ public class ReleaseLineTests
         f.Publish(ReleaseLineFixture.Body("1.0.0", "one", channel));
         f.Publish(ReleaseLineFixture.Body("1.1.0-rc.1", "one", "prerelease"));
         f.Publish(ReleaseLineFixture.Body("1.1.0", "one", channel));
+        f.AssertValid();
+    }
+
+    [Theory]
+    [InlineData("stable")]
+    [InlineData("lts")]
+    public void ADeclaredLineCanStartWithAPrereleaseOfItsFirstVersion(string channel)
+    {
+        using var f = new ReleaseLineFixture();
+        JsonObject product = ReleaseLineFixture.ProductBody();
+        JsonObject line = new() { ["name"] = "one", ["channel"] = channel };
+        if (channel == "lts") line["endOfSupport"] = "2028-01-01T00:00:00Z";
+        product["lines"] = new JsonArray(line);
+        f.ReviseProduct(product);
+        f.Publish(ReleaseLineFixture.Body("1.0.0-rc.1", "one", "prerelease"));
+        f.Publish(ReleaseLineFixture.Body("1.0.0", "one", channel));
         f.AssertValid();
     }
 
@@ -158,6 +176,18 @@ public class ReleaseLineTests
         JsonObject product = ReleaseLineFixture.ProductBody();
         product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "nightly" });
         AssertError(f, f.ReviseProduct(product), "#body.lines[0].channel", "product.line-channel");
+    }
+
+    [Fact]
+    public void NamingAnEarlierProductRevisionCannotBypassADeclaredChannel()
+    {
+        using var f = new ReleaseLineFixture();
+        RecordEnvelope earlier = f.Product;
+        JsonObject product = ReleaseLineFixture.ProductBody();
+        product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "nightly" });
+        f.ReviseProduct(product);
+        RecordEnvelope conflict = f.Estate.Add("release", f.Estate.OperatorId, ReleaseLineFixture.Body().ToJsonString(), earlier.Reference);
+        AssertError(f, conflict, "#body.channel", "release.line-channel");
     }
 
     [Theory]
@@ -202,6 +232,7 @@ public class ReleaseLineTests
     [InlineData("2026-10-13T12:00:07Z", true)]
     [InlineData("2026-10-13T07:00:07-05:00", true)]
     [InlineData("2028-01-01T00:00:00.123+05:30", true)]
+    [InlineData("2028-01-01t00:00:00z", true)]
     public void EndOfSupportIsComparedAsAnInstant(string end, bool valid)
     {
         using var f = new ReleaseLineFixture();
@@ -264,6 +295,20 @@ public class ReleaseLineTests
         body["backportOf"] = JsonNode.Parse(pin);
         RecordEnvelope record = f.Candidate(body);
         Assert.Contains(f.Estate.Load().Findings, x => x.Code == code && x.Location.StartsWith(record.ExpectedPath + "#body.backportOf", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ABackportPinAdmitsOnlyIdAndHashAndCannotNameAFuturePublication()
+    {
+        using var f = new ReleaseLineFixture();
+        RecordEnvelope source = f.Publish(ReleaseLineFixture.Body());
+        JsonObject body = ReleaseLineFixture.Body("1.9.1", "1.x", backport: source);
+        body["backportOf"]!["type"] = "release";
+        AssertError(f, f.Candidate(body), "#body.backportOf.type", "body.unknown-key");
+        body["backportOf"]!.AsObject().Remove("type");
+        body["version"] = "1.9.2";
+        f.Estate.SetClock(source.AtTime.AddSeconds(-2));
+        AssertError(f, f.Candidate(body), "#body.backportOf.id", "release.backport-time");
     }
 
     [Fact]

@@ -447,7 +447,25 @@ public sealed record ReleaseSubmitRequest(string Product, string Version, string
 {
     /// <summary>The submitting client's full informational version, including its source commit; required in format 3.</summary>
     public string? ClientBuild { get; init; }
+
+    /// <summary>Release line; omitted means current.</summary>
+    public string? Line { get; init; }
+
+    /// <summary>Publication channel; omitted means stable.</summary>
+    public string? Channel { get; init; }
+
+    /// <summary>RFC 3339 end of support, required only for lts.</summary>
+    public string? EndOfSupport { get; init; }
+
+    /// <summary>Exact published release of this product carried across from another line.</summary>
+    public ReleaseBackportReference? BackportOf { get; init; }
 }
+
+/// <summary>An exact release revision carried across from another line.</summary>
+/// <param name="Id">Published release record id.</param>
+/// <param name="Hash">Exact release hash.</param>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record ReleaseBackportReference(string Id, string Hash);
 
 /// <summary>One submission objection and the action needed before trying again.</summary>
 /// <param name="Code">Stable diagnostic code.</param>

@@ -57,6 +57,7 @@ internal sealed partial class ReleaseCoordinationService(
         (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, request.Version, request.By, now(), commit, provider, destination);
         ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination));
         List<FindingDto> objections = [.. assessment.Objections];
+        objections.AddRange(CheckReleaseMetadata(model, request, commit, destination));
         if (recordAccess.RequestDeviceRefusal(model) is { } denied) objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", "release", denied.Message)]);
         RecordEnvelope? product = model.ById.GetValueOrDefault(request.Product);
         if (product is not { Type: "product" } || !model.IsCurrent(product)) objections.Add(new("error", "release.product", "release", "The prepared product revision is no longer current."));
@@ -261,6 +262,8 @@ internal sealed partial class ReleaseCoordinationService(
         AddIfGiven(requested, "ref", request.Ref);
         AddIfGiven(requested, "workflow", request.Workflow);
         IReadOnlyDictionary<string, string> settings = profile.Settings(descriptor, providerId, requested);
+        if (settings.Keys.Any(key => ReleaseMetadataKeys.Contains(key, StringComparer.Ordinal)))
+            setup.Add(new("error", "release.metadata-setting", "release", "Release line metadata belongs in the release fields, not provider settings."));
         foreach (string missing in descriptor.DeclaredSettings.Where(s => s.Required && (!settings.TryGetValue(s.Name, out string? value) || string.IsNullOrWhiteSpace(value))).Select(s => s.Name)
             .Concat(descriptor.Destination is { } key && (!settings.TryGetValue(key, out string? value) || string.IsNullOrWhiteSpace(value)) ? [key] : []).Distinct(StringComparer.Ordinal))
             setup.Add(new("error", "release.setting", "release:" + missing, $"The provider '{providerId}' needs the settings {missing}. Supply it on the request or product destination."));
@@ -281,6 +284,7 @@ internal sealed partial class ReleaseCoordinationService(
             RecordEnvelope? current = model.Current("operation").FirstOrDefault(r => EstateModel.BodyString(r, "identity") == identity);
             string? status = current is null ? null : EstateModel.BodyString(current, "status");
             JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
+            AddReleaseMetadata(intentBody["target"]!.AsObject(), request);
             JsonObject claimBody = current is null ? intentBody : ReleaseFlow.RetryIntent(current.Body, intentBody, string.IsNullOrWhiteSpace(request.Reconciliation) ? "Pending admission." : request.Reconciliation);
             if (current is not null) claimBody["dispatchedAt"] = RecordParser.FormatTimestamp(now());
             var first = Admission(model, request, releaseCommit, descriptor, destination, claimBody, current?.Id);
@@ -480,7 +484,7 @@ internal sealed partial class ReleaseCoordinationService(
         RecordResponse? productRecord = readRecord(product);
         ReleaseProfile profile = productRecord is not null && productRecord.Type == "product" ? ReleaseProfile.FromProductBody(productRecord.Envelope.GetProperty("body")) : ReleaseProfile.None;
         var recordedSettings = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (JsonProperty property in target.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String && p.Name is not ("version" or "product" or "run")))
+        foreach (JsonProperty property in target.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String && p.Name is not ("version" or "product" or "run") && !ReleaseMetadataKeys.Contains(p.Name, StringComparer.Ordinal)))
         {
             recordedSettings[property.Name] = property.Value.GetString()!;
         }
@@ -581,6 +585,7 @@ internal sealed partial class ReleaseCoordinationService(
                 (ReleaseRecordFormat formats, string formatEvidence, bool stated) = CandidateFormats(provider, destination, tag, request.Version, release, profile, checksums);
                 evidence.Add(formatEvidence);
                 JsonObject candidateBody = ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums, formats);
+                CopyReleaseMetadata(target, candidateBody);
                 foreach (string hash in observedBasis) candidateBody["evidence"]!.AsArray().Insert(0, new JsonObject { ["summary"] = "Exact policy and duty basis at observed candidate admission.", ["hash"] = hash });
                 WriteOutcome candidate = WriteRecord(new NewRecordRequest("release", request.By, Element(candidateBody), $"product:{product}"));
                 if (!candidate.Ok)
@@ -588,9 +593,11 @@ internal sealed partial class ReleaseCoordinationService(
                     return ReleaseProblem(identity, newStatus, candidate.Problem!);
                 }
 
-                string publish = provider.ManualPublicationCommand(destination, tag);
+                string? publish = PublicationCommand(provider, destination, tag, Element(candidateBody));
                 string formatNote = stated ? string.Empty : $" The draft states no record formats, so the candidate carries this runtime's ({formats.Describe()}); a superseding revision corrects them if the release's differ.";
-                return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}.{formatNote} Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
+                string publication = publish is null ? UnsupportedPublication(Element(candidateBody))
+                    : $"Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.";
+                return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}.{formatNote} {publication}", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
             }
 
             default:
@@ -669,12 +676,14 @@ internal sealed partial class ReleaseCoordinationService(
         if (recorded.Status == "withdrawn")
             return new ReleaseResponse(identity, "withdrawn", $"Release {request.Version} is withdrawn. Observe its draft-deletion intent with --withdrawal; a withdrawal is never published by this observation.", true, ReleaseId: recorded.Id, Url: release?.Url);
 
+        RecordResponse candidate = readRecord(recorded.Id)!;
         if (release is null || release.Draft || release.PublishedAt is null)
         {
-            return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.", true, ReleaseId: recorded.Id, Publish: provider.ManualPublicationCommand(destination, tag), Url: release?.Url);
+            string? publish = PublicationCommand(provider, destination, tag, candidate.Envelope.GetProperty("body"));
+            string unsupported = publish is null ? " " + UnsupportedPublication(candidate.Envelope.GetProperty("body")) : string.Empty;
+            return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.{unsupported}", true, ReleaseId: recorded.Id, Publish: publish, Url: release?.Url);
         }
 
-        RecordResponse candidate = readRecord(recorded.Id)!;
         WriteOutcome published = WriteRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id, Expected: candidate.Hash));
         if (!published.Ok)
         {

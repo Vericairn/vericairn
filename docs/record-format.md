@@ -34,6 +34,38 @@ same build registry and identify the format that introduced each field. An older
 reader's recognition of a format number alone does not prove that it implements
 every later additive field or behavior described here.
 
+## Release lines and channels (0.9.0)
+
+These optional fields extend record format 3. Existing release bodies, hashes and
+signatures stay unchanged; absence is read as `current`/`stable`, without writing defaults.
+A format-2 record cannot carry these fields, and a format-2 reader refuses their
+format-3 envelope. Upgrade participating readers before using the additions.
+
+| Release field | Validation |
+| --- | --- |
+| `line` | A name matching `^[a-z0-9][a-z0-9.-]{0,39}$`; absent means `current`. |
+| `channel` | `stable`, `lts`, `prerelease` or `nightly`; absent means `stable`. |
+| `endOfSupport` | An RFC 3339 timestamp with time and UTC offset. Required for `lts`, forbidden on other channels, and no earlier than the release's `publishedAt`. |
+| `backportOf` | Exactly `{id, hash}` of a current published release of the same product in another line. Candidates, withdrawn releases, stale revisions and mismatched hashes are refused. Every channel can carry a backport. |
+
+A line keeps its channel across releases and product revisions. A `stable` or `lts`
+line can also carry `prerelease` versions: the version has a prerelease suffix and
+its numeric version is newer than that line's earlier stable or LTS publications.
+A `nightly` line holds only nightly releases. A version belongs to one line;
+duplicate current versions and published versions in different lines conflict,
+including when releases reference different revisions of the product.
+
+The product's optional `lines` field is a nonempty array of distinct declarations:
+`{name, channel}` or, for LTS, `{name, channel, endOfSupport}`. Names, channels and
+support dates follow the release rules. Releases referring to that product revision
+use a declared line. Omitting `lines` retains the implicit-line behavior.
+
+The optional product `cadence` field has shape
+`{policy: {type: "estate-policy", id, hash}, rule}`. It pins an existing policy
+revision and a rule key whose kind is `vericairn.estate/recurring-duty`, version 1.
+Unknown keys, absent references, wrong types or hashes, and non-duty rules are
+refused. The field records a reference only; cadence execution is separate work.
+
 
 ## Published Vericairn dependency observations (0.8.3)
 

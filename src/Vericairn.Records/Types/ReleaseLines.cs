@@ -42,7 +42,8 @@ public static partial class ReleaseLines
         string[] fixedChannels = releases.Select(r => Channel(r.Body)).Where(c => c != "prerelease")
             .Concat(ProductHistory(context, product).SelectMany(Declarations).Where(d => PolicyRecords.Text(d, "name") == line)
                 .Select(d => PolicyRecords.Text(d, "channel")).OfType<string>()).Distinct(StringComparer.Ordinal).ToArray();
-        if (fixedChannels.Length > 1 || fixedChannels.Length == 1 && channel != fixedChannels[0]
+        if (channel == "nightly" && releases.Any(r => Channel(r.Body) == "prerelease")
+            || fixedChannels.Length > 1 || fixedChannels.Length == 1 && channel != fixedChannels[0]
             && !(channel == "prerelease" && fixedChannels[0] is "stable" or "lts"))
             body.Error("release.line-channel", "channel", "A line keeps its channel; only stable and lts lines may also carry prereleases of their next version.");
 
@@ -126,7 +127,7 @@ public static partial class ReleaseLines
     private static IEnumerable<JsonElement> Declarations(RecordEnvelope product) => PolicyRecords.Items(PolicyRecords.Property(product.Body, "lines"));
 
     private static IEnumerable<RecordEnvelope> ProductHistory(ValidationContext context, RecordEnvelope product) =>
-        context.Model.Chain(product).Select(id => context.Model.ById[id]);
+        context.Model.OfType("product").Where(p => PolicyRecords.Identity(context.Model, p) == PolicyRecords.Identity(context.Model, product));
 
     private static int CompareVersionCore(string left, string? right)
     {

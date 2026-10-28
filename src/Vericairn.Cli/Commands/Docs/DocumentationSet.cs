@@ -40,7 +40,7 @@ internal static partial class Docs
     public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null) =>
         Notes(new CommandContext(), root, fromVersion, toVersion, output, since, json, at);
 
-    public static int Notes(CommandContext context, string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null)
+    public static int Notes(CommandContext context, string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null, string? line = null)
     {
         try
         {
@@ -53,8 +53,8 @@ internal static partial class Docs
             // the estate, so until the version's publication is recorded they end at the second before, and that record opens the next set.
             DateTimeOffset reading = at ?? DateTimeOffset.UtcNow;
             EstateModel model = CommandContext.LoadCopy(root);
-            RecordEnvelope? from = Published(model, fromVersion);
-            RecordEnvelope? to = Published(model, toVersion);
+            RecordEnvelope? from = Published(model, fromVersion, line);
+            RecordEnvelope? to = Published(model, toVersion, line);
             if (from is null)
             {
                 return context.Fail($"No published release record for {fromVersion} in this estate.");
@@ -72,7 +72,8 @@ internal static partial class Docs
             string upper = to?.At ?? RecordParser.FormatTimestamp(reading.AddSeconds(-1));
             IReadOnlyList<RecordEnvelope> window = ReleaseContents.Window(model, beginning.At, upper);
             Directory.CreateDirectory(output);
-            Write(output, "release-notes.md", ReleaseNotes(model, fromVersion, beginning, to, toVersion, window, upper));
+            Write(output, "release-notes.md", ReleaseNotes(model, fromVersion, beginning, to, toVersion, window, upper, line, from.Subject?.Id));
+            if (line is not null) manifest["line"] = line; else manifest.Remove("line");
             manifest[NotesWindow] = new JsonObject { ["from"] = beginning.At, ["to"] = upper };
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
             if (json)
@@ -282,10 +283,10 @@ internal static partial class Docs
         }
     }
 
-    private static RecordEnvelope? Published(EstateModel model, string version) =>
-        model.Current("release").FirstOrDefault(r => Str(r.Body, "version") == version && Str(r.Body, "status") == "published");
+    private static RecordEnvelope? Published(EstateModel model, string version, string? line = null) =>
+        model.Current("release").FirstOrDefault(r => Str(r.Body, "version") == version && Str(r.Body, "status") == "published" && (line is null || ReleaseLines.Line(r.Body) == line));
 
-    private static string ReleaseNotes(EstateModel model, string fromVersion, Beginning beginning, RecordEnvelope? to, string toVersion, IReadOnlyList<RecordEnvelope> window, string upper)
+    private static string ReleaseNotes(EstateModel model, string fromVersion, Beginning beginning, RecordEnvelope? to, string toVersion, IReadOnlyList<RecordEnvelope> window, string upper, string? line, string? product)
     {
         var lines = new List<string>
         {
@@ -371,12 +372,16 @@ internal static partial class Docs
         // These sections describe revision history, including release candidates and their publication, rather than one entry per record.
         Section(lines, "Design documents revised", window.Where(r => r.Type == "document-revision").Select(r => $"{Str(r.Body, "title")} revision {Str(r.Body, "revision") ?? Num(r.Body, "revision")} (`{Str(r.Body, "path")}`): {Str(r.Body, "summary")}"));
         // The window begins where the previous notes ended, so it also holds the previous release's own candidate and publication.
-        Section(lines, "The release itself", window.Where(r => r.Type == "release" && Str(r.Body, "version") == toVersion).Select(ReleaseLine));
-        List<string> others = window.Where(r => r.Type == "release" && Str(r.Body, "version") != toVersion).Select(ReleaseLine).ToList();
+        IEnumerable<RecordEnvelope> releases = window.Where(r => r.Type == "release" && (line is null || ReleaseLines.Line(r.Body) == line));
+        Section(lines, "The release itself", releases.Where(r => Str(r.Body, "version") == toVersion).Select(ReleaseLine));
+        List<string> others = releases.Where(r => Str(r.Body, "version") != toVersion).Select(ReleaseLine).ToList();
         if (others.Count > 0)
         {
             Section(lines, "Other releases recorded in this window", others);
         }
+
+        IReadOnlyList<string> backports = ReleaseBackports.Notes(model, beginning.At, upper, line, product);
+        if (backports.Count > 0) Section(lines, "Backports across lines", backports);
 
         Section(lines, "Upgrading", current.Where(r => r.Type == "migration").Select(r => $"Migration {r.Id}: from {Str(r.Body, "fromPin")} to {Str(r.Body, "toPin")}, record format {Num(r.Body, "fromFormat")} to {Num(r.Body, "toFormat")}; migrations applied: {(Strings(r.Body, "migrations") is { Count: > 0 } m ? string.Join(", ", m) : "none")}; changes: {string.Join("; ", Strings(r.Body, "changes"))}{RevisionNote(model, r)}."));
         lines.Add($"An estate on {fromVersion} upgrades with `vericairn estate upgrade --to {toVersion} --by <principal>` run with the {toVersion} binary once the published release record is in the estate; `--check` shows the plan first.");
