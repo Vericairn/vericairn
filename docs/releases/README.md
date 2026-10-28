@@ -179,7 +179,8 @@ The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn befor
 
 ## NuGet publication setup
 
-The 0.8.3 release event's Trusted Publishing run, [run 40102325701](https://github.com/Vericairn/vericairn/actions/runs/40102325701),
+The 0.8.4 release event's Trusted Publishing run, [run 40733360890](https://github.com/Vericairn/vericairn/actions/runs/40733360890),
+pushed all eight packages with their symbol packages at 0.8.4, and each lists that version on nuget.org. The 0.8.3 release event's Trusted Publishing run, [run 40102325701](https://github.com/Vericairn/vericairn/actions/runs/40102325701),
 pushed all eight packages with their symbol packages at 0.8.3. The 0.8.2 release event's Trusted Publishing run, [run 39770313785](https://github.com/Vericairn/vericairn/actions/runs/39770313785),
 pushed all eight packages with their symbol packages, and each lists 0.8.2 on nuget.org:
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
