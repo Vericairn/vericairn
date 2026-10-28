@@ -54,3 +54,5 @@ and the generic record reader to `vericairn.records/readers/4` for the new field
 Their hashes change. Declarations pinned to earlier implementations require the
 ordinary explicit generator update before regeneration; earlier golden fixtures
 remain retained.
+
+

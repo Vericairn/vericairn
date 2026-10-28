@@ -28,6 +28,7 @@ public sealed class EstateType : IRecordType
         new("recordFormat", "integer", true, "The record format the estate was chartered in, at most the format of the charter record itself; the manifest states the format new records are written in."),
         new("policies", "object", true, "signatures: optional|required; releaseAcceptance: roles that may accept a release."),
         new("organization", "object", false, "name and optional github organization login."),
+        new("progressRequest", "object", false, "Default requested progress: optional types (accurate, best-effort, not-measurable; all by default), statusText (false by default), and cadence (perStep true, positive minutes, or both). More specific requests replace it.", 3),
     ];
 
     /// <inheritdoc />
@@ -56,6 +57,7 @@ public sealed class EstateType : IRecordType
             organization.NoOtherKeys();
         }
 
+        ProgressReporting.Request(body);
         body.NoOtherKeys();
         if (format is null || operatorId is null)
         {

@@ -13,7 +13,7 @@ namespace Vericairn.Records.Estate;
 internal sealed class ManifestCompanionGenerator : IDocumentGenerator
 {
     internal const string Name = "vericairn.estate/manifest";
-    private const string Implementation = "vericairn.estate/manifest/1";
+    private const string Implementation = "vericairn.estate/manifest/2";
     internal static readonly ImmutableArray<DocumentManagedKind> Inventory =
     [new("estate/manifest", "vericairn.estate-manifest/1"), new("estate/manifest#vericairn.artifacts", "vericairn.estate-manifest/1#vericairn.artifacts")];
     internal static IEnumerable<DocumentCoverageDescriptor> Coverage => Inventory.Select(k => new DocumentCoverageDescriptor(1, k.Id,

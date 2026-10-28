@@ -16,6 +16,7 @@ internal sealed class WorkCommand : Command
         Subcommands.Add(new WorkBriefCommand(context));
         Subcommands.Add(new WorkAssignCommand(context));
         Subcommands.Add(new WorkAttemptCommand(context));
+        Subcommands.Add(new WorkProgressCommand(context));
         Subcommands.Add(new WorkResultCommand(context));
         Subcommands.Add(new WorkReviewCommand(context));
         Subcommands.Add(new WorkAmendCommand(context));

@@ -502,7 +502,8 @@ public static class OpenApiDocument
         }
         else if (method == "POST" && path == "/v1/work/progress")
         {
-            responses["200"] = new JsonObject { ["description"] = "WorkProgressResponse: the latest agent claim, a written record only for a completed phase, or a problem when refused." };
+            responses["200"] = new JsonObject { ["description"] = "WorkProgressResponse: the latest agent claim, a written record only for a completed phase, or a problem when refused.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/WorkProgressResponse" } } } };
         }
         else if (method == "POST" && path.StartsWith("/v1/runs", StringComparison.Ordinal))
         {
@@ -666,6 +667,14 @@ public static class OpenApiDocument
         backport["additionalProperties"] = false;
         releaseSubmit["properties"]!["backportOf"] = backport;
 
+        JsonObject progressRequest = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean"));
+        progressRequest["properties"]!["progress"] = ProgressSchemas.Value();
+        progressRequest["properties"]!["statusText"] = ProgressSchemas.StatusText();
+        JsonObject progressClaim = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("at", "string"), ("completed", "boolean"), ("record", "string"));
+        progressClaim["properties"]!["progress"] = ProgressSchemas.Value();
+        progressClaim["properties"]!["statusText"] = ProgressSchemas.StatusText();
+        JsonObject progressResponse = Object(("claim", "object"), ("written", "object"), ("problem", "object"), ("ok", "boolean"));
+        progressResponse["properties"]!["claim"] = new JsonObject { ["$ref"] = "#/components/schemas/WorkProgressClaim" };
         return new JsonObject
         {
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -699,7 +708,9 @@ public static class OpenApiDocument
             ["WorkNewRequest"] = workNewRequest,
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
-            ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
+            ["WorkProgressRequest"] = progressRequest,
+            ["WorkProgressClaim"] = progressClaim,
+            ["WorkProgressResponse"] = progressResponse,
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["ResultReviewRequest"] = Object(("result", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),

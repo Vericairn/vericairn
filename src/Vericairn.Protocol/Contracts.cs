@@ -148,7 +148,16 @@ public sealed record AttemptRequest(string Assignment, string By, string Workspa
 /// <param name="Phase">A stable lower-case phase name.</param>
 /// <param name="Note">The progress claim.</param>
 /// <param name="Completed">Whether to record the phase's completion, at most once.</param>
-public sealed record WorkProgressRequest(string Attempt, string By, string Phase, string Note, bool Completed = false);
+public sealed record WorkProgressRequest(string Attempt, string By, string Phase, string Note, bool Completed = false)
+{
+    /// <summary>Optional format-3 typed value: accurate (done, optional total, unit, optional estimatePercent), best-effort (percent), or not-measurable. Raw members are retained for strict runtime validation.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Progress { get; init; }
+
+    /// <summary>Optional short status sentence; required when the effective progress request says so.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusText { get; init; }
+}
 
 /// <summary>A progress claim, explicitly separate from the worker's observations.</summary>
 /// <param name="Attempt">The attempt.</param>
@@ -158,7 +167,16 @@ public sealed record WorkProgressRequest(string Attempt, string By, string Phase
 /// <param name="At">When it was submitted.</param>
 /// <param name="Completed">Whether the phase was claimed complete.</param>
 /// <param name="Record">The completion record, if any.</param>
-public sealed record WorkProgressClaim(string Attempt, string By, string Phase, string Note, string At, bool Completed, string? Record = null);
+public sealed record WorkProgressClaim(string Attempt, string By, string Phase, string Note, string At, bool Completed, string? Record = null)
+{
+    /// <summary>The retained typed value, when given; percent and estimatePercent always mean estimates.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Progress { get; init; }
+
+    /// <summary>The contributor's status sentence, when given.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? StatusText { get; init; }
+}
 
 /// <summary>A progress submission; a successful interim note has no written record.</summary>
 /// <param name="Claim">The claim now shown.</param>
