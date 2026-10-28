@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -50,6 +51,12 @@ public sealed class PolicyCommandsTests
             CliHarness.Outcome response = CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "--json",
                 "policies", "check", "--as-of", "2026-11-01T00:00:00Z");
             Assert.Equal(0, response.Code);
+            CliHarness.Outcome status = CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "--json", "status");
+            Assert.Equal(0, status.Code);
+            Assert.Equal(CanonicalJson.Serialize(api.Status().Json), CanonicalJson.Serialize(status.Json));
+            Assert.Equal(status.Out, CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "--json", "status").Out);
+            string text = CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "status").Out;
+            Assert.Equal(text, CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "status").Out);
             return JsonSerializer.Deserialize<PolicyResponse>(response.Out, ProtocolJson.Options)!;
         }, assignments);
     }

@@ -10,6 +10,8 @@ namespace Vericairn.Records.Estate;
 public sealed class EstateModel
 {
     private readonly ILookup<string, RecordEnvelope> recordsByType;
+    private readonly Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>> recordsBySubject;
+    private readonly Lazy<ILookup<string, (int Position, RecordEnvelope Record)>> decisionsByAnswer;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -19,6 +21,10 @@ public sealed class EstateModel
         // Projections ask for a few types repeatedly. Index once while loading so a Home report does not walk unrelated
         // history for every empty section. Lookup preserves each type's original path order and all historical revisions.
         recordsByType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
+        recordsBySubject = new(() => records.ToLookup(r => (r.Type, r.Subject?.Id)));
+        decisionsByAnswer = new(() => OfType("decision").Select((record, position) => (Position: position, Record: record))
+            .SelectMany(item => AnswerIds(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
+            .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal));
         ById = byId;
         SupersededBy = supersededBy;
         Findings = findings;
@@ -128,7 +134,17 @@ public sealed class EstateModel
     }
 
     /// <summary>Records of a type whose subject is the given record id.</summary>
-    public IEnumerable<RecordEnvelope> About(string subjectId, string type) => OfType(type).Where(r => r.Subject?.Id == subjectId);
+    public IEnumerable<RecordEnvelope> About(string subjectId, string type) => recordsBySubject.Value[(type, subjectId)];
+
+    // An answer may name several revisions of the same ask. Keep each decision occurrence once, in source order,
+    // and retain the current-record filter at query time, just as the scan did.
+    internal IEnumerable<RecordEnvelope> DecisionsAnswering(IEnumerable<string> asks) => asks
+        .SelectMany(id => decisionsByAnswer.Value[id]).DistinctBy(item => item.Position).OrderBy(item => item.Position)
+        .Select(item => item.Record).Where(IsCurrent);
+
+    private static IEnumerable<string> AnswerIds(RecordEnvelope decision) =>
+        decision.Body.TryGetProperty("answers", out JsonElement answers) && answers.ValueKind == JsonValueKind.Array
+            ? answers.EnumerateArray().Where(a => a.ValueKind == JsonValueKind.String).Select(a => a.GetString()!) : [];
 
     /// <summary>Reads a string field from a body, or null.</summary>
     public static string? BodyString(RecordEnvelope record, string name) =>

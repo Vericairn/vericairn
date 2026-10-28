@@ -46,14 +46,14 @@ internal static partial class FoundationPolicyKinds
                 break;
             case "assignment-without-attempt":
                 foreach (RecordEnvelope order in orders.Where(o => !PolicyWork.Accepted(model, o, at) && EstateModel.BodyString(PolicyWork.Status(model, o, at)!, "status") != "retired"))
-                foreach (RecordEnvelope assignment in model.Current("assignment").Where(a => a.Subject is not null && model.Chain(order).Contains(a.Subject.Id, StringComparer.Ordinal)))
-                    if (!model.OfType("attempt").Any(a => a.Subject == assignment.Reference)) yield return Age(context, assignment, @class, days, assignment.AtTime, assignment);
+                foreach (RecordEnvelope assignment in PolicyHistory.For(model).AboutOrder(order, "assignment").Where(model.IsCurrent))
+                    if (!model.About(assignment.Id, "attempt").Any(a => a.Subject == assignment.Reference)) yield return Age(context, assignment, @class, days, assignment.AtTime, assignment);
                 break;
             case "result-awaiting-review":
                 string requirement = Choice(context.Parameters, "reviewRequirement", "any", "independent", "operator");
                 foreach (RecordEnvelope order in orders.Where(o => !PolicyWork.Accepted(model, o, at) && EstateModel.BodyString(PolicyWork.Status(model, o, at)!, "status") != "retired"))
                 foreach (RecordEnvelope result in PolicyWork.Results(model, order, at))
-                    if (!model.Current("review").Any(r => PolicyWork.ReviewQualifies(model, r, result, requirement))) yield return Age(context, result, @class, days, result.AtTime, result);
+                    if (!model.About(result.Id, "review").Where(model.IsCurrent).Any(r => PolicyWork.ReviewQualifies(model, r, result, requirement))) yield return Age(context, result, @class, days, result.AtTime, result);
                 break;
             case "open-ask":
                 foreach (RecordEnvelope ask in model.Current("ask").Where(a => PolicyWork.Selected(context, a) && Asks.IsWaiting(Asks.State(model, a).State)))
@@ -72,52 +72,50 @@ internal static partial class FoundationPolicyKinds
     {
         EstateModel model = context.Model;
         string identity = PolicyWork.Identity(model, order);
-        RecordEnvelope[] revisions = model.OfType("work-order").Where(r => PolicyWork.Identity(model, r) == identity).ToArray();
+        PolicyHistory history = PolicyHistory.For(model);
+        RecordEnvelope[] revisions = history.Revisions(identity).ToArray();
         IReadOnlySet<DateTimeOffset> changes = ChangeInstants(model, identity, revisions);
         RecordEnvelope? anchor = null;
-        foreach (IGrouping<string, RecordEnvelope> instant in model.Records.Where(r => string.CompareOrdinal(r.At, model.ById[identity].At) >= 0).GroupBy(r => r.At, StringComparer.Ordinal))
+        foreach (DateTimeOffset at in changes.Where(at => at >= model.ById[identity].AtTime).Order())
         {
-            DateTimeOffset at = instant.First().AtTime;
-            // The waiting state, and so the anchor already found, holds until the next instant that can change it.
-            if (!changes.Contains(at)) continue;
             RecordEnvelope current = revisions.Single(r => PolicyWork.CurrentAt(model, r, at));
             (string verdict, string reason, _) = PolicyWork.ReleasePlacement(model, current, at);
             if (verdict == "unavailable") throw new PolicyInputException(reason);
             bool waiting = PolicyWork.Planned(model, current, at) && verdict != "satisfied";
             if (!waiting) anchor = null;
-            else anchor ??= instant.FirstOrDefault(r => r.Id == current.Id)
-                ?? instant.FirstOrDefault(r => r.Type == "work-status" && r.Subject is { } s && model.Chain(current).Contains(s.Id, StringComparer.Ordinal))
-                ?? instant.FirstOrDefault(r => PolicyWork.OrderOfEvent(model, r)?.Id == current.Id)
+            else anchor ??= current.AtTime == at ? current
+                : history.AboutOrder(current, "work-status").FirstOrDefault(r => r.AtTime == at)
+                ?? history.EventAt(current, at)
                 ?? PolicyWork.ReleasePlacement(model, current, at).Evidence ?? current;
         }
         return anchor ?? order;
     }
 
     // An order's waiting state reads its own revisions and those of every carrier it has named, their statuses, assignments,
-    // attempts and results, every acceptance and release, and the records that supersede or withdraw any of those. The basis
+    // attempts and results, their acceptances and matching releases, and records that supersede or withdraw any of those. The basis
     // lists records in time order with whole-second times, so the state can change only at the instants those were recorded.
     internal static IReadOnlySet<DateTimeOffset> ChangeInstants(EstateModel model, string identity, IReadOnlyList<RecordEnvelope> revisions)
     {
         HashSet<string> lines = revisions.Select(r => Text(Get(r.Body, "placement"), "carrier")).OfType<string>().Append(identity).ToHashSet(StringComparer.Ordinal);
-        HashSet<string> orders = model.OfType("work-order").Where(r => lines.Contains(PolicyWork.Identity(model, r))).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
-        bool Concerns(RecordEnvelope record)
+        PolicyHistory history = PolicyHistory.For(model);
+        HashSet<string> read = [];
+        foreach (RecordEnvelope order in lines.SelectMany(history.Revisions))
         {
-            // A status or an assignment names its work order; an attempt reaches it through its assignment, a result through both.
-            RecordEnvelope? link = record;
-            for (int depth = 0; depth < 3 && link?.Subject is { } subject; depth++)
+            read.Add(order.Id);
+            foreach (RecordEnvelope status in model.About(order.Id, "work-status")) read.Add(status.Id);
+            foreach (RecordEnvelope acceptance in model.About(order.Id, "acceptance").Concat(history.ResultAcceptances(order))) read.Add(acceptance.Id);
+            foreach (RecordEnvelope assignment in model.About(order.Id, "assignment"))
             {
-                if (orders.Contains(subject.Id)) return true;
-                link = model.ById.GetValueOrDefault(subject.Id);
+                read.Add(assignment.Id);
+                foreach (RecordEnvelope attempt in model.About(assignment.Id, "attempt"))
+                {
+                    read.Add(attempt.Id);
+                    foreach (RecordEnvelope result in model.About(attempt.Id, "result")) read.Add(result.Id);
+                }
             }
-            return false;
+            JsonElement plan = Get(order.Body, "releasePlan");
+            foreach (RecordEnvelope release in history.Releases(Text(plan, "product"), Text(plan, "version"))) read.Add(release.Id);
         }
-        HashSet<string> read = model.Records.Where(r => r.Type switch
-        {
-            "work-order" => orders.Contains(r.Id),
-            "work-status" or "assignment" or "attempt" or "result" => Concerns(r),
-            "acceptance" or "release" => true,
-            _ => false,
-        }).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
         var successors = new Queue<string>(read);
         while (successors.TryDequeue(out string? id))
             if (model.SupersededBy.TryGetValue(id, out string? next) && read.Add(next)) successors.Enqueue(next);

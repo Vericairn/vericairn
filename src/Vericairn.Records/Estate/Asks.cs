@@ -55,8 +55,7 @@ public static class Asks
         }
 
         IReadOnlyList<string> chain = model.Chain(latest);
-        List<RecordEnvelope> answers = model.Current("decision")
-            .Where(d => d.Body.TryGetProperty("answers", out JsonElement ids) && ids.ValueKind == JsonValueKind.Array && ids.EnumerateArray().Any(i => i.ValueKind == JsonValueKind.String && chain.Contains(i.GetString()!)))
+        List<RecordEnvelope> answers = model.DecisionsAnswering(chain)
             .OrderBy(d => d.At, StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
             .ToList();
         return (answers.Count > 0 ? "answered" : recorded, answers);

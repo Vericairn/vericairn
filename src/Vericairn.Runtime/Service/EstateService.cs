@@ -108,21 +108,37 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public StatusResponse Status()
+    public StatusResponse Status() => Status(null);
+
+    // The observer measures disjoint phases for the performance fixture without changing the response contract.
+    internal StatusResponse Status(Action<string, TimeSpan>? observe)
     {
         lock (gate)
         {
-            EstateModel model = session.Load();
-            PolicySections sections = ReadPolicySections(model);
-            FindingList checks = SectionChecks(model, ChecksWithBatches(model), sections);
-            JsonObject json = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
-            AddPolicySections(json, sections);
+            EstateModel model = MeasureStatus("load-and-validate", session.Load, observe);
+            PolicySections sections = ReadPolicySections(model, observe);
+            FindingList checks = MeasureStatus("repository-and-section-checks", () => SectionChecks(model, ChecksWithBatches(model), sections), observe);
+            JsonObject json = MeasureStatus("status-json", () =>
+            {
+                JsonObject result = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
+                AddPolicySections(result, sections);
+                return result;
+            }, observe);
             // Status is portable: neither the progress projection nor the run projection may read local worker state.
-            json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model,
+            json["attention"] = MeasureStatus("attention", () => JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
-                includeLocalObservations: false), ProtocolJson.Options);
-            return new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors);
+                includeLocalObservations: false), ProtocolJson.Options), observe);
+            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors), observe);
         }
+    }
+
+    private static T MeasureStatus<T>(string phase, Func<T> action, Action<string, TimeSpan>? observe)
+    {
+        if (observe is null) return action();
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        T result = action();
+        observe(phase, System.Diagnostics.Stopwatch.GetElapsedTime(start));
+        return result;
     }
 
     /// <inheritdoc />
