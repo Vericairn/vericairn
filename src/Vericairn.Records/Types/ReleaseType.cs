@@ -88,6 +88,10 @@ public sealed class ReleaseType : IRecordType
         new("limitations", "string[]", true, "Known limitations; may be empty."),
         new("publishedAt", "timestamp", false, "When the publication was observed (published only)."),
         new("url", "string", false, "Where the published release is observed (published only)."),
+        new("line", "string", false, "Release line: 1 to 40 lower-case letters, digits, dots or hyphens, beginning with a letter or digit; defaults to current.", 3),
+        new("channel", "stable|lts|prerelease|nightly", false, "Publication channel; defaults to stable. A stable or lts line may carry prereleases of its next version.", 3),
+        new("endOfSupport", "timestamp", false, "RFC 3339 end of support; required only for lts, no earlier than publishedAt.", 3),
+        new("backportOf", "object", false, "Exact {id, hash} of a current published release of this product in another line.", 3),
     ];
 
     /// <inheritdoc />
@@ -144,6 +148,7 @@ public sealed class ReleaseType : IRecordType
         body.StringArray("limitations", true, allowEmpty: true, maxItemLength: 2000);
         string? publishedAt = body.Timestamp("publishedAt", status == "published");
         body.Text("url", status == "published", 500);
+        ReleaseLines.ValidateRelease(context, publishedAt);
         body.NoOtherKeys();
         if (context.Principal(context.Record.By) is null)
         {
@@ -185,7 +190,7 @@ public sealed class ReleaseType : IRecordType
         if (context.Model.IsCurrent(context.Record))
         {
             string? version = EstateModel.BodyString(context.Record, "version");
-            if (context.Model.Current(Name).Any(other => other.Id != context.Record.Id && other.Subject?.Id == context.Record.Subject?.Id && EstateModel.BodyString(other, "version") == version))
+            if (context.Model.Current(Name).Any(other => other.Id != context.Record.Id && PolicyRecords.ReleaseMatchesProduct(context.Model, other, context.Record.Subject?.Id) && EstateModel.BodyString(other, "version") == version))
             {
                 context.Error("release.duplicate-version", $"Another current release of this product already has version {version}.");
             }
