@@ -519,7 +519,9 @@ The request is unauthenticated and contains no installed version, machine, user 
 estate data or usage telemetry. Its only application header is the constant `User-Agent: Vericairn`
 required by GitHub; cookies, credentials, tracing headers and redirects are disabled. System proxies
 are ignored, so a network requiring one may leave only cached information available. Drafts and
-prereleases are ignored. The check waits at most two seconds for the network and never fails a command.
+prereleases are ignored. The whole check, its local state and the request together, takes at most two
+seconds: a slow or unanswered request, or a state file another client holds, leaves the cached answer
+and the command's own exit code unchanged, and a late response never replaces the cached answer.
 Offline or on a failed response, it keeps the last successful answer without an error message.
 
 The CLI prints the disclosure and any newer-release notice to **stderr**, including with `--json`;

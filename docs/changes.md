@@ -190,13 +190,3 @@ Their SDK methods are `ChangesPush`, `ChangesOpen`, `ChangesMerge` and
 Each has a cancellable `Async` counterpart. An interrupted observation does not
 undo an effect; reconcile the original operation before considering a retry.
 The generated API description and CLI reference include this additive surface.
-
-## Release check deadline (0.9.0)
-
-`status`, `doctor`, `version` and Workbench give the optional release check two
-seconds, including local state access and the release response. A source that
-ignores cancellation or a held state lock leaves the cached release available
-and preserves the command's own exit code. The daily attempt is saved before
-the request; a timed-out attempt stays throttled, and a late response cannot
-replace the cached answer. The check uses the shared setting and sends no
-request when it cannot reserve the attempt.
