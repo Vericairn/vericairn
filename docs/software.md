@@ -593,9 +593,10 @@ vericairn worker run <assignment-id> --agent <reviewer-id> --by <principal> --re
 The worker still requires the registered clone, an admitted device for the Reviewer,
 an available and qualified launcher with explicit execution settings, and the applicable
 authority, budget and run limits. No particular harness is selected by the review
-command. `ReleaseReviewBriefResponse.RequestedProgress` is the named WATCH-02 integration
-seam and currently reports `unavailable`; the assignment does not claim requested
-progress support.
+command. `ReleaseReviewBriefResponse.RequestedProgress` currently reports
+`unavailable`; WATCH-03 connects that display seam. The worker's ordinary brief
+includes any [requested reporting](#requested-progress-090) configured for the
+assignment through the estate, roster, goal or brief.
 
 The API offers `GET /v1/releases/{version}/review-brief` with optional `product` and
 `decision` queries, and `POST` on the same path with `ReleaseReviewAssignRequest`.
@@ -1217,6 +1218,100 @@ An agent may submit `work_progress` through MCP while carrying its own attempt. 
 
 Hand-over packages retain completed phase records. Interim notes stay local and do not change the package's identity;
 resume reports a newly completed phase as an added record.
+
+### Requested progress (0.9.0)
+
+A format-3 estate can request reporting with an optional `progressRequest` on
+existing records. The most specific **complete request** wins:
+
+| Scope | Field in the record body |
+| --- | --- |
+| Estate default | `estate.progressRequest` |
+| Role's roster entry | `roster.roles[].progressRequest`, on the entry matching the work order's role (builder when omitted) |
+| Goal, for its steps | `goal.progressRequest` |
+| One assignment | `assignment.brief.progressRequest` |
+
+For example, a reviewer entry or a goal may contain:
+
+```json
+"progressRequest": {
+  "types": ["accurate", "best-effort", "not-measurable"],
+  "statusText": true,
+  "cadence": { "perStep": true, "minutes": 10 }
+}
+```
+
+`types` defaults to all three when omitted; an explicit list must be nonempty,
+distinct and drawn from those three names. `statusText` defaults to false.
+`cadence` requires `perStep: true`, a positive integer `minutes`, or both;
+minutes may be at most 2147483647. With both, report at each step and at least
+every stated number of minutes. These fields ask the contributor to report;
+they do not change its work, budget, authority or liveness rules.
+
+Omitting a request at a scope inherits the broader request. Supplying one
+replaces that whole request, with its own defaults for omitted `types` and
+`statusText`; it can narrow the permitted types or replace a broader choice.
+With no request anywhere, existing voluntary phase notes continue to work.
+The goal's named roster follows its current revision, as routing does; a goal's
+role override does not discard that roster entry's reporting request. A running
+assignment uses the goal selected for its run. Otherwise the single active goal,
+or the only matching goal, supplies the request. Different requirements from
+several unresolved goals refuse a claim until the run selects a goal or the
+assignment brief supplies an explicit request.
+
+The work brief includes the effective request and its exact source. Its JSON
+assignment entry carries `progressRequest` and `progressRequestSource` when
+configured, or `progressRequestProblem` when the goal choice is unresolved.
+No request field is added to an unconfigured brief. This reporting request is
+independent of a recipient's communication progress frequency.
+
+`work_progress`, `POST /v1/work/progress`, and the SDK's `WorkProgress` and
+`WorkProgressAsync` accept optional `progress` and `statusText` alongside the
+existing attempt, phase, note and completion state. A request in force requires
+a typed value with every claim. The accepted shapes are:
+
+| Type | Example `progress` | Meaning |
+| --- | --- | --- |
+| Accurate | `{"type":"accurate","done":7,"total":20,"unit":"files"}` | 7 / 20 files; keep the count and unit, never replace them with a bare percentage. Omit `total` when unknown. |
+| Best effort | `{"type":"best-effort","percent":60}` | Best-effort estimate 60%. |
+| Not measurable | `{"type":"not-measurable"}` | In progress, with the status text when given. |
+| Count with estimate | `{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60}` | 7 / 20 files; best-effort estimate 60%. Both values are retained. |
+
+Format 3 uses plain safe integers: counts are from 0 through 9007199254740991,
+`done` cannot exceed a known `total`, and percentage estimates are integers
+from 0 through 100. Zero of zero is a valid count. An accurate value needs a
+nonblank unit of at most 100 characters on one line. `not-measurable` carries
+no value fields. An accompanying `estimatePercent` also requires `best-effort`
+in the request's allowed types. Extra fields, values from another type,
+missing required fields, out-of-range numbers and disallowed types are refused.
+`statusText`, when supplied, is a nonblank sentence of at most 500 characters on
+one line. A required status cannot be replaced by the legacy `note`. All text
+passes the ordinary portable-content checks.
+
+The CLI accepts the same typed object in a JSON file, or through standard input:
+
+```sh
+vericairn work progress <attempt-id> --by <contributor-id> --phase review --note "Reading the widget." --state active --progress progress.json --status-text "Read seven of twenty files."
+```
+
+Use `--progress -` for standard input and `--state completed` to claim the phase
+complete. `--json` returns `WorkProgressResponse`, including the retained claim,
+its status text, and a written record only for completion. Plain output labels
+estimates and prints the accurate count separately. Without a request,
+`--progress` and `--status-text` may both be omitted for a voluntary note.
+
+Interim typed claims replace live state and write no record. A completion adds
+only optional `progress` and `statusText` to the existing `work-progress` body,
+within record format 3. Retrying the same phase, note, typed value and status
+returns the original record, even after a request changes or a result closes
+the attempt. Changing any of those fields is refused; a completed phase cannot
+be reopened. Later configuration never invalidates a historical completion.
+Format-2 estates retain their existing notes and refuse the new fields.
+
+WATCH-03 supplies the broader display of typed values, freshness, the overdue
+signal and the result's retained last claim. This request and submission
+contract does not add those features. The release review response's
+`RequestedProgress` display seam remains `unavailable` until that integration.
 
 ## Command observations (0.7.0)
 

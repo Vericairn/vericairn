@@ -68,6 +68,7 @@ public class CompanionImplementationTests
             cases.Add("duties-item.md", RecordCompanionTests.Render([source], "item", "duties", "1"));
             cases.Add("list.md", RecordCompanionTests.Render([source], "list"));
             foreach (var template in TemplateCompanionTests.GoldenCases()) cases.Add(template.Key, template.Value);
+            foreach (var progress in ProgressCases(model)) cases.Add(progress.Key, progress.Value);
         }
         else
         {
@@ -90,6 +91,30 @@ public class CompanionImplementationTests
                 new(DocumentGenerationStatus.Success, [DocumentSourceSnapshot.Record(large)], null, null)).Members);
             cases.Add("partial-overview.md", DocumentRendering.Render(generator, overview.Context));
             Assert.Contains("## Partial overview", RecordCompanionTests.Text(cases["partial-overview.md"]), StringComparison.Ordinal);
+        }
+        return cases;
+    }
+
+    private static Dictionary<string, DocumentRendition> ProgressCases(EstateModel model)
+    {
+        RecordEnvelope attempt = model.OfType("attempt").OrderBy(r => r.Id, StringComparer.Ordinal).First();
+        var cases = new Dictionary<string, DocumentRendition>(StringComparer.Ordinal);
+        foreach ((string name, string value) in new[]
+        {
+            ("accurate", """{"type":"accurate","done":7,"total":20,"unit":"files"}"""),
+            ("best-effort", """{"type":"best-effort","percent":60}"""),
+            ("not-measurable", """{"type":"not-measurable"}"""),
+            ("count-and-estimate", """{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60}"""),
+        })
+        {
+            JsonObject body = new()
+            {
+                ["phase"] = "review", ["note"] = "Read the widget.", ["completedAt"] = "2026-10-13T12:01:00Z",
+                ["progress"] = JsonNode.Parse(value), ["statusText"] = "Read seven of twenty files.",
+            };
+            RecordEnvelope claim = RecordAuthor.Create(new RecordDraft("work-progress", attempt.By, PolicyFixture.Element(body), attempt.Reference,
+                At: new DateTimeOffset(2026, 10, 13, 12, 1, 0, TimeSpan.Zero), Id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Format: 3)).Envelope;
+            cases.Add("progress-" + name + ".md", RecordCompanionTests.Render([DocumentSourceSnapshot.Record(claim)]));
         }
         return cases;
     }

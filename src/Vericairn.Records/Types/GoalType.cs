@@ -52,6 +52,7 @@ public sealed class GoalType : IRecordType
         new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan.", 2),
         new("limits", "object", false, "consecutiveFailures (a positive integer) and deadline (a timestamp) are validated and recorded but not yet enforced. stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds) override the roster and launcher defaults, enforced by the worker.", 2),
         new("inputs", "reference[]", true, "Decisions, work orders and designs it builds on: {type, id, hash?}; may be empty.", 2),
+        new("progressRequest", "object", false, "Requested progress for every step: types, statusText and cadence. Replaces the estate and roster-entry request; an assignment brief may replace it.", 3),
     ];
 
     /// <inheritdoc />
@@ -73,6 +74,7 @@ public sealed class GoalType : IRecordType
         BodyReader? limits = body.Nested("limits", false);
         IReadOnlyList<BodyReader>? inputs = body.NestedArray("inputs", true, allowEmpty: true);
         ExecutionPolicy.Read(body);
+        ProgressReporting.Request(body);
         body.NoOtherKeys();
         foreach (BodyReader condition in completion ?? [])
         {

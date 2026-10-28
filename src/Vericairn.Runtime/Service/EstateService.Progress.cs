@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using static Vericairn.Runtime.Service.EstateServiceValues;
@@ -41,6 +42,7 @@ public sealed partial class EstateService
             {
                 // A retry of the same completion returns the original record and does not replace a later live note.
                 return request.Completed && EstateModel.BodyString(completed, "note") == request.Note
+                    && EstateModel.BodyString(completed, "statusText") == request.StatusText && SameProgress(completed, request.Progress)
                     ? new WorkProgressResponse(Claim(completed), new RecordWritten(completed.ExpectedPath, completed.Id, completed.ComputedHash))
                     : new WorkProgressResponse(null, Problem: Refuse("This phase was already recorded complete; it cannot be recorded or reopened again.").Problem);
             }
@@ -50,8 +52,30 @@ public sealed partial class EstateService
                 return new WorkProgressResponse(null, Problem: Refuse("This attempt already has a result; its progress is closed.").Problem);
             }
 
+            if (request.Progress is { ValueKind: not JsonValueKind.Object })
+                return new WorkProgressResponse(null, Problem: Refuse("Progress must be an object with an admitted type and its value.").Problem);
+
+            RecordEnvelope? assignment = WorkView.AssignmentOfAttempt(model, attempt);
+            ProgressRequestSelection selection = assignment is null ? new() : ProgressRequests.Resolve(model, assignment);
+            if (selection.Problem is string problem)
+                return new WorkProgressResponse(null, Problem: Refuse(problem).Problem);
+            if (selection.Request is JsonElement requested)
+            {
+                if (request.Progress is not JsonElement value)
+                    return new WorkProgressResponse(null, Problem: Refuse("The effective progress request requires a typed progress value.").Problem);
+                if (requested.TryGetProperty("types", out JsonElement types)
+                    && (!value.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String
+                        || !types.EnumerateArray().Any(t => t.GetString() == type.GetString())
+                        || value.TryGetProperty("estimatePercent", out _) && !types.EnumerateArray().Any(t => t.GetString() == "best-effort")))
+                    return new WorkProgressResponse(null, Problem: Refuse("The progress type or accompanying best-effort estimate is not admitted by the effective request.").Problem);
+                if (requested.TryGetProperty("statusText", out JsonElement required) && required.GetBoolean() && string.IsNullOrWhiteSpace(request.StatusText))
+                    return new WorkProgressResponse(null, Problem: Refuse("The effective progress request requires statusText with each claim.").Problem);
+            }
+
             string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
             var body = new JsonObject { ["phase"] = request.Phase, ["note"] = request.Note, ["completedAt"] = at };
+            if (request.Progress is JsonElement progress) body["progress"] = JsonNode.Parse(progress.GetRawText());
+            if (request.StatusText is not null) body["statusText"] = request.StatusText;
             var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference);
             // Interim notes pass the same author, shape and portable-content checks, without storing the candidate record.
             (AuthoredRecord? candidate, string? refusal) = AuthorLocked(draft, model);
@@ -78,7 +102,8 @@ public sealed partial class EstateService
                 written = outcome.Written;
             }
 
-            var claim = new WorkProgressClaim(attempt.Id, request.By, request.Phase, request.Note, at, request.Completed, written?.Id);
+            var claim = new WorkProgressClaim(attempt.Id, request.By, request.Phase, request.Note, at, request.Completed, written?.Id)
+                { Progress = request.Progress?.Clone(), StatusText = request.StatusText };
             session.Live.SetMeta("work-progress:" + attempt.Id, JsonSerializer.Serialize(claim, ProtocolJson.Options));
             return new WorkProgressResponse(claim, written);
         }
@@ -111,5 +136,21 @@ public sealed partial class EstateService
     }
 
     private static WorkProgressClaim Claim(RecordEnvelope record) => new(record.Subject!.Id, record.By,
-        EstateModel.BodyString(record, "phase")!, EstateModel.BodyString(record, "note")!, record.At, true, record.Id);
+        EstateModel.BodyString(record, "phase")!, EstateModel.BodyString(record, "note")!, record.At, true, record.Id)
+    {
+        Progress = record.Body.TryGetProperty("progress", out JsonElement progress) ? progress.Clone() : null,
+        StatusText = EstateModel.BodyString(record, "statusText"),
+    };
+
+    private static bool SameProgress(RecordEnvelope record, JsonElement? progress)
+    {
+        if (!record.Body.TryGetProperty("progress", out JsonElement recorded)) return progress is null;
+        if (progress is not JsonElement value || value.ValueKind != JsonValueKind.Object) return false;
+        try
+        {
+            // Semantic JSON number equality also equates 1 with 1.0 and 1e0. Those are malformed in format 3, even on a retry.
+            return CanonicalJson.Serialize(recorded) == CanonicalJson.Serialize(value);
+        }
+        catch (CanonicalJsonException) { return false; }
+    }
 }

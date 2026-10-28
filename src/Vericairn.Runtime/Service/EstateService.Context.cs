@@ -41,7 +41,7 @@ public sealed partial class EstateService
         }
     }
 
-    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true, bool fullSelectedScope = false)
+    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true, bool fullSelectedScope = false, RecordEnvelope? progressGoal = null)
     {
         List<FindingDto> errors = model.Findings.Where(f => f.Severity == Severity.Error)
             .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)).ToList();
@@ -82,18 +82,18 @@ public sealed partial class EstateService
         {
             basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";
         }
-        return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order, includeDocumentCatalogue: false), maxBytes, fullSelectedScope);
+        return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order, includeDocumentCatalogue: false, progressGoal), maxBytes, fullSelectedScope);
     }
 
-    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null, CommunicationProfile? profile = null, JsonObject? promptUse = null)
+    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null, CommunicationProfile? profile = null, JsonObject? promptUse = null, RecordEnvelope? progressGoal = null)
     {
-        ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope);
+        ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope, progressGoal);
         if (context.Package is not { } package)
         {
             return new BriefResponse(context.Text, Element(new JsonObject { ["problem"] = JsonSerializer.SerializeToNode(context.Problem, ProtocolJson.Options) }), Problem: context.Problem);
         }
 
-        JsonObject json = JsonNode.Parse(WorkView.RenderBriefJson(model, order))!.AsObject();
+        JsonObject json = JsonNode.Parse(WorkView.RenderBriefJson(model, order, progressGoal))!.AsObject();
         if (promptUse is not null)
         {
             JsonObject payload = JsonNode.Parse(package.Payload.GetRawText())!.AsObject();
@@ -110,7 +110,7 @@ public sealed partial class EstateService
         catch (InvalidOperationException) { return new BriefResponse("The adopted context template is unavailable.", Element(new JsonObject()), Problem: new("template-unavailable", "Resolve the explicit context template adoption before continuing.", [])); }
         if (use is not null) json["presentationTemplate"] = JsonSerializer.SerializeToNode(use, ProtocolJson.Options);
         ContextPackage machine = ContextAccounting.Measure(json, null);
-        string lead = WorkView.RenderBrief(model, order, includeDocumentCatalogue: false);
+        string lead = WorkView.RenderBrief(model, order, includeDocumentCatalogue: false, progressGoal);
         if (promptUse is not null) lead += SavedPrompts.Addendum(Element(promptUse));
         (string text, ContextTextMeasurement measurement) = ContextRendering.Render(profile is null ? lead : CommunicationPresentation.Brief(lead, profile), package);
         if (use is not null)

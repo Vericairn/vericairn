@@ -254,11 +254,10 @@ public sealed partial class ToolRegistry
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 async (api, a, token) => Outcome((await api.AttemptAsync(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note")), cancellationToken: token).ConfigureAwait(false)))),
             Write("work_progress", "Publishes the contributor's latest progress claim on its own attempt. Active notes replace live state without records; a completed phase is recorded once. Claims never establish liveness, scope or acceptance.",
-                Arguments(("attempt", "Attempt record id."), ("phase", "Stable lower-case phase name."), ("note", "The contributor's progress claim, without secrets or machine paths."), ("state", "active or completed.")), ["attempt", "phase", "note", "state"],
+                ProgressArguments(), ["attempt", "phase", "note", "state"],
                 async (api, a, token) =>
                 {
-                    bool completed = Arg(a, "state") switch { "active" => false, "completed" => true, _ => throw new ArgumentException("state is active or completed.") };
-                    WorkProgressResponse response = (await api.WorkProgressAsync(new WorkProgressRequest(Arg(a, "attempt"), by, Arg(a, "phase"), Arg(a, "note"), completed), cancellationToken: token).ConfigureAwait(false));
+                    WorkProgressResponse response = (await api.WorkProgressAsync(ReadProgress(a, by), cancellationToken: token).ConfigureAwait(false));
                     return new ToolCallResult(JsonSerializer.Serialize(response, ProtocolJson.Options), !response.Ok);
                 }),
             Write("work_result", "Submits the result of an attempt: outcome (completed, partial, blocked, abandoned), summary, outputs by hash, evidence, checks, limitations, unresolved effects and the next step. A claim to inspect; acceptance is a separate record by someone with that authority.",

@@ -26,7 +26,7 @@ internal sealed class RunAdmissionService(
     EstateRecordAccess recordAccess,
     Func<ProviderRegistry> providers,
     Func<WorkerOptions> workerOptions,
-    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, long?, string?, string?, JsonObject?, BriefResponse> assembleBrief,
+    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, RecordEnvelope, long?, string?, string?, JsonObject?, BriefResponse> assembleBrief,
     Func<EstateModel, string, PromptSelection, string?, (JsonObject? Use, Problem? Problem)> preparePrompt)
 {
     private readonly object gate = recordAccess.Gate;
@@ -617,7 +617,7 @@ internal sealed class RunAdmissionService(
             if (problem is not null) return (null, problem.Message, null);
             promptUse = use;
         }
-        BriefResponse contextBrief = assembleBrief(model, files, order, maxBytes, recipient, recipient is null ? null : assignment.Id, promptUse);
+        BriefResponse contextBrief = assembleBrief(model, files, order, goal, maxBytes, recipient, recipient is null ? null : assignment.Id, promptUse);
         if (contextBrief.Problem is not null)
         {
             return (null, contextBrief.Problem.Message, null);
