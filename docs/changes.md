@@ -190,16 +190,3 @@ Their SDK methods are `ChangesPush`, `ChangesOpen`, `ChangesMerge` and
 Each has a cancellable `Async` counterpart. An interrupted observation does not
 undo an effect; reconcile the original operation before considering a retry.
 The generated API description and CLI reference include this additive surface.
-
-## Pending asks in 0.9.0
-
-Terminal run settlements withdraw outstanding process attention warnings through the same
-journaled record batch, including settlement recovered from retained observations. Opening an
-existing estate reconciles warnings from earlier terminal settlements in one batch, using the
-same withdrawal records. Reopening adds no duplicate withdrawals. Unfinished runs, ordinary
-decision asks, settlement review asks and asks already answered by a person are left alone.
-
-Open-ask views derive answers from current decisions naming any revision of the ask in
-`answers`, without writing another ask revision. Superseded decisions no longer determine the
-answer. The CLI, operator list, status and progress attention, API, SDK and MCP share this rule.
-See [Routing, asks and the worker](operator-guide.md#18-routing-asks-and-the-worker).

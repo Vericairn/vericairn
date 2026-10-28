@@ -874,7 +874,7 @@ superseded, its current revision determines which asks it answers; an ask no lon
 returns to its recorded open or notified state. `ask`, `operator list`, status and progress
 attention, and the API, SDK and MCP views all use that derived state.
 
-In the 0.9.0 development build, every terminal run settlement withdraws the run's still-waiting
+From 0.9.0, every terminal run settlement withdraws the run's still-waiting
 process attention warnings in the settlement's batch, including settlement recovered from a
 retained observation. On opening an existing estate, the runtime also reconciles warnings left
 by earlier terminal settlements in one journaled batch. Each withdrawal keeps the original
