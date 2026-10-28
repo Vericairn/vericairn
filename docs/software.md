@@ -500,7 +500,7 @@ including a builder's acceptance of its own ordinary work, stay out of that sect
 
 To render the 0.8.4 notes from the estate's records, use
 `vericairn docs notes --from 0.8.3 --to 0.8.4 --out docs/releases/0.8.4`.
-The exclusive start follows 0.8.2's recorded end; the command writes its exact window to the manifest.
+The exclusive start follows 0.8.3's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against

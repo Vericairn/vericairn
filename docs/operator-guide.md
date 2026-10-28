@@ -744,7 +744,7 @@ The notes command renders the estate's records from 0.8.3 to 0.8.4:
 vericairn --estate <root> docs notes --from 0.8.3 --to 0.8.4 --out docs/releases/0.8.4
 ```
 
-`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.2's recorded end.
+`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.3's recorded end.
 From 0.8.4, decisions, work orders, acceptances, identity and policy records, and migrations are listed
 once per supersession chain, at the revision current when the window ends. Revised entries name all
 replaced revision IDs, earliest first, including those recorded before the window. A later revision does

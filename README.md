@@ -6,8 +6,8 @@ and history kept as records you own: by default in a git repository beside your 
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
 accept it. Software is its first domain, and the one that ships today.
 
-**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.8.3, from
-October 24, 2026.
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.8.4, from
+October 28, 2026.
 [Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
 [NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
 [Limitations](docs/limitations-and-platforms.md) ·
