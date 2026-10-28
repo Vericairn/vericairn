@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
@@ -28,6 +29,10 @@ public sealed class StatusPerformanceTests(ITestOutputHelper output)
         StatusResponse first = Read("first");
         Assert.False(first.HasErrors, "Generated estate status must validate and evaluate successfully.");
         Assert.True(first.Json.GetProperty("records").GetInt32() >= 20_000);
+        PolicyResponse policies = JsonSerializer.Deserialize<PolicyResponse>(first.Json.GetProperty("policies"), ProtocolJson.Options)!;
+        Assert.True(policies.Complete);
+        // All four declared rules run. The fixture deliberately leaves planned work, unreviewed results and asks waiting.
+        Assert.Equal([0, 100, 333, 667], policies.Rules.Select(rule => rule.Subjects));
         StatusResponse second = Read("repeated");
         Assert.Equal(first.Text, second.Text);
         Assert.Equal(first.Json.GetRawText(), second.Json.GetRawText());

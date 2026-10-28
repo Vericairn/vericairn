@@ -21,7 +21,7 @@ public sealed class EstateModel
         // Projections ask for a few types repeatedly. Index once while loading so a Home report does not walk unrelated
         // history for every empty section. Lookup preserves each type's original path order and all historical revisions.
         recordsByType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
-        recordsBySubject = new(() => records.ToLookup(r => (r.Type, r.Subject?.Id)));
+        recordsBySubject = new(() => recordsByType.SelectMany(group => group).ToLookup(r => (r.Type, r.Subject?.Id)));
         decisionsByAnswer = new(() => OfType("decision").Select((record, position) => (Position: position, Record: record))
             .SelectMany(item => AnswerIds(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
             .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal));

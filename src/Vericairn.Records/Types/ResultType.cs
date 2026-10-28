@@ -120,7 +120,7 @@ public sealed class ResultType : IRecordType
             context.Error("result.contributor", $"A result is submitted by the principal that made the attempt ({attempt.By}), not by {context.Record.By}.");
         }
 
-        if (context.Model.IsCurrent(context.Record) && context.Model.Current(Name).Any(other => other.Id != context.Record.Id && other.Subject?.Id == attempt.Id))
+        if (context.Model.IsCurrent(context.Record) && context.Model.About(attempt.Id, Name).Any(other => context.Model.IsCurrent(other) && other.Id != context.Record.Id))
         {
             context.Error("result.duplicate", "Another current result exists for the same attempt; a corrected result supersedes the earlier one instead of standing beside it.");
         }

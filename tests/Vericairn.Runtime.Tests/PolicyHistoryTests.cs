@@ -6,6 +6,7 @@ using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Policies;
+using static Vericairn.Runtime.Policies.PolicyInputs;
 using static Vericairn.Runtime.Tests.FoundationPolicyTests;
 
 namespace Vericairn.Runtime.Tests;
@@ -25,6 +26,7 @@ public sealed class PolicyHistoryTests
                 Assert.Equal(Outcome(() => ScanStatus(model, order, at)), Outcome(() => PolicyWork.Status(model, order, at)));
                 Assert.Equal(Outcome(() => ScanResults(model, order, at)), Outcome(() => PolicyWork.Results(model, order, at)));
                 Assert.Equal(Outcome(() => ScanAcceptance(model, order, at)), Outcome(() => PolicyWork.Acceptance(model, order, at)));
+                Assert.Equal(PlacementOutcome(() => ScanReleasePlacement(model, order, at)), PlacementOutcome(() => PolicyWork.ReleasePlacement(model, order, at)));
             }
         }
     }
@@ -80,6 +82,19 @@ public sealed class PolicyHistoryTests
     }
 
     [Fact]
+    public void SubjectIndexUsesTheSameRecordSnapshotAsTheTypeIndex()
+    {
+        RecordEnvelope order = Order();
+        RecordEnvelope original = R("assignment", "original", new { }, subject: order.Reference);
+        var records = new List<RecordEnvelope> { order, original };
+        var model = new EstateModel("", records, records.ToDictionary(r => r.Id, StringComparer.Ordinal), new Dictionary<string, string>(), new());
+        records.Remove(original);
+        records.Add(R("assignment", "added", new { }, subject: order.Reference));
+        Assert.Equal([original], model.About(order.Id, "assignment"));
+        Assert.Equal(model.OfType("assignment"), model.About(order.Id, "assignment"));
+    }
+
+    [Fact]
     public void AnswerIndexMatchesTheScanAcrossRevisionsDuplicateReferencesAndMalformedBodies()
     {
         RecordEnvelope ask = R("ask", "ask", new { state = "open" });
@@ -117,6 +132,12 @@ public sealed class PolicyHistoryTests
         try { return PolicyBasis.Canonical(action()); }
         catch (PolicyInputException error) { return "unavailable: " + error.Message; }
     }
+
+    private static string PlacementOutcome(Func<(string Verdict, string Reason, RecordEnvelope? Evidence)> action) => Outcome(() =>
+    {
+        var placement = action();
+        return new { placement.Verdict, placement.Reason, placement.Evidence };
+    });
 
     // The pre-index queries are deliberately kept independent: an optimized helper cannot validate itself.
     private static RecordEnvelope? ScanStatus(EstateModel model, RecordEnvelope order, DateTimeOffset at)
@@ -157,6 +178,22 @@ public sealed class PolicyHistoryTests
         if (resultAcceptances.Length == 0) return null;
         IReadOnlyList<RecordEnvelope> current = ScanResults(model, order, at);
         return resultAcceptances.FirstOrDefault(a => current.Any(r => a.Subject == r.Reference));
+    }
+
+    private static (string Verdict, string Reason, RecordEnvelope? Evidence) ScanReleasePlacement(EstateModel model, RecordEnvelope order, DateTimeOffset at)
+    {
+        JsonElement placement = Get(order.Body, "placement");
+        if (Text(placement, "kind") != "release") return ("unmet", "No release placement.", null);
+        if (!model.ById.TryGetValue(Text(placement, "carrier") ?? "", out RecordEnvelope? identity)) return ("unmet", "The release carrier is dangling.", null);
+        RecordEnvelope[] carriers = model.OfType("work-order").Where(r => PolicyWork.Identity(model, r) == identity.Id && PolicyWork.CurrentAt(model, r, at)).ToArray();
+        if (carriers.Length != 1) return ("unavailable", "The release carrier history is missing or conflicting.", identity);
+        RecordEnvelope carrier = carriers[0];
+        if (ScanStatus(model, carrier, at) is { } status && EstateModel.BodyString(status, "status") == "retired") return ("unmet", "The release carrier is retired.", status);
+        JsonElement plan = Get(carrier.Body, "releasePlan");
+        if (Text(plan, "product") != Text(placement, "product") || Text(plan, "version") != Text(placement, "version")) return ("unmet", "The carrier's current plan contradicts this placement.", carrier);
+        RecordEnvelope? ended = model.OfType("release").FirstOrDefault(r => r.AtTime <= at && ReleaseMatchesProduct(model, r, Text(plan, "product")) &&
+            EstateModel.BodyString(r, "version") == Text(plan, "version") && EstateModel.BodyString(r, "status") is "published" or "withdrawn");
+        return ended is null ? ("satisfied", "The exact release placement is valid.", carrier) : ("unmet", "The release target has been published or withdrawn.", ended);
     }
 
     private sealed class CountedRecords(IReadOnlyList<RecordEnvelope> records) : IReadOnlyList<RecordEnvelope>
