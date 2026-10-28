@@ -5,7 +5,6 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using AskState = Vericairn.Records.Estate.Asks;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
@@ -177,10 +176,10 @@ internal sealed partial class RunDispatchService(
                 // machine bindings to its records. The provider's refusal is path-free.
                 signals = [.. signals ?? [], new RunSignal("audit-unverified", "warning", observed.ExitedAt ?? run.Latest.At, problem)];
             }
-            if (run.InFlight && includeLocalObservations)
+            if (includeLocalObservations)
             {
                 if (settlementProblems.TryGetValue(run.Id, out string? unresolved)) unavailable.Add(unresolved);
-                else if (observed is { ExitedAt: not null, Settled: null, Problem: not null })
+                else if (run.InFlight && observed is { ExitedAt: not null, Settled: null, Problem: not null })
                     unavailable.Add("The run exited but its settlement is unrecorded. Request worker settle to retry from the retained observation.");
             }
             if (unavailable.Count > 0)
@@ -732,27 +731,10 @@ internal sealed partial class RunDispatchService(
 
     // Process attention ends with the run; settlement review starts there. Reserve new ask ids before hashing the operation,
     // then pin those asks to that hash. The operation, new asks and old ask withdrawals are judged and journaled together.
-    // A person may already have answered a process ask; only still-waiting asks named by this run are withdrawn.
+    // A person may already have answered a process ask; only this run's still-waiting process warnings are withdrawn.
     private WriteOutcome SettleAttentionLocked(EstateModel model, AgentRuns.Run run, RecordDraft draft)
     {
-        var attention = new HashSet<string>(StringComparer.Ordinal);
-        if (draft.Body.TryGetProperty("liveness", out JsonElement liveness) && liveness.TryGetProperty("attention", out JsonElement stall) && stall.ValueKind == JsonValueKind.String)
-        {
-            attention.Add(stall.GetString()!);
-        }
-
-        if (draft.Body.TryGetProperty("signals", out JsonElement signals))
-        {
-            foreach (JsonElement signal in signals.EnumerateArray())
-            {
-                if (signal.TryGetProperty("attention", out JsonElement asked) && asked.ValueKind == JsonValueKind.String) attention.Add(asked.GetString()!);
-            }
-        }
-
-        List<RecordEnvelope> waiting = attention.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()
-            .Select(model.Latest).DistinctBy(a => a.Id)
-            .Where(a => a.Type == "ask" && a.By == draft.By && a.Subject?.Id == run.Id && AskState.IsWaiting(AskState.State(model, a).State))
-            .OrderBy(a => a.Id, StringComparer.Ordinal).ToList();
+        List<RecordEnvelope> waiting = ProcessAttention(model, run);
         List<RecordDraft> reviews = SettlementReviewAsks(model, run, ref draft);
         if (waiting.Count == 0 && reviews.Count == 0)
         {
@@ -770,10 +752,7 @@ internal sealed partial class RunDispatchService(
         }
         foreach (RecordEnvelope ask in waiting)
         {
-            JsonObject body = JsonNode.Parse(ask.Body.GetRawText())!.AsObject();
-            body["state"] = "withdrawn";
-            body["recommendation"] = $"No longer needed: run {run.Id} settled as {EstateModel.BodyString(settlement.Envelope, "status")} in operation {settlement.Envelope.Id}. Its worker observations remain available for review.";
-            (AuthoredRecord? withdrawn, string? problem) = recordAccess.AuthorLocked(new RecordDraft("ask", ask.By, Element(body), settlement.Envelope.Reference, ask.Id), model);
+            (AuthoredRecord? withdrawn, string? problem) = recordAccess.AuthorLocked(AttentionWithdrawal(run, settlement.Envelope, ask), model);
             if (withdrawn is null) return Refuse(problem!);
             records.Add(withdrawn);
         }

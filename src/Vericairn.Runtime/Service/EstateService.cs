@@ -84,8 +84,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         var service = new EstateService(EstateSession.Open(root));
         service.JudgeInterruptedBatches();
         service.runDispatch.RecoverSettlements();
+        service.ReconcileRunAttention();
         return service;
     }
+
+    // Kept separate from retained-observation recovery: existing settlements need only their records.
+    internal void ReconcileRunAttention() => runDispatch.ReconcileSettledAttention();
 
     /// <summary>Opens canonical records for a check without cache updates, batch recovery or creating durable state.</summary>
     internal static EstateService OpenReadOnly(string root) => new(EstateSession.Open(root, readOnly: true));

@@ -63,6 +63,15 @@ public sealed class WorkerJourneyTests : IDisposable
             var directory = new RunDirectory(service.Session.Manifest.Estate, started.Run);
             using var changed = new FileSignal(root, directory.Path);
             changed.Until(() => directory.Read() is { ExitedAt: not null, Problem: not null }, "the failed settlement", TestContext.Current.CancellationToken);
+            RecordResponse intent = service.Record(started.Run)!;
+            string attentionAt = intent.Envelope.GetProperty("at").GetString()!;
+            WriteOutcome warning = service.NewRecord(new("ask", op, JsonSerializer.SerializeToElement(new
+            {
+                to = op, state = "open", question = $"Run {started.Run} [loop/warning] needs attention at {attentionAt}: Repeated action. Inspect the run?",
+                recommendation = "Inspect the run.", consequence = "The observation remains for review.",
+            }), $"operation:{started.Run}:{intent.Hash}"));
+            Assert.True(warning.Ok, warning.Problem?.Message);
+            Assert.Contains(warning.Written!.Id, service.Asks().Text, StringComparison.Ordinal);
             string[] arguments = ["--estate", root, .. (json ? new[] { "--json" } : []), "worker", "settle", started.Run, "--by", op];
             CliHarness.Outcome unresolved = CliHarness.RunWithApi(service, null, arguments);
             Assert.Equal(2, unresolved.Code);
@@ -74,6 +83,10 @@ public sealed class WorkerJourneyTests : IDisposable
             Assert.Equal(0, recovered.Code);
             Assert.Contains("observed-success", recovered.Out, StringComparison.Ordinal);
             Assert.Null(directory.Read()!.Problem);
+            var model = service.Session.Load();
+            var ask = model.Latest(model.ById[warning.Written.Id]);
+            Assert.Equal("withdrawn", ask.Body.GetProperty("state").GetString());
+            Assert.DoesNotContain(warning.Written.Id, CliHarness.RunWithApi(service, null, "--estate", root, "ask").Out, StringComparison.Ordinal);
             if (json)
             {
                 Assert.True(recovered.Json.GetProperty("ok").GetBoolean());
