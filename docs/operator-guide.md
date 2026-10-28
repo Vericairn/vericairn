@@ -868,6 +868,22 @@ vericairn ask --to <principal>
 
 `goal step` takes the first eligible route that can act, one step per call. An operator, the sponsor when a person, or a principal with `local-engineering` records it. An agent's assignment is validated with its run intent and stored only after the worker's preflight; a person's assignment is validated with its ask. Storage of the pair is journaled but not atomic: a stranded assignment holds no step, and `estate reconcile` reports an incomplete pair. An existing agent result goes to review; a different principal's review with findings or failure returns it for another attempt. Asks are answered by a decision of the principal asked, with the ask id in `answers`, not by reading them, dismissing attention or waiting.
 
+An ask is shown as answered when a current decision names any revision of it in `answers`.
+This is derived from the records, without writing another ask revision. If a decision is
+superseded, its current revision determines which asks it answers; an ask no longer answered
+returns to its recorded open or notified state. `ask`, `operator list`, status and progress
+attention, and the API, SDK and MCP views all use that derived state.
+
+In the 0.9.0 development build, every terminal run settlement withdraws the run's still-waiting
+process attention warnings in the settlement's batch, including settlement recovered from a
+retained observation. On opening an existing estate, the runtime also reconciles warnings left
+by earlier terminal settlements in one journaled batch. Each withdrawal keeps the original
+asker's authorship and question, names the recorded settlement, and is written only once;
+opening the estate again adds no duplicate withdrawals. Warnings for unfinished runs, ordinary
+decision asks, settlement review asks, and asks a person has answered remain unchanged. Missing
+signing authority or an unfinished ask batch leaves cleanup pending for reconciliation. The
+worker's observations remain available for review after their process warnings are withdrawn.
+
 Before a native run or an agent `goal step`, configure each launcher used on the worker's machine. Choose the model selector and an effort from that launcher's native vocabulary:
 
 ```sh
