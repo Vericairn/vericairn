@@ -28,7 +28,7 @@ public class ReleaseChannelTests
         using var f = new Fixture();
         ReleaseSubmitRequest request = f.Request with
         {
-            Line = "maintenance", Channel = channel, EndOfSupport = channel == "lts" ? "2028-01-01T00:00:00Z" : null,
+            Line = "maintenance", Channel = channel, EndOfSupport = channel == "lts" ? f.EndOfSupport : null,
             BackportOf = new(f.Source.Id, f.Source.ComputedHash),
         };
         ReleaseResponse submitted = f.Api.ReleaseSubmit(request);
@@ -47,7 +47,8 @@ public class ReleaseChannelTests
         Assert.Equal(channel, EstateModel.BodyString(recorded, "channel"));
         Assert.Equal(f.Source.Id, recorded.Body.GetProperty("backportOf").GetProperty("id").GetString());
         Assert.Equal(f.Source.ComputedHash, recorded.Body.GetProperty("backportOf").GetProperty("hash").GetString());
-        Assert.Equal(channel == "lts", recorded.Body.TryGetProperty("endOfSupport", out _));
+        Assert.Equal(channel == "lts", recorded.Body.TryGetProperty("endOfSupport", out JsonElement end));
+        if (request.EndOfSupport is not null) Assert.Equal(request.EndOfSupport, end.GetString());
         Assert.Equal(command, f.Api.ReleaseObserve(observe).Publish);
 
         // An observation cannot accept or publish the candidate on any channel.
@@ -110,9 +111,8 @@ public class ReleaseChannelTests
     public void AnOlderProviderLeavesPublicationExplicitlyUnsupported(string channel)
     {
         using var f = new Fixture();
-        f.Api.Providers = new ProviderRegistry();
         f.Api.Providers.Register(new LegacyProvider(f.Provider));
-        ReleaseSubmitRequest request = f.Request with { Line = "maintenance", Channel = channel, EndOfSupport = channel == "lts" ? "2028-01-01T00:00:00Z" : null };
+        ReleaseSubmitRequest request = f.Request with { Line = "maintenance", Channel = channel, EndOfSupport = channel == "lts" ? f.EndOfSupport : null };
         ReleaseResponse submitted = f.Api.ReleaseSubmit(request);
         Assert.True(submitted.Ok, submitted.Message);
         f.Provider.CompleteRun("Example/widget", submitted.Run!, true, request.Version);
@@ -163,7 +163,7 @@ public class ReleaseChannelTests
         using var f = new Fixture();
         ReleaseSubmitRequest request = f.Request with
         {
-            Line = "1.x", Channel = "lts", EndOfSupport = "2028-01-01T00:00:00Z", BackportOf = new(f.Source.Id, f.Source.ComputedHash),
+            Line = "1.x", Channel = "lts", EndOfSupport = f.EndOfSupport, BackportOf = new(f.Source.Id, f.Source.ComputedHash),
         };
         string json = JsonSerializer.Serialize(request, ProtocolJson.Options);
         Assert.Equal(request, JsonSerializer.Deserialize<ReleaseSubmitRequest>(json, ProtocolJson.Options));
@@ -210,6 +210,7 @@ public class ReleaseChannelTests
         public EstateService Api { get; }
         public RecordEnvelope Product { get; }
         public RecordEnvelope Source { get; }
+        public string EndOfSupport { get; } = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddYears(2));
         public ReleaseSubmitRequest Request => new(Product.Id, "1.1.0", "Example/widget", Records.Estate.OperatorId,
             Provider: Provider.Provider, Commit: Provider.HeadSha, Expected: Product.ComputedHash) { ClientBuild = EstateService.Version };
 
