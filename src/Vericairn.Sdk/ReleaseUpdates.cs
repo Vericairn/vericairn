@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using Vericairn.Records.Updates;
 
 namespace Vericairn.Sdk;
@@ -8,38 +9,112 @@ namespace Vericairn.Sdk;
 // Internal implementation shared by the two shipped clients; it adds no SDK or estate API contract.
 internal sealed class ReleaseUpdates(ReleaseUpdateStore store, IReleaseSource source, TimeProvider clock)
 {
+    private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(2);
+    private bool enabled = true;
+
     internal ReleaseUpdates(IReleaseSource source) : this(new ReleaseUpdateStore(), source, TimeProvider.System) { }
 
-    internal bool Enabled => store.Enabled;
+    // Disclosure uses the setting observed by the check, without doing unbounded I/O on the caller's thread.
+    internal bool Enabled => Volatile.Read(ref enabled);
 
     internal async Task<PublishedRelease?> CheckAsync(CancellationToken cancellationToken = default)
     {
-        PublishedRelease? cached = store.CachedRelease();
-        if (!store.Enabled) return cached;
+        PublishedRelease? cached = null;
+        long started = Stopwatch.GetTimestamp();
+        var cancellation = new CancellationTokenSource();
+        CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(
+            static state => ObserveFailure(((CancellationTokenSource)state!).CancelAsync()), cancellation);
+        CancellationToken token = cancellation.Token;
+        // Include synchronous state I/O and source invocation in the caller's deadline. A transport timeout
+        // alone cannot bound an implementation that blocks before returning a task or ignores cancellation.
+        Task<PublishedRelease?> pending = Task.Run(CheckCoreAsync, CancellationToken.None);
         try
         {
-            using FileStream held = store.Acquire();
-            if (!store.Enabled) return cached;
-            ReleaseCheckState state = store.ReadState();
-            cached = state.Release;
-            DateTimeOffset now = clock.GetUtcNow();
-            // A future timestamp (for example after a clock correction) also suppresses another request.
-            if (state.LastAttemptAt is DateTimeOffset previous && now - previous < TimeSpan.FromDays(1)) return cached;
-            // Persist the attempt before any request, even if the request fails or this client is killed.
-            state = state with { LastAttemptAt = now };
-            store.WriteState(state);
-            PublishedRelease? latest = await source.LatestAsync(cancellationToken).ConfigureAwait(false);
-            if (latest is not null)
-            {
-                store.WriteState(state with { LastSuccessAt = clock.GetUtcNow(), Tag = latest.Tag });
-                return latest;
-            }
+            // Independent of cancellation delivery, which can itself be delayed by a source's callbacks.
+            return await pending.WaitAsync(CheckTimeout, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception exception) when (ReleaseUpdateStore.Unavailable(exception) || exception is HttpRequestException or OperationCanceledException)
+        catch (Exception)
         {
-            // Offline, timeout, malformed response, contention or inaccessible local state: keep the last answer.
+            // This optional check must never change the command's exit code, even for an unexpected source failure.
+            return Volatile.Read(ref cached);
         }
-        return cached;
+        finally
+        {
+            ObserveFailure(pending);
+            // Neither cancelling a source nor disposing a linked registration may wait on its callbacks here.
+            _ = CancelAndDisposeAsync(cancellation, registration);
+        }
+
+        async Task<PublishedRelease?> CheckCoreAsync()
+        {
+            Volatile.Write(ref cached, store.CachedRelease());
+            ThrowIfExpired();
+            Volatile.Write(ref enabled, store.Enabled);
+            if (!Enabled) return cached;
+            ThrowIfExpired();
+            ReleaseCheckState state;
+            using (store.Acquire())
+            {
+                ThrowIfExpired();
+                Volatile.Write(ref enabled, store.Enabled);
+                if (!Enabled) return cached;
+                state = store.ReadState();
+                Volatile.Write(ref cached, state.Release);
+                DateTimeOffset now = clock.GetUtcNow();
+                // A future timestamp (for example after a clock correction) also suppresses another request.
+                if (state.LastAttemptAt is DateTimeOffset previous && now - previous < TimeSpan.FromDays(1)) return cached;
+                // Persist the attempt before any request, even if the request fails or this client is killed.
+                state = state with { LastAttemptAt = now };
+                ThrowIfExpired();
+                store.WriteState(state);
+            }
+            // The saved attempt reserves this day's request; an uncooperative source need not hold the lock.
+            ThrowIfExpired();
+            Task<PublishedRelease?> request = source.LatestAsync(token);
+            try
+            {
+                // Late answers and faults are observed only for cleanup; they cannot replace the cached release.
+                PublishedRelease? latest = await request.WaitAsync(CheckTimeout, token).ConfigureAwait(false);
+                ThrowIfExpired();
+                if (latest is not null)
+                {
+                    using FileStream held = store.Acquire();
+                    ThrowIfExpired();
+                    // Another client may have disabled checking or reserved a newer attempt while we waited.
+                    Volatile.Write(ref enabled, store.Enabled);
+                    if (!Enabled || store.ReadState() != state) return cached;
+                    ThrowIfExpired();
+                    store.WriteState(state with { LastSuccessAt = clock.GetUtcNow(), Tag = latest.Tag });
+                    return latest;
+                }
+            }
+            finally { ObserveFailure(request); }
+            return cached;
+        }
+
+        void ThrowIfExpired()
+        {
+            token.ThrowIfCancellationRequested();
+            // Check elapsed time too: a completed task must not beat a delayed timer callback.
+            if (Stopwatch.GetElapsedTime(started) >= CheckTimeout) throw new TimeoutException();
+        }
+    }
+
+    private static void ObserveFailure(Task pending)
+    {
+        _ = pending.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private static async Task CancelAndDisposeAsync(CancellationTokenSource cancellation, CancellationTokenRegistration registration)
+    {
+        try
+        {
+            await registration.DisposeAsync().ConfigureAwait(false);
+            await cancellation.CancelAsync().ConfigureAwait(false);
+        }
+        catch (Exception) { /* A source's cancellation callback must also fail soft. */ }
+        finally { cancellation.Dispose(); }
     }
 
     internal static string Disclosure(bool enabled) => enabled

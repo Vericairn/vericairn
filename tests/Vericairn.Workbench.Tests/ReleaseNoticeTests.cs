@@ -71,15 +71,54 @@ public sealed class ReleaseNoticeTests(HeadlessFixture fixture)
         finally { Directory.Delete(home, recursive: true); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnansweredSourceAndHeldLockKeepTheCachedNoticeWithinAFewSeconds(bool heldLock)
+    {
+        string home = Seed.Temp("update-deadline");
+        var answer = new TaskCompletionSource<PublishedRelease?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? refresh = null;
+        try
+        {
+            var store = new ReleaseUpdateStore(home);
+            var clock = new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero));
+            DateTimeOffset previous = clock.GetUtcNow().AddDays(-2);
+            var cached = new ReleaseCheckState(previous, previous, "v9.2.0");
+            using (store.Acquire()) store.WriteState(cached);
+            var source = new Source { Answer = _ => answer.Task };
+            using FileStream? held = heldLock ? store.Acquire() : null;
+            refresh = fixture.UiAsync(async () =>
+            {
+                var shell = new ShellViewModel(_ => throw new InvalidOperationException("No estate needed"), new FakeRuntimeManager(),
+                    new Preferences(Path.Combine(home, "workbench")), new ReleaseUpdates(store, source, clock));
+                await shell.RefreshUpdatesAsync();
+                Assert.Equal("No estate open.", shell.Status);
+                Assert.Contains("Newer Vericairn release: 9.2.0", shell.UpdateNotice, StringComparison.Ordinal);
+                Assert.Contains("Release check: on", shell.UpdateDisclosure, StringComparison.Ordinal);
+            });
+            await refresh.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            Assert.Equal(heldLock ? 0 : 1, source.Calls);
+            Assert.Equal(heldLock ? cached : cached with { LastAttemptAt = clock.GetUtcNow() }, store.ReadState());
+        }
+        finally
+        {
+            answer.TrySetResult(null);
+            if (refresh is not null) await refresh.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
     private sealed class Source : IReleaseSource
     {
         internal int Calls { get; private set; }
         internal bool Offline { get; init; }
+        internal Func<CancellationToken, Task<PublishedRelease?>>? Answer { get; init; }
         public Task<PublishedRelease?> LatestAsync(CancellationToken cancellationToken)
         {
             Calls++;
             if (Offline) throw new HttpRequestException("offline");
-            return Task.FromResult(PublishedRelease.FromTag("v9.2.0"));
+            return Answer?.Invoke(cancellationToken) ?? Task.FromResult(PublishedRelease.FromTag("v9.2.0"));
         }
     }
 }

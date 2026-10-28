@@ -37,11 +37,13 @@ public sealed class ReleaseUpdatesTests : IDisposable
     [Fact]
     public async Task SimultaneousClientsReserveOnlyOneAttempt()
     {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var released = new TaskCompletionSource<PublishedRelease?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.Answer = _ => released.Task;
+        source.Answer = _ => { entered.SetResult(); return released.Task; };
         Task<PublishedRelease?> first = new ReleaseUpdates(new(home), source, clock).CheckAsync(TestContext.Current.CancellationToken);
         try
         {
+            await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.Equal(1, source.Calls);
             await new ReleaseUpdates(new(home), source, clock).CheckAsync(TestContext.Current.CancellationToken);
             Assert.Equal(1, source.Calls);
