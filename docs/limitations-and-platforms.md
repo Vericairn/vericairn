@@ -668,7 +668,7 @@ The generated CLI reference includes every visible option at its declaring comma
 The GitHub Releases provider runs through the runtime user's `gh` login. It identifies a dispatched run by listing recent runs and can report uncertainty when none appears within thirty seconds. It is the only shipped release provider. Verifications preserve a command's exit, duration and output; they do not parse test reports. Third-party notices and license texts remain hand-maintained beside the generated SBOM and checked against lock files. The 0.6.0 review found its SBOM named the component 0.0.0, included packages absent from archives and omitted the embedded .NET and ASP.NET Core runtimes. From 0.8.2 (CI-03) the SBOM is generated from the self-contained distributables' locked platform restores and checked to name every package they ship; it still lists no embedded .NET or ASP.NET Core runtime, and this set establishes no complete inventory from it. Use the notices for bundled components and the release review's artifact observations. Live stores for clones no longer present are not listed or removed by a command.
 
 The notes command renders the estate's records with `--from 0.8.3 --to 0.8.4`.
-Its exclusive start follows 0.8.2's recorded end; `docs notes` writes the exact window to the manifest.
+Its exclusive start follows 0.8.3's recorded end; `docs notes` writes the exact window to the manifest.
 FIX-13 gives accepted work one entry per work order, naming the latest accepted current result in the
 window by recorded time and then identifier, with its acceptance. Earlier results and attempts remain
 available through `work observe`; later unaccepted results remain separate. Superseded results are omitted.

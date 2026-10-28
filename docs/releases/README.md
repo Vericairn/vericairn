@@ -1,25 +1,33 @@
 # Release documentation sets
 
-The current published release is **0.8.3**, published on October 24, 2026 at 14:24:07 UTC,
-with tag `v0.8.3` at `fb5b497df0686079e917ec5eac375a7d48d27504`
-(estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`). It follows 0.8.2, published on October 22, 2026
-at 11:24:13 UTC with tag `v0.8.2` at `e000a12ea980a4ac0c7e7a127a714f6423e27d7f`
-(estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). 0.8.3 was published before the Reviewer's review of
-its candidate finished and before the operator's acceptance was recorded (decision
-`01M5Q4Y34CFCY24W4F3A6ZD2SP`); the Reviewer's review `01M5Q6D7PJFDMSB6ST7AAVQ7QV` then passed with four informational findings, and the operator's acceptance followed. 0.8.3's [Security section](0.8.3/release-notes.md#security)
-discloses FIX-60's correction to checked pushes, and 0.8.2's [Security section](0.8.2/release-notes.md#security)
-the corrections from 0.8.0's security review. 0.8.2's known issue, a policy basis that differed by platform
-([issue 184](https://github.com/Vericairn/vericairn/issues/184)), is fixed in 0.8.3 (FIX-61).
+The current published release is **0.8.4**, published on October 28, 2026 at 17:11:44 UTC,
+with tag `v0.8.4` at `a41263f35a3433f1c92337ebffa03bb935f657ae`
+(estate release record `01M61R2J5NY521VVDNEMPX32Y2`). It follows 0.8.3, published on October 24, 2026
+at 14:24:07 UTC with tag `v0.8.3` at `fb5b497df0686079e917ec5eac375a7d48d27504`
+(estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`). 0.8.4 was published after the Reviewer's review of
+its candidate passed and the operator's acceptance was recorded: review `01M5YRMS009X8A0WWE31NZJVW5` passed
+with one documentation warning, and acceptance `01M5YXNMA6Q432QRYB6GJ0MR11` followed. 0.8.4's
+[Security section](0.8.4/release-notes.md#security) discloses FIX-67's correction to how a checked push
+reads a clone's objects, 0.8.3's [Security section](0.8.3/release-notes.md#security) FIX-60's correction
+to how a checked push runs git, and 0.8.2's [Security section](0.8.2/release-notes.md#security) the
+corrections from 0.8.0's security review. 0.8.3's known issue, `status` exceeding its read deadline on
+Windows for a large estate ([issue 205](https://github.com/Vericairn/vericairn/issues/205)), is fixed in
+0.8.4 (FIX-63).
 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
 ## Readiness disclosures
 
-Read these before relying on the current published release, 0.8.3. They moved here from the repository's
+Read these before relying on the current published release, 0.8.4. They moved here from the repository's
 README, which links to this section; the [limitations and platforms](../limitations-and-platforms.md) guide
 gives every current limit.
 
-- **Security.** 0.8.3's release notes open with a [Security](0.8.3/release-notes.md#security) section:
+- **Security.** 0.8.4's release notes open with a [Security](0.8.4/release-notes.md#security) section:
+  FIX-67 corrects a checked push in 0.8.0 through 0.8.3, whose fast-forward check could trust a clone's
+  derived object caches (a commit-graph, pack bitmaps, a multi-pack-index), so a crafted cache in a clone
+  another person or an agent could write might let a push that rewrites history pass as one that only adds
+  commits. If you used `changes push` from such a clone before 0.8.4, compare each pushed branch on the
+  remote with the head Vericairn recorded. 0.8.3's [Security](0.8.3/release-notes.md#security) section:
   FIX-60 corrects how `changes push` ran git in 0.8.0 through 0.8.2, with the clone's own and the user's
   configuration and any protocol, and says what to check in a clone used with it before 0.8.3; the user's system and global git
   configuration, and files they include, applied before 0.8.3 too, so check them as well. 0.8.2's
@@ -28,38 +36,38 @@ gives every current limit.
   [Security](0.7.2/release-notes.md#security) section discloses F-01, which affected export restoration in
   every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
   The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
-- **Order of review and publication.** 0.8.3 was published before the Reviewer's independent review of
-  its candidate finished and before the operator's acceptance was recorded, because the publication command
-  ran early (decision 01M5Q4Y34CFCY24W4F3A6ZD2SP). The Reviewer's review `01M5Q6D7PJFDMSB6ST7AAVQ7QV` then passed with four informational
-  findings, and the operator's acceptance followed on October 24, 2026. Its assets are exactly the reviewed
-  candidate's.
-- **Known issue.** On a slower Windows machine, `status` can exceed its 30-second read deadline for a large
-  estate and fail with "The request timed out." (exit code 124): Vericairn's own estate, about 4,100 records,
-  takes over 30 seconds on GitHub's Windows runner, against 16 seconds on macOS and 25 on Linux. Other
-  commands are not affected. 0.8.4 fixes it (FIX-63,
-  [issue 205](https://github.com/Vericairn/vericairn/issues/205)).
-- **Interfaces.** [API compatibility](../api-compatibility-0.8.3.md) lists 0.8.3's interface additions, among
-  them `IEstateApi.WorkNew` and `IEstateApi.ReleaseCheck` without default implementations and a nullable
-  `ReleaseBasisResponse.Evidence`.
+- **Candidate and review.** 0.8.4's first candidate submission, at `ca3f66e9`, was abandoned before it
+  was observed: the maintained guides frozen in its documentation set still described 0.8.3. The guides were
+  corrected and the set frozen again (pull request 240), and the candidate at `a41263f` was submitted,
+  reviewed and accepted. Its assets are exactly the reviewed candidate's.
+- **Known issue (documentation).** Three guides in the 0.8.4 set, the
+  [operator's guide](0.8.4/operator-guide.md), the [limitations guide](0.8.4/limitations-and-platforms.md)
+  and the [software guide](0.8.4/software.md), say the release notes' window follows 0.8.2's recorded end; it
+  follows 0.8.3's, as the set's manifest records. The maintained guides are corrected, and 0.9.0's set notes
+  the correction (decision `01M5YYKV6P054QZN9K5WM3ME32`); the frozen 0.8.4 set keeps its bytes. 0.8.3's
+  known issue, `status` exceeding its read deadline on Windows, is fixed in 0.8.4 (FIX-63).
+- **Interfaces.** [API compatibility](../api-compatibility-0.8.4.md) lists 0.8.4's interface additions:
+  every new `IEstateApi` member has a default implementation, so existing implementations stay
+  source-compatible, and the package commands record reserved placeholder versions (FIX-72).
 - **Record format 3.** Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
   refuses the upgraded estate, so every writer and clone moves to 0.8.0 or later together. The upgrade
   declares no policy or duty; the operator adopts them explicitly, as the
   [adoption guide](../policy-adoption.md) describes.
-- **Sources and guides.** Ordinary source builds retain `0.8.3-dev`. The maintained guides describe 0.8.3;
+- **Sources and guides.** Ordinary source builds retain `0.8.4-dev`. The maintained guides describe 0.8.4;
   earlier release sets keep their original bytes.
 - **Release checks.** Release checks reach only GitHub, ignore system proxies, are disabled with
   `vericairn updates configure --enabled false` and retain cached information when disabled.
 - **Signals and attention.** Command observations remain signals, not an enforcement boundary. Required
   attention cannot infer closure from prose or missing evidence; its [rules](../required-attention.md) keep
   undecidable items visible as unknown.
-- **Platforms and downloads.** For 0.8.3, the command line is qualified on `linux-x64`, `osx-arm64` and
+- **Platforms and downloads.** For 0.8.4, the command line is qualified on `linux-x64`, `osx-arm64` and
   `win-x64`, where the release's tests ran. The `linux-arm64`, `osx-x64` and `win-arm64` archives are
   provided but unqualified. Workbench is not qualified on any platform. The archives are unsigned developer
-  builds, without code signing or notarization; verify downloads as the [install guide](0.8.3/install.md)
-  describes. 0.8.3's `SHA256SUMS` also lists `vericairn-0.8.3-companions.zip`, the readable build reports,
+  builds, without code signing or notarization; verify downloads as the [install guide](0.8.4/install.md)
+  describes. 0.8.4's `SHA256SUMS` also lists `vericairn-0.8.4-companions.zip`, the readable build reports,
   which the release run keeps in its CI artifact and does not attach; check the attached assets with
   `--ignore-missing`, as the guide does.
-- **NuGet.** All eight command-line and library packages are available at 0.8.3 on nuget.org. The `dotnet-vc`
+- **NuGet.** All eight command-line and library packages are available at 0.8.4 on nuget.org. The `dotnet-vc`
   tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without
   the SDK, and the macOS archives also carry the Secure Enclave helper. The NuGet tool does not bundle that
   helper or Workbench. The worker's agent-side MCP command still resolves `vericairn`; keep the archive
@@ -93,22 +101,22 @@ gives every current limit.
   workspace on macOS; settlement audited the commit and fetched its branch into the registered clone. Only
   the workspace's own `.git` is added to Codex's writable roots. This live qualification covers the reported
   macOS path, not other harness versions, accounts, platforms, provider billing or acceptance of the work.
-  0.8.3 changes no worker behavior; the estate's fourteen 0.8.3 worker runs, on macOS, used its pinned 0.8.2
+  0.8.4 changes no worker behavior either. 0.8.3 changed none; the estate's fourteen 0.8.3 worker runs, on macOS, used its pinned 0.8.2
   worker, so 0.8.2's worker changes, FIX-32 through FIX-35, now have live runs on that platform. The
   [software guide](../software.md#native-inventory-qualification-run-02-and-run-03) retains all seven
   observations.
 - **Limits.** Worker spending limits are soft, and unknown usage is charged at the reserved cap. The
   launchers are tested with stand-in processes; live coding-agent sessions and sign-in are not qualified by
   those tests. Process containment and the workspace audit have platform limits, detailed in the
-  [software guide](../software.md#launch-accounting-and-containment). The efficiency Adapter is absent until
-  the planned 0.8.4 work, Remote is not built, and context tokens remain unknown without a qualified local
+  [software guide](../software.md#launch-accounting-and-containment). The efficiency Adapter is absent; it is
+  planned for 0.9.0, Remote is not built, and context tokens remain unknown without a qualified local
   tokenizer. Spending and containment limits remain as described in the guides.
 
 ## Documentation sets
 
-The [0.8.4 set](0.8.4/README.md) is prepared for the next release and is not yet published; the current published release stays 0.8.3 until 0.8.4 is accepted and published, when the living-document pass updates this index and the readiness disclosures above. It follows published 0.8.3 and carries PROMPT-01's saved-prompt library; TPL-01, TPL-02 and TPL-COMMS-01's declarative document templates for the estate's own documents and for communication; OPS-02's signed operator-close action and OPS-03's durable operator requests; CODE-09's generated release-review brief run as an assignment and CODE-10's guided decision from an answered ask; DOCS-12's release documentation pass; MCP-02's read-only MCP resources and prompts; FIX-68's first-party bootstrap for every estate; FIX-64, FIX-65, FIX-66, FIX-69 and FIX-72; and CI-05's CI time limits. Its notes also record work verified but not yet accepted at the set's window: FIX-63, FIX-70, FIX-71 and FIX-67, whose correction to a checked push's trust in a clone's derived object caches the [Security section](0.8.4/release-notes.md#security) discloses. An estate at format 3 upgrades to it without a format step. The source version is `0.8.4-dev`. Its references retain build commit `3a9bd5f6a108f85017193ac308525a05263a4c4d`, with 180 commands, 134 API operations, 47 record types and 41 required documents. Its notes render the estate's records with `--from 0.8.3 --to 0.8.4` and open with the Security section. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish once it publishes; every file's checksum is in `frozen-sha256.json`.
+The [0.8.4 set](0.8.4/README.md) documents the current published release, published on October 28, 2026 at tag `v0.8.4`, commit `a41263f35a3433f1c92337ebffa03bb935f657ae` (estate release record `01M61R2J5NY521VVDNEMPX32Y2`), after published 0.8.3. It carries PROMPT-01's saved-prompt library; TPL-01, TPL-02 and TPL-COMMS-01's declarative document templates for the estate's own documents and for communication; OPS-02's signed operator-close action and OPS-03's durable operator requests; CODE-09's generated release-review brief run as an assignment and CODE-10's guided decision from an answered ask; DOCS-12's release documentation pass; MCP-02's read-only MCP resources and prompts; FIX-68's first-party bootstrap for every estate; FIX-64, FIX-65, FIX-66, FIX-69 and FIX-72; and CI-05's CI time limits. Its notes also record work verified but not yet accepted at the set's window: FIX-63, FIX-70, FIX-71 and FIX-67, whose correction to a checked push's trust in a clone's derived object caches the [Security section](0.8.4/release-notes.md#security) discloses. An estate at format 3 upgrades to it without a format step. The source version is `0.8.4-dev`. Its references retain build commit `3a9bd5f6a108f85017193ac308525a05263a4c4d`, with 180 commands, 134 API operations, 47 record types and 41 required documents. Its notes render the estate's records with `--from 0.8.3 --to 0.8.4` and open with the Security section. The set was frozen before publication, so it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish; every file's checksum is in `frozen-sha256.json`. Its first freeze was replaced before any candidate was observed: the guides it froze still described 0.8.3, and pull request 240 corrected them and replaced the set's own checksum entries, which no published asset had contained. Three of its guides name 0.8.2's recorded end for the notes window, which 0.9.0's set corrects.
 
-The [0.8.3 set](0.8.3/README.md) documents the current published release, published on October 24, 2026 at tag `v0.8.3`, commit `fb5b497df0686079e917ec5eac375a7d48d27504` (estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`), after published 0.8.2: FIX-47 and CODE-07 for a first estate without hand-written JSON, CODE-08's withdrawal and plan moves, FIX-52's verified pins of a published Vericairn release ([issue 177](https://github.com/Vericairn/vericairn/issues/177)), FIX-55's submission check, FIX-60's correction to how a checked push runs git, FIX-61's platform-independent libraries ([issue 184](https://github.com/Vericairn/vericairn/issues/184)), FIX-62's warning about an older background runtime, FIX-50 and FIX-56 through FIX-59, CI-04 and BRAND-04. An estate at format 3 upgrades to it without a format step. The source version is `0.8.3-dev`. Its references retain build commit `a1aac5a1849570994a6f676dfd5242e5ee19a748`, with 150 commands, 108 API operations, 42 record types and 34 required documents. Its notes render the estate's records with `--from 0.8.2 --to 0.8.3` and open with the operator's approved Security section. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`; it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish.
+The [0.8.3 set](0.8.3/README.md) documents an earlier published release, published on October 24, 2026 at tag `v0.8.3`, commit `fb5b497df0686079e917ec5eac375a7d48d27504` (estate release record `01M5Q7AE5C6VRH8YH9JBP19GQS`), after published 0.8.2: FIX-47 and CODE-07 for a first estate without hand-written JSON, CODE-08's withdrawal and plan moves, FIX-52's verified pins of a published Vericairn release ([issue 177](https://github.com/Vericairn/vericairn/issues/177)), FIX-55's submission check, FIX-60's correction to how a checked push runs git, FIX-61's platform-independent libraries ([issue 184](https://github.com/Vericairn/vericairn/issues/184)), FIX-62's warning about an older background runtime, FIX-50 and FIX-56 through FIX-59, CI-04 and BRAND-04. An estate at format 3 upgrades to it without a format step. The source version is `0.8.3-dev`. Its references retain build commit `a1aac5a1849570994a6f676dfd5242e5ee19a748`, with 150 commands, 108 API operations, 42 record types and 34 required documents. Its notes render the estate's records with `--from 0.8.2 --to 0.8.3` and open with the operator's approved Security section. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`; it records no publication, tag, package availability or platform qualification, which the estate's release record and this index establish.
 
 The [0.8.2 set](0.8.2/README.md) documents an earlier published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
 FIX-53, which lets the macOS and Linux single-file command lines start processes again, and FIX-54, which rechecks a
@@ -177,7 +185,7 @@ pushed all eight packages with their symbol packages, and each lists 0.8.2 on nu
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
 `Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.2 is available. 0.8.0's own run,
 [run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377), published 0.8.0 the same way.
-The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0, 0.8.2 or 0.8.3 events.
+The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0, 0.8.2, 0.8.3 or 0.8.4 events.
 
 On October 17, 2026, [run 39028643979](https://github.com/Vericairn/vericairn/actions/runs/39028643979)
 of `nuget.yml` pushed `dotnet-vc` and the seven Vericairn packages at 0.7.1, with their produced symbol packages,
@@ -224,12 +232,16 @@ the macOS Secure Enclave helper nor Workbench.
 | `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
-| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md`, `api-compatibility-0.8.3.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md`; from 0.8.3, that release's interface additions |
+| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md`, `api-compatibility-0.8.3.md`, `api-compatibility-0.8.4.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md`; from 0.8.3 and 0.8.4, each release's interface additions |
 | `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
 | `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
 | `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |
 | `readable-companions.md`, `reference-inventory.md` | a person, frozen copies | From 0.8.0, generator contracts, reading surfaces and the inventory/coverage contract |
 | `reference-inventory.json`, `reference-index.md`, `inputs/` | the build | From 0.8.0, exact reference membership, explicit register mappings and retained generator inputs |
+| `cli.md` | a person, frozen copy | From 0.8.4, the commands added since the release the generated reference first described, with the guides that cover them |
+| `templates.md`, `presentation-templates.md` | a person, frozen copies | From 0.8.4, declarative document templates, their sections, states, reviews and cohesion, and the installed content forms |
+| `prompts.md`, `prompt-record-reference.md` | a person, frozen copies; the second selected from the generated record reference | From 0.8.4, the saved-prompt library, its categories and favorites, and the prompt record |
+| `operator-requests.md` | a person, frozen copy | From 0.8.4, durable requests made of the operator and their recorded outcomes |
 | `release-notes.md` | `vericairn docs notes` | What changed, from the estate's records since the previous set's notes ended (before 0.6.0, since the previous publication) |
 | `limitations-and-platforms.md` | a person, from the release record | Remaining limits, signing and expected artifacts; the release record supplies authoritative hashes and platform qualification |
 | `manifest.json` | the build tooling (`vericairn-docs generate`); its `notes` by `vericairn docs notes` | The set's version, commit, generator, the documents the product declares, commands, operations and record types; from 0.6.0 also the record formats the build reads and writes (`recordFormat`) and the window of records the notes cover (`notes`) |

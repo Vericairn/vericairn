@@ -4,36 +4,21 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.8.3 — current published release
+## 0.8.4 — current published release
 
-0.8.3 follows 0.8.2. A first estate needs no hand-written JSON: `estate init` pins the build you run and
-`work new` creates a work order from its options. Any estate can pin and upgrade to the published
-Vericairn release it depends on, verified against the release's tag and checksums, online or from
-downloaded files. A release can be checked against the whole gate before it is submitted, a candidate
-withdrawn and a plan moved to another version with single commands, and every platform's archive carries
-the same library builds ([issue 184](https://github.com/Vericairn/vericairn/issues/184)). Living
-documents show the same due state everywhere the release gate does, CI runs each platform's published
-command line, and after an upgrade the command line says plainly when an older background runtime is
-still serving the estate. A checked push runs git with only the settings a push needs, as the release
-notes' Security section describes. Its [release notes](docs/releases/0.8.3/release-notes.md) and
-[documentation set](docs/releases/0.8.3/README.md) describe what shipped and its limits.
-
-## 0.8.4 — planned
-
-Reusable templates give documents, roadmaps, communication, context, commits and reviews consistent
-sections and checks. Saved prompts, each with a title, description, category, placeholders and the roles
-it suits, can be shared across an estate, kept as personal favorites, and used with new agent runs,
-assignments and answers to an agent's questions, from the command line or as prompts in coding agents
-that support them. An optional efficiency adapter helps reduce eligible agent context, once the agent
-hook it uses is designed and qualified, and a design document's revision lines are generated from the
-revisions the estate records. The operator closes finished work in one signed action, and release review
-briefs, decisions and the documentation pass after each release come from the records. A public example
-estate and app show the whole loop on GitHub, from a work order through an agent's recorded run, review
-and acceptance to a release, and every release upgrades them. This release's cycle also designs release
-lines and channels (long-term support, prerelease and nightly channels, release cadences and keeping a
-fix's public description until its release) and progress that an agent reports when its configuration
-asks for it, as an exact count, a best-effort estimate or not measurable, with a status text. None of
-either design is built before it is accepted.
+0.8.4 follows 0.8.3. Reusable templates give an estate's documents, roadmaps, communication, context,
+commits and reviews consistent sections and checks, and existing documents can be adopted without losing
+their history. Saved prompts, each with a title, description, category, placeholders and the roles it
+suits, can be shared across an estate, kept as personal favorites, and used with new agent runs,
+assignments and answers to an agent's questions, from the command line or as prompts in coding agents that
+support them. The operator closes finished work in one signed action, and every request the builder or an
+agent makes of the operator is kept until it is done or dismissed. A release's review brief, the decision
+behind an answered question and the documentation pass after each publication now come from the records,
+and coding agents can read briefs, records, pinned documents and context packages as read-only MCP
+resources. Every new estate gets the first-party bootstrap, `status` stays within its deadline on a large
+estate, and a checked push no longer trusts a clone's cached object data, as the release notes' Security
+section describes. Its [release notes](docs/releases/0.8.4/release-notes.md) and
+[documentation set](docs/releases/0.8.4/README.md) describe what shipped and its limits.
 
 ## 0.9.0 — planned
 
@@ -42,7 +27,12 @@ to the desktop for work that needs it. From Workbench or the phone, a saved prom
 running agent in one step; it steers the agent without widening what the agent may do. Every planned
 catalog entry gets a community build guide, and anyone can request the implementations they need most,
 one request per account, to inform what is built next. A support bundle collects what a support case
-needs, with secrets and paths removed, and shows you everything in it before you share it. This release's
+needs, with secrets and paths removed, and shows you everything in it before you share it. Work planned for 0.8.4 arrives here too: the optional efficiency adapter, once the agent hook it uses
+is qualified; design documents whose revision lines are generated from the revisions the estate records;
+and a public example estate and app that show the whole loop on GitHub and are upgraded with every release.
+0.9.0 also builds the release lines and channels and the progress agents report, both designed during
+0.8.4's cycle, keeps `status` fast as an estate grows under a performance budget, and keeps the release
+check from ever hanging a command on a slow network. This release's
 cycle also designs the editions and their services, the contract for foundries that start or reshape a
 project with the first software foundries, and the website, web application, book, book series and
 world-building domains.
