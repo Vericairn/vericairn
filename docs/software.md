@@ -904,6 +904,14 @@ usage, preserves the exit, stop, execution and audit facts, and clears the local
 no result and starts no new run. The workspace remains available for review; recovery does not repeat the
 workspace transfer to the registered clone.
 
+**A run already marked settled (0.9.0).** If the retained observation is marked settled but the estate's records
+hold no settlement for the run, `worker settle` refuses by default and names the cause. The settlement record
+may sit on a branch or in a copy of the estate that has not been merged, and settling again would record the run
+twice. Merge any branch or copy that holds it. Once none does, `vericairn worker settle <run> --by <principal>
+--records-checked` records the settlement from the retained observation, with evidence saying the observation was
+marked and the requester confirmed the records. The runtime's start never settles such a run. A fact the
+observation lacks stays unresolved with the confirmation too, and a recorded settlement is never written twice.
+
 The same principals who may stop a run may request settlement. Startup uses the original run author's current
 standing; record validation and signing still apply. A run still being observed, or already settled, is refused
 with its reason. A missing, unreadable, inconsistent or insufficient observation stays unresolved, keeps its

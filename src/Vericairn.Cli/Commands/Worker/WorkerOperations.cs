@@ -148,9 +148,9 @@ internal sealed class WorkerOperations(CommandContext context)
     });
 
     /// <summary>Retries an exited run's settlement from retained facts and reports any unresolved reason.</summary>
-    public int WorkerSettle(string root, string run, string by, bool json) => context.WithApi(root, api =>
+    public int WorkerSettle(string root, string run, string by, bool recordsChecked, bool json) => context.WithApi(root, api =>
     {
-        RunSettleResponse response = api.RunSettle(run, new RunSettleRequest(by));
+        RunSettleResponse response = api.RunSettle(run, new RunSettleRequest(by) { RecordsChecked = recordsChecked });
         if (json) context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
         else
         {
