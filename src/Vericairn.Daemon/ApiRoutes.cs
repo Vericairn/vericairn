@@ -20,6 +20,7 @@ public static class ApiRoutes
         string v = ApiVersion.Prefix;
         CompanionRoutes.Map(app, service);
         PromptRoutes.Map(app, service);
+        SignedRecordRoutes.Map(app, service);
         TemplateRoutes.Map(app, service);
         app.MapGet("/v1/resources", (Func<HttpContext, Task<IResult>>)(async context =>
             Results.Json(await service.ResourcesAsync(context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options)));

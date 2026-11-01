@@ -594,8 +594,20 @@ the operation), flushed to disk, and when that cannot be kept the write is refus
 written; after the write, its outcome under the same id, written with the record's id, hash and path (for a run's
 stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
 interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
-devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
-machine, remain a future design: a remote device's writes cannot rest on a key of the runtime's machine.
+devices writes [<device>]` lists each write with its state.
+
+From 0.9.0 (REMOTE-03) a paired device can also write a record **signed by its own key**, so the write rests on no
+key of the runtime's machine and asks nobody there for presence. `POST /v1/records/prepare` (a `NewRecordRequest`
+naming the device's own principal, with no `at` or `id`) fixes the record's id, time and form for the requesting
+device, runs the same authoring checks as any write, and answers a `RecordPrepareResponse`: a plan, the record's id,
+time and content hash, and its unsigned form for the person to review. It writes nothing, and only a device-signed
+request can prepare. The device signs the record-signing digest of that hash and sends `POST /v1/records/signed`
+(`SignedRecordRequest`: the plan and the signature). The runtime verifies the signature against the requesting
+device's current key, writes the record with that device's signature after the usual validation, and keeps the
+write in `local-network-writes.jsonl` like any other. A plan belongs to the device that prepared it, is used once
+(a refused signature spends it), and lapses after ten minutes. Policy writes and duty evidence are not prepared:
+they keep their expected-hash rules on the runtime's machine. `DeviceSignedRecords.WriteAsync` in the SDK prepares,
+lets the caller review the exact record, signs and writes.
 Remote is not built; WATCH-01 and HANDOFF-01 do not implement or qualify its signing, transport or run observation.
 Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
@@ -732,9 +744,8 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
   certificate names is fetched.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
-Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
-paired device by its own key. Remote is not built; this API makes no claim of Remote support, and local-network
-pairing does not qualify a Remote client.
+Not covered here: discovery, since devices are given the address; and the relay service. This API makes no claim of
+Remote support beyond what the Remote guide describes, and local-network pairing does not qualify a Remote client.
 
 ## Operations
 
@@ -749,6 +760,8 @@ pairing does not qualify a Remote client.
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks. `record.subject-stale` and `acceptance.unresolved` apply only while the referring record is current; superseded judgments retain historical integrity validation but no longer need reconsideration. A stale replacement is still flagged. |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
+| `POST /v1/records/prepare` | Prepare a record the requesting device will sign with its own key (`NewRecordRequest`, the device's own principal, no `at` or `id`); answers `RecordPrepareResponse` and writes nothing. |
+| `POST /v1/records/signed` | Write a prepared record with the requesting device's signature (`SignedRecordRequest`), verified against that admitted device; nothing on the runtime's machine signs it. |
 | `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), unsigned authoring is available only where the record type permits it. Admissions from format 2 and the format-3 policy, duty and generated-declaration actions retain their mandatory signature rules. The proposed estate is validated before publication; refusal publishes no invalid record. |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |

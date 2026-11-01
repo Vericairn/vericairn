@@ -33,6 +33,15 @@ unknown outcome, and nothing retries. The synchronous `VericairnClient` HTTP
 timeout is six minutes instead of five. `VericairnClient.OperationTimeout` and the
 local-network timeout argument still override every deadline.
 
+## Records signed by a paired device (REMOTE-03)
+
+`IEstateApi` adds `PrepareRecord(NewRecordRequest)` and `NewSignedRecord(SignedRecordRequest)` with default
+implementations that answer `unsupported`, and their cancellable counterparts; `CancellationBoundApi` and
+`VericairnClient` implement them. New contracts: `RecordPrepared`, `RecordPrepareResponse` and `SignedRecordRequest`.
+The SDK adds `DeviceSignedRecords.WriteAsync`. Routes: `POST /v1/records/prepare` and `POST /v1/records/signed`,
+declared in the OpenAPI document. Nothing existing changes: `POST /v1/records` still signs with a device held on the
+runtime's machine. Earlier servers answer `404` for the new routes.
+
 ## Release lines and channels (CODE-12)
 
 `ReleaseSubmitRequest` adds nullable init-only properties `Line`, `Channel`,
