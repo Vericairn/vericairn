@@ -71,8 +71,12 @@ internal static partial class Docs
                 : JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject ?? throw new InvalidOperationException($"{manifestPath} is not a JSON object; the window of the notes is recorded in it.");
             string upper = to?.At ?? RecordParser.FormatTimestamp(reading.AddSeconds(-1));
             IReadOnlyList<RecordEnvelope> window = ReleaseContents.Window(model, beginning.At, upper);
+            string notes = ReleaseNotes(model, fromVersion, beginning, to, toVersion, window, upper, line, from.Subject?.Id);
+            // Notes are rendered from records into a frozen, public set: a blocked term in any rendered record stops them.
+            if (BlockedTerms.Introduced(BlockedTerms.In(model, DateTimeOffset.UtcNow), "", notes) is string blocked)
+                return context.Fail(BlockedTerms.Refusal("These release notes", blocked));
             Directory.CreateDirectory(output);
-            Write(output, "release-notes.md", ReleaseNotes(model, fromVersion, beginning, to, toVersion, window, upper, line, from.Subject?.Id));
+            Write(output, "release-notes.md", notes);
             if (line is not null) manifest["line"] = line; else manifest.Remove("line");
             manifest[NotesWindow] = new JsonObject { ["from"] = beginning.At, ["to"] = upper };
             Write(output, "manifest.json", manifest.ToJsonString(Indented));

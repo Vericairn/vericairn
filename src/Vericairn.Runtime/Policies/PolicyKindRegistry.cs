@@ -30,6 +30,7 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
     internal static PolicyKindRegistry Foundation(string implementationDigest) => new(new[]
     {
         FoundationPolicyKinds.Placement, FoundationPolicyKinds.Staleness, FoundationPolicyKinds.KeyFamily, FoundationPolicyKinds.RevisionLine, FoundationPolicyKinds.Consistency,
+        FoundationPolicyKinds.Blocked,
     }.Select(kind => new PolicyKindRegistration(kind, 1, implementationDigest,
         kind == FoundationPolicyKinds.RevisionLine ? ["repository", "product"] : ["estate", "product", "work-orders"],
         kind == FoundationPolicyKinds.RevisionLine ? [PolicyBasis.RepositoryContract] : [], 100000, 100000,

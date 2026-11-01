@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -2110,6 +2111,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (null, communicationRefusal);
         }
 
+        if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);
+
         if (signers is null)
         {
             string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
@@ -2142,6 +2145,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             return (null, exception.Message);
         }
+    }
+
+    // An estate policy's blocked terms stay out of authored records. A revision is refused only for an occurrence its
+    // predecessor did not already hold, so automatic revisions of older records keep working.
+    private static string? BlockedTermRefusal(RecordDraft draft, EstateModel current)
+    {
+        ImmutableArray<string> terms = BlockedTerms.In(current, DateTimeOffset.UtcNow);
+        if (terms.IsEmpty) return null;
+        JsonElement? predecessor = draft.Supersedes is string prior && current.ById.TryGetValue(prior, out RecordEnvelope? former) ? former.Body : null;
+        return BlockedTerms.IntroducedInRecord(terms, draft.Type, draft.Body, predecessor) is string term
+            ? BlockedTerms.Refusal($"This {draft.Type} record", term) : null;
     }
 
     /// <summary>A test hook at the actual signing boundary; availability checks never enter it.</summary>

@@ -47,6 +47,8 @@ public sealed partial class EstateService
             EstateModel projection = ProjectRevision(model, provisional.Envelope);
             string next = TemplateDocuments.RefreshGenerated(projection, declaration, new UTF8Encoding(false, true).GetString(before));
             byte[] after = new UTF8Encoding(false, true).GetBytes(next);
+            if (BlockedTerms.Introduced(BlockedTerms.In(model, DateTimeOffset.UtcNow), new UTF8Encoding(false, true).GetString(before), next) is string blocked)
+                return new(null, null, new("refused", BlockedTerms.Refusal("The refreshed template regions of " + request.Path, blocked), []));
             if (EstateChecks.Content(request.Path, after).HasErrors) return new(null, null, new("refused", "The prepared document fails repository content checks.", []));
             JsonObject body = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
             body["hash"] = ContentHash.Sha256(after); body["bytes"] = after.LongLength;

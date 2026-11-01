@@ -96,3 +96,10 @@ See [the reporting contract](software.md#requested-progress-090) for shapes,
 validation and precedence. Broader display and freshness integration belongs
 to WATCH-03; the release review response's `RequestedProgress` member remains
 unchanged in this step.
+
+## Blocked terms (CODE-17)
+
+No contract changes. A new estate-policy rule kind, `vericairn.estate/blocked-terms`, appears in the policy kinds listing. Record
+writes through every client can now be refused when they would introduce a blocked term, with a message naming the term, and
+generated-document preparation can be refused as `generated-refused` for the same reason. See
+[blocked terms](policies.md#blocked-terms-090).

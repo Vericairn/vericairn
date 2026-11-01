@@ -133,7 +133,10 @@ public sealed partial class EstateService
                 (record, string? refusal) = AuthorLocked(draft, model);
                 if (record is null) return NewRefused(refusal!);
                 if (JudgeProposedLocked([record]) is { } rejected) return new(null, null, null, rejected);
-                byte[] bytes = new UTF8Encoding(false, true).GetBytes(TemplateDocuments.NewContent(model, record.Envelope));
+                string content = TemplateDocuments.NewContent(model, record.Envelope);
+                if (BlockedTerms.Introduced(BlockedTerms.In(model, DateTimeOffset.UtcNow), "", content) is string blocked)
+                    return NewRefused(BlockedTerms.Refusal("The new template instance " + request.Path, blocked));
+                byte[] bytes = new UTF8Encoding(false, true).GetBytes(content);
                 if (EstateChecks.Content(request.Path, bytes).HasErrors) return NewRefused("The prepared document fails ordinary repository content checks.");
                 hash = ContentHash.Sha256(bytes);
                 DocumentChangePlan companions = PrepareDocuments(model, [record]);
