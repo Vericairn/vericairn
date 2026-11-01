@@ -37,6 +37,7 @@ internal sealed class AttentionDerivation(
         }
 
         Read("progress", Blockers);
+        Read("requested progress", ProgressOverdue);
         Read("goals", () =>
         {
             foreach (GoalRow goal in Goals().Where(g => g.Status is "blocked" or "budget-limited"))
@@ -318,6 +319,23 @@ internal sealed class AttentionDerivation(
         var seen = new HashSet<string>(StringComparer.Ordinal);
         while (Str(record.Envelope, "supersedes") is string previous && seen.Add(record.Id)) record = Required(previous);
         return (At(record), record.Id);
+    }
+
+    private void ProgressOverdue()
+    {
+        foreach (JsonElement element in Array(Progress().Json, "requestedProgress"))
+        {
+            RequestedProgress? status = element.Deserialize<RequestedProgress>(ProtocolJson.Options);
+            if (status is not { Overdue: true, Closed: false }) continue;
+            string id = status.Attempt ?? status.Run ?? status.Assignment;
+            string type = status.Attempt is not null ? "attempt" : status.Run is not null ? "operation" : "assignment";
+            RecordResponse record = Required(id, type);
+            Add("progress-overdue", record, "overdue", ProgressClaimPresentation.Claim(status)
+                + ". Requested reporting is overdue; this attention never stops a run. " + ProgressClaimPresentation.Liveness(status),
+                command: "vericairn progress");
+            int index = items.FindIndex(a => a.Kind == "progress-overdue" && a.Record == id);
+            items[index] = items[index] with { AsOf = status.AsOf };
+        }
     }
 
     private void Runs()

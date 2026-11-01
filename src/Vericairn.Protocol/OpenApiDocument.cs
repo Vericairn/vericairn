@@ -70,6 +70,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/assign"),
         ("POST", "/v1/work/attempt"),
         ("POST", "/v1/work/progress"),
+        ("GET", "/v1/progress/{id}"),
         ("POST", "/v1/work/result"),
         ("POST", "/v1/work/review"),
         ("GET", "/v1/release-bases/{hash}"),
@@ -500,6 +501,11 @@ public static class OpenApiDocument
                 : "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseResponse" } } } };
         }
+        else if (method == "GET" && path == "/v1/progress/{id}")
+        {
+            responses["200"] = new JsonObject { ["description"] = "RequestedProgress: the agent's claim and freshness beside independent worker liveness. Overdue never stops a run.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/RequestedProgress" } } } };
+        }
         else if (method == "POST" && path == "/v1/work/progress")
         {
             responses["200"] = new JsonObject { ["description"] = "WorkProgressResponse: the latest agent claim, a written record only for a completed phase, or a problem when refused.",
@@ -586,17 +592,6 @@ public static class OpenApiDocument
 
     private static JsonObject Schemas()
     {
-        static JsonObject Object(params (string Name, string Type)[] properties)
-        {
-            var props = new JsonObject();
-            foreach ((string name, string type) in properties)
-            {
-                props[name] = new JsonObject { ["type"] = type };
-            }
-
-            return new JsonObject { ["type"] = "object", ["properties"] = props };
-        }
-
         JsonObject decisionNew = Object(("by", "string"), ("ask", "string"), ("statement", "string"), ("answeredAt", "string"),
             ("baseCommit", "string"), ("title", "string"), ("summary", "string"), ("synthesis", "string"),
             ("effects", "array"), ("documents", "array"), ("stake", "string"), ("affects", "array"), ("notAuthorized", "array"),
@@ -710,6 +705,7 @@ public static class OpenApiDocument
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = progressRequest,
             ["WorkProgressClaim"] = progressClaim,
+            ["RequestedProgress"] = RequestedProgressSchema(),
             ["WorkProgressResponse"] = progressResponse,
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["ResultReviewRequest"] = Object(("result", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
@@ -829,7 +825,7 @@ public static class OpenApiDocument
             ["HarnessQualifyRequest"] = Object(("launcher", "string"), ("by", "string"), ("settings", "object")),
             ["RunResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("cap", "object"), ("workspace", "string"), ("problem", "object")),
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
-            ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object")),
+            ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object"), ("requestedProgress", "object")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
             ["ReleaseResponse"] = releaseResponse,
             ["ReleaseCheckDetails"] = releaseCheck,
@@ -991,6 +987,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/new") => "Create a work order from fields, with the same validation, refusals and author signing as POST /v1/records for work-order.",
         ("POST", "/v1/work/assign") => "Delegate a work order to a contributor under a brief.",
         ("POST", "/v1/work/attempt") => "Record the start of an attempt.",
+        ("GET", "/v1/progress/{id}") => "Read the current agent claim, request and freshness for an attempt or run, beside worker liveness. Missing requested updates yield progress-overdue attention and never stop a run.",
         ("POST", "/v1/work/progress") => "Publish the contributor's latest progress claim on its own attempt. Active notes replace local state; a completed phase is recorded once, and an identical completion retry returns its record. Claims never establish worker liveness, scope or acceptance.",
         ("POST", "/v1/work/result") => "Submit a result with exact duty proof bindings; a duty result requires the current attempt hash and an admitted signature.",
         ("GET", "/v1/release-bases/{hash}") => "Read retained exact release-admission inputs and findings; historical evidence grants no new authority.",
@@ -1064,4 +1061,25 @@ public static class OpenApiDocument
         ("POST", "/v1/runtime/certificate") => "Replace the runtime certificate now: paired devices keep working, since the runtime identity signs the new one; for a compromise every other open connection is closed too, and identity replaces the runtime identity as well, after which every device pairs again. On the runtime's own machine only.",
         _ => string.Empty,
     };
+
+    private static JsonObject Object(params (string Name, string Type)[] properties)
+    {
+        var props = new JsonObject();
+        foreach ((string name, string type) in properties)
+        {
+            props[name] = new JsonObject { ["type"] = type };
+        }
+
+        return new JsonObject { ["type"] = "object", ["properties"] = props };
+    }
+
+    private static JsonObject RequestedProgressSchema()
+    {
+        JsonObject schema = Object(("assignment", "string"), ("attempt", "string"), ("by", "string"), ("agent", "string"),
+            ("run", "string"), ("claim", "object"), ("request", "object"), ("source", "object"), ("freshness", "string"),
+            ("asOf", "string"), ("quietSeconds", "integer"), ("cadenceSeconds", "integer"), ("overdue", "boolean"),
+            ("closed", "boolean"), ("liveness", "object"), ("workerObserved", "boolean"), ("problem", "string"));
+        schema["properties"]!["claim"] = new JsonObject { ["$ref"] = "#/components/schemas/WorkProgressClaim" };
+        return schema;
+    }
 }

@@ -381,6 +381,7 @@ public sealed partial class ShellViewModel : Observable
             // the full estate load just to present the same report under the now-known communication settings.
             ProgressResponse? progress = await TryAsync(() => connection.Api.ProgressAsync(cancellationToken)).ConfigureAwait(true);
             FillProgress(progress);
+            await RefreshWorkObservationsAsync(connection.Api, cancellationToken).ConfigureAwait(true);
             await AddCommunicationAttentionAsync(recipient, progress, cancellationToken: cancellationToken).ConfigureAwait(true);
             Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
@@ -620,6 +621,7 @@ public sealed partial class ShellViewModel : Observable
             ProgressResponse? progress = await TryAsync(() => api.ProgressAsync(cancellationToken)).ConfigureAwait(true);
             await RefreshCommunicationAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
             FillProgress(progress, onDemand: false);
+            await RefreshWorkObservationsAsync(api, cancellationToken).ConfigureAwait(true);
             Replace(Attention, estate.Attention);
 
             await AddCommunicationAttentionAsync((await CommunicationRecipientAsync(cancellationToken: cancellationToken).ConfigureAwait(true)), progress, cancellationToken: cancellationToken).ConfigureAwait(true);
@@ -650,6 +652,16 @@ public sealed partial class ShellViewModel : Observable
         Open(page);
         Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Remote is not built.";
         return page;
+    }
+
+    private async Task RefreshWorkObservationsAsync(IEstateApi api, CancellationToken cancellationToken)
+    {
+        foreach (WorkOrderDocument page in Documents.OfType<WorkOrderDocument>().ToArray())
+        {
+            ObserveResponse? observed = await TryAsync(async () => (await api.ObserveAsync(page.Id, cancellationToken).ConfigureAwait(true))!).ConfigureAwait(true);
+            page.Observation = observed is null ? "Work observation unavailable; refresh before relying on earlier claims."
+                : CommunicationPresentation.Protected(communication, "result", page.Key, "Complete work and result observations.", observed.Text);
+        }
     }
 
     /// <summary>Explicitly record an observation by the selected person, through the runtime; a refresh alone never does this.</summary>
@@ -1027,6 +1039,12 @@ public sealed partial class ShellViewModel : Observable
             Str(body, "summary") ?? string.Empty,
             string.Empty,
         };
+        if (body.TryGetProperty("progressClaim", out JsonElement claim))
+        {
+            lines.Add("Agent's last progress claim (context only; never evidence of completion):");
+            lines.Add(JsonSerializer.Serialize(claim, Pretty));
+            lines.Add(string.Empty);
+        }
         foreach ((string name, string title) in new[] { ("outputs", "Outputs"), ("evidence", "Evidence"), ("checks", "Checks"), ("limitations", "Limitations"), ("unresolvedEffects", "Unresolved effects") })
         {
             if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array)

@@ -306,8 +306,10 @@ public sealed class WorkOrderDocument : Document
     /// <summary>The addressed recipient profile and its provenance.</summary>
     public string Communication { get; }
 
-    /// <summary>The observation text.</summary>
-    public string Observation { get; }
+    private string observation = string.Empty;
+
+    /// <summary>The current work observation, including requested claims beside liveness.</summary>
+    public string Observation { get => observation; internal set => Set(ref observation, value); }
 
     /// <summary>Assignments.</summary>
     public IReadOnlyList<AssignmentView> Assignments { get; }

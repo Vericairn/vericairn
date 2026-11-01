@@ -158,3 +158,36 @@ The record format and the product's cadence reference shape are unchanged.
 It returns the text a push's commits would publish, their messages and added lines. An adapter that keeps the default cannot
 push to a public repository while a disclosure hold is in force; the shipped git adapter implements it. Work orders gain an
 optional `disclosure` field whose only value is `held`, within record format 3. See [disclosure holds](changes.md#disclosure-holds-090).
+
+## Requested progress surfaces and overdue attention (WATCH-03)
+
+`IEstateApi.WorkProgressGet(string id)` reads an attempt or run. Its default
+implementation throws `NotSupportedException` so an older implementation is
+explicitly unavailable. `WorkProgressGetAsync` has the ordinary cancellable
+synchronous bridge as its default. Both members have default implementations;
+none is added without one. `CancellationBoundApi` and the synchronous and
+asynchronous SDK forward the read to `GET /v1/progress/{id}`. MCP exposes
+it through the read-only `work_progress_get` tool.
+
+The additive `RequestedProgress` response carries the claim, request, exact
+source, freshness and observation time beside independent worker liveness.
+`RunRow.RequestedProgress` and `StatusResponse.RequestedProgress` are nullable
+init-only additions, omitted when null. Their positional constructors and
+deconstructors are unchanged. Status's canonical `Json` and `Text` remain
+portable; human presentation appends the separately labelled local observations.
+Progress and work observation JSON add a `requestedProgress` array. Clients
+must not use any claim or overdue state as completion evidence or a run stop.
+
+`ProgressRequests.ResolveForWork` resolves inherited reporting before preparing
+an assignment. `ReleaseReviewBriefResponse.RequestedProgress` retains its
+string type and default for compatibility; the current runtime fills it with
+the selected request or `not requested`, and preparation pins its source and
+retains the request in the new brief. An ambiguous request refuses preparation.
+
+Results gain optional format-3 `progressClaim` context. Existing record bytes
+and format numbers stay unchanged, and format-2 records refuse the field.
+The generic record reader advances to `vericairn.records/readers/5` because its
+result-field explanation changes. Version 5 has its own golden fixtures;
+prior fixture versions remain unchanged. The generator id and contract version
+remain unchanged; declarations pinned to an older implementation require an
+explicit generator update before regeneration.

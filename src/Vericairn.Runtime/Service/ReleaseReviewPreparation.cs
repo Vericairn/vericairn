@@ -83,7 +83,12 @@ internal static class ReleaseReviewPreparation
         text.Append("Disposition wording is retained in full. A missing decision is not a resolved finding.\n\n");
         Section("Review work order", [order]);
         Section("Reviewer principal", [reviewer]);
-        text.Append("## Worker handoff\n\nUse the recorded Reviewer principal and this assignment with the operator's configured launcher, repository, base commit and run limits. Requested progress: unavailable (WATCH-02).\n");
+        ProgressRequestSelection progress = ProgressRequests.ResolveForWork(model, order);
+        if (progress.Problem is not null) return Failed("conflict", progress.Problem);
+        string requestedProgress = progress.Request is { } requirement ? CanonicalJson.Serialize(requirement) : "not requested";
+        if (progress.Record is string progressSource) Section("Requested progress source", [model.ById[progressSource]]);
+        text.Append("## Worker handoff\n\nUse the recorded Reviewer principal and this assignment with the operator's configured launcher, repository, base commit and run limits. Requested progress: ")
+            .Append(requestedProgress).Append(". Report through work_progress; work_progress_get reads the current claim and freshness beside worker liveness. A claim is never completion evidence; progress-overdue is attention only and never stops a run.\n");
         string rendered = text.ToString();
         if (rendered.Length > 1_000_000) return Failed("refused", "The complete review brief exceeds the assignment text limit; no content was truncated.");
         var brief = new JsonObject
@@ -99,7 +104,8 @@ internal static class ReleaseReviewPreparation
             ["recovery"] = "Read this assignment's retained review brief and exact source revisions before resuming.",
             ["reviewBrief"] = rendered,
         };
-        return (new(rendered, ContentHash.Sha256(Encoding.UTF8.GetBytes(rendered)), Element(brief), reviewerId), order);
+        if (progress.Request is { } selectedRequest) brief["progressRequest"] = JsonNode.Parse(selectedRequest.GetRawText());
+        return (new(rendered, ContentHash.Sha256(Encoding.UTF8.GetBytes(rendered)), Element(brief), reviewerId, RequestedProgress: requestedProgress), order);
 
         void Section(string title, IEnumerable<RecordEnvelope> records)
         {

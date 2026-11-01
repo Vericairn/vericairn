@@ -200,6 +200,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/work/new"] = typeof(WorkNewRequest),
         ["POST /v1/work/assign"] = typeof(AssignRequest),
         ["POST /v1/work/attempt"] = typeof(AttemptRequest),
+        ["GET /v1/progress/{id}"] = null,
         ["POST /v1/work/progress"] = typeof(WorkProgressRequest),
         ["POST /v1/work/result"] = typeof(ResultRequest),
         ["POST /v1/work/review"] = typeof(ResultReviewRequest),

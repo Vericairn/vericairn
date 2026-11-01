@@ -42,6 +42,7 @@ public sealed class ResultType : IRecordType
         new("limitations", "string[]", true, "What the result does not establish; may be empty."),
         new("unresolvedEffects", "string[]", true, "External effects whose outcome is not known and must be reconciled before any retry; may be empty."),
         new("nextStep", "string", true, "The next permitted step for whoever continues, or 'none'."),
+        new("progressClaim", "object", false, "The last agent claim retained as context: phase, note, at, optional typed progress and statusText. Never evidence of completion or acceptance.", 3),
         new("duties", "object[]", false, "Exact originating policy, rule, tagged occurrence, examined subject, scope, coverage and supporting proof bindings. This is a signed claim, not acceptance.", 3),
     ];
 
@@ -86,6 +87,16 @@ public sealed class ResultType : IRecordType
         body.StringArray("limitations", true, allowEmpty: true, maxItemLength: 2000);
         body.StringArray("unresolvedEffects", true, allowEmpty: true, maxItemLength: 2000);
         body.Text("nextStep", true, 2000);
+        if (body.Since(3, "progressClaim") && body.Nested("progressClaim", false) is BodyReader claim)
+        {
+            claim.Text("phase", true, 100, Patterns.Slug, "a stable lower-case phase name");
+            claim.Text("note", true, 2000);
+            claim.Timestamp("at", true);
+            claim.Flag("completed", false);
+            context.RequireReference("progressClaim.record", claim.Ulid("record", false), "work-progress");
+            ProgressReporting.Claim(claim);
+            claim.NoOtherKeys();
+        }
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {

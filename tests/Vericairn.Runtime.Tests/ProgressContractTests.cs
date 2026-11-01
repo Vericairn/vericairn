@@ -119,6 +119,53 @@ public sealed class ProgressContractTests
             .GetProperty("post").GetProperty("responses").GetProperty("200").GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
     }
 
+    [Fact]
+    public async Task CurrentClaimReaderUsesTheReadRouteThroughSyncAsyncAndCancellationBoundSdk()
+    {
+        using var fixture = new ProgressFixture();
+        fixture.Set("estate", ProgressRequestTests.FullRequest);
+        using EstateService service = EstateService.Open(fixture.Estate.Root);
+        Assert.True(service.WorkProgress(RequestedProgressTests.Request(fixture, """{"type":"best-effort","percent":60}""")).Ok);
+        using var handler = new ProgressReaderHandler(service, fixture.Attempt.Id);
+        using var client = new VericairnClient(new HttpClient(handler) { BaseAddress = new Uri("https://fixture.invalid") });
+        var bound = new CancellationBoundApi(client, TestContext.Current.CancellationToken);
+        int records = service.Session.Load().Records.Count;
+        foreach (IEstateApi api in new IEstateApi[] { client, bound })
+        {
+            Check(api.WorkProgressGet(fixture.Attempt.Id)!);
+            Check((await api.WorkProgressGetAsync(fixture.Attempt.Id, TestContext.Current.CancellationToken))!);
+        }
+        Assert.Equal(4, handler.Calls);
+        Assert.Equal(records, service.Session.Load().Records.Count);
+        using JsonDocument openApi = JsonDocument.Parse(OpenApiDocument.Json);
+        Assert.True(openApi.RootElement.GetProperty("paths").GetProperty("/v1/progress/{id}").TryGetProperty("get", out _));
+        Assert.Equal(typeof(RequestedProgress).GetProperties().Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order(StringComparer.Ordinal),
+            openApi.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("RequestedProgress").GetProperty("properties").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+
+        void Check(RequestedProgress progress)
+        {
+            Assert.Equal(fixture.Attempt.Id, progress.Attempt);
+            Assert.Equal("fresh", progress.Freshness);
+            Assert.False(progress.Overdue);
+            Assert.Null(progress.Liveness);
+            Assert.False(progress.WorkerObserved);
+            Assert.Equal("Reading the widget.", progress.Claim!.StatusText);
+            Assert.Equal(60, progress.Claim.Progress!.Value.GetProperty("percent").GetInt32());
+        }
+    }
+
+    private sealed class ProgressReaderHandler(EstateService service, string attempt) : HttpMessageHandler
+    {
+        internal int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("/v1/progress/" + attempt, request.RequestUri!.AbsolutePath);
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(service.WorkProgressGet(attempt), options: ProtocolJson.Options) });
+        }
+    }
+
     private sealed class ProgressHandler(EstateService service) : HttpMessageHandler
     {
         public int Calls { get; private set; }

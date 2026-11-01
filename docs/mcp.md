@@ -292,8 +292,28 @@ MCP error without changing live state or writing a record. Interim typed claims
 retain both values and status locally across restart. A completed phase adds
 only optional `progress` and `statusText` to its existing format-3 record.
 Identical retries return that record; changing the value or status is refused.
-This does not add a cadence monitor or change worker liveness. WATCH-03 adds
-the broader displays, freshness, overdue signal and result context.
+`work_progress_get` is available to read-only connections. Pass
+`{"id":"<attempt-or-run-id>"}` to read the effective request and its exact source,
+the current agent `claim`, `freshness`, observation time (`asOf`), quiet duration
+and overdue state. Worker `liveness` and `workerObserved` are separate fields;
+no liveness is inferred from a claim. An unknown identity returns a not-found
+error. The tool writes nothing.
+
+Timed reporting is fresh until its cadence boundary. A missing claim becomes
+`overdue` after that cadence; an old claim is `stale`, with `overdue: true`.
+Per-step-only reporting has no invented minute deadline. The progress report's
+`requestedProgress` array carries the same status, and `progress-overdue`
+attention names the agent and attempt or run with its quiet duration. It clears
+on the next fresh claim. It never stops a run or changes the worker's stall
+limit. Required status and values remain visible even at minimal narration.
+Canonical `estate_status` remains portable record-derived JSON; use
+`estate_progress` or `work_progress_get` for these local observations.
+
+`work_result` retains the last claim in `progressClaim`, including its typed
+value, status and time. The runtime fills this context field; callers supply
+ordinary result fields. The retained claim survives local state loss and is
+labelled context, never evidence of completion. A result closes overdue
+reporting without changing the outcome or acceptance rules.
 
 The API and SDK use the same fields in `WorkProgressRequest` and
 `WorkProgressClaim`. The CLI counterpart is `work progress` with `--progress`

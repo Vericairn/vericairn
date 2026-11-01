@@ -91,7 +91,8 @@ public static class CommunicationPresentation
     {
         ArgumentNullException.ThrowIfNull(response);
         string depth = Depth(profile, "status");
-        string content = response.Text;
+        string claims = ProgressClaimPresentation.Render(response.RequestedProgress);
+        string content = response.Text + claims;
         if (depth == "short")
         {
             int start = content.IndexOf("\nPrincipals:\n", StringComparison.Ordinal);
@@ -109,7 +110,7 @@ public static class CommunicationPresentation
         }
 
         return profile.Template is { } use
-            ? CommunicationTemplatePresentation.Render(use, depth, "Current recorded state; unknown observations remain unknown.", response.Text + references, "estate status", profile)
+            ? CommunicationTemplatePresentation.Render(use, depth, "Current recorded state; unknown observations remain unknown.", response.Text + claims + references, "estate status", profile)
             : Lead(profile, "status", "estate status", "Current recorded state; unknown observations remain unknown.") + content + references;
     }
 

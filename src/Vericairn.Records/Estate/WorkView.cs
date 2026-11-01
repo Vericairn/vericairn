@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Estate;
@@ -403,6 +404,11 @@ public static class WorkView
 
     private static void AppendResultDetails(StringBuilder text, RecordEnvelope result, string indent)
     {
+        if (result.Body.TryGetProperty("progressClaim", out JsonElement claim))
+        {
+            text.Append(indent).Append("agent's last progress claim (context only; never evidence of completion): ")
+                .Append(CanonicalJson.Serialize(claim)).Append('\n');
+        }
         if (result.Body.TryGetProperty("outputs", out JsonElement outputs) && outputs.ValueKind == JsonValueKind.Array)
         {
             foreach (JsonElement output in outputs.EnumerateArray())
