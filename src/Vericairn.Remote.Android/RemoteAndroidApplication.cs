@@ -28,6 +28,8 @@ public sealed class RemoteAndroidApplication : AvaloniaAndroidApplication<Remote
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         RemoteApp.Connections = () => new LocalNetworkConnections(Home(), new AndroidKeystoreDeviceKeyStore());
+        // The system font size setting, as a scale of the default.
+        RemoteApp.TextScale = global::Android.App.Application.Context.Resources?.Configuration?.FontScale ?? 1;
         return base.CustomizeAppBuilder(builder);
     }
 

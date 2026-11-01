@@ -18,6 +18,8 @@ public partial class RemoteIosApplication : AvaloniaAppDelegate<RemoteApp>
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         RemoteApp.Connections = () => new LocalNetworkConnections(Home(), Keys());
+        // Dynamic Type: the body text style's size against its default of 17 points.
+        RemoteApp.TextScale = (UIFont.GetPreferredFontForTextStyle(UIFontTextStyle.Body)?.PointSize ?? 17) / 17;
         return base.CustomizeAppBuilder(builder);
     }
 

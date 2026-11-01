@@ -20,6 +20,10 @@ real-device qualification is recorded for it.
     time a check was current. A healthy connection here says nothing about workers running on other machines.
   - **Handoffs:** not in Remote yet; prepare and open them in Workbench.
 
+Every area, input and command has a screen-reader name; states are words, never colour alone; long text wraps rather
+than truncating; and text follows the phone's text-size setting (Dynamic Type on iOS, font size on Android) as Remote
+starts, so a change applies the next time it opens.
+
 Remote decides, accepts and changes nothing in this build. Opening a subject, acknowledging a notice, work detail and
 communicating with a contributor are not in it yet.
 

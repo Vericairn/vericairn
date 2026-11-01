@@ -6,7 +6,8 @@
              xmlns:p="using:Vericairn.Presentation"
              x:Class="Vericairn.Remote.RemoteView"
              x:DataType="vm:RemoteViewModel"
-             Background="{DynamicResource BrandSurface}">
+             Background="{DynamicResource BrandSurface}"
+             FontSize="{DynamicResource ControlContentThemeFontSize}">
   <UserControl.Styles>
     <Style Selector="TextBlock">
       <Setter Property="TextWrapping" Value="Wrap" />
@@ -16,7 +17,7 @@
       <Setter Property="Foreground" Value="{DynamicResource BrandTextMuted}" />
     </Style>
     <Style Selector="TextBlock.heading">
-      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontSize" Value="{DynamicResource RemoteHeadingFontSize}" />
       <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
     <Style Selector="Border.card">
@@ -31,7 +32,7 @@
 
   <Grid RowDefinitions="Auto,*">
     <StackPanel Grid.Row="0" Margin="12,8,12,4" Spacing="6">
-      <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.BuildLabel}" />
+      <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.BuildLabel}" />
       <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding ShowHome}">
         <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" ItemsSource="{Binding Estates}" SelectedItem="{Binding Selected}"
                   AutomationProperties.Name="Estate">
@@ -39,7 +40,7 @@
             <DataTemplate x:DataType="vm:RemoteEstate">
               <StackPanel>
                 <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" />
+                <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding Detail}" />
               </StackPanel>
             </DataTemplate>
           </ComboBox.ItemTemplate>
@@ -48,7 +49,7 @@
         <Button Grid.Column="2" Margin="8,0,0,0" Content="Add" Command="{Binding AddEstateCommand}" AutomationProperties.Name="Pair with another estate" />
       </Grid>
       <TextBlock x:Name="StatusText" IsVisible="{Binding ShowHome}" Text="{Binding StatusLine}" AutomationProperties.Name="{Binding StatusLine}" />
-      <TextBlock Classes="muted" FontSize="12" IsVisible="{Binding ShowHome}" Text="{Binding ConnectionMessage}" />
+      <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" IsVisible="{Binding ShowHome}" Text="{Binding ConnectionMessage}" />
     </StackPanel>
 
     <ScrollViewer Grid.Row="1" IsVisible="{Binding Pairing}">
@@ -85,13 +86,13 @@
                       <TextBlock Text="{Binding Why}" />
                       <TextBlock Classes="muted" Text="{Binding State, StringFormat='State: {0}'}" />
                       <TextBlock Classes="muted" Text="{Binding NextAction, StringFormat='Next: {0}'}" />
-                      <TextBlock Classes="muted" FontSize="12" Text="{Binding AsOf, StringFormat='As of {0}'}" />
+                      <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding AsOf, StringFormat='As of {0}'}" />
                     </StackPanel>
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.AttentionLater}" />
+            <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.AttentionLater}" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
@@ -125,7 +126,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.WorkLater}" />
+            <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.WorkLater}" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
@@ -137,7 +138,7 @@
                 <Border Classes="card">
                   <StackPanel Spacing="2">
                     <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Id}" />
+                    <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding Id}" />
                   </StackPanel>
                 </Border>
               </DataTemplate>
@@ -158,7 +159,7 @@
             <TextBlock Text="{Binding Node.Profiles, StringFormat='Profiles: {0}', FallbackValue=''}" />
             <TextBlock Text="{Binding Node.PairedAt, StringFormat='Paired: {0}', FallbackValue=''}" />
             <TextBlock Text="{Binding Node.LastCurrent, StringFormat='Last current: {0}', FallbackValue=''}" />
-            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.NodesNote}" />
+            <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.NodesNote}" />
           </StackPanel>
         </ScrollViewer>
       </TabItem>
