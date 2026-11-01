@@ -2,7 +2,7 @@
 
 Internal; on demand only. Snapshot: sha256:7b427372758ac04de453bb63245444c198c783c50242cce16c4a5bbf9e926be3.
 
-Generator: vericairn&#46;estate&#47;manifest; contract 1. Input digest: sha256:e6635fa85bcb20eb7952a9b5866a553f06449a25d939976bf2e602653955b7d6.
+Generator: vericairn&#46;estate&#47;manifest; contract 1. Input digest: sha256:db6300233d973ecc931e801c8f5c60c4510e2a733186b3c8f2a5178e5955dc59.
 
 Manifest: [estate&#47;manifest&#46;json](estate/manifest.json) at sha256:5ca57f41876c7f961d513e409059f4c3e99a1c832a597118bc0f92bfb7882ba4.
 
@@ -73,6 +73,12 @@ signatures&#58; optional&#124;required&#59; releaseAcceptance&#58; roles that ma
 ## Organization
 
 name and optional github organization login&#46;
+
+Not recorded in this revision. Absence supplies no inferred value or permission.
+
+## Progress Request
+
+Default requested progress&#58; optional types &#40;accurate&#44; best&#45;effort&#44; not&#45;measurable&#59; all by default&#41;&#44; statusText &#40;false by default&#41;&#44; and cadence &#40;perStep true&#44; positive minutes&#44; or both&#41;&#46; More specific requests replace it&#46;
 
 Not recorded in this revision. Absence supplies no inferred value or permission.
 
