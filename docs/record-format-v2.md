@@ -925,7 +925,7 @@ before dispatch, even when the assignment pins an earlier work-order revision.
 
 WATCH-01 `signals` additionally admit `execution` and `tool-inventory` codes. They record critical
 execution discrepancies or invocations outside the admitted tool inventory; existing command audit
-signals remain intact. The efficiency Adapter stays disabled and absent; enabling it is unsupported.
+signals remain intact. Format-2 execution keeps the efficiency adapter disabled. Format 3 adds the built, disabled-by-default [local efficiency adapter](efficiency-adapter.md), refused until operator machine admission and not to be enabled before its security review.
 A native launcher without complete inventory qualification cannot dispatch.
 
 ## Harness qualifications (RUN-03)
