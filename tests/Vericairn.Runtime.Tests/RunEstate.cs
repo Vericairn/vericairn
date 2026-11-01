@@ -135,6 +135,15 @@ internal sealed class RunEstate : IDisposable
         Service.WorkerOptions = options;
     }
 
+    /// <summary>Opens the estate again with these worker options from its start, so that its startup recovery uses them.</summary>
+    public void Restart(WorkerOptions options)
+    {
+        ProviderRegistry providers = Service.Providers;
+        Service.Dispose();
+        Service = EstateService.Open(Estate.Root, options);
+        Service.Providers = providers;
+    }
+
     public static RecordWritten Ok(WriteOutcome outcome)
     {
         Assert.True(outcome.Ok, outcome.Problem is null ? "no problem reported" : outcome.Problem.Message + "\n" + string.Join('\n', outcome.Problem.Findings.Select(f => $"{f.Severity} {f.Code} {f.Location}: {f.Message}")));

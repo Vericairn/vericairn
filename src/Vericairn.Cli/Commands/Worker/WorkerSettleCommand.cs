@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkerSettleCommand : Command
 {
     public WorkerSettleCommand(CommandContext context)
-        : base("settle", "Settle an exited run whose settlement could not be recorded, using the worker's retained observation on this machine. Missing facts remain unresolved.")
+        : base("settle", "Settle an exited run whose settlement could not be recorded, using the worker's retained observation on this machine, or a run whose supervising worker and harness are gone, with nothing observed for longer than its stall limit, as exited without observation. Missing facts remain unresolved.")
     {
         var operations = new WorkerOperations(context);
         var runArgument = new Argument<string>("run") { Description = "The run's id, any operation revision id, or its identity." };

@@ -74,7 +74,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public EstateSession Session => session;
 
     /// <summary>Opens the estate at a root; throws when it is not an estate.</summary>
-    public static EstateService Open(string root)
+    public static EstateService Open(string root) => Open(root, null);
+
+    // Worker options given here apply from the start, so startup settlement recovery uses them (its clock, for tests).
+    internal static EstateService Open(string root, WorkerOptions? workerOptions)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
@@ -83,6 +86,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var service = new EstateService(EstateSession.Open(root));
+        if (workerOptions is not null) service.WorkerOptions = workerOptions;
         service.JudgeInterruptedBatches();
         service.runDispatch.RecoverSettlements();
         service.ReconcileRunAttention();

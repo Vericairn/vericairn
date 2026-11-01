@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkerStopCommand : Command
 {
     public WorkerStopCommand(CommandContext context)
-        : base("stop", "Ask a run to stop and report what was observed: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the containment, each only once observed. A stop that is not observed is reported as requested.")
+        : base("stop", "Ask a run to stop and report what was observed: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the containment, each only once observed. A stop that is not observed is reported as requested; a run whose supervising worker and harness are gone, with nothing observed for longer than its stall limit, is settled as exited without observation.")
     {
         var operations = new WorkerOperations(context);
         var runArgument = new Argument<string>("run") { Description = "The run: its id, the id of any of its operation's revisions, or its identity." };

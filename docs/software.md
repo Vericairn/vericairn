@@ -837,8 +837,9 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
 5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and the whole
    containment boundary's exit. Root exit or closed output alone does not end a run. A worker that stops observing
-   leaves the run in flight, charged at its cap. A run approaching its wall or reported-token allowance is stopped by
-   the worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
+   leaves the run in flight, charged at its cap, until a stop or settlement finds that worker and the harness gone (a
+   run whose supervising worker died, below). A run approaching its wall or reported-token allowance is stopped by the
+   worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
@@ -861,6 +862,13 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
+
+**A foreground run must outlive its shell.** When no daemon serves the estate, `worker run` and `goal step` without
+`--detach` supervise the run in their own process, as `runtime serve` serves in the foreground. Closing that terminal or
+shell ends the process and its observation, while the harness may run on unobserved. For a run that must outlive the
+shell, start the daemon in the background with `vericairn runtime start` (or register it with `runtime install`),
+launch with `--detach` and follow the run with `worker runs`. A run whose supervising process died is settled as
+described below.
 
 **The custody precondition** (design/goals.md § 10). A key that a store of this machine holds for the operating-system
 user the worker runs as can be used by the agent, which runs as that user. So the worker launches nothing while a device
@@ -890,7 +898,8 @@ file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to its proc
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
 named) has passed, the worker terminates its containment boundary; containment requires observing the whole boundary exited. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
-and the run stays in flight. Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
+and the run stays in flight, unless the worker that supervised it died: then the stop settles it as described below.
+Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
 an agent sponsors) and the principal who started the run may stop it, on every profile; anyone else is refused before
 anything is asked of the run. For a device-signed request, the runtime rechecks the requesting device's admission and
 authenticated key (and its local-network permission on that profile) under the estate's write lock before storing the
@@ -914,6 +923,28 @@ twice. Merge any branch or copy that holds it. Once none does, `vericairn worker
 marked and the requester confirmed the records. The runtime's start never settles such a run. A fact the
 observation lacks stays unresolved with the confirmation too, and a recorded settlement is never written twice.
 
+**A run whose supervising worker died (0.9.0).** When the process supervising a run dies, for example a foreground
+`worker run` whose shell closed, nothing observes the run's exit. `worker stop`, `worker settle` and the runtime's start
+settle such a run as exited without observation, on all of this evidence from the retained observation on the machine
+that ran it: no worker there supervises it; nothing, neither its last heartbeat nor later output or event, was observed
+for longer than its stall limit (the `stallSeconds` its intent pinned, and at least the freshness window); the recorded
+worker process is gone; and the harness's whole boundary is gone. On Linux and macOS no member of its process group may
+remain; on Windows its Job Object closed with the worker's last handle, which ended every member. A process that exists
+and started by the launch, or that cannot be inspected, counts as running, so a reused process id never settles a run.
+
+The settlement is `known-failure`. Its observed summary and evidence say that the exit was not observed; its scope and
+attempt audits are unverified, with an `audit-unverified` warning; a stop asked of the run is recorded with the facts
+observed, normally requested only, and never as contained. It is charged the usage observed up to the last heartbeat:
+wall minutes from launch to that heartbeat and the tokens reported by then, each at most its cap. A unit not observed is
+listed as unreported and charged at its cap, as tokens are when the harness reported none, and currency always is, since
+no launcher reads a price. The settlement releases the branch and leaves the workspace untouched, with its commits and
+uncommitted files, for the next attempt; no branch is fetched into the registered clone. It is recorded once, like any
+settlement; a later stop, settle or start finds it settled.
+
+Anything less keeps the earlier answer: the run stays in flight, charged at its cap, and the stop or settle reply says
+what is missing. On Linux and macOS a harness can outlive its worker, and no worker then transmits a stop to it; its run
+settles once its process group has exited, so end it yourself if it must stop sooner.
+
 The same principals who may stop a run may request settlement. Startup uses the original run author's current
 standing; record validation and signing still apply. A run still being observed, or already settled, is refused
 with its reason. A missing, unreadable, inconsistent or insufficient observation stays unresolved, keeps its
@@ -925,7 +956,9 @@ Current workers retain the monotonic duration, reported usage and final audits b
 Older observations can supply the exit, timestamps, token usage, stop facts and signals they actually retained.
 For those observations, elapsed time comes from the retained UTC timestamps; absent currency usage remains
 unreported and charged at its cap, and missing final scope and attempt audits are explicitly unverified.
-Recovery never infers an exit from a stale heartbeat, a missing process or closed output.
+Recovery from retained exit facts never infers an exit from a stale heartbeat, a missing process or closed output; only
+the rule for a run whose supervising worker died, above, settles a run whose exit was not observed, and only on all of
+its evidence.
 
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
 ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why

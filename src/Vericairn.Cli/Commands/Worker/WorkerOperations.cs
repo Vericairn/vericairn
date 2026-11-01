@@ -147,7 +147,7 @@ internal sealed class WorkerOperations(CommandContext context)
         return response.Ok ? Clean : HasErrors;
     });
 
-    /// <summary>Retries an exited run's settlement from retained facts and reports any unresolved reason.</summary>
+    /// <summary>Retries an exited run's settlement from retained facts, or settles a run whose supervising worker died, and reports any unresolved reason.</summary>
     public int WorkerSettle(string root, string run, string by, bool recordsChecked, bool json) => context.WithApi(root, api =>
     {
         RunSettleResponse response = api.RunSettle(run, new RunSettleRequest(by) { RecordsChecked = recordsChecked });

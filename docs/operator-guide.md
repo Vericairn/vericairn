@@ -1086,7 +1086,7 @@ vericairn goal custody-exception <goal> --by <sponsor or operator for an agent-s
 
 The exception covers this goal revision, appears in each run's intent, and is checked again immediately before launch. It grants no extra spending or publication authority. A revised goal needs a fresh exception.
 
-With `--detach`, a serving daemon supervises the run after the command returns. Otherwise the command waits; Ctrl+C requests a stop. Stop or hand over explicitly:
+With `--detach`, a serving daemon supervises the run after the command returns. Otherwise the command waits; Ctrl+C requests a stop. A foreground run must outlive its shell: when no daemon serves the estate, the command's own process supervises the run, and closing its terminal ends that supervision while the harness may run on. For a run that should outlive the shell, start the daemon with `vericairn runtime start` and launch with `--detach`. If a supervising process dies anyway, `worker stop` or `worker settle` settles the run as exited without observation once that process and the harness are gone and nothing was observed for longer than its stall limit: it is charged the usage observed up to its last heartbeat, never more than its cap, its branch is released and its workspace is kept for the next attempt (`software.md` has the rule). Stop or hand over explicitly:
 
 ```sh
 vericairn worker stop <run> --by <authorized principal> --reason "The operator is taking over." --grace 10
