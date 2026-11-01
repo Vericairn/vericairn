@@ -4,6 +4,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
+using Vericairn.Records.Identity;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
@@ -14,6 +17,51 @@ namespace Vericairn.Daemon.Tests;
 public sealed class AttentionApiTests
 {
     public AttentionApiTests() => DaemonTestHome.Ensure();
+
+    [Fact]
+    public async Task PresenceRequiredSignersHoldRecordWritesButNotUnsignedAcknowledgment()
+    {
+        using var estate = new TestEstate(3);
+        string source = SeedFailure(estate);
+        using EstateService service = EstateService.Open(estate.Root);
+        WriteOutcome authority = service.DeviceCreate(new(estate.OperatorId, "Operator test device", "file"));
+        Assert.True(authority.Ok, authority.Problem?.Message);
+        Assert.True(service.DeviceAdmit(new(authority.Written!.Id, estate.OperatorId, "First authority.")).Ok);
+        string person = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Phone reader","roles":["contributor"]}""").Id;
+        var keys = new FileKeyStore(VericairnHome.Path()); // DaemonTestHome created the test process's isolated home.
+        string device = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
+        byte[] publicKey = keys.Create(device);
+        try
+        {
+            var body = DeviceRecords.Body(person, "Presence fixture", "macos", SecureEnclaveCustody.Kind, RecordSigning.EncodePublicKey(publicKey), ["embedded", "local-network"], 3, "required");
+            estate.Add("device", person, body.ToJsonString(), id: device, signer: new StoreSigner(keys, device));
+            Assert.True(service.DeviceAdmit(new(device, estate.OperatorId, "Test admission.")).Ok);
+            Assert.NotNull(service.PresenceRefusal(person));
+            DeviceStanding standing = service.Standing(device)!;
+            AttentionNotice notice = Assert.Single(service.AttentionGet(person).Items, i => i.SubjectId == source);
+            var context = new DefaultHttpContext();
+            context.Request.Method = "POST";
+            context.Request.Path = "/v1/attention/acknowledge";
+            context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice(standing.Identity, person, standing.PublicKey, LocalNetwork: true);
+            var scope = new RequestScope(service, new LocalNetworkLedger(estate.Root));
+            int records = estate.Load().Records.Count;
+            AttentionAcknowledgeRequest request = Request(person, notice);
+            object? acknowledged = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, request), _ =>
+                ValueTask.FromResult<object?>(Results.Json(service.AttentionAcknowledge(request), ProtocolJson.Options)));
+            Assert.True(Assert.IsType<AttentionAcknowledgeResponse>(Assert.IsAssignableFrom<IValueHttpResult>(acknowledged).Value).Ok);
+            context.Request.Path = "/v1/records";
+            var record = new NewRecordRequest("work-order", person, JsonSerializer.Deserialize<JsonElement>("""{"key":"HELD","kind":"ordinary","title":"Held write","intent":"Confirm presence.","scope":["tests"],"exitQuestion":"Held?","inputs":[],"deliverables":["evidence"]}"""));
+            object? denied = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, record), _ =>
+                throw new InvalidOperationException("A held record write must not reach its handler."));
+            Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(denied).StatusCode);
+            Assert.Contains("presence", Assert.IsType<Microsoft.AspNetCore.Http.HttpResults.ContentHttpResult>(denied).ResponseContent, StringComparison.Ordinal);
+            LocalNetworkWrite kept = Assert.Single(LocalNetworkLedger.Read(estate.Root));
+            Assert.Equal("written", kept.State);
+            Assert.Null(kept.Record);
+            Assert.Equal(records, estate.Load().Records.Count);
+        }
+        finally { keys.Remove(device); }
+    }
 
     [Fact]
     public void ContractCoversPresentationWritesAndEveryInterfaceAdditionHasADefault()
