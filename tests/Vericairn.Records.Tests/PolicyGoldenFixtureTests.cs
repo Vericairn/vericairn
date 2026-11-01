@@ -37,6 +37,12 @@ public class PolicyGoldenFixtureTests
         using TestEstate firstParty = FirstPartyTemplateTests.RecordedFixture();
         EstateModel firstPartyModel = firstParty.Load();
         using PolicyFixture lines = ProductCadenceTests.RecordedFixture();
+        // A work order held from disclosure carries the format-3 disclosure field.
+        lines.Add("work-order", new JsonObject
+        {
+            ["key"] = "FIX-90", ["kind"] = "ordinary", ["title"] = "Held fixture", ["intent"] = "Round trip the disclosure hold.", ["scope"] = new JsonArray("The hold."),
+            ["exitQuestion"] = "Does the hold round trip?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("fixture"), ["disclosure"] = DisclosureHolds.Held,
+        });
         EstateModel lineModel = lines.Estate.Load();
         Assert.False(lineModel.Findings.HasErrors, string.Join('\n', lineModel.Findings));
         using var progress = new ProgressFixture();
