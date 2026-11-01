@@ -1317,14 +1317,31 @@ For archive installations and Workbench, download the archive for your platform 
 page and verify its hashes as the release's installation guide describes. These actions update the
 installed client. They do not update an estate's manifest.
 
+In 0.9.0, the manifest's optional `vericairn.line` and `vericairn.channel` select the followed stream;
+omitted fields mean `current` and `stable`, with no rewrite of existing manifests.
+`estate init --line <name> --channel <channel>` selects them for a new estate.
+
 `vericairn estate check` separately warns with `manifest.release-behind` when an estate is pinned below
-the newest published stable release it knows. It reads the estate's release records for the manifest's
+the newest published release it knows in that line, at its channel or more stable. It reads the estate's release records for the manifest's
 repository and, for `Vericairn/vericairn`, the local release cache. From 0.8.3, it also
 reads verified `vericairn-release` observations and warns for a source pin when the running build's
 version is older than a known published release; it does not infer an ordering of source commits.
-The check makes no network request. Unrelated products, candidate releases and prereleases do not
-count. An equal or newer version, or no known release, produces no warning. The finding is always a
+The check makes no network request. Unrelated products and candidate releases do not count.
+`stable` and `lts` have equal stability; `prerelease` follows them, then `nightly`.
+A stable or LTS estate never receives a prerelease or nightly target, and an estate on `1.x`
+is never offered a newer release from `current`. An equal or newer version, or no known release, produces no warning. The finding is always a
 warning, so it does not fail the check.
+
+The shared latest-release cache and verified dependency observations describe `current/stable`.
+The CLI and Workbench use the selected estate's line when deciding whether to show that cached
+notice. Before an estate is opened, Workbench shows the ordinary installed-client notice.
+For another line, the estate's published release records supply the available versions.
+
+When the followed LTS line's `endOfSupport` has passed, `manifest.line-unsupported` warns even
+without a newer release. It names the lines still supported, using matching publications and
+the product's current line declarations; unrelated repositories cannot supply those names.
+The support timestamp itself remains supported. The warning says when no supported lines
+are known, and neither warning changes the estate's pin or followed line.
 
 Use the target release's own command line to review
 `vericairn estate upgrade --to <published-version> --check`, then apply it with
@@ -1333,6 +1350,12 @@ Vericairn product release record, the command verifies the published release met
 the platform archive against `SHA256SUMS`, then records a dependency observation and pins its hash.
 Add `--from <directory>` to verify downloaded release evidence offline. The existing upgrade checks,
 authority rules and record-format migrations still apply. A cached network answer grants no upgrade authority.
+
+To change lines, explicitly add `--line <name> --to <version>` to both the preview and apply
+commands. Add `--channel <channel>` to change the followed stability, including opting into
+prereleases. Omitted options preserve the manifest's choices. The plan shows the resulting
+line and channel; the migration records an explicit change. Every estate, including one
+using a fork's repository and release records, follows these rules.
 
 
 ## 25. Current required attention

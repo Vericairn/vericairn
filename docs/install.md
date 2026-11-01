@@ -153,6 +153,28 @@ Nothing runs in the background until you ask: commands run the embedded runtime 
 From 0.8.3, the published-dependency commands below let an estate other than Vericairn's own pin a
 published release without authoring a product release record.
 
+In 0.9.0, an estate follows a release line and channel. The optional manifest fields
+`vericairn.line` and `vericairn.channel` default to `current` and `stable`; reading an older
+manifest does not rewrite it. `estate init --line 1.x --channel lts` selects another line.
+The names and rules apply equally to a fork's published release records.
+
+An ordinary `estate upgrade --to <version>` stays within the followed line and accepts only
+its channel or a more stable channel. `stable` and `lts` have equal stability, followed by
+`prerelease`, then `nightly`. A stable or LTS estate is never offered a prerelease version,
+even if an older release record omitted its channel. To change lines deliberately, preview
+and apply the same explicit selection:
+
+```sh
+vericairn estate upgrade --line current --channel stable --to <published-version> --check
+vericairn estate upgrade --line current --channel stable --to <published-version> --by <operator-id>
+```
+
+Omitting `--line` or `--channel` preserves that choice. Opting into release candidates in the
+same line requires `--channel prerelease`; accepting a stable target keeps that preference
+until it is explicitly changed. Line and channel changes are included in the upgrade plan
+and recorded migration. The shared latest-release cache and verified dependency observations
+describe `current/stable`; another line requires its published release records in the estate.
+
 Install and checksum-verify the target command line by Route B. If a daemon serves the estate,
 restart it with the same target build before checking or applying the upgrade. From the estate
 directory on the daemon's machine, run `vericairn runtime stop`, then `vericairn runtime start`.
@@ -567,11 +589,15 @@ vericairn estate upgrade --to <published-version> --check
 vericairn estate upgrade --to <published-version> --by <operator-id>
 ```
 
-`estate check` makes no release-check request. It warns with `manifest.release-behind` when the manifest
-pins a release below the newest stable published version known from matching release records,
+`estate check` makes no release-check request. In 0.9.0 it warns with `manifest.release-behind` when the manifest
+pins a release below the newest published version in its followed line, at its channel or more stable, known from matching release records,
 `vericairn-release` observations or the local cache. For source pins it compares that knowledge with
 the build performing the check; it does not infer an arbitrary source commit's version. The cache
-applies only to `Vericairn/vericairn`; another product's releases do not count.
+contains only `current/stable` knowledge for `Vericairn/vericairn`; another product's releases do not count.
+The CLI and Workbench suppress that cached notice for an estate on another line.
+After an LTS line's `endOfSupport`, `manifest.line-unsupported` names the supported lines known
+from the pinned repository's publications and current product declarations. At the exact support
+timestamp the line still counts as supported. If no supported line is known, the warning says so.
 This warning never makes the command fail and never changes the pin. See the
 [operator guide](operator-guide.md) for the distinction between installing a tool and upgrading an estate.
 
