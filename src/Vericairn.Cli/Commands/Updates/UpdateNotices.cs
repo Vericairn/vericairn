@@ -11,8 +11,8 @@ internal static class UpdateNotices
 
     public static int Run(CommandContext context, ReleaseUpdates updates, Func<int> action)
     {
-        context.Error.WriteLine(ReleaseUpdates.Disclosure(updates.Enabled));
         string notice = ReleaseUpdates.Notice(updates.CheckAsync().GetAwaiter().GetResult(), CommandContext.VersionText());
+        context.Error.WriteLine(ReleaseUpdates.Disclosure(updates.Enabled));
         if (notice.Length > 0) context.Error.WriteLine(notice);
         return action();
     }

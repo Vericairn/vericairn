@@ -55,7 +55,6 @@ public sealed partial class ShellViewModel : Observable
         this.runtime = runtime;
         this.preferences = preferences;
         this.updates = updates;
-        updateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
         layout = preferences.LoadLayout();
         Regions = new ObservableCollection<Region>(
         [
@@ -171,8 +170,8 @@ public sealed partial class ShellViewModel : Observable
 
     internal async Task RefreshUpdatesAsync()
     {
-        UpdateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
         var release = await updates.CheckAsync().ConfigureAwait(true);
+        UpdateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
         string installed = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
         UpdateNotice = ReleaseUpdates.Notice(release, installed);
     }

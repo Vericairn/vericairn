@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
@@ -60,6 +61,77 @@ public sealed class UpdateNoticeJourneyTests : IDisposable
             Assert.DoesNotContain("offline stand-in", actual.Err, StringComparison.Ordinal);
         }
         Assert.Equal(1, source.Calls);
+    }
+
+    [Theory]
+    [InlineData("version", "ignores-cancellation", true)]
+    [InlineData("doctor", "ignores-cancellation", true)]
+    [InlineData("status", "ignores-cancellation", true)]
+    [InlineData("status", "ignores-cancellation", false)]
+    [InlineData("version", "cancellable", true)]
+    [InlineData("doctor", "cancellable", true)]
+    [InlineData("status", "cancellable", true)]
+    [InlineData("version", "synchronous", true)]
+    [InlineData("doctor", "synchronous", true)]
+    [InlineData("status", "synchronous", true)]
+    [InlineData("version", "held-lock", true)]
+    [InlineData("doctor", "held-lock", true)]
+    [InlineData("status", "held-lock", true)]
+    [InlineData("status", "held-lock", false)]
+    [InlineData("version", "timeout", true)]
+    [InlineData("doctor", "timeout", true)]
+    [InlineData("status", "timeout", true)]
+    [InlineData("status", "timeout", false)]
+    public async Task SlowChecksKeepCachedNoticesStdoutAndTheCommandsOwnExitCode(string command, string obstruction, bool validEstate)
+    {
+        if (validEstate) Init();
+        CliHarness.Outcome baseline = CliHarness.Run("--estate", estate, command);
+        Assert.Equal(validEstate ? 0 : 1, baseline.Code);
+        var clock = new ReleaseUpdatesTests.Clock();
+        var store = new ReleaseUpdateStore(home);
+        DateTimeOffset previous = clock.Now.AddDays(-2);
+        var cached = new ReleaseCheckState(previous, previous, "v9.2.0");
+        using (store.Acquire()) store.WriteState(cached);
+        var answer = new TaskCompletionSource<PublishedRelease?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ReleaseCheckState? atRequest = null;
+        var source = new ReleaseUpdatesTests.Source
+        {
+            Answer = token =>
+            {
+                atRequest = store.ReadState();
+                return obstruction switch
+                {
+                    "timeout" => throw new TimeoutException("source timeout stand-in"),
+                    "cancellable" => answer.Task.WaitAsync(token),
+                    "synchronous" => Task.FromResult(answer.Task.GetAwaiter().GetResult()),
+                    _ => answer.Task,
+                };
+            },
+        };
+        var updates = new ReleaseUpdates(store, source, clock);
+        using FileStream? held = obstruction == "held-lock" ? store.Acquire() : null;
+        var elapsed = Stopwatch.StartNew();
+        Task<CliHarness.Outcome> running = Task.Run(() => CliHarness.RunWithUpdates(updates, "--estate", estate, command), TestContext.Current.CancellationToken);
+        try
+        {
+            CliHarness.Outcome actual = await running.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5), "The command waited more than five seconds for the optional release check.");
+            Assert.Equal(baseline.Code, actual.Code);
+            Assert.Equal(baseline.Out, actual.Out);
+            Assert.Contains("Release check: on", actual.Err, StringComparison.Ordinal);
+            Assert.Contains("Newer Vericairn release: 9.2.0", actual.Err, StringComparison.Ordinal);
+            Assert.DoesNotContain("source timeout stand-in", actual.Err, StringComparison.Ordinal);
+            ReleaseCheckState expected = obstruction == "held-lock" ? cached : cached with { LastAttemptAt = clock.Now };
+            Assert.Equal(expected, store.ReadState());
+            Assert.Equal(obstruction == "held-lock" ? null : expected, atRequest);
+            Assert.Equal(obstruction == "held-lock" ? 0 : 1, source.Calls);
+        }
+        finally
+        {
+            answer.TrySetResult(null);
+            // Restore the shared console before another CLI test runs, including when the watchdog fails.
+            await running.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        }
     }
 
     [Fact]
