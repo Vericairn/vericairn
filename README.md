@@ -39,6 +39,12 @@ The outcome is the release you accepted and an estate: the records, in your git 
 every work order, brief, run, result, review, decision and release behind it. `dotnet vc status` and
 `dotnet vc progress` show where it stands.
 
+To see one without installing anything, read the public example: a demonstration estate,
+[vericairn-example-estate](https://github.com/Vericairn/vericairn-example-estate), that manages a small
+product, [tally](https://github.com/Vericairn/vericairn-example-app). Its records show each work order through
+an agent's recorded run, an independent review that once sent the work back, checked merges, acceptance and a
+release, with generated registers that read as Markdown on GitHub.
+
 ## Why records, reviews and acceptance
 
 An agent's report that work is done is a claim, not evidence. In Vericairn each step is a record with a
