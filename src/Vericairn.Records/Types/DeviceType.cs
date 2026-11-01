@@ -41,7 +41,7 @@ public sealed class DeviceType : IRecordType
         new("principal", "ulid", true, "The principal the device acts for."),
         new("name", "string", true, "Descriptive name, never a machine path."),
         new("platform", string.Join('|', Platforms), true, "Operating system family."),
-        new("custody", string.Join('|', DeviceKeyStores.Format2Kinds), true, "How the private key is held; recorded strength, never assumed. From record format 2, macos-secure-enclave, and offline for a recovery device's exported key."),
+        new("custody", string.Join('|', DeviceKeyStores.Format2Kinds), true, "How the private key is held; recorded strength, never assumed. From record format 2, macos-secure-enclave, offline for a recovery device's exported key, and from 0.9.0 a phone's ios-secure-enclave or android-keystore."),
         new("algorithm", RecordSigning.Algorithm, true, "Signature algorithm."),
         new("publicKey", "string", true, "Base64url SubjectPublicKeyInfo of the P-256 public key."),
         new("profiles", "string[]", true, "Permitted connectivity profiles: embedded, local-socket, loopback, local-network, relay."),

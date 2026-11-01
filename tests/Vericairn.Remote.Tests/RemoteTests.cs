@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.LogicalTree;
@@ -175,4 +176,44 @@ internal static class RemoteFixtures
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
     }
+}
+
+/// <summary>The phone's text-size setting scales Remote's text, within the range its layouts were checked at.</summary>
+public sealed class RemoteTextScaleTests(HeadlessFixture fixture) : IDisposable
+{
+    private readonly TestEstate estate = RemoteFixtures.Seeded();
+
+    [Fact]
+    public async Task ThePhonesTextSizeScalesEveryTextAndStaysWithinItsRange()
+    {
+        using var connections = new FakeConnections(estate.Root);
+        await fixture.UiAsync(async () =>
+        {
+            IResourceDictionary resources = Application.Current!.Resources;
+            try
+            {
+                RemoteApp.ApplyTextScale(resources, 1.5);
+                Assert.Equal(21d, resources["ControlContentThemeFontSize"]);
+                Assert.Equal(18d, resources["RemoteSmallFontSize"]);
+                Assert.Equal(27d, resources["RemoteHeadingFontSize"]);
+                (Window window, RemoteView view) = RemoteFixtures.Show(new RemoteViewModel(connections));
+                Assert.Equal(21d, view.FindControl<TextBlock>("PairingResult")!.FontSize);
+                window.Close();
+
+                RemoteApp.ApplyTextScale(resources, 10);
+                Assert.Equal(42d, resources["ControlContentThemeFontSize"]);
+                RemoteApp.ApplyTextScale(resources, double.NaN);
+                Assert.Equal(14d, resources["ControlContentThemeFontSize"]);
+            }
+            finally
+            {
+                RemoteApp.ApplyTextScale(resources, 1);
+            }
+
+            await Task.CompletedTask;
+            return true;
+        });
+    }
+
+    public void Dispose() => estate.Dispose();
 }

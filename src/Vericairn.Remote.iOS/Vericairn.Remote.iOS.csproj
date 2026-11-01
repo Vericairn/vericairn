@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Remote's iOS head. It builds only where the iOS workload and Xcode are installed, so it is in src/Vericairn.Mobile.slnx and CI's
+       remote-ios job, never in Vericairn.slnx. Without a RuntimeIdentifier it builds for the Apple-silicon simulator. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">iossimulator-arm64</RuntimeIdentifier>
+    <Description>Remote for iPhone and iPad: hosts Vericairn.Remote, with device keys in the Secure Enclave.</Description>
+    <IsPackable>false</IsPackable>
+    <ApplicationId>com.vericairn.remote</ApplicationId>
+    <ApplicationTitle>Vericairn Remote</ApplicationTitle>
+    <ApplicationDisplayVersion>$(VersionPrefix)</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <!-- The shared libraries serialize JSON by reflection and are not trim-safe yet, so the app trims only the platform's own
+         assemblies, keeps reflection serialization, and reports no trim analysis for code it does not trim. -->
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.iOS" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Remote/Vericairn.Remote.csproj" />
+  </ItemGroup>
+
+</Project>

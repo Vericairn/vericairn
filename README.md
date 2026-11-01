@@ -222,8 +222,9 @@ operating systems for main, pull requests and manual runs. In CI and in the rele
 failed tests once each; every retried test is named in the run's summary, and a second failure fails the job. A
 separate workflow scans the commits of every pushed branch and pull request for secrets with a pinned,
 checksum-verified gitleaks.
-The release workflow builds the Secure Enclave helper on macOS. This repository's solution contains no iOS or Android
-client, so its build and tests make no mobile-platform qualification claim.
+The release workflow builds the Secure Enclave helper on macOS. Remote, the iOS and Android companion, is in
+`src/Vericairn.Mobile.slnx`: continuous integration builds its iOS head for the simulator on macOS and its Android head on Linux,
+as developer builds. Neither build qualifies a real device; see [Remote](docs/remote.md).
 
 ## Build
 

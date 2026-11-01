@@ -28,6 +28,60 @@ jobs:
           ruby .github/scripts/test-workflow-actions.rb
           python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
+  # Remote's heads build only where their platform's workload is installed, so they are in src/Vericairn.Mobile.slnx, not the
+  # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
+  # developer builds: neither job signs, installs on or qualifies a real device.
+  remote-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        timeout-minutes: 10
+        with:
+          global-json-file: global.json
+      - name: Install the iOS workload
+        timeout-minutes: 10
+        run: dotnet workload install ios --version 10.0.303.1
+      - name: Select Xcode
+        # The pinned iOS workload (26.5) requires Xcode 26.6, and its build finds tools through the macOS SDK.
+        run: |
+          set -eu
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          ls "$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs" "$(xcode-select -p)/Platforms/iPhoneSimulator.platform/Developer/SDKs"
+          xcrun --sdk macosx --show-sdk-path
+      - name: Restore (locked)
+        timeout-minutes: 10
+        run: dotnet restore src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj --locked-mode
+      - name: Build Remote for the iOS simulator
+        run: dotnet build src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj --no-restore --configuration Release
+
+  remote-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        timeout-minutes: 10
+        with:
+          global-json-file: global.json
+      - name: Install the Android workload
+        timeout-minutes: 10
+        run: dotnet workload install android --version 10.0.303.1
+      - name: Restore (locked)
+        timeout-minutes: 10
+        run: dotnet restore src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj --locked-mode
+      - name: Build Remote for Android
+        # The runner image provides the Android SDK, its licenses accepted by the image, and JDK 17.
+        run: >-
+          dotnet build src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj --no-restore --configuration Release
+          -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME_17_X64"
+
   build-test:
     strategy:
       fail-fast: false

@@ -45,6 +45,8 @@ public class ContinuousIntegrationTests
     [Theory]
     [InlineData("ci.yml", "workflow-policy:", 15)]
     [InlineData("ci.yml", "build-test:", 60)]
+    [InlineData("ci.yml", "remote-ios:", 45)]
+    [InlineData("ci.yml", "remote-android:", 45)]
     [InlineData("release.yml", "verify:", 60)]
     [InlineData("package.yml", "enclave-helper:", 20)]
     [InlineData("package.yml", "package:", 45)]
@@ -461,13 +463,38 @@ public class ContinuousIntegrationTests
     {
         // A project outside the solution builds only as a reference, in its default configuration, so a Release pack without a
         // build could not find it; DIST-02's registry provider first met this.
+        // Remote's iOS and Android heads build only with their platform's workload: they are in src/Vericairn.Mobile.slnx instead (not
+        // at the root, so a plain dotnet build there still means Vericairn.slnx), and EveryMobileHeadBuildsInItsPlatformsJob checks
+        // that CI builds each of them.
         string root = RepositoryRoot();
         string solution = Read(Path.Combine(root, "Vericairn.slnx"));
+        string[] mobile = MobileProjects();
         string[] projects = ProjectDirectories.SelectMany(directory => Directory.EnumerateFiles(Path.Combine(root, directory), "*.csproj", SearchOption.AllDirectories))
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
         Assert.NotEmpty(projects);
-        string[] missing = projects.Where(project => !solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)).ToArray();
-        Assert.True(missing.Length == 0, "Not in Vericairn.slnx: " + string.Join(", ", missing));
+        string[] missing = projects.Where(project => !solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)
+            && !mobile.Contains(project, StringComparer.Ordinal)).ToArray();
+        Assert.True(missing.Length == 0, "In neither Vericairn.slnx nor src/Vericairn.Mobile.slnx: " + string.Join(", ", missing));
+        Assert.Single(Directory.GetFiles(root, "*.slnx"));
+        string[] both = projects.Where(project => solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)
+            && mobile.Contains(project, StringComparer.Ordinal)).ToArray();
+        Assert.True(both.Length == 0, "In both solutions: " + string.Join(", ", both));
+    }
+
+    [Theory]
+    [InlineData("remote-ios:", "macos-latest", "src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj", "ios")]
+    [InlineData("remote-android:", "ubuntu-latest", "src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj", "android")]
+    public void EveryMobileHeadBuildsInItsPlatformsJob(string job, string runner, string project, string workload)
+    {
+        string[] mobile = MobileProjects();
+        Assert.Contains(project, mobile);
+        Assert.Equal(2, mobile.Length);
+        string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), job, 2);
+        Assert.Contains($"\n    runs-on: {runner}\n", steps, StringComparison.Ordinal);
+        Assert.Contains($"run: dotnet workload install {workload} --version ", steps, StringComparison.Ordinal);
+        Assert.Contains($"dotnet restore {project} --locked-mode", steps, StringComparison.Ordinal);
+        Assert.Contains($"dotnet build {project} --no-restore --configuration Release", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", steps, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -647,6 +674,10 @@ public class ContinuousIntegrationTests
             yield return string.Join('\n', lines[i..end]);
         }
     }
+
+    // The projects of src/Vericairn.Mobile.slnx, as repository-relative paths; the solution names them relative to itself.
+    private static string[] MobileProjects() => System.Xml.Linq.XDocument.Load(Path.Combine(RepositoryRoot(), "src", "Vericairn.Mobile.slnx"))
+        .Descendants("Project").Select(project => "src/" + (string)project.Attribute("Path")!).ToArray();
 
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
 
