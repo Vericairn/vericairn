@@ -199,8 +199,11 @@ vericairn estate check
 
 The observation should show a completed, accepted result with its review and
 acceptance; the estate check should still have zero errors and warnings. This
-accepts the result, not a release. A review used as an acceptance basis must judge
-the same subject: do not reuse this result review to accept a work-order record.
+accepts the result, not a release, and it does not close the work order: `GUIDE-1`
+stays planned until a review of the work order and an acceptance of it close it, as
+[review and acceptance](operator-guide.md#6-review-and-acceptance) describes. A review
+used as an acceptance basis must judge the same subject: do not reuse this result
+review to accept a work-order record.
 Changed output needs a new result and a fresh review and acceptance of its hash.
 A failed check calls for a `partial` or `blocked` result with limitations and a
 next step; a review with findings calls for another attempt, not a passing label.
