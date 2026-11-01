@@ -752,8 +752,8 @@ runtime's machine holds, or written unsigned where the charter allows it; the ru
 that device's every signature needs its owner's presence. So a record's signature names a device on the
 runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
 such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
-writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). Records signed by the paired device itself,
-on its own machine, remain a future design. Remote is not built; WATCH-01 and HANDOFF-01 add no Remote signing,
+writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). From 0.9.0 a paired device can also sign
+its own records ([api-v1.md](api-v1.md#the-local-network-profile)). WATCH-01 and HANDOFF-01 add no Remote signing,
 transport or run-observation support.
 
 ## Emergency access
@@ -871,7 +871,7 @@ runtime's present time, including generic `records/new` writes. Historical
 validation still checks when an existing record was authored, so a later
 revocation preserves its earlier authorized history. Backdating a new record
 cannot reuse revoked consent. Unknown fields in the new setting, values and
-delegation request contracts are refused explicitly. Remote is not built.
+delegation request contracts are refused explicitly.
 
 ## Explicit execution policies and run observations (RUN-01)
 
@@ -926,7 +926,7 @@ before dispatch, even when the assignment pins an earlier work-order revision.
 WATCH-01 `signals` additionally admit `execution` and `tool-inventory` codes. They record critical
 execution discrepancies or invocations outside the admitted tool inventory; existing command audit
 signals remain intact. The efficiency Adapter stays disabled and absent; enabling it is unsupported.
-Remote is not built. A native launcher without complete inventory qualification cannot dispatch.
+A native launcher without complete inventory qualification cannot dispatch.
 
 ## Harness qualifications (RUN-03)
 

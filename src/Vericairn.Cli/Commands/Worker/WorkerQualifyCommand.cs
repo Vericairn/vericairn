@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkerQualifyCommand : Command
 {
     public WorkerQualifyCommand(CommandContext context)
-        : base("qualify", "Record an authorized human's qualification of one exact installed harness version from local probe digests: version, help-confirmed flags, closed tools, isolated configuration, login boundary and effective MCP. It launches no agent, establishes no live inference or work acceptance, and grants no version range. Admission allows the shipped baseline or a current qualification whose repeated local probes have identical digests; a superseding record revokes the qualification. The existing inventory policy still applies. Remote is not built.")
+        : base("qualify", "Record an authorized human's qualification of one exact installed harness version from local probe digests: version, help-confirmed flags, closed tools, isolated configuration, login boundary and effective MCP. It launches no agent, establishes no live inference or work acceptance, and grants no version range. Admission allows the shipped baseline or a current qualification whose repeated local probes have identical digests; a superseding record revokes the qualification. The existing inventory policy still applies.")
     {
         var operations = new WorkerOperations(context);
         var qualifyLauncher = new Option<string>("--launcher") { Description = "The native launcher: codex or claude-code.", Required = true };

@@ -165,7 +165,7 @@ internal static class ContextAssembly
             ["withheld"] = withheld,
             ["completeness"] = withheld.Count == 0 ? "Complete for the declared selection; no claim about sources outside it."
                 : "Mandatory originals are inlined; inspect every withheld entry before depending on optional material. No claim about sources outside this selection.",
-            ["limitations"] = new JsonArray("This derived package grants no authority; check current authority before acting.", "Remote is not built."),
+            ["limitations"] = new JsonArray("This derived package grants no authority; check current authority before acting.", "Remote does not show it yet."),
         };
         return ContextAccounting.Measure(payload, maxBytes);
     }

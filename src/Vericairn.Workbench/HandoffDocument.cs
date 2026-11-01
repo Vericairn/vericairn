@@ -14,7 +14,7 @@ namespace Vericairn.Workbench;
 public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationProfile>? profile = null) : Document("Hand-over and resume", "handoff")
 {
     private HandoffPackage? package;
-    private string text = "Prepare a hand-over or open a saved package.", resumeText = "No comparison yet.", note = "Remote is not built.";
+    private string text = "Prepare a hand-over or open a saved package.", resumeText = "No comparison yet.", note = "Remote does not open hand-overs yet.";
 
     /// <summary>The retained package, or none. Only an explicit prepare or successful load replaces it.</summary>
     public HandoffPackage? Package => package;
@@ -51,7 +51,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
 
             Keep(response.Package, response.Text);
             ResumeText = "No comparison yet. Resume or refresh to check changes since this package.";
-            Note = "Hand-over prepared. Save the package to continue on another machine. Remote is not built.";
+            Note = "Hand-over prepared. Save the package to continue on another machine. Remote does not open hand-overs yet.";
         }).ConfigureAwait(true);
     }
 
@@ -70,7 +70,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             ResumeText = response.Text;
             Note = response.Problem is not null ? response.Problem.Message
                 : response.HasErrors ? "The current copy is incomplete or invalid. Review every change and finding before continuing."
-                : "Comparison refreshed. The world may have moved; recheck authority and required originals before acting. Remote is not built.";
+                : "Comparison refreshed. The world may have moved; recheck authority and required originals before acting. Remote does not open hand-overs yet.";
         }).ConfigureAwait(true);
     }
 
@@ -97,7 +97,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             Keep(candidate, RetainedText(candidate));
             ResumeText = response.Text;
             Note = response.HasErrors ? "Package loaded; this copy has missing or invalid state. Review the comparison before continuing."
-                : "Package loaded and compared with this estate. The world may have moved. Remote is not built.";
+                : "Package loaded and compared with this estate. The world may have moved. Remote does not open hand-overs yet.";
             loaded = true;
         }).ConfigureAwait(true);
         return loaded;
@@ -172,7 +172,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
     private static string RetainedText(HandoffPackage retained)
     {
         JsonElement payload = retained.Payload;
-        var result = new StringBuilder("Retained hand-over ").Append(retained.Hash).Append("\nThe world may have moved. This package grants no authority. Remote is not built.\n");
+        var result = new StringBuilder("Retained hand-over ").Append(retained.Hash).Append("\nThe world may have moved. This package grants no authority. Remote does not open hand-overs yet.\n");
         result.Append("\nDerived presentation (deterministic; synthesis off; not accepted)\n")
             .Append(payload.GetProperty("presentation").GetProperty("text").GetString())
             .Append("\nObserved state (records only)\n").Append(CanonicalJson.SerializePretty(payload.GetProperty("observedState")))

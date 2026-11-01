@@ -86,7 +86,7 @@ the read-only MCP tool `communication_get` at the next settled boundary.
 Enforcement covers stored authority, conflicts and first-party rendering;
 following the brief is an instruction to an external agent, not an observed
 guarantee of its prose. Communication settings do not select a run configuration or model; RUN-01 resolves those separately.
-Remote is not built; no Remote communication behavior is claimed.
+No Remote communication behavior is claimed.
 
 The [first-party adoption procedure](communication-adoption.md) preserves the
 operator's exact existing decision as an explicit personal record. It is a
@@ -155,7 +155,7 @@ working-tree-only. A shallow clone, absent or unreadable history, or no matching
 blob still refuses with guidance to restore the exact bytes or use a complete
 local clone. Nothing is fetched or checked out; no other revision or object
 store is substituted. Missing mandatory originals refuse the dependent step.
-Remote is not built or qualified.
+Remote does not read context packages yet.
 
 Briefs on every surface, preparation, retrieval and hand-over author nothing and
 write nothing. At run dispatch, the worker retains `context.json` (the complete
@@ -198,7 +198,7 @@ integration responsibility, separate from the existing run spending cap.
 The local contract is exercised through CLI, MCP, API/SDK and both repository-synced and local-only record custody. Those fixtures do not qualify a live model or harness. Provider
 billed usage, model fit, compaction recovery and any later adapter transformation
 need their own measurements and qualification. There is no new Remote reader,
-transport, signing capability or user interface: Remote is not built.
+transport, signing capability or user interface for them.
 COMMS-01 resolves the recipient's presentation depth for both human and MCP
 briefs. The final text is measured after that lead and communication section are
 added; depth changes neither the canonical context identity nor original bytes.
@@ -1510,7 +1510,7 @@ For example, a roster may record `"limits":{"stallSeconds":300,"watch":{"loopWar
 
 ## Local scope of watching
 
-Remote is not built. WATCH-01 observes only a run launched and contained on the worker's own machine. It adds no remote execution, remote containment, remote record signing, relay, or Remote qualification. The local-network API remains its existing transport and authority model.
+WATCH-01 observes only a run launched and contained on the worker's own machine. It adds no remote execution, remote containment, remote record signing, relay, or Remote qualification. The local-network API remains its existing transport and authority model.
 
 Stand-in harness tests exercise the supported event shapes, rate and loop thresholds, attention failures and containment. They do not qualify a real Claude Code or Codex installation; a changed harness event format needs its own qualification. The command audit is an observation of emitted invocation events, which can arrive after an action began. It cannot prevent an already executed action, establish that an unreported action did not occur, or replace an isolation boundary.
 
@@ -1561,7 +1561,7 @@ reads, agent reads and repository probes do not update them. Both flags are
 required, and an agent cannot author an estate observation. Format-1 estates
 must be explicitly upgraded before this write is available.
 
-Remote is not built. HANDOFF-01 provides the runtime, API, CLI and local desktop
+HANDOFF-01 provides the runtime, API, CLI and local desktop
 Workbench journey only. Moving a saved package between copies is an explicit
 file transfer; this work adds no relay, mobile client, Remote transport or
 remote-device record signing. It makes no qualification claim for those surfaces,
@@ -1842,7 +1842,7 @@ There is no inferred version range. The existing platform and containment limits
 `POST /v1/harness-qualifications`, available only on the runtime's own machine over its local socket or
 signed loopback. Paired local-network devices receive `401` / `denied` before any local probe, including
 requests with a command override. The existing human authority checks still apply. The MCP tool list is
-unchanged. Remote is not built.
+unchanged.
 
 Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
 `request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,

@@ -117,7 +117,7 @@ public class HandoffTests(HeadlessFixture fixture)
         await fixture.UiAsync(() => next.CompareAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Contains("cached", next.Note, StringComparison.Ordinal);
         Assert.Equal(basis, next.PackageJson);
-        Assert.Contains("Remote is not built", next.Text, StringComparison.Ordinal);
+        Assert.Contains("Remote does not open hand-overs yet", next.Text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -20,7 +20,7 @@ internal static class ContextRendering
         text.Append("\n\n## Context package\n\n").Append(package.Hash).Append(" · ").Append(package.Bytes.ToString(CultureInfo.InvariantCulture))
             .Append(" serialized payload bytes · ").Append(payload.GetProperty("accounting").GetProperty("maxBytes").ValueKind == JsonValueKind.Null ? "Limit not set" : "explicit context allocation")
             .Append(" · tokens unknown; model fit not claimed\n")
-            .Append("This is derived context, not a second assignment or authority. Remote is not built.\n")
+            .Append("This is derived context, not a second assignment or authority. Remote does not show it yet.\n")
             .Append(payload.GetProperty("completeness").GetString()).Append('\n');
         Section(text, "Context manifest (distinct from the estate release manifest)", payload.GetProperty("manifest"));
         Section(text, "Withheld originals", payload.GetProperty("withheld"));

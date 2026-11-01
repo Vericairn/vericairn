@@ -262,7 +262,7 @@ Unavailable required originals prevent a package with `context.original-unavaila
 retrieval returns `original-unavailable`. The earlier manifest/source
 route remains callable but returns unavailable after access checking; prepare
 again for a self-contained pin. The SDK exposes both API v1 routes. No new record
-type is introduced. Remote is not built.
+type is introduced. Remote does not use them yet.
 
 Briefs, preparation, hand-over and retrieval do not retain artifacts in the
 estate repository or object store. At dispatch only, the worker retains the
@@ -608,7 +608,7 @@ write in `local-network-writes.jsonl` like any other. A plan belongs to the devi
 (a refused signature spends it), and lapses after ten minutes. Policy writes and duty evidence are not prepared:
 they keep their expected-hash rules on the runtime's machine. `DeviceSignedRecords.WriteAsync` in the SDK prepares,
 lets the caller review the exact record, signs and writes.
-Remote is not built; WATCH-01 and HANDOFF-01 do not implement or qualify its signing, transport or run observation.
+WATCH-01 and HANDOFF-01 do not implement or qualify Remote's signing, transport or run observation.
 Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
@@ -1171,7 +1171,7 @@ Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
 by the caller. Preparing it writes nothing: no objects, records, status ledger
 or authority are stored.
-Remote is not built.
+Remote does not use it yet.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,
 `payload`). The SDK operation is `ResumeHandoff(package)`. Despite its POST body,
@@ -1248,7 +1248,7 @@ the read becomes an unavailable profile, never a claim that defaults were
 applied. Unknown recipients, assignments and unsupported values are labeled
 unavailable. Missing personal records use the stated defaults. Reads author
 nothing. Existing canonical status, progress, brief and record JSON do not
-vary with any recipient or one-view selection. Remote is not built.
+vary with any recipient or one-view selection. Remote does not use it yet.
 
 `GET /v1/work/{key}/brief` additionally accepts the same optional recipient,
 assignment and five one-view parameters. The SDK method is `BriefFor`.
@@ -1332,7 +1332,7 @@ Codex and Claude Code qualify only for the exact versions and isolation evidence
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
-The efficiency Adapter is unsupported (EFF-01, 0.8.4); only `disabled` is allowed. Remote is not built.
+The efficiency Adapter is unsupported (EFF-01, 0.8.4); only `disabled` is allowed.
 These execution additions preserve API v1, existing authority checks and local-only dispatch. Their fields are available from record format 2 and remain available at format 3.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 

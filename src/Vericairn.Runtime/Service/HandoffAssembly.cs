@@ -60,7 +60,7 @@ internal static class HandoffAssembly
         payload["latestRecordedAt"] = model.Records.OrderBy(r => r.At, StringComparer.Ordinal).LastOrDefault()?.At;
         payload["scope"] = scope;
         payload["exclusions"] = new JsonArray("Source-file contents, output objects, unrecorded provider state and conversation are outside this record-only selection.");
-        payload["limitations"] = new JsonArray("The world may have moved. Recorded observations are not live health.", "This package grants no authority; current authority and required external originals must be checked before acting.", "No model input allocation, tokenizer, personalized communication profile or compaction recovery is qualified by this standalone hand-over.", "Remote is not built.");
+        payload["limitations"] = new JsonArray("The world may have moved. Recorded observations are not live health.", "This package grants no authority; current authority and required external originals must be checked before acting.", "No model input allocation, tokenizer, personalized communication profile or compaction recovery is qualified by this standalone hand-over.", "Remote does not open hand-overs yet.");
         payload["observedState"] = State(model);
         foreach (JsonObject original in payload["originals"]!.AsArray().Cast<JsonObject>())
         {
@@ -84,7 +84,7 @@ internal static class HandoffAssembly
         var text = new StringBuilder("Hand-over from the records\n");
         text.Append("Package ").Append(package.Hash).Append(" · ").Append(package.Bytes.ToString(CultureInfo.InvariantCulture)).Append(" payload bytes · ")
             .Append(maxBytes is null ? "Limit not set" : $"limit {maxBytes.Value.ToString(CultureInfo.InvariantCulture)} bytes").Append(" · tokens unknown; model fit not claimed\n");
-        text.Append("The world may have moved. This package grants no authority. Remote is not built.\n")
+        text.Append("The world may have moved. This package grants no authority. Remote does not open hand-overs yet.\n")
             .Append("All records held by this copy, including history. No selected source withheld. Source files and output objects are outside this selection.\n\n")
             .Append("Derived presentation (deterministic; synthesis off; not accepted)\n").Append(lead)
             .Append("\nObserved state (records only)\n").Append(payload["observedState"]!.ToJsonString(ProtocolJson.Options));
