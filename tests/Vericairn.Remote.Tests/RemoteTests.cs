@@ -10,9 +10,10 @@ using Vericairn.Sdk;
 
 namespace Vericairn.Remote.Tests;
 
-public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
+/// <summary>First use explains the companion role and pairs only with an address and a code; a failed pairing says why.</summary>
+public sealed class RemotePairingFormTests(HeadlessFixture fixture) : IDisposable
 {
-    private readonly TestEstate estate = Seeded();
+    private readonly TestEstate estate = RemoteFixtures.Seeded();
 
     [Fact]
     public async Task FirstUseExplainsTheCompanionAndPairsOnlyWithAnAddressAndACode()
@@ -21,7 +22,7 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
         await fixture.UiAsync(async () =>
         {
             var model = new RemoteViewModel(connections);
-            (Window window, RemoteView view) = Show(model);
+            (Window window, RemoteView view) = RemoteFixtures.Show(model);
             Assert.True(view.FindControl<Button>("PairButton")!.IsEffectivelyVisible);
             Assert.False(view.FindControl<TabControl>("Home")!.IsVisible);
             Assert.Contains(view.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == RemoteViewModel.Companion);
@@ -34,32 +35,6 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
             Assert.True(model.PairCommand.CanExecute(null));
             window.Close();
             await Task.CompletedTask;
-            return true;
-        });
-    }
-
-    [Fact]
-    public async Task PairingShowsTheHomeWithTheEstatesWorkAndProductsCurrent()
-    {
-        using var connections = new FakeConnections(estate.Root);
-        await fixture.UiAsync(async () =>
-        {
-            var model = new RemoteViewModel(connections, new FixedTime());
-            (Window window, RemoteView view) = Show(model);
-            model.Address = "192.168.1.20:7443";
-            model.Code = "ABCD-EFGH";
-            await model.PairCommand.ExecuteAsync();
-
-            Assert.False(model.Pairing, model.PairingMessage);
-            Assert.True(view.FindControl<TabControl>("Home")!.IsVisible);
-            Assert.Equal("Test Estate", model.Selected!.Name);
-            Assert.Equal(ConnectionStates.Current, model.ConnectionState);
-            Assert.Equal("Connection current · current as of 2026-11-01 12:00:00 UTC", model.StatusLine);
-            Assert.Contains(model.Work, w => w.Key == "REMOTE-TEST" && w.StatusLabel == "planned");
-            Assert.Contains(model.Products, p => p.Name == "Example");
-            Assert.Equal("Test Estate", model.Node!.Estate);
-            Assert.Equal("current", model.Node.State);
-            window.Close();
             return true;
         });
     }
@@ -82,13 +57,47 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
         });
     }
 
+    public void Dispose() => estate.Dispose();
+}
+
+/// <summary>The home shows the estate current after a check the runtime answered, cached with its time after one it did not, and denied when refused.</summary>
+public sealed class RemoteConnectionStateTests(HeadlessFixture fixture) : IDisposable
+{
+    private readonly TestEstate estate = RemoteFixtures.Seeded();
+
+    [Fact]
+    public async Task PairingShowsTheHomeWithTheEstatesWorkAndProductsCurrent()
+    {
+        using var connections = new FakeConnections(estate.Root);
+        await fixture.UiAsync(async () =>
+        {
+            var model = new RemoteViewModel(connections, new RemoteFixtures.FixedTime());
+            (Window window, RemoteView view) = RemoteFixtures.Show(model);
+            model.Address = "192.168.1.20:7443";
+            model.Code = "ABCD-EFGH";
+            await model.PairCommand.ExecuteAsync();
+
+            Assert.False(model.Pairing, model.PairingMessage);
+            Assert.True(view.FindControl<TabControl>("Home")!.IsVisible);
+            Assert.Equal("Test Estate", model.Selected!.Name);
+            Assert.Equal(ConnectionStates.Current, model.ConnectionState);
+            Assert.Equal("Connection current · current as of 2026-11-01 12:00:00 UTC", model.StatusLine);
+            Assert.Contains(model.Work, w => w.Key == "REMOTE-TEST" && w.StatusLabel == "planned");
+            Assert.Contains(model.Products, p => p.Name == "Example");
+            Assert.Equal("Test Estate", model.Node!.Estate);
+            Assert.Equal("current", model.Node.State);
+            window.Close();
+            return true;
+        });
+    }
+
     [Fact]
     public async Task ALaterCheckThatCannotReachTheRuntimeShowsTheLastObservationAsCachedAndDeniedShowsDenied()
     {
         using var connections = new FakeConnections(estate.Root);
         await fixture.UiAsync(async () =>
         {
-            var model = new RemoteViewModel(connections, new FixedTime());
+            var model = new RemoteViewModel(connections, new RemoteFixtures.FixedTime());
             model.Address = "192.168.1.20:7443";
             model.Code = "ABCD-EFGH";
             await model.PairCommand.ExecuteAsync();
@@ -109,14 +118,22 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
         });
     }
 
+    public void Dispose() => estate.Dispose();
+}
+
+/// <summary>Every area, input and command has a screen-reader name, and what is not built is said plainly.</summary>
+public sealed class RemoteScreenReaderTests(HeadlessFixture fixture) : IDisposable
+{
+    private readonly TestEstate estate = RemoteFixtures.Seeded();
+
     [Fact]
     public async Task EveryAreaInputAndCommandHasAScreenReaderNameAndHandoffsSayPlainlyTheyAreNotHereYet()
     {
         using var connections = new FakeConnections(estate.Root);
         await fixture.UiAsync(async () =>
         {
-            var model = new RemoteViewModel(connections, new FixedTime());
-            (Window window, RemoteView view) = Show(model);
+            var model = new RemoteViewModel(connections, new RemoteFixtures.FixedTime());
+            (Window window, RemoteView view) = RemoteFixtures.Show(model);
             foreach (Control control in view.GetLogicalDescendants().OfType<Control>().Where(c => c is TextBox or Button or ComboBox or TabItem))
             {
                 Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(control)), $"{control.GetType().Name} {control.Name} has no screen-reader name.");
@@ -133,8 +150,12 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
     }
 
     public void Dispose() => estate.Dispose();
+}
 
-    private static (Window Window, RemoteView View) Show(RemoteViewModel model)
+/// <summary>The seeded estate, the shown view and the fixed clock the Remote tests share.</summary>
+internal static class RemoteFixtures
+{
+    public static (Window Window, RemoteView View) Show(RemoteViewModel model)
     {
         var view = new RemoteView { DataContext = model };
         var window = new Window { Content = view, Width = 390, Height = 844 };
@@ -142,7 +163,7 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
         return (window, view);
     }
 
-    private static TestEstate Seeded()
+    public static TestEstate Seeded()
     {
         var estate = new TestEstate(2);
         estate.Add("product", estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
@@ -150,7 +171,7 @@ public sealed class RemoteHomeTests(HeadlessFixture fixture) : IDisposable
         return estate;
     }
 
-    private sealed class FixedTime : TimeProvider
+    public sealed class FixedTime : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
     }
