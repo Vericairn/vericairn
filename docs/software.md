@@ -977,7 +977,8 @@ the machine that ran them, never in a record or a repository.
 Limitations: launcher protocol tests use stand-in processes. The seven live Codex observations
 listed below include FIX-19's successful macOS commit; they qualify only the reported run path, not other
 harnesses, accounts or platforms.
-RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`. RUN-03 lets an
+RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`; FIX-81 in 0.9.0 adds Codex
+`0.163.0-alpha.10.2` and `0.163.0`, each Codex baseline checked against its own feature inventory. RUN-03 lets an
 authorized human qualify another exact installed version from the same local probes, without a product release.
 Stand-in executables test version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
 help established the flag baselines; these qualification tests do not start a real coding agent or its configured MCP
@@ -1776,15 +1777,31 @@ Qualification belongs to a launcher and one exact observed version. These compil
 
 | Launcher | Shipped baseline | Admission evidence |
 |---|---|---|
-| `codex` | `0.159.0-alpha.12.1` | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
+| `codex` | `0.159.0-alpha.12.1`; from 0.9.0 (FIX-81) also `0.163.0-alpha.10.2`, bundled with the desktop app, and `0.163.0`, each with its own exact effective feature inventory | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
 | `claude-code` | `2.1.296` | Exact `--version` response and documented flags in `--help`; fixed built-in tool selection; fresh login-only home; no external setting sources; strict, verified explicit MCP file; configuration and instruction inspection. |
 | `generic` | None | No complete inventory implementation. Worker dispatch stays refused, before executing its command. |
 
 A missing flag, failed or malformed probe, missing required feature, unexpected enabled feature, unqualified version,
 extra MCP server (even disabled), altered transport, duplicate MCP field or unaccounted MCP option refuses admission.
 Help must declare the short aliases used by the commands too: Codex's `-c` and Claude Code's `-p`.
-The generic launcher cannot inherit either native launcher's qualification. No version before or after the two exact
-versions above is implicitly qualified, including another Codex alpha build.
+From 0.9.0 (FIX-81) a Codex refusal names each enabled feature the launcher does not admit and the baseline's admitted
+list it was checked against. Every run switches off every baseline's disabled features, which an earlier baseline that
+does not know a feature ignores. A qualified version other than the baselines is checked against the newest baseline's
+features, and its exact inventory is pinned by its probe digests.
+The generic launcher cannot inherit either native launcher's qualification. No version before, between or after the
+exact versions above is implicitly qualified, including another Codex alpha build.
+
+#### Desktop app updates and a pinned Codex (FIX-81)
+
+The ChatGPT desktop app updates its bundled Codex in place. A worker that runs that executable keeps running only while
+the installed version is a shipped baseline or has a current qualification; after an update to another version, every
+Codex launch is refused before intent, naming the version or each feature that differs. Two routes keep workers running:
+
+- Pin an installation the desktop app does not update. Install a baseline into a directory of its own, for example
+  `npm install @openai/codex@0.163.0` there, and pass its executable to each run with
+  `--setting command=<path to that codex executable>`. Its login is provisioned the same way as any other Codex.
+- Qualify the new exact version with `worker qualify --launcher codex` when its features are admitted. A version that
+  enables a feature no baseline admits stays refused until a release qualifies it; the refusal names the feature.
 
 An operator can qualify an updated installation with either command:
 

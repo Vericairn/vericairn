@@ -71,7 +71,7 @@ public sealed class CodexLauncher : IAgentLauncher
         ["verify-goals", "launch", "observe-usage"],
         [
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
-            "Shipped baseline: codex-cli 0.159.0-alpha.12.1. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
+            "Shipped baselines: codex-cli 0.159.0-alpha.12.1, 0.163.0-alpha.10.2 (bundled with the desktop app) and 0.163.0, each checked against its own exact feature inventory; a refusal names each enabled feature it does not admit. Another exact version needs a current human qualification with matching local probe digests and is checked against the newest baseline's features; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
             "Native efforts: none, minimal, low, medium, high, xhigh, max. The version, help, feature and MCP probes do not validate model/effort support; Codex validates it at launch. An observed nonzero exit, including an effort refusal, is recorded as known-failure, never success.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
