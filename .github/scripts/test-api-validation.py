@@ -20,6 +20,8 @@ class PackageValidationTests(unittest.TestCase):
             source = root / "src" / "Fixture.Api"
             source.mkdir(parents=True)
             shutil.copyfile(ROOT / "src" / "Directory.Build.targets", root / "src" / "Directory.Build.targets")
+            (root / "tools").mkdir()
+            shutil.copyfile(ROOT / "tools" / "BuildTelemetry.targets", root / "tools" / "BuildTelemetry.targets")
             project = source / "Fixture.Api.csproj"
             project.write_text('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>'
                                '<IsPackable>true</IsPackable><PackageId>Fixture.Api</PackageId></PropertyGroup></Project>')
