@@ -1,17 +1,5 @@
 # Checked repository changes
 
-## Release metadata in 0.9.0
-
-CODE-12 adds optional release lines, channels, support dates and exact backport
-references within record format 3, plus product line declarations and a cadence
-reference. Submission checks validate the metadata before dispatch. Only stable
-publication marks GitHub latest; generated notes show a backport from either
-line. Existing records retain their bytes and defaults. See the
-[release procedure](operator-guide.md#release-lines-and-channels-in-090) and
-[compatibility notes](api-compatibility-0.9.0.md).
-
-## Checked change procedure
-
 The 0.8.0 `changes` command family records pushes, pull-request openings,
 merges and observations. It uses the same runtime through the CLI, daemon API
 and SDK. These operations require the operator or a principal with
