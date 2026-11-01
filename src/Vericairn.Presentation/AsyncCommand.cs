@@ -3,7 +3,7 @@
 
 using System.Windows.Input;
 
-namespace Vericairn.Workbench;
+namespace Vericairn.Presentation;
 
 /// <summary>An awaitable UI command whose application flow owns cancellation and failure presentation.</summary>
 public sealed class AsyncCommand(Func<Task> execute, Func<bool> canExecute) : ICommand

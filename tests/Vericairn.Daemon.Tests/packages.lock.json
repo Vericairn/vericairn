@@ -11,6 +11,21 @@
           "xunit.v3.mtp-v2": "[4.0.2]"
         }
       },
+      "Avalonia.BuildServices": {
+        "type": "Transitive",
+        "resolved": "11.3.2",
+        "contentHash": "qHDToxto1e3hci5YqbG9n0Ty8mlp3zBUN5wT66wKqaDVzXyQ0do3EnRILd4Ke9jpvsktaPpgE0YjEk7hornryQ=="
+      },
+      "Avalonia.Remote.Protocol": {
+        "type": "Transitive",
+        "resolved": "12.1.4",
+        "contentHash": "9ajC+Ff+U9S21JJKGbJgnwp9fY+zwJG+bSEC//o/vJU2M6IEMRGp+D1+AUoqTR79FAA/iDYgf4f4EF4PZKhZsg=="
+      },
+      "MicroCom.Runtime": {
+        "type": "Transitive",
+        "resolved": "0.11.6",
+        "contentHash": "NdNWGDiZ6eS/Mf/9+QHR91cj1K7Hy+PX9yrHI/zM7xFYuj9IWT2uxtB6sCHjrnxAeLV9fut1R6zHDUGKX6f9lQ=="
+      },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
         "resolved": "2.23.0",
@@ -167,29 +182,36 @@
       "vericairn.adapters.git": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.8.0-dev, )",
-          "Vericairn.Runtime": "[0.8.0-dev, )"
+          "Vericairn.Records": "[0.8.4-dev, )",
+          "Vericairn.Runtime": "[0.8.4-dev, )"
         }
       },
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.0-dev, )",
-          "Vericairn.Runtime": "[0.8.0-dev, )",
-          "Vericairn.Sdk": "[0.8.0-dev, )"
+          "Vericairn.Protocol": "[0.8.4-dev, )",
+          "Vericairn.Runtime": "[0.8.4-dev, )",
+          "Vericairn.Sdk": "[0.8.4-dev, )"
         }
       },
       "vericairn.mcp": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.0-dev, )"
+          "Vericairn.Protocol": "[0.8.4-dev, )"
         }
       },
       "vericairn.packs.software": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.8.0-dev, )",
-          "Vericairn.Runtime": "[0.8.0-dev, )"
+          "Vericairn.Records": "[0.8.4-dev, )",
+          "Vericairn.Runtime": "[0.8.4-dev, )"
+        }
+      },
+      "vericairn.presentation": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Protocol": "[0.8.4-dev, )",
+          "Vericairn.Sdk": "[0.8.4-dev, )"
         }
       },
       "vericairn.protocol": {
@@ -198,21 +220,21 @@
       "vericairn.providers.github": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Providers.GitHub.Releases": "[0.8.0-dev, )",
-          "Vericairn.Records": "[0.8.0-dev, )",
-          "Vericairn.Runtime": "[0.8.0-dev, )"
+          "Vericairn.Providers.GitHub.Releases": "[0.8.4-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )",
+          "Vericairn.Runtime": "[0.8.4-dev, )"
         }
       },
       "vericairn.providers.github.releases": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.8.0-dev, )"
+          "Vericairn.Records": "[0.8.4-dev, )"
         }
       },
       "vericairn.providers.nuget": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Runtime": "[0.8.0-dev, )"
+          "Vericairn.Runtime": "[0.8.4-dev, )"
         }
       },
       "vericairn.records": {
@@ -221,38 +243,69 @@
       "vericairn.records.tests": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.8.0-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )",
           "xunit.v3": "[4.0.2, )"
+        }
+      },
+      "vericairn.remote": {
+        "type": "Project",
+        "dependencies": {
+          "Avalonia": "[12.1.4, )",
+          "Avalonia.Themes.Fluent": "[12.1.4, )",
+          "Vericairn.Presentation": "[0.8.4-dev, )",
+          "Vericairn.Protocol": "[0.8.4-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )",
+          "Vericairn.Sdk": "[0.8.4-dev, )"
         }
       },
       "vericairn.runtime": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.8.0-dev, )",
-          "Vericairn.Records": "[0.8.0-dev, )"
+          "Vericairn.Protocol": "[0.8.4-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )"
         }
       },
       "vericairn.runtime.tests": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Adapters.Git": "[0.8.0-dev, )",
-          "Vericairn.Mcp": "[0.8.0-dev, )",
-          "Vericairn.Packs.Software": "[0.8.0-dev, )",
-          "Vericairn.Providers.GitHub": "[0.8.0-dev, )",
-          "Vericairn.Providers.NuGet": "[0.8.0-dev, )",
-          "Vericairn.Records": "[0.8.0-dev, )",
-          "Vericairn.Records.Tests": "[0.8.0-dev, )",
-          "Vericairn.Runtime": "[0.8.0-dev, )",
-          "Vericairn.Sdk": "[0.8.0-dev, )",
+          "Vericairn.Adapters.Git": "[0.8.4-dev, )",
+          "Vericairn.Mcp": "[0.8.4-dev, )",
+          "Vericairn.Packs.Software": "[0.8.4-dev, )",
+          "Vericairn.Providers.GitHub": "[0.8.4-dev, )",
+          "Vericairn.Providers.NuGet": "[0.8.4-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )",
+          "Vericairn.Records.Tests": "[0.8.4-dev, )",
+          "Vericairn.Runtime": "[0.8.4-dev, )",
+          "Vericairn.Sdk": "[0.8.4-dev, )",
           "xunit.v3": "[4.0.2, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.0-dev, )",
-          "Vericairn.Records": "[0.8.0-dev, )"
+          "Vericairn.Protocol": "[0.8.4-dev, )",
+          "Vericairn.Records": "[0.8.4-dev, )"
+        }
+      },
+      "Avalonia": {
+        "type": "CentralTransitive",
+        "requested": "[12.1.4, )",
+        "resolved": "12.1.4",
+        "contentHash": "Vlz+ebY0PBVsTFXAPIpM+7ySgezMtyJ3GMMGmccHwxXXjgLF2x5+NMwO4AqrdM/lrUPZremnYNO6MSg1r1vuxw==",
+        "dependencies": {
+          "Avalonia.BuildServices": "11.3.2",
+          "Avalonia.Remote.Protocol": "12.1.4",
+          "MicroCom.Runtime": "0.11.6"
+        }
+      },
+      "Avalonia.Themes.Fluent": {
+        "type": "CentralTransitive",
+        "requested": "[12.1.4, )",
+        "resolved": "12.1.4",
+        "contentHash": "vx7P4as07WLQqA2mhMy4iBsqhkWEGwZI7g9Rd2DlJgz3uKS2tSvY6nZqHq3sWMFDBYBT65jkTsetPrgV8oprsQ==",
+        "dependencies": {
+          "Avalonia": "12.1.4"
         }
       },
       "Microsoft.Data.Sqlite": {
