@@ -69,10 +69,10 @@ public class EstateLineCommandsTests
         api.PolicyClock = new AfterSupport();
         CliHarness.Outcome result = CliHarness.RunWithApi(api, null, "--estate", f.Estate.Root, "--json", "estate", "check");
         Assert.Equal(0, result.Code);
-        var warning = Assert.Single(result.Json.GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "manifest.line-unsupported");
+        var warning = Assert.Single(result.Json.GetProperty("findings").EnumerateArray(), f => f.GetProperty("Code").GetString() == "manifest.line-unsupported");
         Assert.Equal("warning", warning.GetProperty("severity").GetString());
-        Assert.Equal(EstateLayout.ManifestPath, warning.GetProperty("location").GetString());
-        Assert.Contains("Supported lines: current.", warning.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal(EstateLayout.ManifestPath, warning.GetProperty("Location").GetString());
+        Assert.Contains("Supported lines: current.", warning.GetProperty("Message").GetString(), StringComparison.Ordinal);
     }
 
     private sealed class AfterSupport : TimeProvider
