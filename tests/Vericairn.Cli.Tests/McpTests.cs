@@ -401,7 +401,7 @@ public class McpTests
             Assert.Contains("| Claude Code | qualified for release 0.9.0 |", agents, StringComparison.Ordinal);
             Assert.Contains("| Codex | non-claim: not observed |", agents, StringComparison.Ordinal);
             // A harness the build does not name still gets its row, after those it names; a platform profile is not a harness.
-            Assert.Contains("| Cline | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 |\n", agents, StringComparison.Ordinal);
+            Assert.Contains("| AutoGen | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 |\n", agents, StringComparison.Ordinal);
             Assert.DoesNotContain("linux-x64", agents, StringComparison.Ordinal);
 
             // A revised qualification replaces the one it supersedes, and a copy generated before it is out of date.

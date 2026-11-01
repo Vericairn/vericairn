@@ -12,7 +12,10 @@
     "Cursor",
     "Windsurf",
     "aider",
-    "Cline"
+    "Cline",
+    "LangGraph",
+    "CrewAI",
+    "AutoGen"
   ],
   "Vericairn.Records.Estate.AgentRuns.ChargedUnits": [
     "wallMinutes",

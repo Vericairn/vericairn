@@ -30,7 +30,8 @@ and who accepted it.
 You write a work order: what to build, its scope and the question that decides when it is done. You
 assign it to an agent with an exact brief. Vericairn's worker runs Codex or Claude Code on that brief in a
 workspace repository of its own, within a spending cap recorded before the run, and a coding agent that
-supports MCP can work in the estate through Vericairn's MCP server. You review the result and accept it or
+supports MCP can work in the estate through Vericairn's MCP server, as can agents you build with LangGraph,
+CrewAI or AutoGen ([Vericairn for agent builders](docs/agent-builders.md)). You review the result and accept it or
 ask for another attempt. A release is built as a draft on GitHub Releases and published only after you
 accept it.
 

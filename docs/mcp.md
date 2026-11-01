@@ -35,6 +35,8 @@ and offer no release acceptance operation. See [Inspecting estate policies](poli
 
 `vericairn mcp serve` exposes an estate to a coding agent over the Model Context Protocol: newline-delimited JSON-RPC 2.0 on standard input and output, the stdio transport used by compatible agent harnesses. The server is a client adapter over the estate API: the adapter itself opens no live store, holds no key of its own and adds no permission; every tool is a call through the daemon when one serves the estate, or through the embedded runtime otherwise, and the runtime evaluates authority behind each call exactly as it does for the command line. When a daemon serves the estate, the server stays its client and never a second owner of the estate's live state. Without one, `mcp serve` holds the embedded runtime, and with it the live state, for its whole session, and a daemon started meanwhile does not detect it, so start the daemon first (`vericairn runtime start`) when other clients use the estate at the same time.
 
+Agents built with LangGraph, CrewAI or AutoGen connect through their frameworks' MCP clients: [Vericairn for agent builders](agent-builders.md) and its guides show each connection, run as written against a scratch estate.
+
 ## Discovery and dnx
 
 From 0.8.2, the `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
