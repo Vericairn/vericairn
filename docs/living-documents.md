@@ -41,6 +41,18 @@ replace that check.
 
 ## Which bytes are compared
 
+For a revision with `hashMode: authored-revisions-v1`, `hash` and `bytes` describe
+the authored content with only the generated revision payload removed. Both marker
+lines, the title, body, line endings outside the payload and any byte-order mark
+remain part of that identity. Older pins without `hashMode` still compare the
+whole file. Document reviews continue to pin the complete reviewed file.
+
+A generated history is also compared with its records. Changing only a generated
+line leaves the authored hash alone, but makes `docs living` due and produces a
+`document.revisions` finding in `estate check`. Refreshing restores the lines from
+their records. A missing, repeated or misplaced marker is a failure, never an
+instruction to hash the whole file instead.
+
 Estate files use the working tree, including uncommitted changes. Other repositories
 use their registered clone's HEAD, or the latest clearing review's commit when Git
 proves that HEAD is its ancestor. A newer or divergent HEAD with changed content
@@ -63,6 +75,39 @@ evidence names that grant, and other due reasons still hold the gate.
 See the [operator guide](operator-guide.md#16-living-documents)
 and the [record-format guide](record-format-v2.md#living-documents-due) for declarations,
 review fields and the other triggers.
+
+## Generated revision histories
+
+In the development build for 0.9.0, `docs pin --convert-revisions` converts one
+Markdown document's opening hand-written history from its existing revision pins.
+The builder performs this migration explicitly; installing the build changes no
+estate document. Conversion requires the exact current whole-file pin, preserves
+every historical line's date and wording in the conversion record, and refuses
+a line with no record or an ambiguous match. No old record is rewritten.
+Generated payloads use LF line endings, like other template regions; conversion
+metadata retains the original line text and its line endings.
+
+The generated `revisions` region follows the level-one title. Its lines are newest
+first: `Revision N, Month D, YYYY: carries decision X: summary` when a decision is
+named, or the same dated line with its summary otherwise. The design-revisions
+policy applies its existing date, ordinal and explanation rules to the first line
+inside the region. The region uses the template marker convention and the
+`vericairn.estate/revision-history-v1` generator with `version=1`; existing pinned
+template definitions and their single-line generator remain available.
+
+Each pin regenerates this region. The displayed ordinal comes from all the path's
+revision records in time order, with id breaking ties. Concurrent authored-content
+pins are retained together, so regenerating after a merge gives each a distinct
+ordinal. The stored `revision` integer is advisory for this mode. Generated text
+can be replaced without changing the bytes that its pin hashes, including the
+pin's own revision line. Whole generated companions keep their source-based
+verification and do not receive authored revision regions.
+
+Context packages and exact original reads return the bytes selected by the pin's
+mode. For authored-content pins this means empty revision markers and the complete
+authored body; generated history can be rendered from the records. The Git adapter
+can retrieve those same hashed bytes from local history, while old whole-file pins
+still retrieve their exact complete files.
 
 ## Template sections in the development build
 
