@@ -17,6 +17,22 @@ is still refused as `already-settled`, and an observation that lacks a fact is s
 `unresolved`. The command is `vericairn worker settle <run> --by <principal>
 --records-checked`. Earlier servers ignore the field and keep refusing.
 
+## Writes outwait a presence prompt (FIX-78)
+
+`ClientOperation` adds `PresenceWait` (five minutes, the longest a device key waits
+for its owner's presence at one signature), `EffectDeadline` (six minutes) and
+`Deadline(string operation, bool mayHaveEffect)`. `Deadline(string)` is unchanged
+and stays the deadline for an observation that cannot write.
+
+An async operation that may write and has no explicit timeout is now observed for
+at least `EffectDeadline` instead of the 30-second or 3-minute default, so a
+`records new` that waits on Touch ID is not reported as an unknown outcome while
+the prompt is still open. Longer named deadlines, such as 15 minutes for run and
+release operations, are unchanged. A timeout after the window still reports an
+unknown outcome, and nothing retries. The synchronous `VericairnClient` HTTP
+timeout is six minutes instead of five. `VericairnClient.OperationTimeout` and the
+local-network timeout argument still override every deadline.
+
 ## Release lines and channels (CODE-12)
 
 `ReleaseSubmitRequest` adds nullable init-only properties `Line`, `Channel`,

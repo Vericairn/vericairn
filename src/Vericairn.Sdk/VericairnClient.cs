@@ -65,7 +65,7 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
                 }
             },
         };
-        http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = TimeSpan.FromMinutes(5) };
+        http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = ClientOperation.EffectDeadline };
         asyncHttp = AsyncTransport(handler, http.BaseAddress);
     }
 
@@ -84,7 +84,7 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
             },
         };
         HttpMessageHandler chain = signer is null ? handler : new SigningHandler(signer, handler);
-        http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = TimeSpan.FromMinutes(5) };
+        http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = ClientOperation.EffectDeadline };
         asyncHttp = AsyncTransport(chain, http.BaseAddress);
     }
 
@@ -106,7 +106,7 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
 
         // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP,
         // each signed for this estate and the runtime identity the device paired with.
-        http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
+        http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? ClientOperation.EffectDeadline };
         var asyncHandler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
