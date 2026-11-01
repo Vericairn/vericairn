@@ -1958,6 +1958,16 @@ Round three normalizes the comparisons, explicitly enables long paths in isolate
 link-safe cleanup for product scratch repositories and test workspaces. Main includes subsequent Windows path
 and cleanup corrections. The macOS observations listed here alone do not establish their Windows behavior.
 FIX-19 ships in 0.7.3; its live committing qualification remains macOS-only.
+
+FIX-81's live run, on macOS, used codex-cli `0.163.0-alpha.10.2`, the build the desktop app bundles, under this fix's development
+build, with the probe-scratch correction below, in a private copy of the public example estate. The worker admitted it
+as a shipped baseline. At `medium` effort it recorded 2 wall minutes and 242,266 tokens, authored its signed attempt and
+result through the estate MCP server, committed exactly the permitted `README.md` change in its own workspace repository,
+and settled observed-success; settlement fetched its branch into the registered clone. It raised `audit-unverified` and a
+`burn-rate` warning for its early token rate, and no tool-inventory or execution discrepancy. Codex 0.163's read-only probes
+name their empty scratch directory `tmp/arg0-<platform>` (`tmp/arg0-macos` here) instead of `tmp/arg0`, so the probe-scratch
+check admits either name, still only as an empty directory without links. This observation covers macOS and that exact build;
+`0.163.0` shares its reported feature inventory and was not run live.
 FIX-20 in 0.7.3 adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
 write forms through every supported wrapper, directory changes, opaque inputs and null devices. Stand-in worker
 runs check that credential and outside-write signals request containment, while null redirects and opaque warnings

@@ -90,4 +90,23 @@ public class CodexBaselineFeatureTests
         Assert.Contains("0.170.0 is not qualified", message, StringComparison.Ordinal);
         Assert.Contains("0.159.0-alpha.12.1 and " + Newer + " and 0.163.0", message, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("arg0", false, true)]
+    [InlineData("arg0-macos", false, true)]
+    [InlineData("arg0-linux", false, true)]
+    [InlineData("arg0-macos", true, false)]
+    [InlineData("arg0-MacOS", false, false)]
+    [InlineData("arg1-macos", false, false)]
+    public void ProbeScratchAdmitsOnlyAnEmptyArgumentDirectory(string name, bool withFile, bool admitted)
+    {
+        using var fixture = new NativeProbe("codex");
+        LaunchContext context = fixture.Prepare();
+        fixture.Behavior("version", "codex-cli " + Newer);
+        fixture.Behavior("featuresSuffix", NewerDefaults);
+        string scratch = Directory.CreateDirectory(Path.Combine(context.Environment["CODEX_HOME"], "tmp", name)).FullName;
+        if (withFile) File.WriteAllText(Path.Combine(scratch, "note"), "x");
+        if (admitted) Assert.True(fixture.Launcher.Preflight(context).Complete);
+        else Assert.Contains("scratch", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+    }
 }
