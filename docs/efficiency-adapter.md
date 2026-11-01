@@ -60,7 +60,10 @@ authentication, credential, hash or signature fields bypasses reduction.
 
 This is a deliberately narrow input contract. Ordinary tool output and current
 brief renderings are not automatically relabelled as eligible. Selecting the
-adapter does not promise a reduction on every request.
+adapter does not promise a reduction on every request. No tool shipped with
+Vericairn emits representation envelopes yet, so until a producer does, a run
+through the adapter forwards every request unreduced and records zero eligible
+bytes.
 
 The adapter does two things:
 

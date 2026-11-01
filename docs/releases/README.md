@@ -108,9 +108,9 @@ gives every current limit.
 - **Limits.** Worker spending limits are soft, and unknown usage is charged at the reserved cap. The
   launchers are tested with stand-in processes; live coding-agent sessions and sign-in are not qualified by
   those tests. Process containment and the workspace audit have platform limits, detailed in the
-  [software guide](../software.md#launch-accounting-and-containment). The [local efficiency adapter](../efficiency-adapter.md) is built for 0.9.0, disabled by default
-  and refused without operator machine admission. It must not be enabled before its security review,
-  which precedes 0.9.0's release. Remote is not built, and context tokens remain unknown without a qualified local tokenizer. Spending and containment limits remain as described in the guides.
+  [software guide](../software.md#launch-accounting-and-containment). The efficiency Adapter is absent; it is
+  planned for 0.9.0, Remote is not built, and context tokens remain unknown without a qualified local
+  tokenizer. Spending and containment limits remain as described in the guides.
 
 ## Documentation sets
 
