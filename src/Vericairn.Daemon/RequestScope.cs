@@ -49,7 +49,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
-            !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
+            !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
             using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
@@ -63,7 +64,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
         // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
-        if (service.PresenceRefusal(device.Principal) is string presence)
+        // A device-signed record is the exception: the paired device signed it itself, and nothing on this machine signs it.
+        if (!operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
         {
             return Denied(context.HttpContext, device, presence);
         }
@@ -192,6 +194,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/records/{id}"] = null,
         ["GET /v1/records"] = null,
         ["POST /v1/records"] = typeof(NewRecordRequest),
+        ["POST /v1/records/prepare"] = typeof(NewRecordRequest),
+        ["POST /v1/records/signed"] = typeof(SignedRecordRequest),
         ["POST /v1/decisions/new"] = typeof(DecisionNewRequest),
         ["GET /v1/decisions"] = null,
         ["GET /v1/decisions/{id}"] = null,
@@ -324,6 +328,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
+        // Its plan was prepared for one device, which alone may sign it: the service holds the request to that device.
+        [typeof(SignedRecordRequest)] = (_, _, _) => null,
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
         [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
         [typeof(OperatorRequestWriteRequest)] = (_, r, d) => Acting(((OperatorRequestWriteRequest)r).By, d),

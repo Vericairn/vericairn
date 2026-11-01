@@ -61,6 +61,8 @@ public static class OpenApiDocument
         ("GET", "/v1/records/{id}"),
         ("GET", "/v1/records"),
         ("POST", "/v1/records"),
+        ("POST", "/v1/records/prepare"),
+        ("POST", "/v1/records/signed"),
         ("POST", "/v1/decisions/new"),
         ("GET", "/v1/decisions"),
         ("GET", "/v1/decisions/{id}"),
@@ -355,6 +357,14 @@ public static class OpenApiDocument
             {
                 ["description"] = "A versioned read result with explicit unavailable, historical, current or different basis. Generation grants no authority or authored clearance.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
+        else if (path == "/v1/records/prepare")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "RecordPrepareResponse: the plan, the record's id, time and hash, and its unsigned form, for the requesting device only; writes nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/RecordPrepareResponse" } } },
             };
         }
         else if (path == "/v1/prompts/use" || method == "GET" && path == "/v1/prompts")
@@ -699,6 +709,9 @@ public static class OpenApiDocument
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string"), ("template", "object")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
+            ["RecordPrepareResponse"] = Object(("ok", "boolean"), ("prepared", "object"), ("problem", "object")),
+            ["RecordPrepared"] = Object(("plan", "string"), ("id", "string"), ("at", "string"), ("hash", "string"), ("expiresAt", "string"), ("record", "object")),
+            ["SignedRecordRequest"] = Object(("plan", "string"), ("signature", "string")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["WorkNewRequest"] = workNewRequest,
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
@@ -866,6 +879,8 @@ public static class OpenApiDocument
         "/v1/status/observations" => "EstateObserveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
+        "/v1/records/prepare" => "NewRecordRequest",
+        "/v1/records/signed" => "SignedRecordRequest",
         "/v1/work/new" => "WorkNewRequest",
         "/v1/work/assign" => "AssignRequest",
         "/v1/work/attempt" => "AttemptRequest",
@@ -979,6 +994,8 @@ public static class OpenApiDocument
         ("GET", "/v1/records/{id}") => "A record by id.",
         ("GET", "/v1/records") => "The current records of one type, oldest first.",
         ("POST", "/v1/records") => "Author a record; signed with the author's admitted device on the runtime's machine; rejected with findings when the estate would be invalid.",
+        ("POST", "/v1/records/prepare") => "Prepare a record the requesting device will sign with its own key: the runtime fixes its id, time and form for that device; writes nothing.",
+        ("POST", "/v1/records/signed") => "Write a prepared record with the requesting device's signature, verified against that admitted device; nothing on the runtime's machine signs it.",
         ("POST", "/v1/decisions/new") => "Record an operator answer with its words, answer time and exact changed design document pins.",
         ("GET", "/v1/decisions") => "Current decisions.",
         ("GET", "/v1/decisions/{id}") => "One decision by the id of any of its revisions.",
