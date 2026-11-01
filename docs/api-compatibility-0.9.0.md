@@ -51,6 +51,26 @@ is still refused as `already-settled`, and an observation that lacks a fact is s
 `unresolved`. The command is `vericairn worker settle <run> --by <principal>
 --records-checked`. Earlier servers ignore the field and keep refusing.
 
+## Settling a run whose supervising worker died (FIX-82)
+
+No contract, route, response field or interface member changes. `POST /v1/runs/{id}/stop`,
+`POST /v1/runs/{id}/settle` and the runtime's start can now record the settlement of a
+run whose exit was never observed, when no worker on the machine that ran it supervises
+it, the recorded worker process and the harness's process boundary are gone, and nothing
+was observed for longer than the run's stall limit. A process that exists and started by
+the launch, or cannot be inspected, counts as running. The settlement is `known-failure`
+with an `audit-unverified` warning, an unverified `scope` and evidence saying the exit was
+not observed. Its `usage` is what was observed up to the last heartbeat, each unit at most
+its cap; a unit not observed is listed in `unreported` and charged at the cap. A stop asked
+of the run is recorded with its observed facts, normally `requested`, never `contained`.
+
+A stop's `RunStopResponse.state` still comes from those facts, and its `message` reports
+the settlement; a later stop is refused because the run has ended, and a later settle
+answers `already-settled`. A run that may still be observed keeps the earlier answers: the
+stop is reported as before, with `ok` true, and settle answers `in-flight`, each message
+now naming what is missing. Record format remains 3; the settlement uses existing operation
+fields. Earlier servers keep such a run in flight, charged at its cap.
+
 ## Writes outwait a presence prompt (FIX-78)
 
 `ClientOperation` adds `PresenceWait` (five minutes, the longest a device key waits

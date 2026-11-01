@@ -340,6 +340,20 @@ internal sealed partial class RunDispatchService(
             observationUnavailable = true;
         }
 
+        // No worker observes the run. When the worker that supervised it and its harness are gone and silent past its stall
+        // limit, it exited without observation: settle it, its stop recorded as requested, instead of leaving it in flight.
+        RunSettleResponse? unobserved = null;
+        if (!supervised && !observationUnavailable && observed is { ExitedAt: null, Settled: null })
+        {
+            lock (gate)
+            {
+                if (AgentRuns.Find(session.Load(), found.Id) is { InFlight: true } current)
+                {
+                    unobserved = SettleRetained(current, request.By, recordsChecked: false, unobservedOnly: true);
+                }
+            }
+        }
+
         RunStop stop = observed?.Stop is { } seen && seen.RequestedAt == asked.RequestedAt ? seen : new RunStop(asked.RequestedAt, asked.RequestedBy, asked.Reason);
         lock (gate)
         {
@@ -355,6 +369,14 @@ internal sealed partial class RunDispatchService(
             "requested" => $"Run {found.Id}: the stop is requested at {stop.RequestedAt}, and no worker on this machine transmitted it: {(supervised ? "the worker that observed the run stopped observing it" : "none observes the run")}{(observed?.Heartbeat is string beat ? $", its last heartbeat at {beat}" : string.Empty)}. A stop that is not observed stays requested, and the run stays in flight, charged at its cap.",
             _ => $"Run {found.Id}: the stop requested at {stop.RequestedAt} is {stop.State}{(stop.TransmittedAt is null ? string.Empty : $" (transmitted at {stop.TransmittedAt}: {stop.Transmission})")}; its containment was not observed in time, so it is reported as {stop.State}, never as stopped.",
         };
+        if (unobserved is { Ok: true })
+        {
+            message = $"Run {found.Id}: the stop requested at {stop.RequestedAt} is {stop.State}, and no worker observes the run to transmit or contain it. {unobserved.Message}";
+        }
+        else if (unobserved?.Problem?.Code is "in-flight" or "unresolved")
+        {
+            message += " " + unobserved.Message;
+        }
         if (observationUnavailable)
         {
             message = $"Run {found.Id}: the stop request is kept; the worker's observation could not be read. The last confirmed stop state is {stop.State}; no additional transmission or containment is inferred.";
@@ -611,28 +633,7 @@ internal sealed partial class RunDispatchService(
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
         TimeSpan elapsed = outcome.Elapsed ?? (outcome.ExitedAt - outcome.LaunchedAt);
-        long minutes = (long)Math.Ceiling(Math.Max(elapsed.Ticks, 0) / (double)(minute ?? WorkerOptions.Minute).Ticks);
-        var usage = new JsonObject { ["wallMinutes"] = minutes };
-        var unreported = new JsonArray();
-        if (outcome.Tokens is long tokens)
-        {
-            usage["tokens"] = tokens;
-        }
-        else if (AgentRuns.Amount(cap, "tokens") is not null)
-        {
-            unreported.Add("tokens");
-        }
-
-        if (outcome.Price is long price && outcome.PriceUnit is string unit && (AgentRuns.CurrencyUnit(cap) ?? unit) == unit)
-        {
-            usage["currency"] = new JsonObject { ["amount"] = price, ["unit"] = unit };
-        }
-        else if (AgentRuns.Amount(cap, "currency") is not null)
-        {
-            unreported.Add("currency");
-        }
-
-        usage["unreported"] = unreported;
+        JsonObject usage = Usage(cap, elapsed, minute ?? WorkerOptions.Minute, outcome.Tokens, outcome.Price, outcome.PriceUnit);
         string took = elapsed.TotalSeconds < 120 ? $"{Math.Round(elapsed.TotalSeconds).ToString(CultureInfo.InvariantCulture)} seconds" : $"{Math.Round(elapsed.TotalMinutes).ToString(CultureInfo.InvariantCulture)} minutes";
         string summary;
         if (outcome.Stop is RunStop stop)
@@ -681,6 +682,40 @@ internal sealed partial class RunDispatchService(
 
         body["evidence"] = evidence;
         return body;
+    }
+
+    /// <summary>
+    /// A run's usage unit by unit: wall minutes from its elapsed time, and tokens and currency as reported; a unit its cap states
+    /// that was not reported is listed as unreported, which the ledger charges at the cap. A run that exited without observation
+    /// is charged at most its cap in each unit it reported.
+    /// </summary>
+    private static JsonObject Usage(JsonElement cap, TimeSpan elapsed, TimeSpan minute, long? tokens, long? price, string? priceUnit, bool atMostCap = false)
+    {
+        long minutes = (long)Math.Ceiling(Math.Max(elapsed.Ticks, 0) / (double)minute.Ticks);
+        var usage = new JsonObject { ["wallMinutes"] = Capped(minutes, "wallMinutes") };
+        var unreported = new JsonArray();
+        if (tokens is long reported)
+        {
+            usage["tokens"] = Capped(reported, "tokens");
+        }
+        else if (AgentRuns.Amount(cap, "tokens") is not null)
+        {
+            unreported.Add("tokens");
+        }
+
+        if (price is long amount && priceUnit is string unit && (AgentRuns.CurrencyUnit(cap) ?? unit) == unit)
+        {
+            usage["currency"] = new JsonObject { ["amount"] = Capped(amount, "currency"), ["unit"] = unit };
+        }
+        else if (AgentRuns.Amount(cap, "currency") is not null)
+        {
+            unreported.Add("currency");
+        }
+
+        usage["unreported"] = unreported;
+        return usage;
+
+        long Capped(long value, string name) => atMostCap && AgentRuns.Amount(cap, name) is long most && value > most ? most : value;
     }
 
     private static JsonObject Stop(RunStop stop)

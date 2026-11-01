@@ -200,6 +200,10 @@ internal sealed class ContainedProcess
         return members.Contains(Id);
     }
 
+    // A run whose worker died has no owner to inventory its group. Only ESRCH, no process left in the group, is an absence;
+    // a member owned by another user (EPERM) or a zombie not yet reaped by its new parent still counts as present.
+    internal static bool UnixGroupGone(int group) => group > 0 && kill(-group, 0) != 0 && Marshal.GetLastPInvokeError() == 3;
+
     internal static bool ProcfsInventoryVisible(string mounts)
     {
         string[]? mounted = mounts.Split('\n').Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
