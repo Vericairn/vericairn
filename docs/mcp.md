@@ -150,7 +150,7 @@ Optional documents and pins without the history marker keep their
 working-tree-only behavior. A denied reader
 receives no source metadata. These read tools author nothing and write nothing.
 Regenerate the estate orientation when adopting this changed tool list and
-`context_read` argument schema. Remote is not built.
+`context_read` argument schema.
 
 `context_prepare` and `work_brief` accept an optional `maxBytes` decimal string for the remaining
 context allocation. Without it, both inline mandatory material and withhold
@@ -321,7 +321,7 @@ The API and SDK use the same fields in `WorkProgressRequest` and
 See [requested progress](software.md#requested-progress-090) for the complete
 scope, replacement, value and compatibility rules.
 
-Remote is not built. These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
+These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
 
 ## Communication read (COMMS-01)
 
@@ -339,7 +339,7 @@ same values and asks it to refresh them at the next settled boundary.
 
 This changes the MCP tool list. Regenerate `AGENTS.md` with
 `vericairn mcp orientation` from the updated runtime; pointer files retain their
-usual role. Remote is not built and is not qualified by this tool.
+usual role. Remote is not qualified by this tool.
 
 ## Explicit run execution (RUN-01)
 
@@ -405,7 +405,7 @@ warnings. The audit is a signal, not an enforcement boundary. UPDATE-01 does not
 through MCP; `estate_check` can report the cached `manifest.release-behind` warning. FIX-21's certificate
 preparation and handshake diagnostics apply when MCP reaches a daemon through TLS. The stock
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
-Remote is not built or qualified by these features.
+Remote is not qualified by these features.
 
 ## Template sections in 0.8.4 development
 

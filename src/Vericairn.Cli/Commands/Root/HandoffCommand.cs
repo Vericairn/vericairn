@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class HandoffCommand : Command
 {
     public HandoffCommand(CommandContext context)
-        : base("handoff", "Prepare a complete record-derived hand-over; refuse missing sources or overflow. Remote is not built.")
+        : base("handoff", "Prepare a complete record-derived hand-over; refuse missing sources or overflow. Remote does not open hand-overs yet.")
     {
         var operations = new HandoffFiles(context);
         var handoffOut = new Option<string?>("--out") { Description = "Retain the portable package in a new file; never overwrite." };

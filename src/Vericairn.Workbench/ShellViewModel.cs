@@ -650,7 +650,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         Open(page);
-        Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Remote is not built.";
+        Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Remote does not open hand-overs yet.";
         return page;
     }
 

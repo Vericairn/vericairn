@@ -120,7 +120,7 @@ assignment from another work order is unavailable for that work brief, and
 full presentation remains visible.
 
 No presentation choice changes a draft's pinned hash, permission, acceptance
-or exported handoff bytes. Remote is not built and has no communication UI.
+or exported handoff bytes. Remote has no communication UI yet.
 
 ## Keyboard
 
@@ -193,5 +193,5 @@ refuses an agent or a principal whose signing authority is unavailable.
 The headless journey checks keyboard entry, visible controls, package retention,
 save/load, refusals, refresh and the explicit observation. Native file pickers and
 screen-reader announcements still need platform qualification. Workbench remains
-a client of a daemon on its own machine. Remote is not built; this page makes no
-claim about a mobile or remote surface.
+a client of a daemon on its own machine. This page makes no claim about
+Remote; see [Remote](remote.md).
