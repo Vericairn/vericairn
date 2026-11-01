@@ -25,7 +25,12 @@ public sealed record PolicyFindingDto(string PolicyIdentity, PolicyRecordReferen
     PolicyTargetDto Target, string Item, string Verdict, string Disposition, string Level, string Owner, string Basis, string? AsOf,
     string Actual, string Required, string NextAction, PolicyRecordReference? Anchor, string? AnchorAt,
     IReadOnlyList<PolicyRecordReference> Evidence, IReadOnlyList<PolicyRecordReference> Exceptions, int SubjectCount,
-    DutyFindingDto? Duty, bool Enforced, bool ReleaseHold);
+    DutyFindingDto? Duty, bool Enforced, bool ReleaseHold)
+{
+    /// <summary>Whether an exact product cadence reference makes this finding context without a release hold.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsReleaseCadence { get; init; }
+}
 
 /// <summary>Complete rule counts; excepted findings retain their underlying verdict.</summary>
 public sealed record PolicyRuleSummaryDto(PolicyRecordReference Policy, string Rule, int Subjects, int Satisfied, int Unmet, int Unavailable, int Excepted);
@@ -62,6 +67,10 @@ public sealed record PolicyResponse(string Text, PolicyBasisDto Basis, IReadOnly
     /// <summary>Exact decision requirements and their recorded changes; a pending requirement alone holds no release.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<PolicyRequirementDto>? Requirements { get; init; }
+
+    /// <summary>Due product cadences at this basis, with recorded or proposed release targets; absent when none is due.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ReleaseCadenceDto>? ReleaseCadences { get; init; }
 }
 
 /// <summary>A decision's pending or recorded policy change, independent of rule findings and separate obligations.</summary>

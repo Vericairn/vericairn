@@ -40,6 +40,7 @@ public static class PolicyPresentation
             foreach (FindingDto diagnostic in response.Diagnostics) text.AppendLine($"  {diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
         if (response.Problem is { } problem) text.AppendLine(problem.Message);
         text.AppendLine($"{response.Holds} release holds; evaluation {(response.Complete ? "complete" : "incomplete")}.");
+        if (response.Basis.Submission is not null) text.Append(ReleaseCadencePresentation.Render(response.ReleaseCadences ?? []));
         return text.ToString().ReplaceLineEndings("\n");
     }
 

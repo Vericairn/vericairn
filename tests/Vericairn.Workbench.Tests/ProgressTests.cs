@@ -16,6 +16,19 @@ namespace Vericairn.Workbench.Tests;
 public class ProgressTests(HeadlessFixture fixture)
 {
     [Fact]
+    public void ProgressSummaryIncludesDueCadenceTargetsWithoutAddingAcceptances()
+    {
+        using JsonDocument report = JsonDocument.Parse("""
+            {"format":"vericairn.progress/1","operator":{"releaseCadences":[{"productName":"Example","line":"1.x","version":"1.0.1","dueAt":"2026-10-13T13:00:00Z"}]}}
+            """);
+        ProgressRow row = Assert.Single(ProgressView.Summary(report.RootElement), r => r.Heading == "Waits on the operator");
+        Assert.Contains("acceptances only the operator gives: 0", row.Detail, StringComparison.Ordinal);
+        Assert.Contains("Example: release due on the cadence; line 1.x; target version 1.0.1; due 2026-10-13T13:00:00Z", row.Detail, StringComparison.Ordinal);
+        using JsonDocument empty = JsonDocument.Parse("""{"format":"vericairn.progress/1","operator":{}}""");
+        Assert.DoesNotContain(ProgressView.Summary(empty.RootElement), r => r.Detail.Contains("release due on the cadence", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task HomeSummarizesTheProgressReportAndOpensTheWholeOfItKeyboardOnly()
     {
         string root = Seed.Temp("wb-progress");

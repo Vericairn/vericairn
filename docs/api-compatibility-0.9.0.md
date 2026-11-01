@@ -132,3 +132,22 @@ The on-demand manifest companion advances to implementation
 `vericairn.estate/manifest/2` to render the followed line and channel and distinguish
 recorded values from defaults. Its implementation hash changes; the earlier
 golden fixtures remain retained.
+
+## Release cadence context (CODE-14)
+
+`PolicyFindingDto` adds init-only `IsReleaseCadence`, default false and omitted
+from JSON when false. Its positional constructor and deconstructor are unchanged.
+A matching product cadence retains the duty verdict and evidence, with
+`ReleaseHold` false. Other policy findings keep their existing enforcement.
+
+`PolicyResponse` adds nullable init-only `ReleaseCadences`, omitted when no
+occurrence is due. `ReleaseCadenceDto` carries the exact product, pinned policy,
+rule and originating schedule, occurrence, due time, line, nullable target version
+and recorded target references. Status and progress also place the due rows in
+`operator.releaseCadences`. The existing release response carries them through
+`policies.releaseCadences`, using the submitted line and version. Existing routes,
+SDK and MCP operations transport these additive fields without new interface
+members. No interface member is added without a default implementation.
+
+`ReleaseCadencePresentation.Render` formats due context without performing effects.
+The record format and the product's cadence reference shape are unchanged.
