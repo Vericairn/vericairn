@@ -402,8 +402,37 @@ containing its publication; earlier frozen sets remain unchanged. The selected
 line and the existing exact notes window are recorded in the set's manifest.
 
 The product may also carry `cadence: {policy: {type: "estate-policy", id, hash}, rule}`,
-pinning a recurring-duty rule. This addition validates the reference; it does not
-schedule or automate a release. See [record fields](record-format.md#release-lines-and-channels-090).
+pinning a recurring-duty rule. See [record fields](record-format.md#release-lines-and-channels-090).
+
+### Release cadence (0.9.0)
+
+A cadence makes a release expected. Declare an ordinary recurring duty and pin
+its exact policy revision and rule in the product's `cadence`. An interval duty
+opens on its declared dates; the duty's `release` schedule form opens one occurrence
+for each observed publication of its named product. The existing duty schedule,
+completion evidence and explicit debt dispositions determine which occurrences
+remain due. A cadence does not create an occurrence record when it is read.
+
+`status` and `progress` show each due occurrence under **What waits on the operator**,
+with its product, line, target version, due time and exact policy and occurrence.
+Targets come from current release candidates and open `releasePlan` work orders;
+a candidate supplies its recorded line, otherwise the line defaults to `current`.
+Published versions are omitted. When no target is recorded, the view says
+`target version not declared`; it never invents a version. These views use the
+same recorded-time basis as other policy findings, shown in their output.
+
+`release submit --check` and the shared submission gate show the due occurrence as
+context for the requested product, line and version, evaluated at submission time.
+A cadence creates no release objection, including when its policy declares a
+`refuse` level. Other duties, record validation, document checks and release
+objections remain in force. The exact pinned schedule is the cadence: an editorial
+policy revision preserves it, while a changed schedule needs a new product pin.
+
+Future, completed and explicitly ended occurrences add no cadence wait. Reading
+or evaluating a cadence signs, records, retains and dispatches nothing. A person
+still submits the release, accepts its exact candidate and performs publication
+through the existing release procedure. No cadence prepares, submits, accepts or
+publishes a release automatically.
 
 ### Release procedure
 

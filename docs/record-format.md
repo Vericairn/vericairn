@@ -64,7 +64,10 @@ The optional product `cadence` field has shape
 `{policy: {type: "estate-policy", id, hash}, rule}`. It pins an existing policy
 revision and a rule key whose kind is `vericairn.estate/recurring-duty`, version 1.
 Unknown keys, absent references, wrong types or hashes, and non-duty rules are
-refused. The field records a reference only; cadence execution is separate work.
+refused. The reference makes due occurrences release context in status, progress
+and the submission gate; it never creates a release objection or performs an
+action. Submission, candidate acceptance and publication remain separate actions.
+See [release cadence](operator-guide.md#release-cadence-090).
 
 
 ## Published Vericairn dependency observations (0.8.3)
