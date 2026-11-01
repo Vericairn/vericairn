@@ -81,6 +81,23 @@ public sealed class GitPushAdapter : IPushAdapter
     }
 
     /// <inheritdoc />
+    public string? PublishedText(string directory, PushPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!Patterns.Commit.IsMatch(plan.Base) || !Patterns.Commit.IsMatch(plan.Head)) return null;
+        // No external diff, text conversion or signature verification runs; the clone's diff drivers cannot execute anything.
+        ProcessResult messages = Invoke(directory, ["log", "--no-show-signature", "--format=%B", plan.Range]);
+        ProcessResult diff = Invoke(directory, ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", plan.Base, plan.Head]);
+        if (messages is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } || diff is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 }) return null;
+        var text = new System.Text.StringBuilder(messages.StandardOutput);
+        foreach (string line in diff.StandardOutput.Split('\n'))
+        {
+            if (line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal)) text.Append('\n').Append(line, 1, line.Length - 1);
+        }
+        return text.ToString();
+    }
+
+    /// <inheritdoc />
     public string? Observe(string directory, string remote, string branch)
     {
         Branch(directory, branch);

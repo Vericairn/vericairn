@@ -501,9 +501,9 @@ public sealed class ChangesFlowTests
         internal ChangesOpenRequest Open => new(Product, "work/change", Head, "A checked change", "Review this change.", Estate.OperatorId);
         internal ChangesMergeRequest Merge => new(Product, "1", Head, Estate.OperatorId);
 
-        internal Fixture(IReadOnlyList<string>? required = null)
+        internal Fixture(IReadOnlyList<string>? required = null, string visibility = "private")
         {
-            RecordEnvelope repository = Estate.Add("resource", Estate.OperatorId, """{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"private"}""");
+            RecordEnvelope repository = Estate.Add("resource", Estate.OperatorId, $$"""{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"{{visibility}}"}""");
             Product = Estate.Add("product", Estate.OperatorId, $$"""
                 {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
                  "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":{{JsonSerializer.Serialize(required ?? Required)}} } }
@@ -563,6 +563,8 @@ public sealed class ChangesFlowTests
             RemoteHead = plan.Head;
         }
         public string? Observe(string directory, string remote, string branch) => RemoteHead;
+        internal string? Text { get; set; } = "";
+        public string? PublishedText(string directory, PushPlan plan) => Text;
     }
 
     internal sealed class ControlledProvider : IPullRequestProvider

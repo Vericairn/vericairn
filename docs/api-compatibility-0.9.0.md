@@ -103,3 +103,10 @@ No contract changes. A new estate-policy rule kind, `vericairn.estate/blocked-te
 writes through every client can now be refused when they would introduce a blocked term, with a message naming the term, and
 generated-document preparation can be refused as `generated-refused` for the same reason. See
 [blocked terms](policies.md#blocked-terms-090).
+
+## Disclosure holds (CODE-16)
+
+`IPushAdapter` adds `string? PublishedText(string directory, PushPlan plan)`, with a default implementation that returns null.
+It returns the text a push's commits would publish, their messages and added lines. An adapter that keeps the default cannot
+push to a public repository while a disclosure hold is in force; the shipped git adapter implements it. Work orders gain an
+optional `disclosure` field whose only value is `held`, within record format 3. See [disclosure holds](changes.md#disclosure-holds-090).

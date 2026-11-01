@@ -116,6 +116,19 @@ gh uses the user's own configuration and login. The runtime has no token
 parameter, does not request a token, and does not retain authentication
 output.
 
+### Disclosure holds (0.9.0)
+
+A work order can carry `"disclosure": "held"`, for example a security fix whose nature must not be public before its release.
+While it is held, a checked push to a repository whose resource records `"visibility": "public"` is refused before anything is
+pushed if the push's commit messages or added lines contain the work order's key as a whole word, or a distinctive phrase of
+its title, intent or scope. Case, Unicode compatibility forms, line wrapping and a sentence's closing punctuation do not hide a
+match. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
+is not matched on its own. The check applies whoever authored the commits.
+
+The hold ends when the release that carries the work order (its placement) is recorded as published with its documentation
+set; what that release discloses stays the operator's choice. A push to a private repository is not held. If a hold is in
+force and the push adapter cannot read the push's text, the push is refused.
+
 ## Merge and observe
 
 ```sh
