@@ -26,6 +26,13 @@ earlier corrections remain. Earlier sets stay frozen.
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
 
+For a complete starting workflow, choose [people only](people-only.md),
+[people and agents](people-and-agents.md), or [agents only](agents-only.md).
+Each guide covers setup, the daily loop, roles, review and acceptance, with a local worked example
+and an explicit account of what stays with a person. Agents-only use today delegates ordinary work;
+a person still accepts releases, publishes, spends and holds credentials. Charter mode fields,
+mode-specific checks, delegated reserved acts and human checkpoints are planned.
+
 ## 1. What you are working with
 
 An estate is a directory of records: one JSON file per record under `records/<type>/<year-month>/<id>.json`, in canonical form, named by a time-ordered id, carrying a content hash and, when authored with an admitted device, a signature. The charter initially permits unsigned records; admission from format 2 has its own mandatory signature rules (section 3). Records are never edited or deleted; a change is a new record that supersedes the old one, and the current state is derived from the whole. `vericairn status` renders that state; `vericairn estate check` validates every record and the repository's cleanliness (no absolute machine paths, no credential-looking values, nothing where it should not be). A repository-synced estate keeps the records in git, which makes every clone a complete, verifiable replica; the runtime keeps a live store per machine beside it for speed, never committed.

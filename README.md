@@ -76,6 +76,12 @@ verified against its checksums. `status` shows the new, empty estate. The
 agent's run, its review and acceptance, and a release. The [install guide](docs/install.md) also covers the
 self-contained archives for machines without the .NET SDK, checking a download, Workbench and the MCP server.
 
+Choose an operating guide: [people only](docs/people-only.md),
+[people and agents](docs/people-and-agents.md), or [agents only](docs/agents-only.md).
+Each walks setup, ordinary work, review and acceptance, and explains what stays with a person.
+Agents-only operation today still needs a person for release acceptance, publication, spending and
+credentials; mode checks and delegated reserved acts are planned.
+
 In a .NET 10 project, `dotnet add package Vericairn` adds the SDK, the typed client of Vericairn's API; see
 the [SDK guide](docs/api-v1.md#the-sdk).
 
