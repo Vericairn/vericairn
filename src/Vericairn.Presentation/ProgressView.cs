@@ -95,7 +95,10 @@ public static class ProgressView
             .Select(g => $"{g.Count().ToString(CultureInfo.InvariantCulture)} {StateLanguage.Label("ask", g.Key)}").ToList();
         JsonElement acceptances = Obj(waiting, "acceptances");
         int due = Items(acceptances, "milestoneWorkOrders").Count + Items(acceptances, "milestoneResults").Count + Items(acceptances, "releaseCandidates").Count + Items(acceptances, "goals").Count;
-        return new ProgressRow("Waits on the operator", $"asks: {(states.Count == 0 ? "none" : string.Join("; ", states))}; acceptances only the operator gives: {due.ToString(CultureInfo.InvariantCulture)}");
+        string cadences = string.Join("; ", Items(waiting, "releaseCadences").Select(c =>
+            $"{Str(c, "productName")}: release due on the cadence; line {Str(c, "line")}; target version {Str(c, "version") ?? "not declared"}; due {Str(c, "dueAt")}"));
+        return new ProgressRow("Waits on the operator", $"asks: {(states.Count == 0 ? "none" : string.Join("; ", states))}; acceptances only the operator gives: {due.ToString(CultureInfo.InvariantCulture)}" +
+            (cadences.Length == 0 ? "" : "; " + cadences));
     }
 
     private static string Count(int count, string noun) => count.ToString(CultureInfo.InvariantCulture) + " " + (count == 1 ? noun : noun + "s");

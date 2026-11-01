@@ -163,6 +163,68 @@ public sealed class ReleaseCadenceTests
     }
 
     [Fact]
+    public void EditorialRevisionAndContributorOwnershipKeepThePinnedCadenceInOperatorWaits()
+    {
+        using var f = new ReleaseCadenceFixture();
+        f.At(f.DueAt);
+        JsonObject revision = PolicyFixture.Body(f.Policy);
+        revision["title"] = "Clarify the cadence description";
+        revision["owner"] = f.Records.Estate.BuilderId;
+        RecordEnvelope current = f.Records.Policy(revision, f.Policy);
+        f.At(f.Records.Estate.Clock.AddSeconds(1));
+        string[] before = f.Snapshot();
+        ReleaseResponse gate = f.Api.ReleaseCheck(f.Request);
+        Assert.True(gate.Ok, gate.Message);
+        ReleaseCadenceDto row = Assert.Single(gate.Policies!.ReleaseCadences!);
+        Assert.Equal(f.Policy.Id, row.Policy.Id);
+        Assert.Equal(f.Policy.Id, row.Origin.Id);
+        Assert.All(gate.Policies.Findings, finding =>
+        {
+            Assert.Equal(current.Id, finding.Policy.Id);
+            Assert.Equal(f.Records.Estate.BuilderId, finding.Owner);
+            Assert.True(finding.IsReleaseCadence);
+            Assert.False(finding.ReleaseHold);
+        });
+        Assert.Single(f.Api.Status().Json.GetProperty("operator").GetProperty("releaseCadences").EnumerateArray());
+        Assert.Single(f.Api.Progress().Json.GetProperty("operator").GetProperty("releaseCadences").EnumerateArray());
+        Assert.Equal(0, f.ProviderCalls);
+        Assert.Equal(before, f.Snapshot());
+    }
+
+    [Fact]
+    public void EveryDueOccurrenceRemainsContextAndRepeatedReadsHaveIdenticalBytes()
+    {
+        using var f = new ReleaseCadenceFixture();
+        f.At(f.DueAt.AddMonths(2));
+        string[] before = f.Snapshot();
+        StatusResponse status = f.Api.Status();
+        Assert.Equal(JsonSerializer.Serialize(status, ProtocolJson.Options), JsonSerializer.Serialize(f.Api.Status(), ProtocolJson.Options));
+        ReleaseResponse gate = f.Api.ReleaseCheck(f.Request);
+        Assert.True(gate.Ok, gate.Message);
+        Assert.Equal(new long[] { 0, 1, 2 }, gate.Policies!.ReleaseCadences!.Select(c => c.Occurrence.GetProperty("number").GetInt64()));
+        Assert.Equal(3, status.Json.GetProperty("operator").GetProperty("releaseCadences").GetArrayLength());
+        Assert.Empty(gate.Check!.Objections);
+        Assert.Equal(0, f.ProviderCalls);
+        Assert.Equal(before, f.Snapshot());
+    }
+
+    [Fact]
+    public void InvalidCadencePinDoesNotSuppressValidationOrARefuseFinding()
+    {
+        using var f = new ReleaseCadenceFixture();
+        f.At(f.DueAt);
+        JsonObject body = PolicyFixture.Body(f.Product);
+        body["cadence"]!["policy"]!["hash"] = "sha256:" + new string('0', 64);
+        RecordEnvelope invalid = f.Records.Add("product", body, supersedes: f.Product.Id);
+        ReleaseResponse gate = f.Api.ReleaseCheck(f.Request with { Product = invalid.Id, Expected = invalid.ComputedHash });
+        Assert.False(gate.Ok);
+        Assert.Null(gate.Policies!.ReleaseCadences);
+        Assert.Contains(gate.Check!.Objections, objection => objection.Code == "policy.reference");
+        Assert.All(gate.Policies.Findings, finding => { Assert.False(finding.IsReleaseCadence); Assert.True(finding.ReleaseHold); });
+        Assert.Equal(0, f.ProviderCalls);
+    }
+
+    [Fact]
     public void CompletionAndExplicitlyEndedDebtLeaveNoCadenceWait()
     {
         using var completed = new ReleaseCadenceFixture();

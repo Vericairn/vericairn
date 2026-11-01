@@ -68,6 +68,7 @@ public class PolicyKindConformanceTests
             c => First(c).Select(f => f with { Disposition = "excepted" }).ToArray(),
             c => First(c).Select(f => f with { Disposition = "ended-unmet" }).ToArray(),
             c => First(c).Select(f => f with { Level = "remind" }).ToArray(),
+            c => First(c).Select(f => f with { IsReleaseCadence = true }).ToArray(),
             c => First(c).Select(f => f with { Rule = "other-rule" }).ToArray(),
             c => First(c).Select(f => f with { Basis = "other-basis" }).ToArray(),
             c => First(c).Concat(First(c)).ToArray(),

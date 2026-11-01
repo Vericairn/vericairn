@@ -43,7 +43,8 @@ internal static class PolicyEvaluator
         if (basis.Submission is { } submission)
             findings = findings.Select(f => f with { Enforced = f.Enforced && Applies(basis.Model, basis.Model.ById[f.Policy.Id], submission) }).ToList();
         ReleaseCadences.Declaration[] cadences = ReleaseCadences.Declarations(basis.Model);
-        findings = findings.Select(f => f with { IsReleaseCadence = cadences.Any(c => c.Matches(basis.Model, f)) }).ToList();
+        if (cadences.Length > 0)
+            findings = findings.Select(f => f with { IsReleaseCadence = cadences.Any(c => c.Matches(basis.Model, f)) }).ToList();
         ImmutableArray<PolicyFinding> ordered = PolicyExceptions.Apply(basis, findings).OrderBy(f => f.PolicyKey, StringComparer.Ordinal).ThenBy(f => f.Rule, StringComparer.Ordinal)
             .ThenBy(f => f.Target.Identity, StringComparer.Ordinal).ThenBy(f => f.Item, StringComparer.Ordinal).ThenBy(f => f.Policy.Id, StringComparer.Ordinal).ToImmutableArray();
         ImmutableArray<PolicyRuleSummary> rules = ordered.GroupBy(f => (f.Policy, f.Rule)).Select(g => new PolicyRuleSummary(g.Key.Policy, g.Key.Rule,
