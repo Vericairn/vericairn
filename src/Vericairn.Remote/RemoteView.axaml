@@ -64,7 +64,7 @@
         <TextBox x:Name="NameBox" Text="{Binding DeviceName}" AutomationProperties.Name="This phone's name on the estate" />
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button x:Name="PairButton" Content="Pair" Command="{Binding PairCommand}" AutomationProperties.Name="Pair with this runtime" />
-          <Button Content="Cancel" Command="{Binding CancelPairingCommand}" AutomationProperties.Name="Back to the home" />
+          <Button Content="Cancel" Command="{Binding CancelPairingCommand}" IsVisible="{Binding HasEstates}" AutomationProperties.Name="Back to the home" />
         </StackPanel>
         <TextBlock x:Name="PairingResult" Text="{Binding PairingMessage}" />
       </StackPanel>

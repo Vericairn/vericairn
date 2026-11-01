@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Remote's Android head. It builds only where the Android workload, an Android SDK and a JDK are installed, so it is in
+       Vericairn.Mobile.slnx and CI's remote-android job, never in Vericairn.slnx. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <Description>Remote for Android: hosts Vericairn.Remote, with device keys in Android Keystore.</Description>
+    <IsPackable>false</IsPackable>
+    <ApplicationId>com.vericairn.remote</ApplicationId>
+    <ApplicationTitle>Vericairn Remote</ApplicationTitle>
+    <ApplicationDisplayVersion>$(VersionPrefix)</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <!-- The shared libraries serialize JSON by reflection and are not trim-safe yet, so the app trims only the platform's own
+         assemblies, keeps reflection serialization, and reports no trim analysis for code it does not trim. -->
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Android" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Remote/Vericairn.Remote.csproj" />
+  </ItemGroup>
+
+</Project>

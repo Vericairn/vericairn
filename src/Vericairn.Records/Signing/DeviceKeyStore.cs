@@ -44,8 +44,17 @@ public static class DeviceKeyStores
     /// <summary>The custody of a recovery device's key: exported once when it was made, encrypted with its owner's passphrase, and kept off every machine.</summary>
     public const string OfflineKind = "offline";
 
-    /// <summary>Custody kinds a device record of record format 2 may claim: format 1's, the macOS Secure Enclave, and a recovery key kept offline.</summary>
-    public static readonly ImmutableArray<string> Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind];
+    /// <summary>The custody of a phone key generated in an iPhone's or iPad's Secure Enclave: usable only on that device while it is unlocked, never exported or backed up.</summary>
+    public const string IosSecureEnclaveKind = "ios-secure-enclave";
+
+    /// <summary>The custody of a phone key generated in Android Keystore: never exported; hardware-backed where the device provides it.</summary>
+    public const string AndroidKeystoreKind = "android-keystore";
+
+    /// <summary>
+    /// Custody kinds a device record of record format 2 may claim: format 1's, the macOS Secure Enclave, a recovery key kept offline, and,
+    /// from 0.9.0, a phone's Secure Enclave or Android Keystore.
+    /// </summary>
+    public static readonly ImmutableArray<string> Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind, IosSecureEnclaveKind, AndroidKeystoreKind];
 
     /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
     public static readonly ImmutableArray<string> PresenceKinds = [SecureEnclaveCustody.Kind];

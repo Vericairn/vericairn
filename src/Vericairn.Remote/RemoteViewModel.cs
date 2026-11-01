@@ -80,6 +80,8 @@ public sealed class RemoteViewModel : Observable
             Estates.Add(new RemoteEstate(connection));
         }
 
+        Estates.CollectionChanged += (_, _) => Raise(nameof(HasEstates));
+
         pairing = Estates.Count == 0;
         selected = Estates.FirstOrDefault();
         if (selected is not null) ShowNode(selected, selected.Connection.Observed?.State ?? string.Empty, selected.Connection.Observed?.Message ?? string.Empty);
@@ -118,6 +120,9 @@ public sealed class RemoteViewModel : Observable
 
     /// <summary>Whether the home is shown.</summary>
     public bool ShowHome => !Pairing;
+
+    /// <summary>Whether there is a home to return to from the pairing form.</summary>
+    public bool HasEstates => Estates.Count > 0;
 
     /// <summary>Whether a check or a pairing is in flight.</summary>
     public bool Busy

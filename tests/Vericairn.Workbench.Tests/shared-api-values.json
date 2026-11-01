@@ -123,7 +123,9 @@
     "linux-secret-service",
     "file-owner-only",
     "macos-secure-enclave",
-    "offline"
+    "offline",
+    "ios-secure-enclave",
+    "android-keystore"
   ],
   "Vericairn.Records.Signing.DeviceKeyStores.Kinds": [
     "windows-cng",

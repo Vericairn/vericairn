@@ -45,6 +45,8 @@ public class ContinuousIntegrationTests
     [Theory]
     [InlineData("ci.yml", "workflow-policy:", 15)]
     [InlineData("ci.yml", "build-test:", 60)]
+    [InlineData("ci.yml", "remote-ios:", 45)]
+    [InlineData("ci.yml", "remote-android:", 45)]
     [InlineData("release.yml", "verify:", 60)]
     [InlineData("package.yml", "enclave-helper:", 20)]
     [InlineData("package.yml", "package:", 45)]
@@ -461,13 +463,36 @@ public class ContinuousIntegrationTests
     {
         // A project outside the solution builds only as a reference, in its default configuration, so a Release pack without a
         // build could not find it; DIST-02's registry provider first met this.
+        // Remote's iOS and Android heads build only with their platform's workload: they are in Vericairn.Mobile.slnx instead, and
+        // EveryMobileHeadBuildsInItsPlatformsJob checks that CI builds each of them.
         string root = RepositoryRoot();
         string solution = Read(Path.Combine(root, "Vericairn.slnx"));
+        string mobile = Read(Path.Combine(root, "Vericairn.Mobile.slnx"));
         string[] projects = ProjectDirectories.SelectMany(directory => Directory.EnumerateFiles(Path.Combine(root, directory), "*.csproj", SearchOption.AllDirectories))
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
         Assert.NotEmpty(projects);
-        string[] missing = projects.Where(project => !solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)).ToArray();
-        Assert.True(missing.Length == 0, "Not in Vericairn.slnx: " + string.Join(", ", missing));
+        string[] missing = projects.Where(project => !solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)
+            && !mobile.Contains($"Path=\"{project}\"", StringComparison.Ordinal)).ToArray();
+        Assert.True(missing.Length == 0, "In neither Vericairn.slnx nor Vericairn.Mobile.slnx: " + string.Join(", ", missing));
+        string[] both = projects.Where(project => solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)
+            && mobile.Contains($"Path=\"{project}\"", StringComparison.Ordinal)).ToArray();
+        Assert.True(both.Length == 0, "In both solutions: " + string.Join(", ", both));
+    }
+
+    [Theory]
+    [InlineData("remote-ios:", "macos-latest", "src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj", "ios")]
+    [InlineData("remote-android:", "ubuntu-latest", "src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj", "android")]
+    public void EveryMobileHeadBuildsInItsPlatformsJob(string job, string runner, string project, string workload)
+    {
+        string mobile = Read(Path.Combine(RepositoryRoot(), "Vericairn.Mobile.slnx"));
+        Assert.Contains($"Path=\"{project}\"", mobile, StringComparison.Ordinal);
+        Assert.Equal(2, mobile.Split("<Project ").Length - 1);
+        string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), job, 2);
+        Assert.Contains($"\n    runs-on: {runner}\n", steps, StringComparison.Ordinal);
+        Assert.Contains($"run: dotnet workload install {workload} --version ", steps, StringComparison.Ordinal);
+        Assert.Contains($"dotnet restore {project} --locked-mode", steps, StringComparison.Ordinal);
+        Assert.Contains($"dotnet build {project} --no-restore --configuration Release", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", steps, StringComparison.Ordinal);
     }
 
     [Fact]
