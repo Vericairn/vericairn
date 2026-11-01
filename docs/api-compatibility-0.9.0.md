@@ -1,5 +1,19 @@
 # API compatibility in 0.9.0
 
+## Local community build guides
+
+`Vericairn.Runtime.Guides` adds standalone source-index, inventory, finding,
+coverage and bundle types. `GuideMarkdown.Read` parses owning rows;
+`GuideGenerator.Generate`, `Check`, `CompareInputs` and `Hash` operate on explicit
+bytes. `GuidePreview.Load`, `Write`, `Check`, `Compare` and `SeparateOutput` provide
+the local file boundary used by `guides generate`, `check` and `compare`.
+`GuideJson.Options` defines the strict camel-case JSON representation.
+
+These additions introduce no interface members, API routes, SDK methods or record
+format changes. Existing implementers have no new obligations. The versioned
+source-index and manifest contracts are described in
+[Community build guides](community-build-guides.md).
+
 ## Settling a run whose observation is marked settled (FIX-76)
 
 `RunSettleRequest` adds an init-only `bool RecordsChecked` property, default false.

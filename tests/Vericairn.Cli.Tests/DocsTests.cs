@@ -228,6 +228,7 @@ public class DocsTests
             Assert.Contains("forks", pinSection, StringComparison.Ordinal);
             Assert.Contains("docs companions", commands);
             Assert.Contains("docs render", commands);
+            foreach (string action in new[] { "generate", "check", "compare" }) Assert.Contains("guides " + action, commands);
             foreach (string route in new[] { "/v1/companions", "/v1/companions/render", "/v1/companions/sources", "/v1/companions/compare" })
                 Assert.Contains("GET " + route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.DoesNotContain("docs generate", commands);

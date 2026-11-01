@@ -19,6 +19,37 @@ Revision 3, October 20, 2026. Add package registry observations and account-hold
 
 The build generates the complete CLI reference from its command tree, including every option. Published references under `docs/releases/` describe their frozen builds. This page documents commands added after 0.8.0 for 0.8.2. The [operator's guide](operator-guide.md) describes 0.8.3's additions: `work new`, `release withdraw`, `work move-plan`, `release submit --check`, `estate init --release` and `estate upgrade --from`.
 
+## `vericairn guides`
+
+The 0.9.0 development build prepares community build guides from explicit local
+Markdown sources and a reviewed source index. It creates private previews only.
+It does not open an estate, create records or contact a publication destination.
+
+```sh
+vericairn guides generate --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --out artifacts/guide-preview
+vericairn guides check --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --out artifacts/guide-preview
+vericairn guides compare --before artifacts/earlier/source-manifest.json --after artifacts/guide-preview/source-manifest.json
+```
+
+`generate` and `check` require `--catalog`, `--contracts`, `--index` and `--out`.
+The output directory must be separate from the input trees and index. Repeat
+`--select <key-or-alias>` to select planned entries; omission selects every planned
+row and explicitly planned remainder. All owning rows still appear in the private
+coverage manifest, including references, available scope and withheld entries.
+
+`generate` writes into a new or empty directory. An existing preview is checked
+against regeneration and is never overwritten. `check` compares every expected
+file and its exact bytes without writing. `compare` requires two complete source
+manifests and lists added, removed or changed guide input identities as due for
+review; it does not clear a guide or repair output. All three accept `--json`.
+
+Exit 0 means the requested generation, check or comparison passed. Exit 1 means
+findings were returned; local path or client failures exit 2. Invalid command
+arguments also return a nonzero exit code.
+Missing sources and incomplete coverage produce findings and failure manifests,
+with no partial guide set. See [Community build guides](community-build-guides.md)
+for the input contract, output files and review workflow.
+
 ## `vericairn operator close`
 
 The 0.8.4 development build replaces per-release closing scripts with an operator command.
