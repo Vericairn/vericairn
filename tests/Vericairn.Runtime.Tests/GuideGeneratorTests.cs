@@ -285,6 +285,24 @@ public sealed class GuideGeneratorTests
         Assert.Contains(GuideMarkdown.Read("fixture", fixture.Sources["family00"]).Findings, f => f.Code == "input-limit");
     }
 
+    [Fact]
+    public void RepeatedSourceSpansCannotMultiplyTheInputBudget()
+    {
+        GuideFixture fixture = GuideFixture.Create();
+        byte[] payload = Encoding.UTF8.GetBytes(new string('x', 1024 * 1024) + "\n");
+        fixture.Sources.Add("bulk", payload);
+        string hash = GuideGenerator.Hash(payload);
+        fixture.Index = fixture.Index with
+        {
+            Sources = [.. fixture.Index.Sources, new("bulk", "contracts", "bulk.md", hash)],
+            Blocks = [.. fixture.Index.Blocks, .. Enumerable.Range(0, 33).Select(i =>
+                new GuideBlockPin("bulk." + i.ToString("00", CultureInfo.InvariantCulture), "bulk", 1, 1, hash))],
+        };
+        GuideBundle bundle = GuideGenerator.Generate(fixture.Index, fixture.Sources);
+        AssertFailed(bundle);
+        Assert.Contains(bundle.Findings, f => f.Code == "input-limit");
+    }
+
     [Theory]
     [InlineData("incomplete")]
     [InlineData("null-guide")]

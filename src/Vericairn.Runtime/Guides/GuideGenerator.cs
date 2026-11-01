@@ -84,15 +84,19 @@ public static partial class GuideGenerator
             catch (DecoderFallbackException) { Fail(source.Id, "invalid-utf8", "The source must be valid UTF-8."); }
         }
         var blocks = new Dictionary<string, GuideQuote>(StringComparer.Ordinal);
+        var sourceLines = sourceText.ToDictionary(p => p.Key, p => GuideMarkdown.Lines(p.Value), StringComparer.Ordinal);
+        long blockBytes = 0;
         foreach (GuideBlockPin pin in index.Blocks.OrderBy(b => b.Id, StringComparer.Ordinal))
         {
             if (!SafeKey(pin.Id)) { Fail(pin.Id, "invalid-block", "Block ids must be portable keys."); continue; }
-            if (!sourceText.TryGetValue(pin.Source, out string? text))
+            if (!sourceLines.TryGetValue(pin.Source, out string[]? lines))
             { Fail(pin.Id, "missing-source", "The block's exact source is unavailable."); continue; }
-            string[] lines = GuideMarkdown.Lines(text);
             if (pin.StartLine < 1 || pin.EndLine < pin.StartLine || pin.EndLine > lines.Length)
             { Fail(pin.Id, "invalid-span", "The inclusive source span is out of range."); continue; }
             string payload = string.Concat(lines[(pin.StartLine - 1)..pin.EndLine]);
+            blockBytes += GuideMarkdown.Utf8.GetByteCount(payload);
+            if (blockBytes > MaximumInputBytes)
+            { Fail(pin.Id, "input-limit", "The selected source spans exceed the combined input byte bound."); break; }
             if (string.IsNullOrWhiteSpace(payload) || pin.Sha256 != Hash(GuideMarkdown.Utf8.GetBytes(payload)))
             { Fail(pin.Id, "block-hash-mismatch", "A required block is empty or differs from its exact pin."); continue; }
             blocks.TryAdd(pin.Id, new(pin.Id, pin.Source, pin.Sha256, payload));

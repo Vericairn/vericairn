@@ -89,7 +89,8 @@ Markdown and HTML display them as escaped inert text, with carriage returns
 encoded so that decoding restores the exact payload. Both renditions use the same
 semantic sections. No clock, account, network query or machine location contributes
 to output bytes. Inputs are bounded to 4 MiB per file, 32 MiB combined, 512 sources
-and 20,000 owning rows; rendered guides are bounded to 128 MiB per selection.
+and 20,000 owning rows. Extracted source blocks also have a combined 32 MiB bound;
+rendered guides are bounded to 128 MiB per selection.
 
 Open `index.html` locally to inspect the preview. New files and directories use
 owner-only permissions on Unix; Windows uses the destination's inherited access
