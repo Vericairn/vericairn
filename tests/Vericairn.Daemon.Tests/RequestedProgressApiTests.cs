@@ -13,6 +13,14 @@ public sealed class RequestedProgressApiTests
 {
     public RequestedProgressApiTests() => DaemonTestHome.Ensure();
 
+    [Fact]
+    public void CurrentClaimRouteIsCoveredByReadAccess()
+    {
+        Assert.True(RequestScope.Covers("GET /v1/progress/{id}"));
+        using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
+        Assert.True(api.RootElement.GetProperty("paths").GetProperty("/v1/progress/{id}").TryGetProperty("get", out _));
+    }
+
     [Theory]
     [InlineData("{\"type\":\"accurate\",\"done\":7,\"total\":20,\"unit\":\"files\"}")]
     [InlineData("{\"type\":\"best-effort\",\"percent\":60}")]
@@ -33,6 +41,16 @@ public sealed class RequestedProgressApiTests
         Assert.True(JsonElement.DeepEquals(progress.RootElement, live.Claim!.Progress!.Value));
         Assert.Equal(request.StatusText, live.Claim.StatusText);
         Assert.Null(live.Written);
+        foreach (RequestedProgress current in new[] { client.WorkProgressGet(fixture.Attempt.Id)!,
+            (await client.WorkProgressGetAsync(fixture.Attempt.Id, TestContext.Current.CancellationToken))! })
+        {
+            Assert.Equal("fresh", current.Freshness);
+            Assert.Equal(request.StatusText, current.Claim!.StatusText);
+            Assert.True(JsonElement.DeepEquals(progress.RootElement, current.Claim.Progress!.Value));
+            Assert.Null(current.Liveness);
+            Assert.False(current.Overdue);
+        }
+        Assert.Equal("fresh", Assert.Single(client.Status().RequestedProgress!).Freshness);
         Assert.Equal(records, fixture.Estate.Load().Records.Count);
         Assert.False(client.WorkProgress(request with { StatusText = null }).Ok);
         using JsonDocument malformed = JsonDocument.Parse("""{"type":"best-effort","percent":101}""");

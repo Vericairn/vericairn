@@ -593,10 +593,11 @@ vericairn worker run <assignment-id> --agent <reviewer-id> --by <principal> --re
 The worker still requires the registered clone, an admitted device for the Reviewer,
 an available and qualified launcher with explicit execution settings, and the applicable
 authority, budget and run limits. No particular harness is selected by the review
-command. `ReleaseReviewBriefResponse.RequestedProgress` currently reports
-`unavailable`; WATCH-03 connects that display seam. The worker's ordinary brief
-includes any [requested reporting](#requested-progress-090) configured for the
-assignment through the estate, roster, goal or brief.
+command. `ReleaseReviewBriefResponse.RequestedProgress` gives the effective
+[requested reporting](#requested-progress-090), or `not requested`. Preparation
+pins its source and retains the request in the assignment brief. A source change
+changes the prepared hash, so assignment requires a fresh preparation. The worker
+uses that retained request through the ordinary brief.
 
 The API offers `GET /v1/releases/{version}/review-brief` with optional `product` and
 `decision` queries, and `POST` on the same path with `ReleaseReviewAssignRequest`.
@@ -1308,10 +1309,49 @@ the attempt. Changing any of those fields is refused; a completed phase cannot
 be reopened. Later configuration never invalidates a historical completion.
 Format-2 estates retain their existing notes and refuse the new fields.
 
-WATCH-03 supplies the broader display of typed values, freshness, the overdue
-signal and the result's retained last claim. This request and submission
-contract does not add those features. The release review response's
-`RequestedProgress` display seam remains `unavailable` until that integration.
+The human `status`, `progress` and Workbench work view show the agent's claim:
+its type, value, status text and submission time, with its freshness beside an
+independent worker liveness observation. Required values and status stay visible
+at every communication progress frequency, including `none`; optional narration
+still follows that preference. Workbench refreshes an open work observation in
+place along with its progress summary and attention list.
+
+`GET /v1/progress/{id}`, `WorkProgressGet` / `WorkProgressGetAsync` in the SDK,
+and the read-only MCP `work_progress_get` accept an attempt or run id. Their
+`RequestedProgress` response includes the effective request and source, current
+`claim`, `freshness`, `asOf`, `quietSeconds`, `cadenceSeconds`, `overdue` and
+`closed`, beside `liveness` and `workerObserved`. A run read selects only an
+attempt belonging to that run; a later run cannot borrow an earlier claim.
+Run rows also carry `requestedProgress`.
+
+With a timed cadence, an initial missing claim is `pending` until one cadence
+has elapsed from the attempt or run starting (or a later effective request).
+It then becomes `overdue`. A claim within the cadence is `fresh`; at the cadence
+boundary it becomes `stale` and reporting is overdue. A per-step-only request
+requires a claim for the current attempt, without inventing a time limit.
+An unavailable request is labelled `unavailable`, and an unconfigured reader
+reports `not-requested`. No assignment-only deadline starts before work begins.
+
+`progress-overdue` attention names the agent, attempt or run and quiet duration.
+It appears on human status, progress and Workbench when the requested update is
+missing or stale, and clears on the next fresh claim. It writes no ask or record,
+changes no liveness observation or stall limit, and never stops a run. A live
+run may be overdue while a stalled run may have fresh reporting. Closed attempts
+and settled runs retain context and create no further reporting obligations.
+
+Canonical `status --json` and MCP `estate_status` remain record-derived and
+portable across machines. Local observations are separate: the API's
+`StatusResponse.RequestedProgress`, human status, and the `requestedProgress`
+array in progress and work observations expose current claims beside liveness.
+Use those observations or `work_progress_get` for current reporting, with the
+runtime's `asOf` rather than treating canonical status as a live clock.
+
+When a result is submitted, the runtime retains the last claim in optional
+format-3 `progressClaim`: its phase, note, time, phase-completion flag and source
+record when present, typed value and status text. This is labelled agent context,
+never completion evidence. It survives loss of the local live store and travels
+with the result. A 100% estimate does not complete or accept work. The result's
+outcome, checks, evidence and separate review and acceptance retain their meanings.
 
 ## Command observations (0.7.0)
 

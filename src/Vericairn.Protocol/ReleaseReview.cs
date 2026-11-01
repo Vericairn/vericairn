@@ -19,7 +19,7 @@ public sealed record ReleaseReviewAssignRequest(string By, string Expected, stri
 /// <param name="Reviewer">The identity of the principal currently holding the reviewer role.</param>
 /// <param name="Assignment">Receipt of the stored assignment, when requested.</param>
 /// <param name="Problem">A refusal or conflict; no assignment is stored on a preparation refusal.</param>
-/// <param name="RequestedProgress">WATCH-02 integration seam. Unavailable until requested progress is implemented.</param>
+/// <param name="RequestedProgress">The effective requested reporting retained in the prepared brief, or not requested. Older implementations may report unavailable.</param>
 public sealed record ReleaseReviewBriefResponse(string Text, string? Hash = null, JsonElement? Brief = null,
     string? Reviewer = null, RecordWritten? Assignment = null, Problem? Problem = null, string RequestedProgress = "unavailable")
 {

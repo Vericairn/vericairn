@@ -129,7 +129,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             json["attention"] = MeasureStatus("attention", () => JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
                 includeLocalObservations: false), ProtocolJson.Options), observe);
-            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors), observe);
+            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
         }
     }
 
@@ -163,6 +163,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         AddPolicySections(json, sections);
         List<WorkProgressClaim> claims = ProgressClaims(model);
         json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
+        List<RequestedProgress> requested = CurrentRequestedProgress(model);
+        json["requestedProgress"] = JsonSerializer.SerializeToNode(requested, ProtocolJson.Options);
         List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
         json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
         string text = ProgressReport.Render(model, checks) + OperatorDutyText(sections) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false);
@@ -178,6 +180,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 $"  run {r.Run} [{s.Severity} {s.Code}]: {s.Summary} [{(s.Attention is null ? "attention recording pending" : "ask " + s.Attention)}]"))) + "\n";
         }
 
+        text += ProgressClaimPresentation.Render(requested);
         return new ProgressResponse(text, Element(json), model.Findings.HasErrors || checks.HasErrors);
     }
 
@@ -374,8 +377,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return null;
             }
 
-            using JsonDocument json = JsonDocument.Parse(WorkView.RenderBriefJson(model, order));
-            return new ObserveResponse(WorkView.RenderObserve(model, order), json.RootElement.Clone());
+            JsonObject json = JsonNode.Parse(WorkView.RenderBriefJson(model, order))!.AsObject();
+            List<RequestedProgress> progress = CurrentRequestedProgress(model, order);
+            json["requestedProgress"] = JsonSerializer.SerializeToNode(progress, ProtocolJson.Options);
+            return new ObserveResponse(WorkView.RenderObserve(model, order) + ProgressClaimPresentation.Render(progress), Element(json));
         }
     }
 
@@ -448,9 +453,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public WriteOutcome Result(ResultRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return HasDuties(request.Body) || request.Expected is not null
-            ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, request.Body, request.Expected)
-            : About("result", "attempt", request.Attempt, request.By, request.Body);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            JsonElement body = request.Body;
+            if (body.ValueKind == JsonValueKind.Object && session.Manifest.RecordFormat >= 3)
+            {
+                if (body.TryGetProperty("progressClaim", out _)) return Refuse("progressClaim is retained by the runtime from the attempt's last claim.");
+                if (Latest(model, request.Attempt, "attempt") is { } attempt && LatestProgressClaim(model, attempt) is { } claim)
+                {
+                    JsonObject retained = JsonNode.Parse(body.GetRawText())!.AsObject();
+                    retained["progressClaim"] = ProgressContext(claim);
+                    body = Element(retained);
+                }
+            }
+            return HasDuties(body) || request.Expected is not null
+                ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, body, request.Expected)
+                : About("result", "attempt", request.Attempt, request.By, body);
+        }
     }
 
     /// <inheritdoc />

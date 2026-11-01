@@ -47,8 +47,16 @@ public class PolicyGoldenFixtureTests
         Assert.False(lineModel.Findings.HasErrors, string.Join('\n', lineModel.Findings));
         using var progress = new ProgressFixture();
         foreach (string scope in new[] { "estate", "roster", "goal", "brief" }) progress.Set(scope, ProgressRequestTests.FullRequest);
-        progress.Estate.Add("work-progress", progress.Estate.BuilderId,
+        RecordEnvelope completion = progress.Estate.Add("work-progress", progress.Estate.BuilderId,
             """{"phase":"review","note":"Read the widget.","completedAt":"2026-10-13T12:01:00Z","progress":{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60},"statusText":"Read seven of twenty files."}""", progress.Attempt.Reference);
+        JsonObject context = JsonNode.Parse(completion.Body.GetRawText())!.AsObject();
+        context.Remove("completedAt");
+        context["at"] = completion.At;
+        context["completed"] = true;
+        context["record"] = completion.Id;
+        JsonObject progressResult = PolicyFixture.ResultBody();
+        progressResult["progressClaim"] = context;
+        progress.Estate.Add("result", progress.Estate.BuilderId, progressResult.ToJsonString(), progress.Attempt.Reference);
         EstateModel progressModel = progress.Estate.Load();
         Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));

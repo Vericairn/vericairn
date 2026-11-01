@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.Records.Tests;
+using Vericairn.Protocol;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -50,6 +51,32 @@ public sealed class WorkProgressCommandsTests
             Assert.Equal(records + 1, service.Session.Load().Records.Count);
         }
         finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void RequestedStatusAndOverdueAppearOnBothHumanViewsAndClearAfterAFreshClaim()
+    {
+        using var fixture = new ProgressFixture();
+        fixture.Set("estate", ProgressRequestTests.FullRequest);
+        using EstateService service = EstateService.Open(fixture.Estate.Root);
+        foreach (string command in new[] { "status", "progress" })
+        {
+            CliHarness.Outcome missing = CliHarness.RunWithApi(service, null, "--estate", fixture.Estate.Root, command);
+            Assert.Equal(0, missing.Code);
+            Assert.Contains("progress-overdue", missing.Out, StringComparison.Ordinal);
+            Assert.Contains(fixture.Estate.BuilderId, missing.Out, StringComparison.Ordinal);
+            Assert.Contains("Worker liveness", missing.Out, StringComparison.Ordinal);
+        }
+        Assert.True(service.WorkProgress(new WorkProgressRequest(fixture.Attempt.Id, fixture.Estate.BuilderId, "review", "Optional narration.")
+            { Progress = JsonSerializer.Deserialize<JsonElement>("""{"type":"accurate","done":7,"total":20,"unit":"files"}"""), StatusText = "Reading the widget." }).Ok);
+        foreach (string command in new[] { "status", "progress" })
+        {
+            CliHarness.Outcome fresh = CliHarness.RunWithApi(service, null, "--estate", fixture.Estate.Root, command);
+            Assert.Equal(0, fresh.Code);
+            foreach (string text in new[] { "Agent's progress claim", "accurate: 7 of 20 files", "Reading the widget.", "fresh", "Worker liveness" })
+                Assert.Contains(text, fresh.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("progress-overdue:", fresh.Out, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

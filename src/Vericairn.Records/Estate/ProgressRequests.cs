@@ -26,6 +26,19 @@ public static class ProgressRequests
         if (assignment.Body.TryGetProperty("brief", out JsonElement brief) && Select(assignment, brief, "brief") is { } explicitRequest)
             return explicitRequest;
 
+        return ResolveInherited(model, WorkView.OrderOfAssignment(model, assignment), assignment.Id, goal);
+    }
+
+    /// <summary>Resolve inherited reporting for a work order before its assignment is prepared. An ambiguous goal remains an explicit problem.</summary>
+    public static ProgressRequestSelection ResolveForWork(EstateModel model, RecordEnvelope order)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return ResolveInherited(model, order, null, null);
+    }
+
+    private static ProgressRequestSelection ResolveInherited(EstateModel model, RecordEnvelope? order, string? assignment, RecordEnvelope? goal)
+    {
         // Preserve the unconfigured path without traversing goals, routing or the run ledger.
         if (model.CurrentEstate?.Body.TryGetProperty("progressRequest", out _) != true
             && !model.Current("goal").Any(g => g.Body.TryGetProperty("progressRequest", out _))
@@ -33,12 +46,11 @@ public static class ProgressRequests
                 && roles.ValueKind == JsonValueKind.Array && roles.EnumerateArray().Any(entry => entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("progressRequest", out _))))
             return new();
 
-        RecordEnvelope? order = WorkView.OrderOfAssignment(model, assignment);
         string role = order is null ? Routing.DefaultRole : Routing.RoleOf(model.Latest(order));
         if (goal is not null) return ForGoal(model, model.Latest(goal), role);
         IReadOnlyList<RecordEnvelope> goals = order is null ? [] : Routing.GoalsOf(model, order);
         // A running assignment uses the goal its worker selected, including when work belongs to several goals.
-        string[] runningGoals = AgentRuns.All(model).Where(r => r.InFlight && r.Assignment == assignment.Id && r.Goal is not null)
+        string[] runningGoals = AgentRuns.All(model).Where(r => r.InFlight && assignment is not null && r.Assignment == assignment && r.Goal is not null)
             .Select(r => r.Goal!).Distinct(StringComparer.Ordinal).ToArray();
         if (runningGoals.Length == 1 && GoalView.Find(model, runningGoals[0]) is { } runningGoal)
             return ForGoal(model, runningGoal, role);

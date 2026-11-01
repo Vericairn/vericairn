@@ -99,6 +99,45 @@ public class ProgressTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task RequestedStatusSurvivesMinimalNarrationAndRefreshesAnOpenWorkView()
+    {
+        string root = Seed.Temp("wb-requested-progress");
+        string op = Seed.Init(root);
+        var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-requested-prefs")));
+        MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
+        try
+        {
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+            IEstateApi api = shell.Api!;
+            Assert.True(api.NewRecord(new NewRecordRequest("work-order", op, Seed.Json("""{"key":"W-1","kind":"ordinary","title":"Review the widget","intent":"Observe progress.","scope":["widget"],"exitQuestion":"Reviewed?","inputs":[],"deliverables":["review"]}"""))).Ok);
+            string assignment = api.Assign(new AssignRequest("W-1", op, op, Seed.Json("""{"outcome":"Review","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["widget repository"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["tests"],"recovery":"Record a result.","progressRequest":{"statusText":true,"cadence":{"perStep":true}}}"""))).Written!.Id;
+            string attempt = api.Attempt(new AttemptRequest(assignment, op, "widget repository", "Review the widget.")).Written!.Id;
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(() => shell.OpenRecordAsync("W-1", TestContext.Current.CancellationToken));
+            WorkOrderDocument page = Assert.IsType<WorkOrderDocument>(shell.SelectedDocument);
+            Assert.Contains("overdue", page.Observation, StringComparison.Ordinal);
+            Assert.Contains(shell.Attention, a => a.Kind == "progress-overdue");
+            Assert.True(api.WorkProgress(new WorkProgressRequest(attempt, op, "review", "Optional narration.")
+                { Progress = Seed.Json("""{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60}"""), StatusText = "Reading the widget." }).Ok);
+            // The default completion-and-need profile suppresses optional active narration during periodic refresh.
+            await fixture.UiAsync(() => shell.RefreshProgressAsync(TestContext.Current.CancellationToken));
+            Assert.Same(page, shell.Documents.OfType<WorkOrderDocument>().Single());
+            foreach (string text in new[] { "Agent's progress claim", "accurate: 7 of 20 files", "best-effort estimate 60%", "Reading the widget.", "fresh", "Worker liveness" })
+                Assert.Contains(text, page.Observation, StringComparison.Ordinal);
+            Assert.DoesNotContain(shell.Attention, a => a.Kind == "progress-overdue");
+            Assert.Contains(shell.Progress, row => row.Heading == "Agent claim · requested progress" && row.Detail.Contains("Reading the widget.", StringComparison.Ordinal));
+            Assert.Contains(shell.Progress, row => row.Heading == "Worker liveness");
+            foreach (string frequency in CommunicationResolution.Frequencies)
+            {
+                var rows = ProgressView.Summary(api.Progress().Json, frequency, onDemand: false);
+                Assert.Contains(rows, row => row.Detail.Contains("accurate: 7 of 20 files", StringComparison.Ordinal));
+                Assert.Contains(rows, row => row.Heading == "Worker liveness");
+            }
+        }
+        finally { await fixture.Ui(window.Close); }
+    }
+
+    [Fact]
     public void TheSummaryReadsTheReportsOwnFiguresAndSaysWhenThereIsNoReport()
     {
         Assert.Equal([new ProgressRow("Progress", "unavailable: the runtime gave no progress report")], ProgressView.Summary(default));

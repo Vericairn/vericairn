@@ -33,6 +33,12 @@ public static class ProgressView
         return [Standing(report), WorkOrders(report), Releases(report), Next(report), Eligible(report), Operator(report),
             .. Items(report, "agentClaims").Where(c => CommunicationPresentation.ShouldDeliver(frequency,
                 c.TryGetProperty("completed", out JsonElement completed) && completed.ValueKind == JsonValueKind.True ? "completion" : "progress", [], onDemand)).Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)")),
+            .. Items(report, "requestedProgress").SelectMany(c =>
+            {
+                RequestedProgress status = c.Deserialize<RequestedProgress>(ProtocolJson.Options)!;
+                return new[] { new ProgressRow("Agent claim · requested progress", ProgressClaimPresentation.Claim(status)),
+                    new ProgressRow("Worker liveness", ProgressClaimPresentation.Liveness(status)) };
+            }),
             .. Items(report, "runSignals").SelectMany(r => Items(r, "signals").Select(s => new ProgressRow($"Worker · {Str(s, "severity")} {Str(s, "code")}",
                 $"{Str(s, "summary")} (run {Str(r, "run")}; {(Str(s, "attention") is string ask ? "ask " + ask : "attention recording pending")})")))];
     }

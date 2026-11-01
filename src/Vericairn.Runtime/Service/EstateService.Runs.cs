@@ -3,6 +3,7 @@
 
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Service;
@@ -27,9 +28,22 @@ public sealed partial class EstateService
     public RunResponse RunStart(RunStartRequest request) => runDispatch.Start(request, null, out _);
 
     /// <inheritdoc />
-    public RunsResponse Runs() => runDispatch.Runs();
+    public RunsResponse Runs()
+    {
+        lock (gate) return Runs(session.Load());
+    }
 
-    private RunsResponse Runs(EstateModel model, bool includeLocalObservations = true) => runDispatch.Runs(model, includeLocalObservations);
+    private RunsResponse Runs(EstateModel model, bool includeLocalObservations = true)
+    {
+        RunsResponse response = runDispatch.Runs(model, includeLocalObservations);
+        if (!includeLocalObservations) return response;
+        return response with { Runs = response.Runs.Select(run =>
+        {
+            if (run.Assignment is not string id || !model.ById.TryGetValue(id, out RecordEnvelope? assignment)) return run;
+            RequestedProgress progress = RequestedProgressOf(model, assignment, AttemptOfRun(model, run), run);
+            return progress.Request is null && progress.Claim?.Progress is null && progress.Problem is null ? run : run with { RequestedProgress = progress };
+        }).ToList() };
+    }
 
     /// <inheritdoc />
     public RunStopResponse RunStop(string run, RunStopRequest request) => runDispatch.RunStop(run, request);

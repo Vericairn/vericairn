@@ -29,7 +29,7 @@ public sealed class ReleaseReviewTests
         Assert.Null(brief.Assignment);
         Assert.Equal(before, f.Model.Records.Count);
         Assert.Equal(f.Reviewer.Id, brief.Reviewer);
-        Assert.Equal("unavailable", brief.RequestedProgress);
+        Assert.Equal("not requested", brief.RequestedProgress);
         Assert.Equal(ContentHash.Sha256(Encoding.UTF8.GetBytes(brief.Text)), brief.Hash);
         Assert.DoesNotContain('\r', brief.Text);
 
@@ -60,6 +60,32 @@ public sealed class ReleaseReviewTests
         Assert.True(JsonElement.DeepEquals(brief.Brief.Value, assignment.Body.GetProperty("brief")));
         Assert.Contains(brief.Text, f.Api.BriefContext(f.Order.Id)!.Markdown, StringComparison.Ordinal);
         Assert.Equal(before + 1, f.Model.Records.Count);
+        f.Records.AssertValid();
+    }
+
+    [Fact]
+    public void PreparedReviewPinsItsEffectiveProgressRequestAndDetectsAChangedSource()
+    {
+        using var f = new ReleaseReviewFixture();
+        RecordEnvelope estate = f.Model.CurrentEstate!;
+        JsonObject body = PolicyFixture.Body(estate);
+        body["progressRequest"] = JsonNode.Parse(ProgressRequestTests.FullRequest);
+        RecordEnvelope request = f.Records.Add("estate", body, supersedes: estate.Id);
+        ReleaseReviewBriefResponse prepared = f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version);
+        Assert.True(prepared.Ok, prepared.Problem?.Message);
+        Assert.Equal(ProgressRequestTests.FullRequest, prepared.RequestedProgress);
+        Assert.Equal(ProgressRequestTests.FullRequest, CanonicalJson.Serialize(prepared.Brief!.Value.GetProperty("progressRequest")));
+        Assert.Contains(request.ComputedHash, prepared.Text, StringComparison.Ordinal);
+        Assert.Contains("work_progress_get", prepared.Text, StringComparison.Ordinal);
+        body["progressRequest"] = JsonNode.Parse(ProgressRequestTests.DefaultRequest);
+        f.Records.Add("estate", body, supersedes: request.Id);
+        int before = f.Model.Records.Count;
+        Assert.Equal("conflict", f.Api.ReleaseReviewAssign(ReleaseReviewFixture.Version, new(f.Operator, prepared.Hash!)).Problem!.Code);
+        Assert.Equal(before, f.Model.Records.Count);
+        ReleaseReviewBriefResponse current = f.Api.ReleaseReviewBrief(ReleaseReviewFixture.Version);
+        ReleaseReviewBriefResponse assigned = f.Api.ReleaseReviewAssign(ReleaseReviewFixture.Version, new(f.Operator, current.Hash!));
+        Assert.True(assigned.Ok, assigned.Problem?.Message);
+        Assert.Equal(ProgressRequestTests.DefaultRequest, CanonicalJson.Serialize(f.Model.ById[assigned.Assignment!.Id].Body.GetProperty("brief").GetProperty("progressRequest")));
         f.Records.AssertValid();
     }
 

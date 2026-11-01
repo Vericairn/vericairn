@@ -66,7 +66,12 @@ public sealed record HealthResponse(string Api, string Vericairn, string Estate,
 /// <param name="Text">Rendered status.</param>
 /// <param name="Json">Canonical status document.</param>
 /// <param name="HasErrors">Whether errors exist.</param>
-public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors);
+public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors)
+{
+    /// <summary>Local requested progress beside liveness; separate from the portable record-derived Json and Text.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<RequestedProgress>? RequestedProgress { get; init; }
+}
 
 /// <summary>
 /// The progress report: where the estate stands, its work orders by state, each published release and
@@ -714,7 +719,12 @@ public sealed record RunSignal(string Code, string Severity, string At, string S
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
 /// <param name="Execution">Immutable admitted execution snapshot, absent on older runs.</param>
 /// <param name="ExecutionObserved">Reported execution facts and unknowns at settlement.</param>
-public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null, JsonElement? Execution = null, JsonElement? ExecutionObserved = null);
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null, JsonElement? Execution = null, JsonElement? ExecutionObserved = null)
+{
+    /// <summary>The agent's reporting status beside, never substituted for, worker liveness.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public RequestedProgress? RequestedProgress { get; init; }
+}
 
 /// <summary>One unit of a goal's ledger.</summary>
 /// <param name="Unit">wallMinutes, tokens or currency.</param>

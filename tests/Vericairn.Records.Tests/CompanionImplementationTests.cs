@@ -78,6 +78,9 @@ public class CompanionImplementationTests
             cases.Add("list.md", RecordCompanionTests.Render([source], "list"));
             foreach (var template in TemplateCompanionTests.GoldenCases()) cases.Add(template.Key, template.Value);
             cases.Add("release-backport.md", RecordCompanionTests.Render([BackportSource(model)]));
+            JsonObject reported = JsonNode.Parse(model.OfType("result").First().Body.GetRawText())!.AsObject();
+            reported["progressClaim"] = JsonNode.Parse("""{"phase":"review","note":"Reading the widget.","at":"2026-10-13T12:00:00Z","progress":{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60},"statusText":"Read seven files."}""");
+            cases.Add("result-progress-claim.md", RecordCompanionTests.Render([RecordCompanionTests.Source("result", reported)]));
             JsonObject product = ReleaseLineFixture.ProductBody();
             product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "stable" },
                 new JsonObject { ["name"] = "1.x", ["channel"] = "lts", ["endOfSupport"] = "2028-01-01T00:00:00Z" });

@@ -76,6 +76,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/work/new", (WorkNewRequest request) => Outcome(service.WorkNew(request)));
         app.MapPost($"{v}/work/assign", (AssignRequest request) => Outcome(service.Assign(request)));
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
+        app.MapGet($"{v}/progress/{{id}}", (string id) => service.WorkProgressGet(id) is { } progress ? Results.Json(progress, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/work/progress", (WorkProgressRequest request) => Results.Json(service.WorkProgress(request), ProtocolJson.Options));
         app.MapPost($"{v}/work/result", (ResultRequest request) => Outcome(service.Result(request)));
         app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Json(basis, ProtocolJson.Options) : Results.NotFound());

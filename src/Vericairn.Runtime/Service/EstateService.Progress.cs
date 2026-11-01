@@ -72,11 +72,11 @@ public sealed partial class EstateService
                     return new WorkProgressResponse(null, Problem: Refuse("The effective progress request requires statusText with each claim.").Problem);
             }
 
-            string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+            string at = RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
             var body = new JsonObject { ["phase"] = request.Phase, ["note"] = request.Note, ["completedAt"] = at };
             if (request.Progress is JsonElement progress) body["progress"] = JsonNode.Parse(progress.GetRawText());
             if (request.StatusText is not null) body["statusText"] = request.StatusText;
-            var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference);
+            var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference, At: WorkerOptions.Clock.GetUtcNow());
             // Interim notes pass the same author, shape and portable-content checks, without storing the candidate record.
             (AuthoredRecord? candidate, string? refusal) = AuthorLocked(draft, model);
             if (candidate is null)
@@ -114,17 +114,7 @@ public sealed partial class EstateService
         var claims = new List<WorkProgressClaim>();
         foreach (RecordEnvelope attempt in model.Current("attempt").OrderBy(a => a.Id, StringComparer.Ordinal))
         {
-            RecordEnvelope? recorded = model.Current("work-progress").Where(r => r.Subject?.Id == attempt.Id)
-                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-            WorkProgressClaim? claim = recorded is null ? null : Claim(recorded);
-            if (session.Live.Meta("work-progress:" + attempt.Id) is string live)
-            {
-                WorkProgressClaim? latest = JsonSerializer.Deserialize<WorkProgressClaim>(live, ProtocolJson.Options);
-                if (latest is not null && (claim is null || string.CompareOrdinal(latest.At, claim.At) >= 0))
-                {
-                    claim = latest;
-                }
-            }
+            WorkProgressClaim? claim = LatestProgressClaim(model, attempt);
 
             if (claim is not null)
             {

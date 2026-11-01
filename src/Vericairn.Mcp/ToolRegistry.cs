@@ -254,6 +254,10 @@ public sealed partial class ToolRegistry
             Write("writing_exception_remove", "Remove one writing entry with its expected hash and a reason, signed as the acting principal under current authority.",
                 Arguments(("id", "Writing-entry record id."), ("expected", "Expected current entry hash."), ("reason", "Why this entry is removed."), ("basis", "Optional exact authority basis for this removal.")), ["id", "expected", "reason"],
                 async (api, a, token) => Outcome(await api.WritingExceptionRemoveAsync(Arg(a, "id"), new WritingExceptionRemoveRequest(by, Arg(a, "expected"), Arg(a, "reason"), a?["basis"] is null ? null : Body(a, "basis")), token).ConfigureAwait(false)), ["basis"]) with { PolicyAction = "writing-remove" },
+            Read("work_progress_get", "Read the agent's current progress claim, effective request and freshness for an attempt or run, beside worker liveness. Progress overdue is attention only and never stops a run. Writes nothing.",
+                Arguments(("id", "Attempt or run record id.")), "id",
+                async (api, a, token) => (await api.WorkProgressGetAsync(Arg(a, "id"), token).ConfigureAwait(false)) is { } progress
+                    ? Json(progress) : NotFound("attempt or run", Arg(a, "id"))),
             Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 async (api, a, token) => Outcome((await api.AttemptAsync(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note")), cancellationToken: token).ConfigureAwait(false)))),
