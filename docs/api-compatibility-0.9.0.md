@@ -17,6 +17,8 @@ is still refused as `already-settled`, and an observation that lacks a fact is s
 `unresolved`. The command is `vericairn worker settle <run> --by <principal>
 --records-checked`. Earlier servers ignore the field and keep refusing.
 
+## Requested progress and the typed claim (WATCH-02)
+
 WATCH-02 adds optional `Progress` and `StatusText` init properties to
 `WorkProgressRequest` and `WorkProgressClaim`. Existing constructors and
 deconstruction signatures are unchanged. Null additions are omitted during
