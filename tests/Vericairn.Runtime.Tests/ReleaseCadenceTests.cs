@@ -70,6 +70,7 @@ public sealed class ReleaseCadenceTests
         Assert.True(gate.Ok, gate.Message);
         Assert.Null(gate.Policies!.ReleaseCadences);
         Assert.DoesNotContain("release due on the cadence", gate.Policies.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("cadence context", gate.Policies.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(gate.Check!.Objections);
         Assert.Equal(0, f.Dispatches);
         Assert.Equal(before, f.Snapshot());
@@ -266,6 +267,8 @@ public sealed class ReleaseCadenceTests
         Assert.False(progress.Json.GetProperty("operator").TryGetProperty("releaseCadences", out _));
         Assert.DoesNotContain("release due on the cadence", status.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("release due on the cadence", progress.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("cadence context", status.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cadence context", progress.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

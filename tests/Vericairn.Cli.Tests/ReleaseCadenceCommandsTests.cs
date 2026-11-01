@@ -35,7 +35,11 @@ public sealed class ReleaseCadenceCommandsTests
                     Assert.Equal("1.0.0", row.GetProperty("version").GetString());
                 }
             }
-            else Assert.Equal(due, response.Out.Contains("release due on the cadence; line current; target version 1.0.0", StringComparison.Ordinal));
+            else
+            {
+                Assert.Equal(due, response.Out.Contains("release due on the cadence; line current; target version 1.0.0", StringComparison.Ordinal));
+                Assert.Equal(due, response.Out.Contains("cadence context", StringComparison.OrdinalIgnoreCase));
+            }
         }
         CliHarness.Outcome check = CliHarness.RunWithApi(f.Api, null, [.. prefix, "release", "submit", "--check", "--product", f.Product.Id,
             "--version", "1.0.0", "--commit", f.Request.Commit!, "--expected", f.Product.ComputedHash, "--by", f.Records.Estate.OperatorId]);
@@ -45,7 +49,11 @@ public sealed class ReleaseCadenceCommandsTests
             Assert.Empty(check.Json.GetProperty("check").GetProperty("objections").EnumerateArray());
             Assert.Equal(due, check.Json.GetProperty("policies").TryGetProperty("releaseCadences", out _));
         }
-        else Assert.Equal(due, check.Out.Contains("release due on the cadence; line current; target version 1.0.0", StringComparison.Ordinal));
+        else
+        {
+            Assert.Equal(due, check.Out.Contains("release due on the cadence; line current; target version 1.0.0", StringComparison.Ordinal));
+            Assert.Equal(due, check.Out.Contains("cadence context", StringComparison.OrdinalIgnoreCase));
+        }
         Assert.Equal(0, f.Dispatches);
         Assert.Equal(0, f.ProviderCalls);
         Assert.Empty(f.Api.Records("operation"));
