@@ -1,4 +1,5 @@
 <Project>
+  <Import Project="../tools/BuildTelemetry.targets" />
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">
     <Using Include="Vericairn.TestSupport" />
     <Compile Include="$(MSBuildThisFileDirectory)TestSupport/TestTiming.cs" Link="TestSupport/TestTiming.cs" />

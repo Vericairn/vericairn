@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # A second line behind tools/BuildTelemetry.targets: Avalonia's build statistics stay off in every job.
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+
 jobs:
   publish:
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'

@@ -233,7 +233,9 @@ dotnet test
 dotnet run --project src/Vericairn.Cli -- records describe
 ```
 
-Build output goes to `artifacts/`, which is ignored.
+Build output goes to `artifacts/`, which is ignored. Building sends nothing: the repository switches off the build statistics
+that Avalonia, Workbench's UI framework, would otherwise send from every build, and continuous integration also sets
+`AVALONIA_TELEMETRY_OPTOUT=1`.
 
 ## License
 

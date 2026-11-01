@@ -1,4 +1,5 @@
 <Project>
+  <Import Project="../tools/BuildTelemetry.targets" />
   <Import Project="../tools/BundledPacks.targets" Condition="'$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench'" />
   <!-- Ordinary builds remain offline-capable. The package workflow supplies baselines fetched for this run. -->
   <PropertyGroup Condition="'$(VericairnApiBaselineRoot)' != '' And '$(IsPackable)' == 'true' And '$(PackAsTool)' != 'true'">

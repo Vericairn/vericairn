@@ -24,6 +24,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # A second line behind tools/BuildTelemetry.targets: Avalonia's build statistics stay off in every job.
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+
 jobs:
   enclave-helper:
     # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
