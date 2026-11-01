@@ -23,7 +23,7 @@ internal sealed partial class ReleaseCoordinationService(
     Func<ProviderRegistry> providers,
     Func<string, RecordResponse?> readRecord,
     Func<NewRecordRequest, WriteOutcome> writeRecord,
-    Func<EstateModel, string, string, string?, IReadOnlySet<string>, ReleasePolicyAssessment> assessPolicies,
+    Func<EstateModel, string, string, string?, IReadOnlySet<string>, string?, ReleasePolicyAssessment> assessPolicies,
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, byte[]> serializeBasis,
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
     Func<DateTimeOffset> now,
@@ -55,7 +55,7 @@ internal sealed partial class ReleaseCoordinationService(
         ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true, IReadOnlyList<RecordReference>? excluded = null)
     {
         (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, request.Version, request.By, now(), commit, provider, destination);
-        ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination));
+        ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination), request.Line ?? "current");
         List<FindingDto> objections = [.. assessment.Objections];
         objections.AddRange(CheckReleaseMetadata(model, request, commit, destination));
         if (recordAccess.RequestDeviceRefusal(model) is { } denied) objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", "release", denied.Message)]);
@@ -543,7 +543,7 @@ internal sealed partial class ReleaseCoordinationService(
                     {
                         EstateModel model = session.Load();
                         (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, product, request.Version, request.By, now(), built, provider.Descriptor, destination);
-                        observedPolicies = assessPolicies(model, product, request.Version, built, ReleaseRepositories(model, provider.Descriptor, destination));
+                        observedPolicies = assessPolicies(model, product, request.Version, built, ReleaseRepositories(model, provider.Descriptor, destination), revisionBody["target"]?["releaseLine"]?.GetValue<string>() ?? "current");
                         List<FindingDto> objections = [.. observedPolicies.Objections, .. changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message))];
                         if (objections.Count > 0)
                         {

@@ -83,7 +83,7 @@ public sealed partial class EstateService
         return PolicyView(model, basis, evaluated, selected, problem);
     }
 
-    private PolicyResponse PolicyView(EstateModel model, PolicyBasis basis, PolicyEvaluation evaluated, RecordEnvelope? selected = null, Problem? problem = null, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null)
+    private PolicyResponse PolicyView(EstateModel model, PolicyBasis basis, PolicyEvaluation evaluated, RecordEnvelope? selected = null, Problem? problem = null, IReadOnlyDictionary<string, RecordFile>? sourceFiles = null, string? releaseLine = null)
     {
         PolicyFinding[] findings = evaluated.Findings.Where(f => selected is null || f.PolicyIdentity == PolicyWork.Identity(model, selected)).ToArray();
         RecordEnvelope[] policies = model.Current("estate-policy").Where(p => selected is null || p.Id == selected.Id)
@@ -91,11 +91,12 @@ public sealed partial class EstateService
         HashSet<string> identities = policies.Select(p => PolicyWork.Identity(model, p)).ToHashSet(StringComparer.Ordinal);
         RecordResponse[] exceptions = model.OfType("policy-exception").Where(e => e.Subject is { } s && model.ById.TryGetValue(s.Id, out RecordEnvelope? p) && identities.Contains(PolicyWork.Identity(model, p)))
             .OrderBy(e => e.At, StringComparer.Ordinal).ThenBy(e => e.Id, StringComparer.Ordinal).Select(e => PolicyRecord(model, e, sourceFiles)).ToArray();
+        ReleaseCadenceDto[] cadences = ReleaseCadences.Due(model, findings, basis.Submission, releaseLine);
         var response = new PolicyResponse("", BasisView(basis), policies.Select(p => PolicyRecord(model, p, sourceFiles)).ToArray(), exceptions,
             findings.Select(ConvertPolicy<PolicyFindingDto>).ToArray(), evaluated.Rules.Where(r => policies.Any(p => p.Id == r.Policy.Id)).Select(ConvertPolicy<PolicyRuleSummaryDto>).ToArray(),
             evaluated.Diagnostics.Select(PolicyDiagnostic).ToArray(), evaluated.Complete && problem is null, findings.Count(f => f.ReleaseHold), problem)
         { Requirements = evaluated.Requirements?.Where(r => selected is null || r.Policy == EstateModel.BodyString(selected, "key") || identities.Contains(r.Policy))
-            .Select(ConvertPolicy<PolicyRequirementDto>).ToArray() };
+            .Select(ConvertPolicy<PolicyRequirementDto>).ToArray(), ReleaseCadences = cadences.Length == 0 ? null : cadences };
         return response with { Text = PolicyPresentation.Render(response) };
     }
 

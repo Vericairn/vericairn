@@ -16,8 +16,10 @@ internal sealed record PolicyFinding(
     RecordReference? Anchor, string? AnchorAt, ImmutableArray<RecordReference> Evidence, ImmutableArray<RecordReference> Exceptions,
     int SubjectCount = 1, DutyFinding? Duty = null, bool Enforced = true)
 {
-    public bool ReleaseHold => Enforced && Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
-    public Severity Severity => !Enforced || Verdict == "satisfied" || Disposition is "excepted" or "ended-unmet" || Level == "remind" ? Severity.Info : Severity.Warning;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsReleaseCadence { get; init; }
+    public bool ReleaseHold => !IsReleaseCadence && Enforced && Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
+    public Severity Severity => IsReleaseCadence || !Enforced || Verdict == "satisfied" || Disposition is "excepted" or "ended-unmet" || Level == "remind" ? Severity.Info : Severity.Warning;
 }
 
 internal sealed record PolicyRuleSummary(RecordReference Policy, string Rule, int Subjects, int Satisfied, int Unmet, int Unavailable, int Excepted);

@@ -67,6 +67,8 @@ public sealed partial class EstateService
         json["writingExceptions"] = JsonSerializer.SerializeToNode(sections.Exceptions, ProtocolJson.Options);
         if (json["operator"] is not JsonObject operatorView) json["operator"] = operatorView = new();
         operatorView["duties"] = JsonSerializer.SerializeToNode(sections.Operator, ProtocolJson.Options);
+        if (sections.Policies.ReleaseCadences is { Count: > 0 } cadences)
+            operatorView["releaseCadences"] = JsonSerializer.SerializeToNode(cadences, ProtocolJson.Options);
     }
 
     private static string OperatorDutyText(PolicySections sections)
@@ -82,6 +84,7 @@ public sealed partial class EstateService
             foreach (PolicyRecordReference evidence in finding.Evidence) text.AppendLine($"      evidence {evidence.Type} {evidence.Id} {evidence.Hash}");
             foreach (PolicyRecordReference ask in item.Asks) text.AppendLine($"      linked ask {ask.Id} {ask.Hash}");
         }
+        text.Append(ReleaseCadencePresentation.Render(sections.Policies.ReleaseCadences ?? []));
         return text.ToString().ReplaceLineEndings("\n");
     }
 
@@ -89,7 +92,7 @@ public sealed partial class EstateService
     {
         List<OperatorDutyDto> rows = [];
         RecordEnvelope[] asks = Vericairn.Records.Estate.Asks.Deliveries(model).Where(d => model.HasRole(d.Principal, Roles.Operator)).SelectMany(d => d.Asks).ToArray();
-        foreach (PolicyFindingDto finding in policies.Findings.Where(f => f.Duty is { Completed: false } && f.Enforced &&
+        foreach (PolicyFindingDto finding in policies.Findings.Where(f => !f.IsReleaseCadence && f.Duty is { Completed: false } && f.Enforced &&
             f.Disposition is not ("ended-unmet" or "scheduled")))
         {
             RecordEnvelope[] linked = asks.Where(a => a.Subject is { Type: "result" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) &&
