@@ -245,6 +245,62 @@ From 0.7.0, `estate_progress` also shows worker-observed command, rate and loop 
 
 Watching thresholds are recorded in goal and roster `limits.watch`, with bounded integer fields and goal-over-roster-over-launcher precedence. MCP progress notes cannot change those thresholds or the worker's observations. The run intent pins the settings and roster revision current at launch; [the software guide](software.md#recorded-watching-settings-070) gives defaults, ranges and examples.
 
+### Requested typed claims (0.9.0)
+
+In a format-3 estate, `work_progress` also accepts optional `progress` (an object)
+and `statusText` (a short sentence). Its existing required arguments remain
+`attempt`, `phase`, `note` and `state`. For example:
+
+```json
+{
+  "attempt": "<attempt-id>",
+  "phase": "review",
+  "note": "Reading the widget.",
+  "state": "active",
+  "progress": {
+    "type": "accurate",
+    "done": 7,
+    "total": 20,
+    "unit": "files",
+    "estimatePercent": 60
+  },
+  "statusText": "Read seven of twenty files; checking the dependencies."
+}
+```
+
+`accurate` requires a nonnegative integer `done` and a nonblank `unit`; `total`
+is optional when unknown and otherwise an integer at least `done`. Its optional
+`estimatePercent` is a separate best-effort estimate. `best-effort` requires only
+`percent` beside its type; `not-measurable` admits only its type and means in
+progress. Percentage estimates are integers from 0 to 100 and stay labelled as
+estimates; counts use format 3's safe integer range. Values for another type or
+unknown fields are refused. `statusText` is nonblank, on one line and at most
+500 characters; the accurate unit is nonblank, on one line and at most 100.
+
+The effective request comes from the most specific configured scope: assignment
+`brief.progressRequest`, goal `progressRequest`, the matching roster role's
+`progressRequest`, then estate `progressRequest`. A complete request replaces
+broader ones. It has optional `types` (all three by default), `statusText` (false
+by default), and required `cadence` (`perStep: true`, positive integer `minutes`,
+or both). The work brief includes that request and its source. A configured
+request requires a typed claim, an admitted type and any required status text.
+A count accompanied by an estimate requires both `accurate` and `best-effort`.
+With no request anywhere, voluntary WATCH-01 notes remain valid.
+
+Malformed claims, disallowed types and missing required status text return an
+MCP error without changing live state or writing a record. Interim typed claims
+retain both values and status locally across restart. A completed phase adds
+only optional `progress` and `statusText` to its existing format-3 record.
+Identical retries return that record; changing the value or status is refused.
+This does not add a cadence monitor or change worker liveness. WATCH-03 adds
+the broader displays, freshness, overdue signal and result context.
+
+The API and SDK use the same fields in `WorkProgressRequest` and
+`WorkProgressClaim`. The CLI counterpart is `work progress` with `--progress`
+(a JSON file or `-` for standard input) and `--status-text`.
+See [requested progress](software.md#requested-progress-090) for the complete
+scope, replacement, value and compatibility rules.
+
 Remote is not built. These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
 
 ## Communication read (COMMS-01)

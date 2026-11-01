@@ -39,13 +39,19 @@ public class PolicyGoldenFixtureTests
         using PolicyFixture lines = ProductCadenceTests.RecordedFixture();
         EstateModel lineModel = lines.Estate.Load();
         Assert.False(lineModel.Findings.HasErrors, string.Join('\n', lineModel.Findings));
+        using var progress = new ProgressFixture();
+        foreach (string scope in new[] { "estate", "roster", "goal", "brief" }) progress.Set(scope, ProgressRequestTests.FullRequest);
+        progress.Estate.Add("work-progress", progress.Estate.BuilderId,
+            """{"phase":"review","note":"Read the widget.","completedAt":"2026-10-13T12:01:00Z","progress":{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60},"statusText":"Read seven of twenty files."}""", progress.Attempt.Reference);
+        EstateModel progressModel = progress.Estate.Load();
+        Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));

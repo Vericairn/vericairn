@@ -123,7 +123,11 @@ public static class WorkView
     public static string RenderBrief(EstateModel model, RecordEnvelope order) => RenderBrief(model, order, includeDocumentCatalogue: true);
 
     /// <summary>The same obligations with a catalogue listing or a link to it; selection belongs to the context package.</summary>
-    public static string RenderBrief(EstateModel model, RecordEnvelope order, bool includeDocumentCatalogue)
+    public static string RenderBrief(EstateModel model, RecordEnvelope order, bool includeDocumentCatalogue) =>
+        RenderBrief(model, order, includeDocumentCatalogue, progressGoal: null);
+
+    /// <summary>The brief with progress requirements resolved for the goal selected by a worker before its run is recorded.</summary>
+    public static string RenderBrief(EstateModel model, RecordEnvelope order, bool includeDocumentCatalogue, RecordEnvelope? progressGoal)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
@@ -165,7 +169,7 @@ public static class WorkView
         text.Append(anyDecision ? "\n" : "(none)\n\n");
         foreach (RecordEnvelope assignment in model.Current("assignment").Where(a => a.Subject is not null && model.Chain(order).Contains(a.Subject.Id)).OrderBy(a => a.Id, StringComparer.Ordinal))
         {
-            AppendAssignment(model, text, order, assignment);
+            AppendAssignment(model, text, order, assignment, progressGoal);
         }
 
         if (includeDocumentCatalogue)
@@ -192,7 +196,10 @@ public static class WorkView
     }
 
     /// <summary>The brief as JSON, for machine consumption.</summary>
-    public static string RenderBriefJson(EstateModel model, RecordEnvelope order)
+    public static string RenderBriefJson(EstateModel model, RecordEnvelope order) => RenderBriefJson(model, order, progressGoal: null);
+
+    /// <summary>The machine brief with progress requirements resolved for the worker's selected goal.</summary>
+    public static string RenderBriefJson(EstateModel model, RecordEnvelope order, RecordEnvelope? progressGoal)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
@@ -216,7 +223,7 @@ public static class WorkView
                 });
             }
 
-            assignments.Add(new JsonObject
+            var item = new JsonObject
             {
                 ["id"] = assignment.Id,
                 ["hash"] = assignment.ComputedHash,
@@ -224,7 +231,15 @@ public static class WorkView
                 ["contributor"] = EstateModel.BodyString(assignment, "contributor"),
                 ["brief"] = assignment.Body.TryGetProperty("brief", out JsonElement brief) ? JsonNode.Parse(brief.GetRawText()) : null,
                 ["attempts"] = attempts,
-            });
+            };
+            ProgressRequestSelection progress = ProgressRequests.Resolve(model, assignment, progressGoal);
+            if (progress.Request is JsonElement requested)
+            {
+                item["progressRequest"] = JsonNode.Parse(requested.GetRawText());
+                item["progressRequestSource"] = new JsonObject { ["scope"] = progress.Scope, ["record"] = progress.Record, ["hash"] = progress.Hash };
+            }
+            if (progress.Problem is not null) item["progressRequestProblem"] = progress.Problem;
+            assignments.Add(item);
         }
 
         var decisions = new JsonArray(model.Current("decision").Where(d => Affects(d, chain)).OrderBy(d => d.Id, StringComparer.Ordinal)
@@ -315,7 +330,7 @@ public static class WorkView
         return text.ToString();
     }
 
-    private static void AppendAssignment(EstateModel model, StringBuilder text, RecordEnvelope order, RecordEnvelope assignment)
+    private static void AppendAssignment(EstateModel model, StringBuilder text, RecordEnvelope order, RecordEnvelope assignment, RecordEnvelope? progressGoal)
     {
         string contributor = EstateModel.BodyString(assignment, "contributor") ?? "?";
         text.Append("## Assignment ").Append(assignment.Id).Append(" to ").Append(PrincipalName(model, contributor)).Append(" (").Append(contributor).Append(")\n\n");
@@ -350,6 +365,17 @@ public static class WorkView
             text.Append("### Recovery\n\n").Append(brief.TryGetProperty("recovery", out JsonElement recovery) ? recovery.GetString() : string.Empty).Append("\n\n");
         }
 
+        ProgressRequestSelection progress = ProgressRequests.Resolve(model, assignment, progressGoal);
+        if (progress.Request is JsonElement requested)
+        {
+            text.Append("### Requested progress\n\n")
+                .Append("Report through work_progress with a typed progress value and any required statusText. ")
+                .Append("Types default to accurate, best-effort and not-measurable; percentages are labelled estimates. ")
+                .Append("This request changes reporting only.\n\n```json\n")
+                .Append(Canonical.CanonicalJson.SerializePretty(requested).TrimEnd()).Append("\n```\n\n")
+                .Append("Source: ").Append(progress.Scope).Append(" record ").Append(progress.Record).Append(" at ").Append(progress.Hash).Append(".\n\n");
+        }
+        if (progress.Problem is not null) text.Append("### Requested progress\n\nUnavailable: ").Append(progress.Problem).Append("\n\n");
         if (assignment.Body.TryGetProperty("promptUse", out JsonElement promptUse)) text.Append(SavedPrompts.Addendum(promptUse));
         text.Append("### Attempts and results\n\n");
         IReadOnlyList<RecordEnvelope> attempts = AttemptsOf(model, assignment);

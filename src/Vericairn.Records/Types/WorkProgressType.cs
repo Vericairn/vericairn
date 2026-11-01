@@ -30,6 +30,8 @@ public sealed class WorkProgressType : IRecordType
         new("phase", "string", true, "A stable lower-case phase name, reused by its interim notes.", 2),
         new("note", "string", true, "The contributor's claim about the phase, never proof of liveness or scope.", 2),
         new("completedAt", "timestamp", true, "When the contributor claimed the phase completed.", 2),
+        new("progress", "object", false, "Typed claim: accurate (done, optional total, unit, optional estimatePercent), best-effort (percent), or not-measurable (no value). Percentages are estimates, never a replacement for a count.", 3),
+        new("statusText", "string", false, "A short status sentence on one line, at most 500 characters.", 3),
     ];
 
     /// <inheritdoc />
@@ -39,6 +41,7 @@ public sealed class WorkProgressType : IRecordType
         string? phase = context.Body.Text("phase", true, 100, Patterns.Slug, "a stable lower-case phase name");
         context.Body.Text("note", true, 2000);
         context.Body.Timestamp("completedAt", true);
+        ProgressReporting.Claim(context.Body);
         context.Body.NoOtherKeys();
         if (context.Find(context.Record.Subject?.Id) is { Type: "attempt" } attempt && attempt.By != context.Record.By)
         {

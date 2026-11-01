@@ -119,9 +119,15 @@ public class McpTests
             string attemptId = outcome.RootElement.GetProperty("written").GetProperty("id").GetString()!;
 
             Assert.Contains("work_progress", ToolNames(replies[0]));
+            JsonNode progressSchema = replies[0]["result"]!["tools"]!.AsArray().Single(t => t!["name"]!.GetValue<string>() == "work_progress")!["inputSchema"]!;
+            Assert.Equal(3, progressSchema["properties"]!["progress"]!["oneOf"]!.AsArray().Count);
+            Assert.Equal("string", progressSchema["properties"]!["statusText"]!["type"]!.GetValue<string>());
             JsonObject progress = Drive(api, builder, """{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"work_progress","arguments":{"attempt":"@ATTEMPT@","phase":"build","note":"The build is underway.","state":"active"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
             Assert.False(progress["result"]!["isError"]!.GetValue<bool>(), progress.ToJsonString());
             Assert.Contains("The build is underway.", CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
+            Assert.Empty(api.Records("work-progress"));
+            JsonObject malformedProgress = Drive(api, builder, """{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"work_progress","arguments":{"attempt":"@ATTEMPT@","phase":"malformed","note":"Reading.","state":"completed","progress":{"type":"best-effort","percent":101},"statusText":"Reading the widget."}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            Assert.True(malformedProgress["result"]!["isError"]!.GetValue<bool>(), malformedProgress.ToJsonString());
             Assert.Empty(api.Records("work-progress"));
             JsonObject completedProgress = Drive(api, builder, """{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"work_progress","arguments":{"attempt":"@ATTEMPT@","phase":"build","note":"The build passed.","state":"completed"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
             Assert.False(completedProgress["result"]!["isError"]!.GetValue<bool>(), completedProgress.ToJsonString());

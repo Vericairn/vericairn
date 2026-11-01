@@ -8,7 +8,7 @@ using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 
-internal sealed class WorkOperations(CommandContext context)
+internal sealed partial class WorkOperations(CommandContext context)
 {
     public int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null, bool agentContext = false, long? maxBytes = null) => context.WithApi(root, api =>
     {

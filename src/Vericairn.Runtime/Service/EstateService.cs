@@ -52,8 +52,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (draft, model) => AuthorLocked(draft, model),
             StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
-            (model, files, order, maxBytes, recipient, assignment, promptUse) =>
-                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse),
+            (model, files, order, goal, maxBytes, recipient, assignment, promptUse) =>
+                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal),
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,

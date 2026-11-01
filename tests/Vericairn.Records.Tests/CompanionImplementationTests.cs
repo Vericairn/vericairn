@@ -78,6 +78,7 @@ public class CompanionImplementationTests
             DocumentSourceSnapshot declaredProduct = RecordCompanionTests.Source("product", product);
             cases.Add("product-lines-and-cadence.md", RecordCompanionTests.Render([declaredProduct]));
             cases.Add("product-lines-list.md", RecordCompanionTests.Render([declaredProduct], "list", "lines"));
+            foreach (var progress in ProgressCases(model)) cases.Add(progress.Key, progress.Value);
         }
         else
         {
@@ -114,6 +115,30 @@ public class CompanionImplementationTests
     {
         RecordEnvelope source = model.OfType("release").First(r => EstateModel.BodyString(r, "status") == "published");
         return RecordCompanionTests.Source("release", ReleaseLineFixture.Body("1.9.1", "1.x", "lts", source));
+    }
+
+    private static Dictionary<string, DocumentRendition> ProgressCases(EstateModel model)
+    {
+        RecordEnvelope attempt = model.OfType("attempt").OrderBy(r => r.Id, StringComparer.Ordinal).First();
+        var cases = new Dictionary<string, DocumentRendition>(StringComparer.Ordinal);
+        foreach ((string name, string value) in new[]
+        {
+            ("accurate", """{"type":"accurate","done":7,"total":20,"unit":"files"}"""),
+            ("best-effort", """{"type":"best-effort","percent":60}"""),
+            ("not-measurable", """{"type":"not-measurable"}"""),
+            ("count-and-estimate", """{"type":"accurate","done":7,"total":20,"unit":"files","estimatePercent":60}"""),
+        })
+        {
+            JsonObject body = new()
+            {
+                ["phase"] = "review", ["note"] = "Read the widget.", ["completedAt"] = "2026-10-13T12:01:00Z",
+                ["progress"] = JsonNode.Parse(value), ["statusText"] = "Read seven of twenty files.",
+            };
+            RecordEnvelope claim = RecordAuthor.Create(new RecordDraft("work-progress", attempt.By, PolicyFixture.Element(body), attempt.Reference,
+                At: new DateTimeOffset(2026, 10, 13, 12, 1, 0, TimeSpan.Zero), Id: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Format: 3)).Envelope;
+            cases.Add("progress-" + name + ".md", RecordCompanionTests.Render([DocumentSourceSnapshot.Record(claim)]));
+        }
+        return cases;
     }
 
     private static DocumentRendition MigratedManifest()
