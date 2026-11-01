@@ -103,3 +103,32 @@ No contract changes. A new estate-policy rule kind, `vericairn.estate/blocked-te
 writes through every client can now be refused when they would introduce a blocked term, with a message naming the term, and
 generated-document preparation can be refused as `generated-refused` for the same reason. See
 [blocked terms](policies.md#blocked-terms-090).
+
+## Estate release lines (CODE-13)
+
+`EstateManifest.Line` and `EstateManifest.Channel`, and the matching init-only
+`EstateInitialization` properties, default to `current` and `stable`. Optional
+manifest JSON fields live inside `vericairn`. Reading an older manifest preserves
+its bytes. Status JSON adds the effective `vericairn.line` and `vericairn.channel`.
+
+`UpgradeRequest` adds nullable init-only `Line` and `Channel` properties. Null
+preserves the corresponding manifest choice. The existing upgrade route, SDK
+method and async bridge carry them; OpenAPI declares optional `line` and `channel`.
+`UpgradeResponse` and `UpgradePlan` add init-only `Line` and `Channel` properties
+defaulting to `current` and `stable`. Positional constructors and deconstructors
+remain unchanged. `EstateUpgrade.Plan` retains both existing overloads and adds
+overloads taking explicit line and channel choices.
+
+Nondefault pin descriptions include `[line/channel]`, including in migration
+`fromPin` and `toPin`, so interrupted changes of channel at the same version can
+resume. Descriptions for `current/stable` keep their existing form.
+
+No interface member is added. Older servers cannot enforce this selection
+contract: upgrade the serving runtime before relying on these options. The
+upgrade plan and refusal behavior use published releases in the followed line
+at the followed channel or more stable; changing lines or channels is explicit.
+
+The on-demand manifest companion advances to implementation
+`vericairn.estate/manifest/2` to render the followed line and channel and distinguish
+recorded values from defaults. Its implementation hash changes; the earlier
+golden fixtures remain retained.
