@@ -11,7 +11,7 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class EstateBootstrapTests
 {
-    internal const string WrittenJson = """[{"path":"bootstrap","status":"written"},{"path":"bootstrap.ps1","status":"written"},{"path":".gitattributes","status":"written"}]""";
+    internal const string WrittenJson = """[{"path":"bootstrap","status":"written"},{"path":"bootstrap.ps1","status":"written"},{"path":".gitattributes","status":"written"},{"path":".gitignore","status":"written"}]""";
     private static readonly string[] JsonOption = ["--json"];
     private static readonly string[] ForceOption = ["--force"];
 
@@ -123,12 +123,37 @@ public sealed class EstateBootstrapTests
     }
 
     [Fact]
+    public void AnEstateClonedWithWindowsLineEndingConversionPassesItsCheck()
+    {
+        // Git for Windows checks text out with CRLF by default (core.autocrlf=true); the attributes estate init writes keep every
+        // record, object and document LF, so a fresh clone passes the same check as the estate it came from.
+        string root = CliHarness.TempDirectory("crlf-source");
+        string parent = CliHarness.TempDirectory("crlf-parent");
+        string clone = Path.Combine(parent, "clone");
+        try
+        {
+            CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Line endings.",
+                "--operator-name", "Operator", "--organization", "Example", "--commit", "0123456789abcdef0123456789abcdef01234567");
+            ContextJourneyTests.Git(root, "init", "-q");
+            ContextJourneyTests.Git(root, "add", ".");
+            ContextJourneyTests.Git(root, "commit", "-qm", "Initialize");
+            ContextJourneyTests.Git(parent, "-c", "core.autocrlf=true", "clone", "-q", root, clone);
+            Assert.DoesNotContain((byte)'\r', File.ReadAllBytes(Path.Combine(clone, "estate", "manifest.json")));
+            CliHarness.Outcome check = CliHarness.Run("--estate", clone, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+            Assert.DoesNotContain("formatting", check.Out, StringComparison.Ordinal);
+        }
+        finally { CliHarness.Delete(root, parent); }
+    }
+
+    [Fact]
     public void ExistingAttributesKeepTheirLinesAndGainOnlyTheMissingOnes()
     {
         using var estate = new TestEstate(3);
         estate.WriteFile(".gitattributes", "* text=auto eol=lf\nbootstrap.ps1 text eol=lf");
         AssertReceipt(Run(estate.Root, json: true), true, "written", "written", "written");
-        Assert.Equal("* text=auto eol=lf\nbootstrap.ps1 text eol=lf\nbootstrap text eol=lf\n", File.ReadAllText(Path.Combine(estate.Root, ".gitattributes")));
+        Assert.Equal("* text=auto eol=lf\nbootstrap.ps1 text eol=lf\n*.json text eol=lf\n*.md text eol=lf\nbootstrap text eol=lf\n", File.ReadAllText(Path.Combine(estate.Root, ".gitattributes")));
+        Assert.Equal(".vericairn/\n", File.ReadAllText(Path.Combine(estate.Root, ".gitignore")));
         AssertReceipt(Run(estate.Root, json: true), true, "unchanged", "unchanged", "unchanged");
         AssertInstalled(estate.Root);
         Assert.Empty(EstateChecks.Run(estate.Load()));
@@ -191,6 +216,11 @@ public sealed class EstateBootstrapTests
         string[] attributes = File.ReadAllLines(Path.Combine(root, ".gitattributes"));
         Assert.Contains("bootstrap text eol=lf", attributes);
         Assert.Contains("bootstrap.ps1 text eol=lf", attributes);
+        // ... and every record, object and document LF too, so their canonical bytes and hashes survive a Windows checkout.
+        Assert.Contains("* text=auto eol=lf", attributes);
+        Assert.Contains("*.json text eol=lf", attributes);
+        Assert.Contains("*.md text eol=lf", attributes);
+        Assert.Contains(".vericairn/", File.ReadAllLines(Path.Combine(root, ".gitignore")));
         if (!OperatingSystem.IsWindows())
         {
             UnixFileMode execute = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
@@ -201,22 +231,23 @@ public sealed class EstateBootstrapTests
     private static CliHarness.Outcome Run(string root, bool json, bool force = false) =>
         CliHarness.Run(["--estate", root, .. json ? JsonOption : [], "estate", "bootstrap", .. force ? ForceOption : []]);
 
-    private static void AssertReceipt(CliHarness.Outcome outcome, bool json, string shellStatus, string powershellStatus, string attributesStatus)
+    private static void AssertReceipt(CliHarness.Outcome outcome, bool json, string shellStatus, string powershellStatus, string attributesStatus, string? ignoreStatus = null)
     {
+        ignoreStatus ??= attributesStatus;
         Assert.Equal(0, outcome.Code);
         Assert.Empty(outcome.Err);
         if (json)
         {
             Assert.Equal(["bootstrap"], outcome.Json.EnumerateObject().Select(p => p.Name));
             JsonElement[] files = outcome.Json.GetProperty("bootstrap").EnumerateArray().ToArray();
-            Assert.Equal(["bootstrap", "bootstrap.ps1", ".gitattributes"], files.Select(f => f.GetProperty("path").GetString()));
-            Assert.Equal([shellStatus, powershellStatus, attributesStatus], files.Select(f => f.GetProperty("status").GetString()));
+            Assert.Equal(["bootstrap", "bootstrap.ps1", ".gitattributes", ".gitignore"], files.Select(f => f.GetProperty("path").GetString()));
+            Assert.Equal([shellStatus, powershellStatus, attributesStatus, ignoreStatus], files.Select(f => f.GetProperty("status").GetString()));
             Assert.All(files, file => Assert.Equal(["path", "status"], file.EnumerateObject().Select(p => p.Name)));
         }
-        else Assert.Equal($"{shellStatus,-9} bootstrap\n{powershellStatus,-9} bootstrap.ps1\n{attributesStatus,-9} .gitattributes\n", outcome.Out);
+        else Assert.Equal($"{shellStatus,-9} bootstrap\n{powershellStatus,-9} bootstrap.ps1\n{attributesStatus,-9} .gitattributes\n{ignoreStatus,-9} .gitignore\n", outcome.Out);
     }
 
     private static string[] EstateFiles(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-        .Where(path => Path.GetRelativePath(root, path) is not ("bootstrap" or "bootstrap.ps1" or ".gitattributes"))
+        .Where(path => Path.GetRelativePath(root, path) is not ("bootstrap" or "bootstrap.ps1" or ".gitattributes" or ".gitignore"))
         .Select(path => Path.GetRelativePath(root, path) + " " + ContentHash.Sha256File(path)).Order(StringComparer.Ordinal).ToArray();
 }
