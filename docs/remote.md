@@ -67,7 +67,7 @@ Rotating a phone's key is not built yet; pair the phone again and revoke the old
 
 ## Building from source
 
-The phone heads are in `Vericairn.Mobile.slnx`, not in `Vericairn.slnx`, because each needs its platform's workload:
+The phone heads are in `src/Vericairn.Mobile.slnx`, not in `Vericairn.slnx`, because each needs its platform's workload:
 
 - iOS: the .NET `ios` workload (workload set `10.0.303.1`) and Xcode 26.5 or later on macOS.
   `dotnet build src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj` builds for the Apple-silicon simulator.

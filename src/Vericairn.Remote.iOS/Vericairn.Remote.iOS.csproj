@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Remote's iOS head. It builds only where the iOS workload and Xcode are installed, so it is in Vericairn.Mobile.slnx and CI's
+  <!-- Remote's iOS head. It builds only where the iOS workload and Xcode are installed, so it is in src/Vericairn.Mobile.slnx and CI's
        remote-ios job, never in Vericairn.slnx. Without a RuntimeIdentifier it builds for the Apple-silicon simulator. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

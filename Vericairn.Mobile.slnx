@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj" />
-    <Project Path="src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj" />
-  </Folder>
-</Solution>

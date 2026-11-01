@@ -24,7 +24,7 @@ jobs:
           ruby .github/scripts/test-workflow-actions.rb
           python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
-  # Remote's heads build only where their platform's workload is installed, so they are in Vericairn.Mobile.slnx, not the
+  # Remote's heads build only where their platform's workload is installed, so they are in src/Vericairn.Mobile.slnx, not the
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
   # developer builds: neither job signs, installs on or qualifies a real device.
   remote-ios:

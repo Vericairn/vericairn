@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Vericairn.Remote.Android/Vericairn.Remote.Android.csproj" />
+  <Project Path="Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj" />
+</Solution>
