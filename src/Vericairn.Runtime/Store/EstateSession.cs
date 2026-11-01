@@ -24,6 +24,7 @@ public sealed class EstateSession : IDisposable
     private LiveStore.FileSnapshot? loadedFiles;
 
     internal long ParsedFiles => parseCache.ParsedFiles;
+    internal bool IsReadOnly => readOnly;
 
     // The response envelope must come from the very bytes whose model was just judged, not a second full store read/sync.
     internal RecordFile? LoadedFile(string path) => loadedFiles?.ByPath.GetValueOrDefault(path);

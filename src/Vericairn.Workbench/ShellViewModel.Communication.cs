@@ -69,6 +69,14 @@ public sealed partial class ShellViewModel
     private async Task AddCommunicationAttentionAsync(string? recipient, ProgressResponse? progress, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is not { } api) { return; }
+        try
+        {
+            AttentionResponse current = await api.AttentionGetAsync(ActingPrincipalId, cancellationToken).ConfigureAwait(true);
+            Replace(Attention, current.Items.Select(Presentation.AttentionItem.From).ToList());
+            return;
+        }
+        catch (NotSupportedException) { } // Older runtimes retain the complete derived attention below.
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound) { }
         int deliveredAsks = 0;
         foreach (CommunicationAttention item in (await CommunicationPresentation.AttentionAsync(api, recipient, progress, progressObserved: true, cancellationToken: cancellationToken).ConfigureAwait(true)))
         {

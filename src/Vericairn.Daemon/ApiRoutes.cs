@@ -54,6 +54,13 @@ public static class ApiRoutes
         app.MapGet($"{v}/status", () => Results.Json(service.Status(), ProtocolJson.Options));
         app.MapPost($"{v}/status/observations", (EstateObserveRequest request) => Outcome(service.ObserveEstate(request)));
         app.MapGet($"{v}/progress", () => Results.Json(service.Progress(), ProtocolJson.Options));
+        app.MapGet($"{v}/attention", IResult (string? principal) =>
+        {
+            try { return Results.Json(service.AttentionGet(principal), ProtocolJson.Options); }
+            catch (UnauthorizedAccessException exception)
+            { return Results.Json(new Problem("denied", exception.Message, []), ProtocolJson.Options, statusCode: StatusCodes.Status401Unauthorized); }
+        });
+        app.MapPost($"{v}/attention/acknowledge", (AttentionAcknowledgeRequest request) => Results.Json(service.AttentionAcknowledge(request), ProtocolJson.Options));
         app.MapGet($"{v}/handoff", (long? maxBytes) => Results.Json(service.Handoff(maxBytes), ProtocolJson.Options));
         app.MapPost($"{v}/resume", (HandoffPackage package) => Results.Json(service.ResumeHandoff(package), ProtocolJson.Options));
         app.MapGet($"{v}/context/work/{{key}}/brief", (string key, long? maxBytes, string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) => service.BriefContext(key, maxBytes, recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)) is { } brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());

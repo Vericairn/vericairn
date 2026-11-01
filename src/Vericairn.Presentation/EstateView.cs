@@ -45,6 +45,24 @@ public sealed record AttentionItem(string Kind, string Subject, string Why, stri
 {
     /// <summary>The label of the kind.</summary>
     public string KindLabel => StateLanguage.Label("attention", Kind);
+
+    /// <summary>The runtime's exact notice, when presentation state is supported.</summary>
+    public AttentionNotice? Notice { get; init; }
+
+    /// <summary>The attention state is separate from the subject's state.</summary>
+    public string AttentionState => Notice?.AttentionState ?? "unacknowledged";
+
+    /// <summary>The acknowledgment's own timestamp, separate from source freshness.</summary>
+    public string AttentionDescription => Notice?.AcknowledgedAt is string at ? "acknowledged at " + at : AttentionState;
+
+    /// <summary>Maps a runtime notice without deriving acknowledgment from work state.</summary>
+    public static AttentionItem From(AttentionNotice notice)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+        string kind = notice.SubjectType == "ask" && notice.Kind == "required-decision" ? "decision needed" : notice.Kind;
+        return new(kind, notice.Subject, notice.Why, StateLanguage.Label(notice.SubjectType, notice.State), notice.AsOf, notice.NextAction,
+            notice.Target?.Type ?? notice.SubjectType, notice.Target?.Id ?? notice.SubjectId) { Notice = notice };
+    }
 }
 
 /// <summary>

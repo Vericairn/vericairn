@@ -34,6 +34,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         {
             return Denied(context.HttpContext, device, machine);
         }
+        if (operation.Equals("GET /v1/attention", StringComparison.OrdinalIgnoreCase) &&
+            context.Arguments.OfType<string>().FirstOrDefault() is string principal && principal != device.Principal)
+            return Denied(context.HttpContext, device, "Attention belongs to the requesting device's principal.");
 
         foreach (object? argument in context.Arguments)
         {
@@ -64,8 +67,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
         // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
-        // A device-signed record is the exception: the paired device signed it itself, and nothing on this machine signs it.
-        if (!operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
+        // A device-signed record is signed by the paired device itself. Attention acknowledgment is unsigned presentation state.
+        // Neither exception asks a signer on this machine, and both still enter the local-network ledger below.
+        if (!operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/attention/acknowledge", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
         {
             return Denied(context.HttpContext, device, presence);
         }
@@ -132,7 +137,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
         bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
-        if (value is WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
+        if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -183,6 +188,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/status"] = null,
         ["POST /v1/status/observations"] = typeof(EstateObserveRequest),
         ["GET /v1/progress"] = null,
+        ["GET /v1/attention"] = null,
+        ["POST /v1/attention/acknowledge"] = typeof(AttentionAcknowledgeRequest),
         ["GET /v1/handoff"] = null,
         ["POST /v1/resume"] = typeof(HandoffPackage),
         ["GET /v1/context/work/{key}"] = null,
@@ -319,6 +326,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),
         [typeof(HandoffPackage)] = (_, _, _) => null,
         [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
+        [typeof(AttentionAcknowledgeRequest)] = (_, r, d) => Acting(((AttentionAcknowledgeRequest)r).By, d),
         [typeof(PromptSaveRequest)] = (_, r, d) => Acting(((PromptSaveRequest)r).By, d),
         [typeof(PromptPreferenceRequest)] = (_, r, d) => Acting(((PromptPreferenceRequest)r).By, d),
         [typeof(PromptCopyRequest)] = (_, r, d) => Acting(((PromptCopyRequest)r).By, d),

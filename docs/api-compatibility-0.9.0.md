@@ -284,3 +284,46 @@ These additions introduce no interface members, API routes, SDK methods or recor
 format changes. Existing implementers have no new obligations. The versioned
 source-index and manifest contracts are described in
 [Community build guides](community-build-guides.md).
+
+
+## Principal attention presentation state (REMOTE-02)
+
+`IEstateApi` adds `AttentionGet(string? principal = null)` and
+`AttentionAcknowledge(AttentionAcknowledgeRequest)`. Both have default implementations
+that throw `NotSupportedException`. `AttentionGetAsync` and `AttentionAcknowledgeAsync`
+have the usual cancellable synchronous bridges; `CancellationBoundApi` and the SDK
+forward both operations. No interface member is added without a default implementation.
+
+`GET /v1/attention` returns the principal, observation timestamp and complete notices,
+including acknowledged ones. The principal defaults to the requesting device's principal
+or the local operator. A device cannot request another principal's presentation state.
+Each notice carries a kind, subject identity, source freshness, reason, subject state,
+next action, revision and independent acknowledgment timestamp. `Target` identifies the
+subject to open when it differs from the notice's source. Notice ordering keeps urgency
+separate from acknowledgment.
+
+`POST /v1/attention/acknowledge` requires `by`, `kind`, `subjectType`, `subjectId` and
+`expected` (the observed notice revision). It rechecks the device and exact current item,
+then stores unsigned runtime presentation state for that principal. It returns
+`AttentionAcknowledgeResponse` with `item` and `ok`, or `problem`; there is no record
+receipt. A conflict requires a refreshed observation. Repeating the same acknowledgment
+returns its original timestamp. Changed or absent items invalidate prior acknowledgments.
+The local-network request is authenticated and kept in its write ledger, but this operation
+needs no presence-free record signer. Other record writes retain their presence checks.
+
+Canonical `StatusResponse.Json` remains record-derived and portable. Human status uses
+the principal's attention presentation; the dedicated attention endpoint exposes that
+runtime state without mixing it into canonical record state. Workbench shows the same
+state and retains its derivation fallback with an older runtime.
+
+## Remote observation storage (REMOTE-02)
+
+`IRemoteConnections` adds `LoadObservation(RuntimeConnection)` and
+`SaveObservation(RuntimeConnection, RemoteObservation)`, with defaults returning null
+and doing nothing, respectively. Existing implementations remain source compatible and
+explicitly retain no persistent cache until they implement these members.
+`LocalNetworkConnections` keeps versioned app observations bound to the connection,
+estate, runtime identity, principal and device. Invalid or mismatched cached data is
+unavailable. Restoring a snapshot establishes neither current access nor action authority.
+Only successful observations and confirmed acknowledgments are stored; no offline
+request queue is introduced. The record format remains 3.
