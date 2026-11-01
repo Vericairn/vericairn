@@ -226,7 +226,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 all.Add(finding);
             }
 
-            ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease(), Version);
+            ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease(), Version, PolicyClock.GetUtcNow());
 
             return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
@@ -1448,7 +1448,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", exception.Message, []));
             }
 
-            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)]);
+            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)]) { Line = plan.Line, Channel = plan.Channel };
             if (request.Check)
             {
                 return (response, null);
@@ -1508,7 +1508,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     dependency.Envelope.Subject, At: dependency.Envelope.AtTime, Id: dependency.Envelope.Id, Format: dependency.Envelope.Format), model);
                 if (signed is null) return (null, new Problem("refused", refusal!, []));
                 dependency = signed;
-                plan = EstateUpgrade.Plan(model, signed.Envelope);
+                plan = EstateUpgrade.Plan(model, signed.Envelope, request.Line, request.Channel);
             }
 
             if (pending is not null)
@@ -1542,6 +1542,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
+            if (model.Manifest!.Line != plan.Line || model.Manifest.Channel != plan.Channel)
+                changes.Add($"followed line/channel changed explicitly from {model.Manifest.Line}/{model.Manifest.Channel} to {plan.Line}/{plan.Channel}");
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());

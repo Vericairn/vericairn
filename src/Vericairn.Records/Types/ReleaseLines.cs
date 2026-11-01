@@ -13,7 +13,7 @@ namespace Vericairn.Records.Types;
 /// <summary>Release-line defaults and the additive format-3 line, channel, support and backport rules.</summary>
 public static partial class ReleaseLines
 {
-    private static readonly string[] Channels = ["stable", "lts", "prerelease", "nightly"];
+    internal static readonly string[] Channels = ["stable", "lts", "prerelease", "nightly"];
 
     /// <summary>The named line, or current for a record without the field; never changes the record.</summary>
     public static string Line(JsonElement body) => PolicyRecords.Text(body, "line") ?? "current";
@@ -145,7 +145,7 @@ public static partial class ReleaseLines
     }
 
     [GeneratedRegex(@"\A[a-z0-9][a-z0-9.-]{0,39}\z")]
-    private static partial Regex LinePattern();
+    internal static partial Regex LinePattern();
 
     [GeneratedRegex(@"\A[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})\z")]
     private static partial Regex TimestampPattern();

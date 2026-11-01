@@ -746,6 +746,12 @@ public sealed record RunsResponse(IReadOnlyList<RunRow> Runs, IReadOnlyList<Ledg
 /// <param name="Check">Plan only.</param>
 public sealed record UpgradeRequest(string Version, string? By, bool Check)
 {
+    /// <summary>Explicitly change the followed line. Null preserves the manifest's line.</summary>
+    public string? Line { get; init; }
+
+    /// <summary>Explicitly change the followed channel. Null preserves the manifest's channel.</summary>
+    public string? Channel { get; init; }
+
     /// <summary>Optional directory of downloaded release evidence on the runtime's machine; no path is recorded.</summary>
     public string? From { get; init; }
 
@@ -764,7 +770,14 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check)
 /// <param name="Applied">Whether applied.</param>
 /// <param name="Migration">The migration record, when applied.</param>
 /// <param name="Anchored">The admissions recorded without a signature that the move to record format 2 anchors, by id; the migration that lists them is signed by the operator or a principal with the 'administer' scope.</param>
-public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration, IReadOnlyList<string>? Anchored = null);
+public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration, IReadOnlyList<string>? Anchored = null)
+{
+    /// <summary>The followed line after applying this plan.</summary>
+    public string Line { get; init; } = "current";
+
+    /// <summary>The followed channel after applying this plan.</summary>
+    public string Channel { get; init; } = "stable";
+}
 
 /// <summary>A reconcile task.</summary>
 /// <param name="Code">Code.</param>

@@ -40,6 +40,12 @@ public sealed partial class EstateManifest
     /// <summary>Pinned version (release mode).</summary>
     public string? Version { get; init; }
 
+    /// <summary>The release line this estate follows; omitted fields mean current.</summary>
+    public string Line { get; init; } = "current";
+
+    /// <summary>The least stable release channel this estate follows; omitted fields mean stable.</summary>
+    public string Channel { get; init; } = "stable";
+
     /// <summary>Release mode: the hash of the distributable per platform, so the bootstrap verifies what it fetches against the estate, never against a tag name.</summary>
     public IReadOnlyDictionary<string, string>? Artifacts { get; init; }
 
@@ -47,7 +53,10 @@ public sealed partial class EstateManifest
     public RecordReference? Release { get; init; }
 
     /// <summary>One-line description of the pin for status output.</summary>
-    public string Describe() => Mode == "release" ? $"release {Version}" : $"source {Repository}@{(Commit is { Length: >= 12 } ? Commit[..12] : Commit)}";
+    public string Describe() => (Mode == "release" ? $"release {Version}" : $"source {Repository}@{(Commit is { Length: >= 12 } ? Commit[..12] : Commit)}") + FollowingSuffix(Line, Channel);
+
+    // Pin descriptions distinguish a preference-only move as well as a version move, including on resume.
+    internal static string FollowingSuffix(string line, string channel) => line == "current" && channel == "stable" ? string.Empty : $" [{line}/{channel}]";
 
     /// <summary>Loads and validates the manifest; problems become findings and the result is null.</summary>
     public static EstateManifest? Load(string root, FindingList findings)
@@ -123,6 +132,7 @@ public sealed partial class EstateManifest
             string profile = reader.Has("profile") ? reader.Enum("profile", false, Profiles) ?? Profiles[0] : Profiles[0];
             BodyReader? vericairn = reader.Nested("vericairn", true);
             string? mode = null, repository = null, commit = null, version = null;
+            string line = "current", channel = "stable";
             Dictionary<string, string>? artifacts = null;
             RecordReference? release = null;
             if (vericairn is not null)
@@ -131,6 +141,8 @@ public sealed partial class EstateManifest
                 repository = vericairn.Text("repository", true, 200, Patterns.GitHubRepository, "owner/name");
                 commit = vericairn.Text("commit", mode == "source", 40, CommitPattern(), "a 40-character lower-case hex commit id");
                 version = vericairn.Text("version", mode == "release", 100, Patterns.SemanticVersion, "a semantic version");
+                line = vericairn.Text("line", false, 40, ReleaseLines.LinePattern()) ?? "current";
+                channel = vericairn.Enum("channel", false, ReleaseLines.Channels) ?? "stable";
                 BodyReader? artifactsReader = vericairn.Nested("artifacts", mode == "release");
                 BodyReader? releaseReader = vericairn.Nested("release", false);
                 if (releaseReader is not null)
@@ -171,7 +183,7 @@ public sealed partial class EstateManifest
                 return null;
             }
 
-            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts, Release = release };
+            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts, Release = release, Line = line, Channel = channel };
         }
     }
 
