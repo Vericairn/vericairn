@@ -208,7 +208,7 @@ public sealed partial class EstateService
         return new(release ?? (candidates.Length == 1 ? candidates[0].Reference : null), Identity(product), version, commit ?? "unavailable", selectedRepositories, work);
     }
 
-    private ReleasePolicyAssessment AssessReleasePolicies(EstateModel model, string product, string version, string? commit, IReadOnlySet<string> repositories)
+    private ReleasePolicyAssessment AssessReleasePolicies(EstateModel model, string product, string version, string? commit, IReadOnlySet<string> repositories, string? line)
     {
         PolicySubmission submission = SelectRelease(model, product, version, commit, repositories);
         PolicyKindRegistry registry = PolicySources.Registry();
@@ -220,7 +220,7 @@ public sealed partial class EstateService
             objections.Add(new("warning", "policy." + finding.Verdict, "policy:" + finding.PolicyKey + "/" + finding.Rule,
                 $"{finding.PolicyKey}/{finding.Rule} [{finding.Policy.Id} {finding.Policy.Hash}] {finding.Target.Identity}: {finding.Actual} Required: {finding.Required} Next: {finding.NextAction}" +
                 (finding.Duty is { } duty ? $" Due {duty.DueAt}; deadline {duty.Deadline}; occurrence {duty.Occurrence.GetRawText()}." : "")));
-        return new(basis, evaluation, PolicyView(model, basis, evaluation, sourceFiles: session.ReadFiles().ToDictionary(f => f.Path, StringComparer.Ordinal)), objections);
+        return new(basis, evaluation, PolicyView(model, basis, evaluation, sourceFiles: session.ReadFiles().ToDictionary(f => f.Path, StringComparer.Ordinal), releaseLine: line), objections);
     }
 
     private static byte[] SerializeReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
