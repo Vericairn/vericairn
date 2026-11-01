@@ -371,7 +371,19 @@ public static class LivingDocuments
 
         string file = System.IO.Path.Combine(model.Root, path.Replace('/', System.IO.Path.DirectorySeparatorChar));
         byte[]? bytes = repository is null ? File.Exists(file) ? File.ReadAllBytes(file) : null : source!.Read(model, declaration, commit!);
-        string? currentHash = bytes is null ? null : ContentHash.Sha256(bytes);
+        string? currentHash;
+        try
+        {
+            currentHash = bytes is null ? null : ContentHash.Sha256(clearance is { Type: "document-revision" }
+                ? RevisionLines.PinnedContent(bytes, clearance) : bytes);
+            if (bytes is not null && repository is null && model.Current("document-revision").Any(p => EstateModel.BodyString(p, "path") == path && RevisionLines.IsAuthored(p))
+                && !bytes.AsSpan().SequenceEqual(RevisionLines.Refresh(model, path, bytes)))
+                return Due($"{path}: the generated revision region differs from its records");
+        }
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException)
+        {
+            return Due($"{path}: the generated revision region is invalid");
+        }
         string where = commit is null ? "in the estate's working tree" : $"at {Short(commit)}";
         if (currentHash == clearedHash)
             return new(true, null, $"{path} {where} is the content its {(clearance!.Type == "document-review" ? "review" : "revision")} {clearance.Id} cleared");

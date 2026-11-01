@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
@@ -30,6 +31,18 @@ public static partial class DocumentChecks
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(text);
         var outcomes = new List<Outcome>();
+        if (EstateModel.BodyString(declaration, "repository") is null && model.Current("document-revision")
+            .Any(p => RevisionLines.IsAuthored(p) && EstateModel.BodyString(p, "path") == documentPath))
+        {
+            bool valid;
+            try
+            {
+                byte[] bytes = new UTF8Encoding(false, true).GetBytes(text);
+                valid = bytes.AsSpan().SequenceEqual(RevisionLines.Refresh(model, documentPath, bytes));
+            }
+            catch (Exception error) when (error is InvalidOperationException or ArgumentException) { valid = false; }
+            outcomes.Add(new("revision-history", valid ? "passed" : "failed", "The generated revision region must equal its complete recorded history."));
+        }
         IEnumerable<string> names = declaration.Body.TryGetProperty("checks", out JsonElement checks) && checks.ValueKind == JsonValueKind.Array
             ? checks.EnumerateArray().Select(c => c.GetString() ?? string.Empty)
             : [];

@@ -447,7 +447,19 @@ public static partial class EstateChecks
                 continue;
             }
 
-            string actual = ContentHash.Sha256File(full);
+            byte[] bytes = File.ReadAllBytes(full);
+            string actual;
+            try
+            {
+                actual = ContentHash.Sha256(RevisionLines.PinnedContent(bytes, revision));
+                if (RevisionLines.IsAuthored(revision) && !bytes.AsSpan().SequenceEqual(RevisionLines.Refresh(model, path, bytes)))
+                    findings.Error("document.revisions", path, "The revision region differs from its records. Refresh it with docs pin --render-template.");
+            }
+            catch (Exception error) when (error is InvalidOperationException or ArgumentException)
+            {
+                findings.Error("document.revisions", path, "The authored-content pin requires one valid revision region after the title.");
+                continue;
+            }
             if (actual != hash)
             {
                 findings.Error("document.drift", path, $"The file changed after revision record {revision.Id} pinned it ({actual}). Record a new document-revision that supersedes it.");

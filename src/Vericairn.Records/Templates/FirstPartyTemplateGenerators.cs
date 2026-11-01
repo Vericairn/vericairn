@@ -19,7 +19,7 @@ internal sealed class FirstPartyTemplateGenerators : IDocumentGenerator
     internal const string Roadmap = Prefix + "roadmap-releases-v1";
     internal static readonly IReadOnlyList<IDocumentGenerator> All = new[]
     {
-        "revision-line", "operator-words", "design-index", "open-decisions", "design-decisions", "design-work", "roadmap-releases", "published-releases",
+        "revision-line", "revision-history", "operator-words", "design-index", "open-decisions", "design-decisions", "design-work", "roadmap-releases", "published-releases",
     }.Select(name => (IDocumentGenerator)new FirstPartyTemplateGenerators(name)).ToArray();
 
     private readonly string name;
@@ -29,14 +29,15 @@ internal sealed class FirstPartyTemplateGenerators : IDocumentGenerator
         Id = Prefix + name + "-v1";
         ImmutableArray<string> types = name switch
         {
-            "revision-line" or "design-index" => ["document-revision"],
+            "revision-line" or "revision-history" or "design-index" => ["document-revision"],
             "operator-words" or "open-decisions" or "design-decisions" => ["ask", "decision"],
             "design-work" => ["work-order", "decision", "document-revision"],
             "roadmap-releases" => ["work-order"],
             _ => ["release"],
         };
         Descriptor = new(Id, 1, Id, CompanionImplementation.Hash(Id), ImmutableDictionary<string, ImmutableArray<string>>.Empty,
-            types, ["record"], ["current"], "text/markdown", "Ordinal identities and paths; release placement groups by product, version and carrier",
+            types, ["record"], name == "revision-history" ? ["all-revisions"] : ["current"], "text/markdown",
+            name == "revision-history" ? "Recorded UTC time then ordinal record identity, newest first" : "Ordinal identities and paths; release placement groups by product, version and carrier",
             "Internal", "single") { AllowsRepositoryOutput = false };
     }
 
@@ -53,6 +54,7 @@ internal sealed class FirstPartyTemplateGenerators : IDocumentGenerator
         return name switch
         {
             "revision-line" => RevisionLine(model.Current("document-revision").SingleOrDefault(r => EstateModel.BodyString(r, "path") == path)),
+            "revision-history" => RevisionLines.Render(model, path),
             "roadmap-releases" => RoadmapRows(model.Current("work-order").Select(r => r.Body)),
             "design-index" => Index(model),
             "open-decisions" => Decisions(model, model.Current("ask"), model.Current("decision")),
