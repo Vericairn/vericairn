@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
@@ -23,6 +24,7 @@ public sealed partial class EstateService
             EstateModel model = session.Load();
             Problem? problem = PrepareDocumentPin(request, model, out RecordDraft? draft, out long revision);
             if (problem is not null) return new(null, null, problem);
+            if (draft!.Body.TryGetProperty("hashMode", out _)) return PinRevisionLines(request, model, draft);
             if (request.RenderTemplate) return PinTemplate(request, model, draft!, revision);
             WriteOutcome outcome = WriteLocked(draft!, model);
             return new(outcome.Written, outcome.Written is null ? null : revision, outcome.Problem);
@@ -41,6 +43,10 @@ public sealed partial class EstateService
         if (string.IsNullOrWhiteSpace(request.Summary)) return Refused("A document pin needs a summary.");
         if (request.Title is not null && string.IsNullOrWhiteSpace(request.Title)) return Refused("A document title cannot be empty.");
         if (request.Expected is not null && !Ulid.IsValid(request.Expected)) return Refused("The expected pin must be a record id (ULID).");
+        if (request.Decision is not null && (!Ulid.IsValid(request.Decision) || !model.ById.TryGetValue(request.Decision, out RecordEnvelope? decision) || decision.Type != "decision"))
+            return Refused("The carried decision must name an existing decision record.");
+        if ((request.ConvertRevisions || request.Decision is not null) && model.Manifest!.RecordFormat < 3)
+            return Refused("Generated revision histories and carried decisions require record format 3.");
 
         RecordEnvelope[] pins = model.Current("document-revision")
             .Where(r => EstateModel.BodyString(r, "path") == request.Path).ToArray();
@@ -66,18 +72,41 @@ public sealed partial class EstateService
             return Refused("The document could not be read from the estate repository; check that it exists with its exact path and without symbolic links or case aliases.");
         }
 
+        bool authored = request.ConvertRevisions || previous is not null && RevisionLines.IsAuthored(previous);
+        JsonArray? history = null;
+        if (authored)
+        {
+            if (DocumentMediaType(request.Path) != "text/markdown") return Refused("A generated revision history requires a Markdown document.");
+            try
+            {
+                if (request.ConvertRevisions)
+                {
+                    if (previous is not null && (RevisionLines.IsAuthored(previous) || EstateModel.BodyString(previous, "hash") != ContentHash.Sha256(bytes)))
+                        return Refused("Conversion requires the exact current whole-file pin; pin authored changes before converting, or refresh an already converted document.");
+                    (bytes, history) = RevisionLines.Convert(model, request.Path, bytes);
+                }
+                bytes = RevisionLines.AuthoredContent(bytes);
+            }
+            catch (Exception error) when (error is InvalidOperationException or ArgumentException)
+            {
+                return Refused(error is InvalidOperationException ? error.Message : "The document must contain valid UTF-8 revision text.");
+            }
+        }
         string hash = ContentHash.Sha256(bytes);
         if (!request.RenderTemplate && previous is not null && EstateModel.BodyString(previous, "hash") == hash)
             return Refused($"{request.Path} has unchanged bytes; nothing to pin (current pin {previous.Id}).");
-        revision = previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1;
+        revision = authored ? RevisionLines.History(model, request.Path).Count + 1 : previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1;
         string title = request.Title ?? (previous is null ? null : EstateModel.BodyString(previous, "title"))
             ?? Path.GetFileNameWithoutExtension(request.Path);
-        JsonElement body = JsonSerializer.SerializeToElement(new
+        JsonObject body = JsonSerializer.SerializeToNode(new
         {
             path = request.Path, title, hash, bytes = bytes.LongLength,
             mediaType = DocumentMediaType(request.Path), revision, summary = request.Summary,
-        });
-        draft = new RecordDraft("document-revision", request.By, body, Supersedes: previous?.Id);
+        })!.AsObject();
+        if (authored) body["hashMode"] = RevisionLines.HashMode;
+        if (request.Decision is not null) body["decision"] = request.Decision;
+        if (history is { Count: > 0 }) body["revisionHistory"] = history;
+        draft = new RecordDraft("document-revision", request.By, JsonSerializer.SerializeToElement(body), Supersedes: previous?.Id);
         return null;
 
         static Problem Refused(string message) => new("refused", message, []);

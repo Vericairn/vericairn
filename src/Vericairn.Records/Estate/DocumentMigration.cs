@@ -86,14 +86,22 @@ public static class DocumentMigration
             if (repair.Status != DocumentGenerationStatus.Success) return new(repair.Status, [], [], null, repair.Problems);
             DocumentFile file = inventory.Files[0];
             if (repair.Changes.SingleOrDefault() is { After: { } after }) file = file with { Bytes = after };
-            if (requirePin && !model.Current("document-revision").Any(p => EstateModel.BodyString(p, "path") == file.Path
-                && EstateModel.BodyString(p, "hash") == file.Hash && p.Body.TryGetProperty("bytes", out JsonElement size) && size.GetInt64() == file.Bytes.Length))
+            bool ExactPin(RecordEnvelope pin)
+            {
+                if (EstateModel.BodyString(pin, "path") != file.Path) return false;
+                byte[] bytes = [.. file.Bytes];
+                byte[] pinned = RevisionLines.PinnedContent(bytes, pin);
+                return EstateModel.BodyString(pin, "hash") == ContentHash.Sha256(pinned)
+                    && pin.Body.TryGetProperty("bytes", out JsonElement size) && size.GetInt64() == pinned.LongLength
+                    && (!RevisionLines.IsAuthored(pin) || bytes.AsSpan().SequenceEqual(RevisionLines.Refresh(model, file.Path, bytes)));
+            }
+            if (requirePin && !model.Current("document-revision").Any(ExactPin))
                 return new(DocumentGenerationStatus.Error, [], [], null, ["Restored authored ownership requires an exact current document-revision pin."]);
             if (DocumentChecks.Generated(model, proposed, System.Text.Encoding.UTF8.GetString(file.Bytes.AsSpan())).Count != 0)
                 return new(DocumentGenerationStatus.Error, [], [], null, ["The restored authored regions must pass their generation checks."]);
             return new(DocumentGenerationStatus.Success, [file], inventory.Files, null, []);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             return new(DocumentGenerationStatus.Unavailable, [], [], null, ["The restored authored file could not be verified."]);
         }

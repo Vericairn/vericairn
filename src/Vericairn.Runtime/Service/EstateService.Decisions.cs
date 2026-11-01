@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
@@ -71,20 +72,44 @@ public sealed partial class EstateService
                 return Failed("Decision prose in " + field + " contains a model identity from the estate's run or qualification records.");
 
             var records = new List<AuthoredRecord>();
+            var outputs = new List<DocumentOutputChange>();
             var pins = new JsonArray();
+            string decisionId = Ulid.NewUlid().Value;
             foreach (DesignFileChange document in change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal))
             {
                 Problem? problem = PrepareDocumentPin(new(document.Path, request.By, request.Summary), model, out RecordDraft? draft, out _);
                 if (problem is not null) return new(null, [], problem);
-                if (draft!.Body.GetProperty("hash").GetString() != document.Hash)
-                    return Failed("A design file changed during preparation; read the change set again.");
+                byte[] documentBytes;
+                try
+                {
+                    documentBytes = File.ReadAllBytes(GeneratedDocumentVerification.SafeFile(Root, document.Path));
+                    byte[] pinned = draft!.Body.TryGetProperty("hashMode", out _) ? RevisionLines.AuthoredContent(documentBytes) : documentBytes;
+                    if (ContentHash.Sha256(documentBytes) != document.Hash || ContentHash.Sha256(pinned) != draft.Body.GetProperty("hash").GetString())
+                        return Failed("A design file changed during preparation; read the change set again.");
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                {
+                    return Failed("A design file became unavailable during preparation; read the change set again.");
+                }
+                if (draft!.Body.TryGetProperty("hashMode", out _))
+                {
+                    JsonObject pinBody = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
+                    pinBody["decision"] = decisionId;
+                    draft = draft with { Body = JsonSerializer.SerializeToElement(pinBody) };
+                    draft = StampRevision(draft, RevisionLines.History(model, document.Path));
+                }
                 (AuthoredRecord? pin, string? refusal) = AuthorLocked(draft, model);
                 if (pin is null) return Failed(refusal!);
                 records.Add(pin);
+                if (RevisionLines.IsAuthored(pin.Envelope))
+                {
+                    byte[] after = RevisionLines.Refresh(ProjectRevision(model, pin.Envelope), document.Path, documentBytes);
+                    outputs.Add(new(document.Path, document.Hash, [.. after]));
+                }
                 pins.Add(new JsonObject { ["path"] = document.Path, ["id"] = pin.Envelope.Id, ["hash"] = pin.Envelope.ComputedHash });
             }
             body["changeSet"] = new JsonObject { ["baseCommit"] = change.BaseCommit, ["head"] = change.Head, ["pins"] = pins };
-            (AuthoredRecord? decision, string? reason) = AuthorLocked(new("decision", request.By, JsonSerializer.SerializeToElement(body)), model);
+            (AuthoredRecord? decision, string? reason) = AuthorLocked(new("decision", request.By, JsonSerializer.SerializeToElement(body), Id: decisionId), model);
             if (decision is null) return Failed(reason!);
             records.Add(decision);
 
@@ -98,7 +123,10 @@ public sealed partial class EstateService
                 || !change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal).SequenceEqual(current.Documents.OrderBy(d => d.Path, StringComparer.Ordinal))
                 || currentAsk.ComputedHash != ask.ComputedHash || !AskState.IsWaiting(AskState.State(refreshed, currentAsk).State))
                 return Failed("The ask or design change set changed during preparation; inspect it before trying again.");
-            var stored = StoreTogetherLocked(records, "Record the operator's supplied answer and its exact design document pins.", null);
+            var stored = StoreTogetherLocked(records, "Record the operator's supplied answer and its exact design document pins.", null,
+                current => change.Documents.Any(d => !RevisionLines.History(current, d.Path).Select(r => r.ComputedHash)
+                    .SequenceEqual(RevisionLines.History(model, d.Path).Select(r => r.ComputedHash), StringComparer.Ordinal))
+                    ? new("conflict", "A document's revision history changed during preparation.", []) : null, [.. outputs]);
             RecordWritten? written = stored.Written.SingleOrDefault(r => r.Id == decision.Envelope.Id);
             Problem? incomplete = stored.Problem;
             if (incomplete is not null && stored.Written.Count > 0)

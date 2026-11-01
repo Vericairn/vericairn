@@ -1,5 +1,39 @@
 # API compatibility in 0.9.0
 
+## Generated document revision histories (DOCS-10)
+
+`DocumentPinRequest` adds init-only `ConvertRevisions` (default false) and nullable
+`Decision` properties. Its constructor and deconstructor, routes, response shape,
+SDK methods and cancellation bridges are unchanged. OpenAPI describes the optional
+JSON fields `convertRevisions` and `decision`. `DocumentPinResponse.Revision` is the
+derived ordinal for a converted document. Earlier servers ignore these additions;
+clients must use a server that supports conversion before relying on it.
+
+Record format remains 3. `document-revision` adds optional `hashMode`, `decision`
+and `revisionHistory` fields. Absent `hashMode` retains whole-file hashing and the
+existing succession rules. `authored-revisions-v1` hashes the bytes with the
+revision payload removed, retaining both markers, and treats concurrent revisions
+as an ordered history. The `revision` field remains present and becomes advisory
+in this mode. Conversion metadata binds each preserved line to its original
+revision id and record hash. Existing records, signatures and frozen documentation
+are unchanged. Readers that ignore optional metadata keep their existing field
+shapes; verifying the new hash mode requires a reader that implements it.
+
+`RevisionLines` supplies the shared rendering, conversion and byte selection.
+The additive `vericairn.estate/revision-history-v1` template generator renders the
+complete history. Existing generator identities and template pins remain valid.
+Context document identities add `hashMode` only for pins that declare it; exact
+reads verify and return the selected bytes, not a newly rendered history.
+
+## `ISourceAdapter.ReadFileAtHash` with a hash mode (DOCS-10)
+
+`ISourceAdapter` adds `ReadFileAtHash(string root, string relativePath, string hash,
+string? hashMode)` with a default implementation. A null mode delegates to the
+existing three-argument member; another mode returns null until the adapter
+supports it. `GitCommandAdapter` implements both members and verifies the selected
+bytes from local history without fetching or changing a checkout. No interface
+member is added without a default implementation.
+
 ## Settling a run whose observation is marked settled (FIX-76)
 
 `RunSettleRequest` adds an init-only `bool RecordsChecked` property, default false.

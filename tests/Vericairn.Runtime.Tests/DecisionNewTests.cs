@@ -15,6 +15,27 @@ namespace Vericairn.Runtime.Tests;
 public sealed class DecisionNewTests
 {
     [Fact]
+    public void GuidedDecisionsKeepTheGeneratedHistoryAndItsAuthoredPinMode()
+    {
+        using var fixture = new DecisionFixture();
+        fixture.Estate.WriteFile(DecisionFixture.Document, "# Guide\n\nInitial.\n");
+        DocumentPinResponse converted = fixture.Service.DocumentPin(new(DecisionFixture.Document, fixture.Estate.OperatorId, "Convert the history.") { ConvertRevisions = true });
+        Assert.True(converted.Ok, converted.Problem?.Message);
+        string file = Path.Combine(fixture.Estate.Root, DecisionFixture.Document);
+        File.WriteAllText(file, File.ReadAllText(file).Replace("Initial.", "Revised body.", StringComparison.Ordinal));
+        DecisionNewResponse result = fixture.Service.DecisionFromAsk(fixture.Request);
+        Assert.True(result.Ok, Details(result));
+        RecordEnvelope pin = fixture.Service.Session.Load().ById[Assert.Single(result.Pins).Id];
+        Assert.True(RevisionLines.IsAuthored(pin));
+        Assert.Equal(result.Written!.Id, EstateModel.BodyString(pin, "decision"));
+        Assert.Equal(ContentHash.Sha256(RevisionLines.AuthoredContent(File.ReadAllBytes(file))), EstateModel.BodyString(pin, "hash"));
+        Assert.Contains("Revision 3, ", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.Contains("carries decision `" + result.Written.Id + "`:", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.Contains("Revised body.", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Service.Check().Findings, f => f.Code is "document.drift" or "document.revisions");
+    }
+
+    [Fact]
     public void RecordsExactWordsAndAnswerTimeAndSignedNextPinsTogether()
     {
         using var fixture = new DecisionFixture();

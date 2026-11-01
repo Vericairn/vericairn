@@ -114,7 +114,8 @@ public sealed partial class EstateService
                 {
                     RecordEnvelope? actual = current.Current("living-document").SingleOrDefault(d => EstateModel.BodyString(d, "repository") is null && GeneratedDocumentContract.Owns(d, request.Path));
                     if (actual?.ComputedHash != request.ExpectedDeclaration || ContentHash.Sha256(File.ReadAllBytes(file)) != hash
-                        || (pinDraft is not null && current.Current("document-revision").SingleOrDefault(r => EstateModel.BodyString(r, "path") == request.Path)?.Id != pinDraft.Supersedes))
+                        || (pinDraft is not null && !RevisionLines.History(current, request.Path).Select(r => r.ComputedHash)
+                            .SequenceEqual(RevisionLines.History(model, request.Path).Select(r => r.ComputedHash), StringComparer.Ordinal)))
                         return new Problem("conflict", "The document, pin or declaration changed during preparation; no adoption was stored.", []);
                     if (pin is not null) session.Objects.Put(original);
                     return null;
@@ -146,21 +147,31 @@ public sealed partial class EstateService
             if (content == text) return (null, content, null);
             string path = EstateModel.BodyString(declaration, "path")!;
             RecordEnvelope? previous = model.Current("document-revision").SingleOrDefault(r => EstateModel.BodyString(r, "path") == path);
+            bool authored = previous is not null && RevisionLines.IsAuthored(previous);
             DateTimeOffset at = DateTimeOffset.UtcNow;
             if (previous is not null && previous.AtTime > at) at = previous.AtTime;
+            byte[] pinned = authored ? RevisionLines.AuthoredContent(original) : original;
             var body = new JsonObject
             {
-                ["path"] = path, ["title"] = EstateModel.BodyString(declaration, "title"), ["hash"] = ContentHash.Sha256(original),
-                ["bytes"] = original.LongLength, ["mediaType"] = "text/markdown", ["revision"] = previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1,
+                ["path"] = path, ["title"] = EstateModel.BodyString(declaration, "title"), ["hash"] = ContentHash.Sha256(pinned),
+                ["bytes"] = pinned.LongLength, ["mediaType"] = "text/markdown", ["revision"] = authored ? RevisionLines.History(model, path).Count + 1 : previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1,
                 ["summary"] = "Adopt the document's exact template and recorded generated regions.",
             };
+            if (authored) body["hashMode"] = RevisionLines.HashMode;
+            string Render(EstateModel projected, string value)
+            {
+                value = TemplateDocuments.RefreshGenerated(projected, declaration, value);
+                return authored ? new UTF8Encoding(false, true).GetString(RevisionLines.Refresh(projected, path, new UTF8Encoding(false, true).GetBytes(value))) : value;
+            }
             var draft = new RecordDraft("document-revision", by, JsonSerializer.SerializeToElement(body), Supersedes: previous?.Id, At: at, Id: Ulid.NewUlid(at).Value, Format: 3);
-            content = TemplateDocuments.RefreshGenerated(ProjectRevision(model, RecordAuthor.Create(draft).Envelope), declaration, text);
+            if (authored) draft = StampRevision(draft, RevisionLines.History(model, path));
+            content = Render(ProjectRevision(model, RecordAuthor.Create(draft).Envelope), text);
             byte[] bytes = new UTF8Encoding(false, true).GetBytes(content);
             if (EstateChecks.Content(path, bytes).HasErrors) return (null, null, new("refused", "The prepared document fails repository content checks.", []));
-            body["hash"] = ContentHash.Sha256(bytes); body["bytes"] = bytes.LongLength;
+            pinned = authored ? RevisionLines.AuthoredContent(bytes) : bytes;
+            body["hash"] = ContentHash.Sha256(pinned); body["bytes"] = pinned.LongLength;
             draft = draft with { Body = JsonSerializer.SerializeToElement(body) };
-            if (TemplateDocuments.RefreshGenerated(ProjectRevision(model, RecordAuthor.Create(draft).Envelope), declaration, content) != content)
+            if (Render(ProjectRevision(model, RecordAuthor.Create(draft).Envelope), content) != content)
                 return (null, null, new("refused", "The generated adoption contains an output-hash cycle.", []));
             return (draft, content, null);
         }

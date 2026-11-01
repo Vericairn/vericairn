@@ -40,6 +40,9 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
     public byte[]? ReadFileAtHash(string root, string relativePath, string hash) => GitDocumentHistory.Read(root, relativePath, hash);
 
     /// <inheritdoc />
+    public byte[]? ReadFileAtHash(string root, string relativePath, string hash, string? hashMode) => GitDocumentHistory.Read(root, relativePath, hash, hashMode);
+
+    /// <inheritdoc />
     public bool IsRepository(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

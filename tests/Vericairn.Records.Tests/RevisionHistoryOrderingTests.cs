@@ -25,6 +25,7 @@ public sealed class RevisionHistoryOrderingTests
         RecordEnvelope a = estate.Add("document-revision", estate.OperatorId, Body(50, "Branch A."), supersedes: first.Id);
         estate.SetClock(at);
         RecordEnvelope b = estate.Add("document-revision", estate.OperatorId, Body(50, "Branch B."), supersedes: first.Id);
+        RecordEnvelope order = FirstPartyTemplateTests.Work(estate, "DOCS-1");
         EstateModel model = estate.Load();
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
         RecordEnvelope latest = new[] { a, b }.MaxBy(r => r.Id, StringComparer.Ordinal)!;
@@ -35,6 +36,7 @@ public sealed class RevisionHistoryOrderingTests
         Assert.Contains("Revision 2, October 13, 2026:", rendered, StringComparison.Ordinal);
         Assert.Contains("Revision 1, October 13, 2026: First.", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("Revision 50", rendered, StringComparison.Ordinal);
+        Assert.Contains("design/example.md (revision 3,", WorkView.RenderBrief(model, order), StringComparison.Ordinal);
         EstateModel reversed = EstateLoader.Load(estate.Root, EstateLoader.EnumerateRecordFiles(estate.Root).Reverse().ToArray());
         Assert.Equal(rendered, RevisionLines.Render(reversed, PathName));
         Assert.Equal(latest.Id, Assert.Single(reversed.Current("document-revision")).Id);

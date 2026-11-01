@@ -24,15 +24,7 @@ public sealed partial class EstateService
             return new(null, null, new("refused", "Template rendering requires an existing estate template instance.", []));
         try
         {
-            TemplateDefinition effective = TemplateInstances.Effective(TemplateCatalog.Resolve(model, TemplateCatalog.Pin(declaration)!), declaration);
-            var regions = DocumentChecks.Regions(declaration);
-            foreach (JsonElement section in effective.Elements.Where(s => s.GetProperty("synthesis").GetProperty("mode").GetString() == "generated"))
-            {
-                JsonElement synthesis = section.GetProperty("synthesis");
-                if (!regions.Any(r => r.Id == section.GetProperty("id").GetString() && r.Generator == synthesis.GetProperty("generator").GetString()
-                    && r.Inputs.SequenceEqual(synthesis.GetProperty("inputs").EnumerateArray().Select(i => i.GetString()!), StringComparer.Ordinal)))
-                    return new(null, null, new("review-required", "Declare the template's exact generated regions through the existing ownership migration review before rendering them.", []));
-            }
+            if (TemplateRenderingRefusal(model, declaration) is { } ownership) return new(null, null, ownership);
             string file = GeneratedDocumentVerification.SafeFile(Root, request.Path);
             byte[] before = File.ReadAllBytes(file);
             string beforeHash = ContentHash.Sha256(before);
@@ -67,6 +59,20 @@ public sealed partial class EstateService
         {
             return new(null, null, new("refused", "The complete template output could not be prepared from its existing markers and sources; no pin was stored.", []));
         }
+    }
+
+    private static Problem? TemplateRenderingRefusal(EstateModel model, RecordEnvelope declaration)
+    {
+        TemplateDefinition effective = TemplateInstances.Effective(TemplateCatalog.Resolve(model, TemplateCatalog.Pin(declaration)!), declaration);
+        var regions = DocumentChecks.Regions(declaration);
+        foreach (JsonElement section in effective.Elements.Where(s => s.GetProperty("synthesis").GetProperty("mode").GetString() == "generated"))
+        {
+            JsonElement synthesis = section.GetProperty("synthesis");
+            if (!regions.Any(r => r.Id == section.GetProperty("id").GetString() && r.Generator == synthesis.GetProperty("generator").GetString()
+                && r.Inputs.SequenceEqual(synthesis.GetProperty("inputs").EnumerateArray().Select(i => i.GetString()!), StringComparer.Ordinal)))
+                return new("review-required", "Declare the template's exact generated regions through the existing ownership migration review before rendering them.", []);
+        }
+        return null;
     }
 
     private static EstateModel ProjectRevision(EstateModel model, RecordEnvelope revision)

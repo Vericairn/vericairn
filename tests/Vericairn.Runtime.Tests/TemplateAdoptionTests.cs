@@ -19,6 +19,28 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class TemplateAdoptionTests
 {
+    [Fact]
+    public void AdoptingRegionsPreservesAnExistingAuthoredContentHashMode()
+    {
+        using var estate = new TestEstate(3);
+        const string path = "design/roadmap.md";
+        estate.WriteFile(path, "# Roadmap\n\n## Direction\n\nKeep the authored direction.\n\n## Releases\n\n"
+            + GeneratedRegions.Start("releases") + "\nOld rows.\n" + GeneratedRegions.End("releases") + "\n");
+        using EstateService service = EstateService.Open(estate.Root);
+        DocumentPinResponse converted = service.DocumentPin(new(path, estate.OperatorId, "Start the revision history.") { ConvertRevisions = true });
+        Assert.True(converted.Ok, converted.Problem?.Message);
+        string file = Path.Combine(estate.Root, path);
+        var definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/roadmap");
+        DocumentAdoptResponse adopted = service.DocumentAdopt(new(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), path,
+            ContentHash.Sha256File(file), IncludeRegions: true));
+        Assert.True(adopted.Ok, JsonSerializer.Serialize(adopted.Problem));
+        RecordEnvelope pin = service.Session.Load().ById[adopted.Pin!.Id];
+        Assert.True(RevisionLines.IsAuthored(pin));
+        Assert.Equal(ContentHash.Sha256(RevisionLines.AuthoredContent(File.ReadAllBytes(file))), EstateModel.BodyString(pin, "hash"));
+        Assert.Contains("Revision 2, ", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.DoesNotContain(service.Check().Findings, f => f.Code is "document.drift" or "document.revisions");
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -146,8 +168,10 @@ public sealed class TemplateAdoptionTests
         Assert.Empty(service.Session.Load().OfType("document-revision"));
     }
 
-    [Fact]
-    public void AdoptionCannotUseATemplateToBypassTheExistingGeneratedRegionMigrationReview()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AdoptionCannotUseATemplateToBypassTheExistingGeneratedRegionMigrationReview(bool converted)
     {
         using var estate = new TestEstate(3);
         const string path = "design/roadmap.md";
@@ -156,6 +180,7 @@ public sealed class TemplateAdoptionTests
             """{"path":"design/roadmap.md","title":"Roadmap","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"refuse"}],"summary":"Keep the roadmap current."}""");
         var definition = FirstPartyTemplates.Definitions.Single(d => d.Id == "vericairn.estate/roadmap");
         using EstateService service = EstateService.Open(estate.Root);
+        if (converted) Assert.True(service.DocumentPin(new(path, estate.OperatorId, "Generate revision history.") { ConvertRevisions = true }).Ok);
         var request = new DocumentAdoptRequest(estate.OperatorId, new(definition.Id, definition.Version, definition.Hash), path,
             ContentHash.Sha256File(Path.Combine(estate.Root, path)), prior.ComputedHash, IncludeRegions: true);
         int before = service.Session.Load().Records.Count;

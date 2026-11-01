@@ -4,6 +4,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 
 namespace Vericairn.Adapters.Git;
@@ -14,10 +15,10 @@ internal static class GitDocumentHistory
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
     private const int OutputLimit = 64 * 1024 * 1024;
 
-    internal static byte[]? Read(string root, string relativePath, string hash)
+    internal static byte[]? Read(string root, string relativePath, string hash, string? hashMode = null)
     {
         string[] parts = relativePath.Split('/');
-        if (!Directory.Exists(root) || !ContentHash.IsValid(hash) || parts.Length < 2 || parts[0] is not ("docs" or "design") ||
+        if (hashMode is not (null or RevisionLines.HashMode) || !Directory.Exists(root) || !ContentHash.IsValid(hash) || parts.Length < 2 || parts[0] is not ("docs" or "design") ||
             parts.Any(p => p is "" or "." or ".." || p.Contains('\\', StringComparison.Ordinal)))
         {
             return null;
@@ -62,6 +63,11 @@ internal static class GitDocumentHistory
             if (bytes is null)
             {
                 return null;
+            }
+            if (hashMode == RevisionLines.HashMode)
+            {
+                try { bytes = RevisionLines.AuthoredContent(bytes); }
+                catch (Exception error) when (error is InvalidOperationException or ArgumentException) { continue; }
             }
             if (ContentHash.Sha256(bytes) == hash)
             {

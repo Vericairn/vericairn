@@ -152,13 +152,12 @@ internal static partial class FoundationPolicyKinds
         foreach (PolicyFile file in repository.Files.Where(f => f.Path.EndsWith(".md", StringComparison.Ordinal) && selectors.Any(s => Matches(s, f.Path)) && coverage.Any(s => Matches(s, f.Path))))
         {
             string text = Read(file);
-            string? line = WritingScanner.LinesOutsideFences(text).Select(l => l.Text).Where(l => !l.StartsWith("    ", StringComparison.Ordinal) && !l.StartsWith('\t'))
-                .SkipWhile(l => !l.TrimStart(' ').StartsWith("# ", StringComparison.Ordinal)).Skip(1).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+            string? line = RevisionLines.FirstProseLine(text);
             Match match = RevisionPattern().Match(line ?? "");
             bool valid = match.Success && DateOnly.TryParseExact(match.Groups["date"].Value, "MMMM d, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date) &&
                 date <= DateOnly.FromDateTime(context.Basis.Time!.Value.UtcDateTime) && match.Groups["explanation"].Value.Any(char.IsLetterOrDigit);
             yield return context.Finding(new("file", repository.Identity + ":" + file.Path, Repository: repository.Identity, Path: file.Path, Hash: file.Hash), "revision-line", valid ? "satisfied" : "unmet",
-                line ?? "No prose line after the first level-one title.", "Revision N, Month D, YYYY followed by an explanation, dated no later than the UTC basis date.", "Write a valid authored revision line.");
+                line ?? "No prose line after the first level-one title.", "Revision N, Month D, YYYY followed by an explanation, dated no later than the UTC basis date.", "Record and regenerate a valid revision line, or correct the hand-written line before conversion.");
         }
     }
 

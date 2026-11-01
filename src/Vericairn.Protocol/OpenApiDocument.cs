@@ -773,7 +773,9 @@ public static class OpenApiDocument
                     ["summary"] = new JsonObject { ["type"] = "string" },
                     ["title"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Defaults to the current title or the first pin's file name without extension." },
                     ["expected"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Expected current pin record id; a mismatch writes nothing." },
-                    ["renderTemplate"] = new JsonObject { ["type"] = "boolean", ["default"] = false, ["description"] = "Explicitly refresh existing template regions and pin the resulting bytes together. Authored bytes outside markers are preserved." },
+                    ["renderTemplate"] = new JsonObject { ["type"] = "boolean", ["default"] = false, ["description"] = "Refresh existing template regions or a converted revision history, including with unchanged authored bytes. Authored bytes outside markers are preserved." },
+                    ["convertRevisions"] = new JsonObject { ["type"] = "boolean", ["default"] = false, ["description"] = "Convert the opening revision history to a generated region, preserving every existing line with its exact record." },
+                    ["decision"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Exact decision record carried by this revision." },
                 },
             },
             ["DocumentPinResponse"] = new JsonObject

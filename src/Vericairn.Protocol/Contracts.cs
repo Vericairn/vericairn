@@ -295,8 +295,14 @@ public sealed record DocumentReviewRequest(string By, string Outcome, string Sum
 /// <param name="Expected">Expected current pin record id; a mismatch refuses without writing.</param>
 public sealed record DocumentPinRequest(string Path, string By, string Summary, string? Title = null, string? Expected = null)
 {
-    /// <summary>Explicitly refresh existing template-generated regions and pin the resulting bytes in one recoverable batch.</summary>
+    /// <summary>Refresh existing template regions or a converted revision history, including with unchanged authored bytes, in one recoverable batch.</summary>
     public bool RenderTemplate { get; init; }
+
+    /// <summary>Convert the hand-written opening history to a generated region; every existing line must have a record.</summary>
+    public bool ConvertRevisions { get; init; }
+
+    /// <summary>The exact decision carried by the new revision, when one applies.</summary>
+    public string? Decision { get; init; }
 }
 
 /// <summary>The exact document pin receipt and its revision, or a refusal. A stored receipt with a problem requires reconciliation.</summary>

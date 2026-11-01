@@ -71,7 +71,7 @@ public static partial class RevisionLines
                 preserved[id] = line;
             }
         }
-        return string.Join("\n\n", history.Select((record, index) =>
+        return GeneratedRegions.Normalize(string.Join("\n\n", history.Select((record, index) =>
         {
             string number = (index + 1).ToString(CultureInfo.InvariantCulture);
             if (preserved.TryGetValue(record.Id, out string? original))
@@ -84,7 +84,7 @@ public static partial class RevisionLines
             string decision = EstateModel.BodyString(record, "decision") is { } id ? "carries decision `" + id + "`: " : "";
             return "Revision " + number + ", " + record.AtTime.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture)
                 + ": " + decision + System.Net.WebUtility.HtmlEncode(EstateModel.BodyString(record, "summary")!.ReplaceLineEndings(" "));
-        }).Reverse()) + (history.Count == 0 ? "" : "\n");
+        }).Reverse()));
     }
 
     /// <summary>Refreshes the generated payload without changing the authored bytes.</summary>

@@ -42,18 +42,46 @@ public sealed class RevisionConversionHistoryTests
         byte[] original = Encoding.UTF8.GetBytes("\uFEFF# Example\r\n\r\n" + two + "\r\n\r\n" + one + "\r\n\r\n" + body);
         var converted = RevisionLines.Convert(estate.Load(), "design/example.md", original);
         Assert.Equal(2, converted.History.Count);
+        Assert.Equal(one, converted.History[1]!["line"]!.GetValue<string>());
         JsonObject pin = JsonNode.Parse(RevisionHistoryOrderingTests.Body(3, "Convert history."))!.AsObject();
         pin["revisionHistory"] = converted.History;
         estate.Add("document-revision", estate.OperatorId, pin.ToJsonString(), supersedes: second.Id);
         EstateModel model = estate.Load();
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
         string rendered = Encoding.UTF8.GetString(RevisionLines.Refresh(model, "design/example.md", converted.Content));
-        Assert.Contains(one, rendered, StringComparison.Ordinal);
+        Assert.Contains(one.ReplaceLineEndings("\n"), rendered, StringComparison.Ordinal);
         Assert.Contains(two, rendered, StringComparison.Ordinal);
         Assert.EndsWith(body, rendered, StringComparison.Ordinal);
         Assert.StartsWith("\uFEFF# Example\r\n\r\n<!-- vericairn:generated revisions -->\r\n", rendered, StringComparison.Ordinal);
         Assert.Equal(converted.Content, RevisionLines.AuthoredContent(Encoding.UTF8.GetBytes(rendered)));
+        Assert.Equal(rendered, GeneratedRegions.Replace(rendered, RevisionLines.Region, RevisionLines.Render(model, "design/example.md")));
         Assert.Equal(first.ComputedHash, model.ById[first.Id].ComputedHash);
+    }
+
+    [Theory]
+    [InlineData("current")]
+    [InlineData("stale-history")]
+    [InlineData("changed-body")]
+    public void AuthoredOwnershipPreviewVerifiesThePinModeAndTheGeneratedHistory(string state)
+    {
+        using TestEstate estate = RecordedFixture();
+        const string path = "design/example.md";
+        string file = Path.Combine(estate.Root, path);
+        string text = File.ReadAllText(file);
+        if (state == "stale-history") estate.WriteFile(path, text.Replace("Original wording.", "Changed generated wording.", StringComparison.Ordinal));
+        if (state == "changed-body") estate.WriteFile(path, text.Replace("Body.", "Changed body.", StringComparison.Ordinal));
+        RecordEnvelope declaration = estate.Add("living-document", estate.OperatorId,
+            """{"path":"design/example.md","title":"Example","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Retain authored ownership."}""");
+        EstateModel model = estate.Load();
+        DocumentMigrationPreview preview = DocumentMigration.Prepare(model, declaration, requireAuthoredPin: true);
+        Assert.Equal(state == "current" ? DocumentGenerationStatus.Success : DocumentGenerationStatus.Error, preview.Status);
+        if (state == "current")
+        {
+            IDocumentGenerator generator = DocumentGenerators.Find("vericairn.estate/revision-history-v1")!;
+            Assert.NotNull(generator);
+            Assert.Contains("all-revisions", generator.Descriptor!.Selections);
+            Assert.Equal(RevisionLines.Render(model, path), generator.GenerateRegion(model, declaration, RevisionLines.Region, ["version=1"]));
+        }
     }
 
     [Theory]

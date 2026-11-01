@@ -25,6 +25,15 @@ internal static class GeneratedOutputStore
             {
                 if (change.After is not null)
                 {
+                    RecordEnvelope? revision = model.Current("document-revision").SingleOrDefault(p => EstateModel.BodyString(p, "path") == change.Path
+                        && RevisionLines.IsAuthored(p) && journal.Records.Any(r => r.Id == p.Id));
+                    if (revision is not null)
+                    {
+                        byte[] retained = [.. change.After.Value];
+                        if (ContentHash.Sha256(RevisionLines.AuthoredContent(retained)) != EstateModel.BodyString(revision, "hash")
+                            || !retained.AsSpan().SequenceEqual(RevisionLines.Refresh(model, change.Path, retained))) return false;
+                        continue;
+                    }
                     RecordEnvelope? owner = model.Current("living-document").SingleOrDefault(d => EstateModel.BodyString(d, "repository") is null
                         && !GeneratedDocumentContract.IsRetired(model, d) && GeneratedDocumentContract.Owns(d, change.Path));
                     if (owner is null) return false;
