@@ -125,7 +125,7 @@ public class PolicyStalenessScaleTests
     // Orders revised between placements, carriers whose plans change or retire, statuses (some conflicting at one instant),
     // work with attempts, results and acceptances, releases published and withdrawn, and unrelated records, on a coarse clock
     // so that many records share an instant.
-    private static RecordEnvelope[] History(Random random, int unrelated)
+    internal static RecordEnvelope[] History(Random random, int unrelated)
     {
         var records = new List<RecordEnvelope>();
         string Tick() => Time(60 * random.Next(1, 240));

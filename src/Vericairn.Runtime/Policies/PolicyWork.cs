@@ -62,8 +62,7 @@ internal static class PolicyWork
 
     internal static RecordEnvelope? Status(EstateModel model, RecordEnvelope order, DateTimeOffset at)
     {
-        IReadOnlyList<string> lineage = model.Chain(order);
-        RecordEnvelope[] states = model.OfType("work-status").Where(s => s.Subject is not null && lineage.Contains(s.Subject.Id, StringComparer.Ordinal) && CurrentAt(model, s, at))
+        RecordEnvelope[] states = PolicyHistory.For(model).AboutOrder(order, "work-status").Where(s => CurrentAt(model, s, at))
             .OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).ToArray();
         if (states.Length == 0) return null;
         RecordEnvelope latest = states[^1];
@@ -74,10 +73,9 @@ internal static class PolicyWork
 
     internal static RecordEnvelope? Acceptance(EstateModel model, RecordEnvelope order, DateTimeOffset at)
     {
-        RecordEnvelope[] acceptances = model.OfType("acceptance").Where(a => CurrentAt(model, a, at)).ToArray();
-        RecordEnvelope? exact = acceptances.FirstOrDefault(a => a.Subject == order.Reference);
+        RecordEnvelope? exact = model.About(order.Id, "acceptance").FirstOrDefault(a => CurrentAt(model, a, at) && a.Subject == order.Reference);
         if (exact is not null) return exact;
-        RecordEnvelope[] resultAcceptances = acceptances.Where(a => a.Subject is { Type: "result" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) &&
+        RecordEnvelope[] resultAcceptances = PolicyHistory.For(model).ResultAcceptances(order).Where(a => CurrentAt(model, a, at) && a.Subject is { Type: "result" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) &&
             subject == result.Reference && WorkView.OrderOfResult(model, result)?.Reference == order.Reference).ToArray();
         if (resultAcceptances.Length == 0) return null;
         IReadOnlyList<RecordEnvelope> current = Results(model, order, at);
@@ -102,27 +100,27 @@ internal static class PolicyWork
         JsonElement placement = Get(order.Body, "placement");
         if (Text(placement, "kind") != "release") return ("unmet", "No release placement.", null);
         if (!model.ById.TryGetValue(Text(placement, "carrier") ?? "", out RecordEnvelope? identity)) return ("unmet", "The release carrier is dangling.", null);
-        RecordEnvelope[] carriers = model.OfType("work-order").Where(r => Identity(model, r) == identity.Id && CurrentAt(model, r, at)).ToArray();
+        RecordEnvelope[] carriers = PolicyHistory.For(model).Revisions(identity.Id).Where(r => CurrentAt(model, r, at)).ToArray();
         if (carriers.Length != 1) return ("unavailable", "The release carrier history is missing or conflicting.", identity);
         RecordEnvelope carrier = carriers[0];
         if (Status(model, carrier, at) is { } status && EstateModel.BodyString(status, "status") == "retired") return ("unmet", "The release carrier is retired.", status);
         JsonElement plan = Get(carrier.Body, "releasePlan");
         if (Text(plan, "product") != Text(placement, "product") || Text(plan, "version") != Text(placement, "version")) return ("unmet", "The carrier's current plan contradicts this placement.", carrier);
-        RecordEnvelope? ended = model.OfType("release").FirstOrDefault(r => r.AtTime <= at && ReleaseMatchesProduct(model, r, Text(plan, "product")) &&
-            EstateModel.BodyString(r, "version") == Text(plan, "version") && EstateModel.BodyString(r, "status") is "published" or "withdrawn");
+        RecordEnvelope? ended = PolicyHistory.For(model).Releases(Text(plan, "product"), Text(plan, "version"))
+            .FirstOrDefault(r => r.AtTime <= at && EstateModel.BodyString(r, "status") is "published" or "withdrawn");
         return ended is null ? ("satisfied", "The exact release placement is valid.", carrier) : ("unmet", "The release target has been published or withdrawn.", ended);
     }
 
     internal static IReadOnlyList<RecordEnvelope> Results(EstateModel model, RecordEnvelope order, DateTimeOffset at)
     {
         List<RecordEnvelope> results = [];
-        foreach (RecordEnvelope assignment in model.OfType("assignment").Where(a => CurrentAt(model, a, at) && a.Subject is not null && model.Chain(order).Contains(a.Subject.Id, StringComparer.Ordinal)))
+        foreach (RecordEnvelope assignment in PolicyHistory.For(model).AboutOrder(order, "assignment").Where(a => CurrentAt(model, a, at)))
         {
-            RecordEnvelope[] attempts = model.OfType("attempt").Where(a => a.Subject == assignment.Reference && CurrentAt(model, a, at)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToArray();
+            RecordEnvelope[] attempts = model.About(assignment.Id, "attempt").Where(a => a.Subject == assignment.Reference && CurrentAt(model, a, at)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToArray();
             if (attempts.Length == 0) continue;
             RecordEnvelope attempt = attempts[^1];
             if (attempts.Count(a => a.At == attempt.At) > 1) throw new PolicyInputException("The latest attempt is ambiguous.");
-            RecordEnvelope[] current = model.OfType("result").Where(r => r.Subject == attempt.Reference && CurrentAt(model, r, at)).ToArray();
+            RecordEnvelope[] current = model.About(attempt.Id, "result").Where(r => r.Subject == attempt.Reference && CurrentAt(model, r, at)).ToArray();
             if (current.Length > 1) throw new PolicyInputException("The current submitted result is ambiguous.");
             results.AddRange(current);
         }

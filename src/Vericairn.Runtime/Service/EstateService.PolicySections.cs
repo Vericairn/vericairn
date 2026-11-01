@@ -17,14 +17,17 @@ public sealed partial class EstateService
     private sealed record PolicySections(PolicyEvaluation Evaluation, WritingEvaluation Writing,
         PolicyResponse Policies, WritingExceptionsResponse Exceptions, IReadOnlyList<OperatorDutyDto> Operator);
 
-    private PolicySections ReadPolicySections(EstateModel model)
+    private PolicySections ReadPolicySections(EstateModel model, Action<string, TimeSpan>? observe = null)
     {
         PolicyKindRegistry registry = PolicySources.Registry();
-        PolicyBasis basis = PolicySnapshot(model, registry);
-        PolicyEvaluation policies = PolicyEvaluator.Evaluate(basis, registry);
-        WritingEvaluation writing = WritingEvaluation.Evaluate(basis);
-        PolicyResponse view = PolicyView(model, basis, policies);
-        return new(policies, writing, view, WritingView(model, basis, writing), OperatorDuties(model, view));
+        PolicyBasis basis = MeasureStatus("policy-snapshot", () => PolicySnapshot(model, registry), observe);
+        PolicyEvaluation policies = MeasureStatus("policy-evaluation", () => PolicyEvaluator.Evaluate(basis, registry), observe);
+        WritingEvaluation writing = MeasureStatus("writing-evaluation", () => WritingEvaluation.Evaluate(basis), observe);
+        return MeasureStatus("policy-views", () =>
+        {
+            PolicyResponse view = PolicyView(model, basis, policies);
+            return new PolicySections(policies, writing, view, WritingView(model, basis, writing), OperatorDuties(model, view));
+        }, observe);
     }
 
     private static FindingList SectionChecks(EstateModel model, FindingList builtIn, PolicySections sections)
