@@ -20,6 +20,8 @@ public sealed class SupportBundleTests
     [Fact]
     public void TheBundleShownIsTheBundleWrittenAndHoldsNoSecretPathOrRecordBody()
     {
+        // First, so the harness has isolated the per-user state before the log path below is computed.
+        string scratch = CliHarness.TempDirectory("support-bundle");
         using var estate = new TestEstate(2);
         string marker = "MARKER-" + Guid.NewGuid().ToString("N");
         estate.Add("work-order", estate.OperatorId, $$"""{"key":"SUPPORT-1","kind":"ordinary","title":"{{marker}}","intent":"Exercise the support bundle.","scope":["tests"],"exitQuestion":"Redacted?","inputs":[],"deliverables":["evidence"]}""");
@@ -30,7 +32,6 @@ public sealed class SupportBundleTests
             $"2026-11-01T10:00:01Z error: refused a request with {Token} for {Path.Combine(estate.Root, "records", "x.json")}",
             "2026-11-01T10:00:02Z failed to open /Users/someone/Library/estate and C:\\Users\\someone\\estate",
         ]);
-        string scratch = CliHarness.TempDirectory("support-bundle");
         string output = Path.Combine(scratch, "bundle.json");
         try
         {
