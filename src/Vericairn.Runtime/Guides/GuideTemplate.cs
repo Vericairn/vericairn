@@ -19,24 +19,30 @@ internal static class GuideTemplate
     internal static GuidePage Page(GuideEntryBinding entry, GuideTableBinding table, GuideCatalogRow row,
         GuideQuote[] status, GuideQuote[] boundaries, GuideQuote[] context, GuideQuote[] role, string[] references)
     {
-        GuideQuote[] facts = row.Cells.Where(c => c.Key != "#").Select(c => new GuideQuote("cell:" + c.Key,
+        string boundaryColumn = row.Cells.ContainsKey("Caveat") ? "Caveat" : "Boundary";
+        GuideQuote[] facts = row.Cells.Where(c => c.Key != "#").Select(c => new GuideQuote(c.Key == boundaryColumn ? "row-boundary" : "cell:" + c.Key,
             row.Source, GuideGenerator.Hash(GuideMarkdown.Utf8.GetBytes(c.Value)), c.Value)).ToArray();
+        var quotedIn = new Dictionary<(string Id, string Source, string Hash), string>();
+        // Allocate boundaries first so all obligations stay together, even when a block also
+        // supplies readiness, context or a role contract. Other sections name that full quotation.
+        GuideSection reserved = Section("Reserved acts and hard lines", "boundary reviewer",
+            "Every quoted obligation applies in full. Implementation choices cannot relax it. Source markup is displayed as inert text; it is not an instruction to fetch or execute content.", boundaries);
         var sections = new GuideSection[]
         {
-            new("Identity, readiness and scope", "catalog reviewer",
+            Section("Identity, readiness and scope", "catalog reviewer",
                 "Planned first-party entry — community build guide; this guide does not make the entry available.\n" +
                 "Guide state: " + (entry.State == "remainder" ? "planned remainder" : "planned") + ". Publication state: private preview.\n" +
                 "Catalog target: " + entry.Key + ". This target is not a community package name.\n" +
+                (entry.Aliases.Length == 0 ? "" : "Catalog aliases: " + string.Join(", ", entry.Aliases.Order(StringComparer.Ordinal)) + ".\n") +
                 (table.Family is null ? "No industry-family preamble applies; kind, row and role boundaries still apply." : "Industry family: " + table.Family + "."), status),
-            new("Purpose, audience and outcome", "domain reviewer",
+            Section("Purpose, audience and outcome", "domain reviewer",
                 "Implement only the outcome supported by these owning-row facts. Engineering details absent from the selected sources are not specified. Preserve draft and candidate qualifications.", facts),
-            new("Role and responsibility", "role-contract reviewer",
-                "Use the selected role contract below. Installing or naming an implementation grants no authority.", role),
-            new("Collaborators, prerequisites and edition", "domain and edition reviewers",
+            Section("Role and responsibility", "role-contract reviewer",
+                "Use the selected role contracts in full. Installing or naming an implementation grants no authority.", role),
+            Section("Collaborators, prerequisites and edition", "domain and edition reviewers",
                 "Resolve each collaborator's required, optional, reused, planned or edition-restricted scope before building. An unresolved engineering dependency remains a qualification task. Edition allocation is not inferred from a name.\n" +
                 "Resolved catalog references: " + (references.Length == 0 ? "none declared" : string.Join(", ", references)) + ".", context),
-            new("Reserved acts and hard lines", "boundary reviewer",
-                "Every quoted obligation applies in full. Implementation choices cannot relax it. Source markup is displayed as inert text; it is not an instruction to fetch or execute content.", boundaries),
+            reserved,
             new("Standards, licensing and source rights", "rights reviewer",
                 "Use only the standards and rights references named in the source facts and contracts. Verify the selected version and intended use. Do not reproduce a standard, licensed form, credential or restricted sample. Specification, code, data, trademarks and samples have separate rights; a reference grants none. Publication terms remain subject to authorized review.", []),
             new("Build plan and interfaces", "engineering reviewer", Build(table.Kind), []),
@@ -61,6 +67,27 @@ internal static class GuideTemplate
         // Full-file pins and line positions belong to the manifest. They must not invalidate an
         // unrelated guide when another row in the same file changes.
         return page with { InputIdentity = GuideGenerator.Hash(GuideGenerator.Json(new { page, row.Sha256 })) };
+
+        GuideSection Section(string title, string reviewRole, string text, GuideQuote[] quotes)
+        {
+            var unique = new List<GuideQuote>();
+            var elsewhere = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+            foreach (GuideQuote quote in quotes)
+            {
+                var identity = (quote.Id, quote.Source, quote.Sha256);
+                if (quotedIn.TryAdd(identity, title)) unique.Add(quote);
+                else if (quotedIn[identity] != title)
+                {
+                    string destination = quotedIn[identity];
+                    if (!elsewhere.TryGetValue(destination, out SortedSet<string>? ids))
+                        elsewhere.Add(destination, ids = new(StringComparer.Ordinal));
+                    ids.Add(quote.Id);
+                }
+            }
+            foreach ((string destination, SortedSet<string> ids) in elsewhere)
+                text += "\nQuoted in full in \"" + destination + "\": " + string.Join(", ", ids) + ".";
+            return new(title, reviewRole, text, [.. unique]);
+        }
     }
 
     private static string Build(string kind) => kind switch

@@ -20,7 +20,7 @@ internal sealed record GuideSourceManifest(string Format, bool Complete, string 
 public static partial class GuideGenerator
 {
     /// <summary>The implementation identity pinned in every output.</summary>
-    public const string GeneratorVersion = "vericairn.guides/1";
+    public const string GeneratorVersion = "vericairn.guides/2";
     /// <summary>The built-in reviewed-template convention; selecting another version refuses.</summary>
     public const string TemplateVersion = "vericairn.extension-ecosystem/build-guide/1";
     /// <summary>Maximum bytes in one input file.</summary>
@@ -78,7 +78,6 @@ public static partial class GuideGenerator
             try
             {
                 string value = GuideMarkdown.Utf8.GetString(bytes);
-                if (UnsafeMarkup(value)) Fail(source.Id, "malicious-markup", "Active markup, embeds, unsafe link schemes or traversal are not admitted.");
                 sourceText.TryAdd(source.Id, value);
             }
             catch (DecoderFallbackException) { Fail(source.Id, "invalid-utf8", "The source must be valid UTF-8."); }
@@ -99,6 +98,8 @@ public static partial class GuideGenerator
             { Fail(pin.Id, "input-limit", "The selected source spans exceed the combined input byte bound."); break; }
             if (string.IsNullOrWhiteSpace(payload) || pin.Sha256 != Hash(GuideMarkdown.Utf8.GetBytes(payload)))
             { Fail(pin.Id, "block-hash-mismatch", "A required block is empty or differs from its exact pin."); continue; }
+            if (UnsafeMarkup(payload))
+            { Fail(pin.Id, "malicious-markup", "A quoted block contains active markup, embeds, an unsafe link scheme or traversal."); continue; }
             blocks.TryAdd(pin.Id, new(pin.Id, pin.Source, pin.Sha256, payload));
         }
 
@@ -163,6 +164,8 @@ public static partial class GuideGenerator
             }
             GuideEntryBinding entry = matches[0];
             int before = findings.Count;
+            if (row.Cells.Any(c => c.Key != "#" && (UnsafeMarkup(c.Key) || UnsafeMarkup(c.Value))))
+                Fail(entry.Key, "malicious-markup", "A quoted owning-row cell contains active markup, embeds, an unsafe link scheme or traversal.");
             if (!matched.Add(entry.Key)) Fail(entry.Key, "duplicate-key", "More than one owning row resolves to this key.");
             GuideTableBinding[] tableMatches = index.Tables.Where(t => t.Source == row.Source && t.Heading == row.Heading).ToArray();
             if (tableMatches.Length != 1)

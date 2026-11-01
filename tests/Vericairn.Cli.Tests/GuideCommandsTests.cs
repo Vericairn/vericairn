@@ -130,6 +130,64 @@ public sealed class GuideCommandsTests
         finally { CliHarness.Delete(root); }
     }
 
+    [Fact]
+    public void ParentLinksAndUnquotedExamplesAllowACompletePrivatePreview()
+    {
+        string root = CliHarness.TempDirectory("guide-source-prose");
+        try
+        {
+            GuideFixture fixture = GuideFixture.Create();
+            string family = System.Text.Encoding.UTF8.GetString(fixture.Sources["family00"]);
+            fixture.Replace("family00", family, family + "\n[Catalog](../catalog.md)\n");
+            fixture.Replace("contracts", "# Synthetic role contracts", "# Synthetic role contracts: `<!--` is an example delimiter");
+            fixture.Replace("family00", "Reserved acts: the designated person approves every delivery.", "Reserved acts: review [the notes](notes.md) before delivery.");
+            fixture.WriteInputs(root);
+            string output = Path.Combine(root, "preview");
+            CliHarness.Outcome generated = CliHarness.Ok(["--json", .. Arguments("generate", root, output)]);
+            Assert.True(generated.Json.GetProperty("ok").GetBoolean());
+            Assert.Equal("private-preview", generated.Json.GetProperty("publicationState").GetString());
+            Assert.Equal(0, CliHarness.Run(Arguments("check", root, output)).Code);
+            using JsonDocument guide = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "guides", "provider.workshop00.group.json")));
+            Assert.Single(guide.RootElement.GetProperty("sections").EnumerateArray().SelectMany(s => s.GetProperty("quotes").EnumerateArray()),
+                q => q.GetProperty("id").GetString() == "role.provider");
+            string html = File.ReadAllText(Path.Combine(output, "guides", "provider.workshop00.group.html"));
+            Assert.Contains("[the notes](notes.md)", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("<a ", html, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(root, "catalog", "catalog", "notes.md")));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
+    [Theory]
+    [InlineData("block", "malicious-markup")]
+    [InlineData("cell", "malicious-markup")]
+    [InlineData("table", "malformed-table")]
+    public void InvalidQuotedContentAndMalformedOwningTablesFailTheCommand(string fault, string code)
+    {
+        string root = CliHarness.TempDirectory("guide-source-findings");
+        try
+        {
+            GuideFixture fixture = GuideFixture.Create();
+            if (fault == "table")
+            {
+                string family = System.Text.Encoding.UTF8.GetString(fixture.Sources["family00"]);
+                fixture.Replace("family00", family, family + "\n## Additional routes\n| Provider | Role | Works with | Caveat |\n|---|---|---|\n| Extra route | Observe. | Sketch. | No delivery. |\n");
+            }
+            else fixture.Replace("family00", fault == "block" ? "Reserved acts: the designated person approves every delivery." : "Builders prepare measured sketches",
+                "[action](javascript:run())");
+            fixture.WriteInputs(root);
+            string output = Path.Combine(root, "preview");
+            CliHarness.Outcome failed = CliHarness.Run(["--json", .. Arguments("generate", root, output)]);
+            Assert.Equal(1, failed.Code);
+            Assert.False(failed.Json.GetProperty("ok").GetBoolean());
+            Assert.Contains(failed.Json.GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == code);
+            Assert.False(Directory.Exists(Path.Combine(output, "guides")));
+            using JsonDocument coverage = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "coverage-manifest.json")));
+            Assert.False(coverage.RootElement.GetProperty("complete").GetBoolean());
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
     private static string[] Arguments(string action, string root, string output) =>
         ["guides", action, "--catalog", Path.Combine(root, "catalog"), "--contracts", Path.Combine(root, "contracts"),
             "--index", Path.Combine(root, "index.json"), "--out", output];

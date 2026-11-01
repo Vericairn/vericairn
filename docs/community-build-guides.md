@@ -32,12 +32,18 @@ qualified by kind and family, such as `provider.workshop.routes`. Keys use lower
 ASCII letters, digits, dots and hyphens; display names and row numbers are not keys.
 `name` is the exact owning-row display name without its outer bold or code markers.
 Retain keys and add aliases when a display name changes.
+The identity section lists the stable target and its aliases in ordinal order,
+including an explicit identifier retained as an alias of a kind-qualified key.
 
 The reader recognizes the catalog's Identifier, Foundry, Provider, Capability and
 Area column contracts, plus planned additions with Entry/Area/Status/Where columns.
 Implementation observations with Entry/Assembly/Status columns, prose mentions and
 fenced examples do not create owning rows. `GuideMarkdown.Read` returns the parsed
 rows and findings for preparing and reviewing the mappings.
+An owning header followed by a malformed delimiter produces a finding naming its
+source, heading and line numbers, even if the table has no index mapping yet.
+That finding prevents a complete generation; the table cannot silently disappear
+from coverage.
 
 Every entry needs pinned `status` blocks. States are `planned`, `remainder`,
 `available`, `retired`, `reference` and `withheld`. A remainder must disclose both
@@ -68,6 +74,13 @@ Duplicate identities, missing sources, unresolved references, incomplete boundar
 mappings, stale hashes, unsupported templates and active source markup return
 findings. A failed generation emits no partial guide set.
 
+Content checks apply to pinned blocks and mapped owning-row cells. Source prose
+outside those quotations, such as a family file's parent link to its catalog or
+an unquoted code example, is not guide content. Catalog family links still require
+their sources in the allowlist. Quoted active markup, embeds, unsafe schemes,
+protocol-relative links and parent traversal produce findings. Admitted relative
+links are displayed as inert text; generation never resolves or follows them.
+
 A successful preview contains `index.md`, `index.html`, `source-index.json`,
 `source-manifest.json`, `coverage-manifest.json` and
 `guides/<key>.json`, `.md` and `.html`. Both manifests indicate whether generation
@@ -82,6 +95,10 @@ contribution route and maintenance. The four Pack roles have distinct recipes;
 shared-capability guides describe product contributions. Request counts remain
 "not collected" and no request route is enabled. Missing implementation details
 and real-operation qualification stay explicit work for the builder.
+Each applicable boundary block and row caveat is quoted in full once, in
+"Reserved acts and hard lines". The role section refers there by block identifier.
+When readiness or context uses the same block, it names the section containing
+the full quotation instead of repeating it. All thirteen sections remain present.
 
 Outputs use UTF-8 without a byte-order mark and LF presentation newlines, sorted
 by stable key. Quoted payloads retain their original bytes in JSON strings;
@@ -91,6 +108,26 @@ semantic sections. No clock, account, network query or machine location contribu
 to output bytes. Inputs are bounded to 4 MiB per file, 32 MiB combined, 512 sources
 and 20,000 owning rows. Extracted source blocks also have a combined 32 MiB bound;
 rendered guides are bounded to 128 MiB per selection.
+
+For a catalog that exceeds the rendered-output bound, generate exact batches with
+repeated `--select` arguments and a fresh private output directory for each batch.
+Use the same complete source index and pinned inputs for every batch. For example:
+
+```sh
+vericairn guides generate --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --select provider.workshop.routes --select foundry.workshop.desk --out artifacts/guide-batch-01
+vericairn guides check --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --select provider.workshop.routes --select foundry.workshop.desk --out artifacts/guide-batch-01
+```
+
+Partition all planned and remainder keys into disjoint selections; keep each batch's
+exact selection for its check. If a selection exceeds the bound, split it again.
+An oversized selection produces failure manifests and no guides. Every successful
+batch still accounts for the full inventory, marking unselected planned entries
+as withheld. Before reviewing the collection as complete, verify that the union of
+the batches' source-manifest guide keys equals all planned and remainder keys in
+the reviewed index, with each key present in exactly one batch. Keep the bundles
+separate, including their manifests and indexes; concatenating them is not a
+checked collection. Each individual guide must fit the bound with its full blocks;
+batching never permits shortening an obligation.
 
 Open `index.html` locally to inspect the preview. New files and directories use
 owner-only permissions on Unix; Windows uses the destination's inherited access
@@ -107,6 +144,8 @@ its dependent guides; changes outside a guide's selected inputs leave that guide
 identity unchanged. `check` independently regenerates the entire selection and
 compares complete membership and bytes, including boundary payloads and readable
 renditions. An output-only edit fails; checking writes no repair or clearance.
+The generator identity is `vericairn.guides/2`; comparison with an earlier generator
+marks its guides due for review. Generate into fresh directories for that review.
 
 The template is a versioned checked convention. This command does not adopt a
 living-document instance, record a review, publish a repository or activate a site.

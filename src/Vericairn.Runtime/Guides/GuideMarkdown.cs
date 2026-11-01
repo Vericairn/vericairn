@@ -47,11 +47,18 @@ public static partial class GuideMarkdown
             }
             if (!line.StartsWith('|') || i + 1 >= lines.Length) continue;
             string[] columns = Cells(line);
-            string[] separator = Cells(lines[i + 1].Trim());
-            if (separator.Length != columns.Length || !separator.All(c => Separator().IsMatch(c))) continue;
             string? nameColumn = NameColumn(columns);
             if (nameColumn is null) continue;
+            string[] separator = Cells(lines[i + 1].Trim());
             string trail = string.Join(" / ", headings.Values);
+            if (separator.Length != columns.Length || !separator.All(c => Separator().IsMatch(c)))
+            {
+                if (separator.Any(c => c.Length > 0 && c.All(ch => ch is ':' or '-' or ' ' or '\t')))
+                    findings.Add(new(source, "malformed-table", "The owning table under " + trail + " at line " +
+                        (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " has an invalid delimiter at line " +
+                        (i + 2).ToString(System.Globalization.CultureInfo.InvariantCulture) + "; cell count and separators must match the header."));
+                continue;
+            }
             if (!tableLocations.Add(trail)) findings.Add(new(source, "ambiguous-table", "More than one owning table has heading: " + trail));
             if (columns.Distinct(StringComparer.Ordinal).Count() != columns.Length)
                 findings.Add(new(source, "duplicate-column", "Duplicate columns in: " + trail));
