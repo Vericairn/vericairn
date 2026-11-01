@@ -1,0 +1,7 @@
+<Project>
+  <!-- Building Vericairn sends nothing. Avalonia brings in Avalonia.BuildServices, whose AvaloniaStats target would send anonymous
+       build statistics before each compile unless AVALONIA_TELEMETRY_OPTOUT is set. Directory.Build.targets is imported after the
+       package's targets, so this empty target replaces it for everyone who builds the repository. BuildTelemetryTests fail if the
+       package's task can run again. -->
+  <Target Name="AvaloniaStats" />
+</Project>
