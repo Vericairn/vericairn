@@ -37,7 +37,7 @@ public static class SecureEnclaveCustody
 public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
 {
     private static readonly TimeSpan Quick = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan WithPerson = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan WithPerson = DeviceKeyStores.PresenceWait;
     private readonly string directory;
     private readonly string helper;
 

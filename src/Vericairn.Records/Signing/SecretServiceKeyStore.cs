@@ -29,7 +29,7 @@ public sealed class SecretServiceKeyStore : IDeviceKeyStore
 {
     private const string Application = "vericairn";
     private static readonly TimeSpan Quick = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan WithPerson = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan WithPerson = DeviceKeyStores.PresenceWait;
     private readonly string directory;
 
     /// <summary>Creates a store whose markers live under the given home directory.</summary>

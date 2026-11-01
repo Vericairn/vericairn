@@ -104,7 +104,19 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
 /// </summary>
 public static class ClientOperation
 {
-    /// <summary>Interactive reads have a short deadline; checks, transfers and effect preparation have time to finish.</summary>
+    /// <summary>The longest a device key waits for its owner's presence at one signature, as the Secure Enclave and secret-service stores do.</summary>
+    public static TimeSpan PresenceWait { get; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// An operation that may write can sign with a device that asks for its owner's presence, so it is observed for a minute longer than
+    /// <see cref="PresenceWait"/>. A timeout after that still reports an unknown outcome and never retries.
+    /// </summary>
+    public static TimeSpan EffectDeadline { get; } = PresenceWait + TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// The deadline by operation name, for an observation that cannot write: interactive reads have a short deadline; checks, transfers
+    /// and effect preparation have time to finish. An operation that may write uses <see cref="Deadline(string, bool)"/>.
+    /// </summary>
     public static TimeSpan Deadline(string operation) => operation switch
     {
         "Check" or "Validate" or "Context" or "BriefContext" or "Handoff" or "ResumeHandoff" or
@@ -115,6 +127,13 @@ public static class ClientOperation
         "PackagesObserve" => TimeSpan.FromMinutes(3),
         _ => TimeSpan.FromSeconds(30),
     };
+
+    /// <summary>The deadline by operation name, never shorter than <see cref="EffectDeadline"/> for an operation that may write.</summary>
+    public static TimeSpan Deadline(string operation, bool mayHaveEffect)
+    {
+        TimeSpan named = Deadline(operation);
+        return mayHaveEffect && named < EffectDeadline ? EffectDeadline : named;
+    }
 
     /// <summary>Adapts an embedded operation without running synchronous I/O on the caller's thread.</summary>
     public static Task<T> RunSynchronousAsync<T>(string operation, Func<T> action, bool mayHaveEffect, CancellationToken cancellationToken = default) =>
@@ -134,7 +153,7 @@ public static class ClientOperation
         TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         RunAsync(operation, action, () => mayHaveEffect, timeout, cancellationToken);
 
-    /// <summary>Runs a staged operation whose possible effect begins only after its read-only preparation.</summary>
+    /// <summary>Runs a staged operation whose possible effect begins only after its read-only preparation; without a timeout, its deadline is judged as it starts.</summary>
     public static Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, Func<bool> mayHaveEffect,
         TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
         RunAsync(operation, action, mayHaveEffect, timeout, TimeProvider.System, cancellationToken);
@@ -149,7 +168,9 @@ public static class ClientOperation
             throw new ClientCancelledException(false, cancellationToken);
         }
 
-        TimeSpan budget = timeout ?? Deadline(operation);
+        // Whether the operation may write is judged as it starts. A staged operation whose effect begins only after its read-only
+        // preparation, such as pairing, gives its own timeout.
+        TimeSpan budget = timeout ?? Deadline(operation, mayHaveEffect());
         long started = clock.GetTimestamp();
         using var deadline = new CancellationTokenSource(budget, clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);

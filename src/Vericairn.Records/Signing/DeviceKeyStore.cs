@@ -47,6 +47,9 @@ public static class DeviceKeyStores
     /// <summary>Custody kinds a device record of record format 2 may claim: format 1's, the macOS Secure Enclave, and a recovery key kept offline.</summary>
     public static readonly ImmutableArray<string> Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind];
 
+    /// <summary>The longest a store waits for its owner's presence at one signature; clients observe writes for longer (ClientOperation.EffectDeadline).</summary>
+    internal static readonly TimeSpan PresenceWait = TimeSpan.FromMinutes(5);
+
     /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
     public static readonly ImmutableArray<string> PresenceKinds = [SecureEnclaveCustody.Kind];
 
