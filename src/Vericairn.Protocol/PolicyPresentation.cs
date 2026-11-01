@@ -26,7 +26,7 @@ public static class PolicyPresentation
             if (group.Key.Owner.Length > 0) text.AppendLine($"  Duties owned by {group.Key.Owner}, subject {group.Key.Subject}:");
             foreach (PolicyFindingDto finding in group)
             {
-                text.AppendLine($"  {finding.PolicyKey}/{finding.Rule} {finding.Target.Identity}: {finding.Verdict} ({finding.Disposition}), {finding.Level}{(finding.ReleaseHold ? "; release hold" : finding.IsReleaseCadence ? "; cadence context" : "")}");
+                text.AppendLine($"  {finding.PolicyKey}/{finding.Rule} {finding.Target.Identity}: {finding.Verdict} ({finding.Disposition}), {finding.Level}{(finding.ReleaseHold ? "; release hold" : "")}");
                 text.AppendLine($"    {finding.Actual} Required: {finding.Required} Next: {finding.NextAction}");
                 if (finding.Duty is { } duty)
                     text.AppendLine($"    Recurring duty: due {duty.DueAt}; deadline {duty.Deadline}; completed {duty.Completed}; missed {duty.Missed}; completed at {duty.CompletedAt ?? "none"}; occurrence {duty.Occurrence.GetRawText()}");
