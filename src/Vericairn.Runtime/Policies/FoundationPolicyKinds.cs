@@ -18,6 +18,7 @@ internal static partial class FoundationPolicyKinds
     internal const string KeyFamily = "vericairn.estate/work-key-family";
     internal const string RevisionLine = "vericairn.estate/revision-line";
     internal const string Consistency = "vericairn.estate/work-state-consistency";
+    internal const string Blocked = BlockedTerms.Kind;
 
     internal static void Validate(PolicyRuleContext context)
     {
@@ -31,6 +32,7 @@ internal static partial class FoundationPolicyKinds
             KeyFamily => Families(context, parametersOnly: true),
             RevisionLine => Revisions(context, parametersOnly: true),
             Consistency => Consistencies(context, parametersOnly: true),
+            Blocked => BlockedTermFindings(context, parametersOnly: true),
             _ => throw new PolicyParameterException("This foundation parameter reader does not recognize the kind."),
         };
         _ = validation.ToArray();
@@ -46,6 +48,7 @@ internal static partial class FoundationPolicyKinds
             KeyFamily => Families(context),
             RevisionLine => Revisions(context),
             Consistency => Consistencies(context),
+            Blocked => BlockedTermFindings(context),
             _ => [context.Unavailable("The exact rule kind and version are not installed.")],
         };
         PolicyFinding[] findings = results.ToArray();
@@ -78,6 +81,24 @@ internal static partial class FoundationPolicyKinds
                 (verdict, reason) = valid ? ("satisfied", "The named backlog is valid.") : ("unmet", "The backlog is unknown or contradicts the selected product.");
             }
             yield return context.Finding(PolicyWork.Target(context.Model, order), "placement", verdict, reason, "A valid release placement or declared backlog.", "Revise the work's explicit placement.", order, evidence is null ? [] : [evidence.Reference]);
+        }
+    }
+
+    // Authoring and generation refuse blocked terms; this reports records written after the policy began that hold one anyway,
+    // such as a record from an older build or merged from another copy. Earlier records are left alone and never rewritten.
+    // A finding never repeats the term, since findings themselves are rendered into generated documents.
+    private static IEnumerable<PolicyFinding> BlockedTermFindings(PolicyRuleContext context, bool parametersOnly = false)
+    {
+        if (BlockedTerms.Validate(context.Parameters) is string problem) throw new PolicyParameterException(problem);
+        if (parametersOnly) yield break;
+        System.Collections.Immutable.ImmutableArray<string> terms = BlockedTerms.TermsOf(context.Parameters);
+        DateTimeOffset at = context.Basis.Time!.Value;
+        DateTimeOffset since = context.Model.ById[PolicyWork.Identity(context.Model, context.Policy)].AtTime;
+        foreach (RecordEnvelope record in context.Model.Records.Where(r => r.AtTime >= since && PolicyWork.CurrentAt(context.Model, r, at)).OrderBy(r => r.Id, StringComparer.Ordinal))
+        {
+            if (BlockedTerms.IntroducedInRecord(terms, record.Type, record.Body, null) is null) continue;
+            yield return context.Finding(PolicyWork.Target(context.Model, record), "terms", "unmet", $"This {record.Type} record, written after the policy began, holds a blocked term.",
+                "No blocked term outside a structured model selector.", "Leave the record unchanged; keep the term out of its successor and of new records.");
         }
     }
 

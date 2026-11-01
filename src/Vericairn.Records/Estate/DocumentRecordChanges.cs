@@ -17,6 +17,8 @@ public static class DocumentRecordChanges
         ArgumentNullException.ThrowIfNull(added);
         var changes = ImmutableArray.CreateBuilder<DocumentOutputChange>();
         var directories = ImmutableArray.CreateBuilder<string>();
+        // A generated document may keep a blocked term its sources already carried, never introduce one.
+        ImmutableArray<string> blocked = BlockedTerms.In(proposed, DateTimeOffset.UtcNow);
         try
         {
             foreach (RecordEnvelope declaration in proposed.Current("living-document").Where(d => EstateModel.BodyString(d, "repository") is null))
@@ -28,6 +30,8 @@ public static class DocumentRecordChanges
                         introducedPins: added.Where(r => r.Type == "document-revision").Select(r => r.Id).ToHashSet(StringComparer.Ordinal));
                     if (!DocumentMigration.IsReviewed(proposed, declaration, preview))
                         return Failed(DocumentGenerationStatus.Error, "The complete fresh ownership preview and retained pins must match the independently reviewed migration result.");
+                    if (BlockedTerms.IntroducedInFiles(blocked, preview.Before, preview.After) is (string migratedPath, string migratedTerm))
+                        return Failed(DocumentGenerationStatus.Error, BlockedTerms.Refusal("Generated document " + migratedPath, migratedTerm));
                     changes.AddRange(DocumentRepair.Changes(preview.Before, preview.After));
                     if (declaration.Supersedes is { } prior && proposed.ById.TryGetValue(prior, out RecordEnvelope? former)
                         && EstateModel.BodyString(former, "pathPattern") is not null
@@ -70,6 +74,8 @@ public static class DocumentRecordChanges
                     if (!before.Current) return Failed(before.Status == DocumentGenerationStatus.Success ? DocumentGenerationStatus.Error : before.Status,
                         "Repair the existing generated members before changing their sources.");
                 }
+                if (BlockedTerms.IntroducedInFiles(blocked, next.Actual, next.Expected) is (string path, string term))
+                    return Failed(DocumentGenerationStatus.Error, BlockedTerms.Refusal("Generated document " + path, term));
                 changes.AddRange(DocumentRepair.Changes(next.Actual, next.Expected));
             }
             if (changes.Select(c => c.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != changes.Count)

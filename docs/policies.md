@@ -116,3 +116,28 @@ record-set digest. No partial evidence is returned. [API v1](api-v1.md#release-b
 describes the diagnostic codes, and the [release guide](operator-guide.md) explains how to read them.
 
 The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).
+
+## Blocked terms (0.9.0)
+
+An estate can keep words out of its records and out of the documents generated from them, such as the names of the models
+its agents run on. Declare them in an estate policy with a rule of kind `vericairn.estate/blocked-terms`, version 1, whose only
+parameter is `terms`: one to 256 distinct terms of 2 to 100 characters, each containing a letter or digit.
+
+```json
+{ "key": "terms", "kind": "vericairn.estate/blocked-terms", "version": 1, "parameters": { "terms": ["example-model"] } }
+```
+
+While a current policy declares the list, from its `startsAt` when one is set:
+
+- Authoring a record whose body would introduce a term is refused, on every authoring path. A new record is refused for any
+  occurrence. A revision is refused only for an occurrence its predecessor did not already hold, so revisions of older records
+  keep working. The values of `model` properties, the structured model selectors the worker records for each run, are facts
+  rather than prose and are not checked. The policy record that declares the list is exempt from it.
+- Generating a document that would introduce a term is refused: release notes from `docs notes`, the generated companions a
+  record write refreshes, refreshed template regions and new template instances. A generated document may keep a term its
+  sources already carried; it never gains one.
+- A term matches whole, ignoring case and Unicode compatibility forms, so it is never found inside a longer word.
+
+Evaluating the rule reports each current record written after the policy began that still holds a term, such as one from an
+older build or merged from another copy of the estate. Earlier records are left alone, and no record is rewritten. A finding
+never repeats the term, since findings are themselves rendered into generated documents.
