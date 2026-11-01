@@ -124,6 +124,10 @@ public sealed class RequestedProgressSurfaceTests
         {
             Clock = clock, AfterEvent = eventSeen.Set, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1),
         });
+        // The fixture writes its records on the system clock after the worker's clock started, possibly in a later second; the run's
+        // intent must not be dated before the records it names, so the worker's clock catches up with the latest of them.
+        DateTimeOffset latest = run.Service.Session.Load().Records.Max(record => record.AtTime);
+        if (latest > clock.GetUtcNow()) clock.Advance(latest - clock.GetUtcNow());
         RunResponse started = run.Start("generic", "ack-stop", run.Report("progress-overdue"),
             settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "3600" });
         Assert.True(started.Ok, started.Message);
