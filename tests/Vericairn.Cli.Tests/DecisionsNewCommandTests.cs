@@ -5,6 +5,7 @@ using System.CommandLine;
 using System.Text.Json;
 using Vericairn.Cli;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Tests;
 
@@ -48,6 +49,10 @@ public sealed class DecisionsNewCommandTests
         foreach (string fact in new[] { request.AnsweredAt, request.BaseCommit, fixture.Ask.ComputedHash, response.Pins[0].Id, response.Pins[0].Hash })
             Assert.Contains(fact, readable.Out, StringComparison.Ordinal);
         Assert.Equal(0, CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Estate.Root, "decisions").Code);
+        Assert.Single(fixture.Estate.Load().OfType("ask"));
+        Assert.Equal("answered", Asks.State(fixture.Estate.Load(), fixture.Ask).State);
+        Assert.Empty(CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Estate.Root, "--json", "ask").Json.GetProperty("principals").EnumerateArray());
+        Assert.Empty(CliHarness.RunWithApi(fixture.Service, null, "--estate", fixture.Estate.Root, "--json", "operator", "list").Json.GetProperty("items").EnumerateArray());
     }
 
     [Theory]

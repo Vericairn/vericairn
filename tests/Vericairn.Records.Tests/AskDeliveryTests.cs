@@ -15,6 +15,39 @@ namespace Vericairn.Records.Tests;
 public class AskDeliveryTests
 {
     [Fact]
+    public void OnlyCurrentDecisionsAnswerAnyRevisionWithoutChangingTheAsk()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope ask = estate.Add("ask", estate.BuilderId, Ask(estate.OperatorId, "Continue?", "open"));
+        RecordEnvelope notified = estate.Add("ask", estate.BuilderId, Ask(estate.OperatorId, "Continue?", "notified"), supersedes: ask.Id);
+        RecordEnvelope other = estate.Add("ask", estate.BuilderId, Ask(estate.OperatorId, "Another question?", "open"));
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId, Answer(estate.OperatorId, ask.Id));
+        AssertState("answered", decision);
+        decision = estate.Add("decision", estate.OperatorId, Answer(estate.OperatorId, other.Id), supersedes: decision.Id);
+        AssertState("notified");
+        decision = estate.Add("decision", estate.OperatorId, Answer(estate.OperatorId, notified.Id), supersedes: decision.Id);
+        AssertState("answered", decision);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+
+        void AssertState(string expected, params RecordEnvelope[] answers)
+        {
+            EstateModel current = estate.Load();
+            int count = current.Records.Count;
+            foreach (RecordEnvelope revision in new[] { ask, notified })
+            {
+                Assert.Equal(expected, Asks.State(current, revision).State);
+                Assert.Equal(answers.Select(a => a.Id), Asks.State(current, revision).Answers.Select(a => a.Id));
+            }
+            Assert.Equal(expected == "notified", Asks.Deliveries(current).SelectMany(d => d.Asks).Any(a => a.Id == notified.Id));
+            Assert.Equal(notified.Id, current.Latest(ask).Id);
+            Assert.Equal("notified", EstateModel.BodyString(current.Latest(ask), "state"));
+            Assert.Equal(3, current.OfType("ask").Count());
+            Assert.Equal(count, estate.Load().Records.Count);
+        }
+    }
+
+    [Fact]
     public void AtMostThreeAsksGoOutPerDeliveryWithTheRecommendationFirstAndTheRestWaitInOrder()
     {
         using var estate = new TestEstate(recordFormat: 2);
