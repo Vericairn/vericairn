@@ -47,6 +47,8 @@ public sealed class AgentProductWarningTests
     [Fact]
     public void HumansAndAgentsWithoutAnyRoutedLauncherGetNoWarning()
     {
+        // The shipped launchers are registered as a command runs; run first in its process, this test registers them itself.
+        Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
         JsonElement human = JsonSerializer.SerializeToElement(new { kind = "human", name = "Person" });
         Assert.Null(RecordsNewCommand.AgentProductWarning(human, Vericairn.Runtime.Providers.ProviderRegistry.Current.Launchers));
         JsonElement agent = JsonSerializer.SerializeToElement(new { kind = "agent", name = "Builder", agent = new { vendor = "Example", product = "Anything" } });
