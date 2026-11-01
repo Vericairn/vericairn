@@ -43,6 +43,8 @@ internal sealed class ManifestCompanionGenerator : IDocumentGenerator
             + ".\n\nManifest: " + DocumentMarkdown.Link(EstateLayout.ManifestPath, EstateLayout.ManifestPath) + " at " + files[0].Hash + ".\n\n";
         using JsonDocument document = JsonDocument.Parse(files[0].Bytes.ToArray());
         bool profileRecorded = document.RootElement.TryGetProperty("profile", out _);
+        JsonElement pin = document.RootElement.GetProperty("vericairn");
+        bool lineRecorded = pin.TryGetProperty("line", out _), channelRecorded = pin.TryGetProperty("channel", out _);
         return RecordCompanionGenerator.Pages(header, Blocks(), context.Page);
 
         IEnumerable<string> Blocks()
@@ -52,7 +54,9 @@ internal sealed class ManifestCompanionGenerator : IDocumentGenerator
                 + ". A local-only record store remains authoritative; this view changes no custody.\n\nManifest record format: " + manifest.RecordFormat.ToString(CultureInfo.InvariantCulture)
                 + ". Each charter retains its original envelope and declared format below.\n\nRuntime mode: " + DocumentMarkdown.Text(manifest.Mode)
                 + ". Repository: " + DocumentMarkdown.Text(manifest.Repository!) + ".\n\nPinned version: " + DocumentMarkdown.Text(manifest.Version ?? "Not recorded")
-                + ". Pinned source commit: " + (manifest.Commit ?? "Not recorded") + ".\n\n";
+                + ". Pinned source commit: " + (manifest.Commit ?? "Not recorded") + ".\n\n"
+                + "Followed line: " + DocumentMarkdown.Text(manifest.Line) + (lineRecorded ? " (recorded)" : " (manifest default)")
+                + ". Followed channel: " + DocumentMarkdown.Text(manifest.Channel) + (channelRecorded ? " (recorded)" : " (manifest default)") + ".\n\n";
             yield return "## Runtime artifact pins\n\nHashes identify exact bytes; they do not prove publication, availability or acceptance.\n\n";
             if (manifest.Artifacts is not { Count: > 0 }) yield return "No artifact pins recorded.\n\n";
             else foreach ((string platform, string hash) in manifest.Artifacts.OrderBy(p => p.Key, StringComparer.Ordinal)) yield return "- " + DocumentMarkdown.Text(platform) + ": " + hash + "\n\n";

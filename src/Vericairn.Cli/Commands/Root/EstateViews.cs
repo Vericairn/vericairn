@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
@@ -29,6 +30,7 @@ internal sealed class EstateViews(CommandContext context)
                 }
 
                 StatusResponse observed = api.Status();
+                context.ReleaseNoticePin = observed.Json.TryGetProperty("vericairn", out JsonElement pin) ? pin.Clone() : default(JsonElement);
                 context.Output.Write(json ? CanonicalJson.SerializePretty(observed.Json) : CommandPresentation.Status(api, observed, presentation));
                 return observed.HasErrors ? HasErrors : Clean;
             });
@@ -47,6 +49,7 @@ internal sealed class EstateViews(CommandContext context)
         return context.WithApi(root, api =>
         {
             StatusResponse status = api.Status();
+            context.ReleaseNoticePin = status.Json.TryGetProperty("vericairn", out JsonElement pin) ? pin.Clone() : default(JsonElement);
             context.Output.Write(json ? CanonicalJson.SerializePretty(status.Json) : CommandPresentation.Status(api, status, presentation));
             return status.HasErrors ? HasErrors : Clean;
         });

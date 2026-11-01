@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Avalonia.Controls;
+using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Tests;
 using Vericairn.Records.Updates;
 using Vericairn.Sdk;
 
@@ -9,6 +14,77 @@ namespace Vericairn.Workbench.Tests;
 
 public sealed class ReleaseNoticeTests(HeadlessFixture fixture)
 {
+    [Theory]
+    [InlineData("current", "stable", "Vericairn/vericairn", true)]
+    [InlineData("current", "prerelease", "Vericairn/vericairn", true)]
+    [InlineData("1.x", "lts", "Vericairn/vericairn", false)]
+    [InlineData("current", "stable", "Example/fork", false)]
+    public void AReleasePinUsesItsOwnVersionAndSelectionForTheCachedNotice(string line, string channel, string repository, bool warn)
+    {
+        JsonElement pin = JsonSerializer.SerializeToElement(new { mode = "release", repository, version = "1.0.0", line, channel });
+        string notice = ReleaseUpdates.EstateNotice(PublishedRelease.FromTag("v2.0.0"), "3.0.0+build.1", pin);
+        if (warn)
+        {
+            Assert.Contains("estate pins 1.0.0; installed 3.0.0", notice, StringComparison.Ordinal);
+            Assert.Contains("estate upgrade --to 2.0.0 --check", notice, StringComparison.Ordinal);
+        }
+        else Assert.Empty(notice);
+    }
+
+    [Fact]
+    public void OlderRuntimeSelectionsKeepTheDefaultsAndAnUnavailablePinCannotOfferAnEstateUpgrade()
+    {
+        PublishedRelease release = PublishedRelease.FromTag("v2.0.0")!;
+        JsonElement pin = JsonSerializer.SerializeToElement(new { mode = "release", repository = "Vericairn/vericairn", version = "1.0.0" });
+        Assert.Contains("estate upgrade --to 2.0.0 --check", ReleaseUpdates.EstateNotice(release, "1.0.0", pin), StringComparison.Ordinal);
+        Assert.Empty(ReleaseUpdates.EstateNotice(release, "1.0.0", default));
+    }
+
+    [Fact]
+    public async Task OpeningAndSwitchingEstatesRechecksTheCachedNoticeAgainstTheirOwnLines()
+    {
+        string home = Seed.Temp("update-lines");
+        using var lts = new TestEstate();
+        using var current = new TestEstate();
+        string path = Path.Combine(lts.Root, EstateLayout.ManifestPath);
+        JsonObject manifest = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        manifest["vericairn"]!["line"] = "1.x";
+        manifest["vericairn"]!["channel"] = "lts";
+        File.WriteAllBytes(path, CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(manifest)));
+        var connections = new List<ServiceConnection>();
+        try
+        {
+            var source = new Source();
+            await fixture.UiAsync(async () =>
+            {
+                var shell = new ShellViewModel(root =>
+                {
+                    var connection = new ServiceConnection(root);
+                    connections.Add(connection);
+                    return connection;
+                }, new FakeRuntimeManager(), new Preferences(Path.Combine(home, "workbench")),
+                    new ReleaseUpdates(new(home), source, new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero))));
+                await shell.RefreshUpdatesAsync();
+                Assert.Contains("estate upgrade --to 9.2.0", shell.UpdateNotice, StringComparison.Ordinal);
+                await shell.OpenEstateAsync(lts.Root, TestContext.Current.CancellationToken);
+                Assert.True(shell.HasEstate);
+                Assert.Empty(shell.UpdateNotice);
+                await shell.RefreshUpdatesAsync();
+                Assert.Empty(shell.UpdateNotice);
+                await shell.OpenEstateAsync(current.Root, TestContext.Current.CancellationToken);
+                Assert.Contains("estate upgrade --to 9.2.0", shell.UpdateNotice, StringComparison.Ordinal);
+                await shell.OpenEstateAsync(lts.Root, TestContext.Current.CancellationToken);
+                Assert.Empty(shell.UpdateNotice);
+            });
+            Assert.Equal(1, source.Calls);
+        }
+        finally
+        {
+            foreach (ServiceConnection connection in connections) connection.Dispose();
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ShellShowsTheDisclosureAndUpgradeRoutesWithoutAnEstateAndSharesTheClientCache()
     {

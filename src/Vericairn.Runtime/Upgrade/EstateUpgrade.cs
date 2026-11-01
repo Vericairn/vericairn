@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 using Vericairn.Records.Updates;
 
 namespace Vericairn.Runtime.Upgrade;
@@ -75,7 +76,14 @@ public interface IRecordFormatMigration
 /// <param name="Release">The published release record or verified dependency observation upgraded to.</param>
 /// <param name="Artifacts">Distributable hash per platform, carried into the manifest.</param>
 /// <param name="Anchored">Moving to record format 2, the admissions recorded without a signature that are in force, by id and hash, which the signed migration anchors.</param>
-public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts, IReadOnlyList<RecordReference> Anchored);
+public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts, IReadOnlyList<RecordReference> Anchored)
+{
+    /// <summary>The followed line after the upgrade.</summary>
+    public string Line { get; init; } = "current";
+
+    /// <summary>The followed channel after the upgrade.</summary>
+    public string Channel { get; init; } = "stable";
+}
 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
 public static class EstateUpgrade
@@ -101,7 +109,10 @@ public static class EstateUpgrade
     }
 
     /// <summary>Plans against a recorded published release or dependency observation; this pure planner never fetches or writes.</summary>
-    public static UpgradePlan Plan(EstateModel model, string version)
+    public static UpgradePlan Plan(EstateModel model, string version) => Plan(model, version, null, null);
+
+    /// <summary>Plans a target within the followed line and channel, with explicit optional changes to either.</summary>
+    public static UpgradePlan Plan(EstateModel model, string version, string? line, string? channel)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
@@ -112,7 +123,7 @@ public static class EstateUpgrade
             ?? throw new InvalidOperationException(candidates.Count == 0
                 ? $"No release record or verified observation has version {version}; run estate upgrade with the target release's command line to verify the published dependency."
                 : $"Release {version} is recorded as {EstateModel.BodyString(candidates[0], "status")}, not published; the operator's acceptance and the observed publication come first.");
-        return Plan(model, release);
+        return Plan(model, release, line, channel);
     }
 
     // An estate can publish an unrelated product with the same version. Its release cannot supply a Vericairn pin.
@@ -124,7 +135,10 @@ public static class EstateUpgrade
         .ToList();
 
     /// <summary>Plans against a published release record or a verified dependency observation prepared without writing it.</summary>
-    public static UpgradePlan Plan(EstateModel model, RecordEnvelope release)
+    public static UpgradePlan Plan(EstateModel model, RecordEnvelope release) => Plan(model, release, null, null);
+
+    /// <summary>Plans a published target, changing the followed line or channel only when explicitly requested.</summary>
+    public static UpgradePlan Plan(EstateModel model, RecordEnvelope release, string? line, string? channel)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(release);
@@ -133,6 +147,14 @@ public static class EstateUpgrade
         if ((!VericairnReleaseObservation.Is(release) && release.Type != "release") || data.GetProperty("status").GetString() != "published")
             throw new InvalidOperationException("The upgrade target is not a published release. Choose a published release or verify its dependency observation.");
         string version = data.GetProperty("version").GetString()!;
+        line ??= manifest.Line;
+        channel ??= manifest.Channel;
+        if (!ReleaseLines.LinePattern().IsMatch(line) || !ReleaseLines.Channels.Contains(channel, StringComparer.Ordinal))
+            throw new InvalidOperationException("Choose a line of 1 to 40 lower-case letters, digits, dots or hyphens, beginning with a letter or digit, and a channel of stable, lts, prerelease or nightly. Nothing changed.");
+        if (ReleaseLines.Line(data) != line)
+            throw new InvalidOperationException($"Release {version} belongs to line {ReleaseLines.Line(data)}, not followed line {line}. To change lines deliberately, use estate upgrade --line {ReleaseLines.Line(data)} --to {version} --check. Nothing changed.");
+        if (!ReleaseFollowing.Allows(line, channel, data))
+            throw new InvalidOperationException($"Release {version} in line {line} is not at channel {channel} or more stable. Choose a target within the followed channel, or explicitly change it with --channel {(ReleaseLines.Channel(data) is "stable" or "lts" ? "prerelease" : ReleaseLines.Channel(data))}. Nothing changed.");
         long toFormat = data.TryGetProperty("recordFormat", out JsonElement format) && format.TryGetProperty("writes", out JsonElement writes) && writes.TryGetInt64(out long w) ? w : manifest.RecordFormat;
         if (toFormat < manifest.RecordFormat)
         {
@@ -194,8 +216,9 @@ public static class EstateUpgrade
         IReadOnlyList<RecordReference> anchored = steps.Contains("record-format-2")
             ? [.. model.OfType("admission").Where(a => a.Signatures.Count == 0).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).Select(a => new RecordReference("admission", a.Id, a.ComputedHash))]
             : [];
-        string fromPin = manifest.Mode == "source" ? $"source {manifest.Repository}@{manifest.Commit}" : manifest.Describe();
-        return new UpgradePlan(fromPin, $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts, anchored);
+        string fromPin = manifest.Mode == "source" && manifest.Line == "current" && manifest.Channel == "stable"
+            ? $"source {manifest.Repository}@{manifest.Commit}" : manifest.Describe();
+        return new UpgradePlan(fromPin, $"release {version}" + EstateManifest.FollowingSuffix(line, channel), manifest.RecordFormat, toFormat, steps, release, artifacts, anchored) { Line = line, Channel = channel };
     }
 
     private sealed class Restore : IDisposable
@@ -277,6 +300,8 @@ public static class EstateUpgrade
         };
         if (VericairnReleaseObservation.Is(plan.Release))
             manifest["vericairn"]!["release"] = new JsonObject { ["type"] = "observation", ["id"] = plan.Release.Id, ["hash"] = plan.Release.ComputedHash };
+        if (plan.Line != "current") manifest["vericairn"]!["line"] = plan.Line;
+        if (plan.Channel != "stable") manifest["vericairn"]!["channel"] = plan.Channel;
         using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
         return CanonicalJson.SerializePrettyUtf8(document.RootElement);
     }

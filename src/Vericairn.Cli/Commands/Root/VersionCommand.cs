@@ -12,7 +12,7 @@ internal sealed class VersionCommand : Command
     public VersionCommand(CommandContext context, ReleaseUpdates updates)
         : base("version", "Print the version. " + UpdateNotices.Help)
     {
-        SetAction(_ => UpdateNotices.Run(context, updates, () => Execute(context)));
+        SetAction(parseResult => UpdateNotices.Run(context, updates, () => Execute(context), parseResult.GetValue(context.EstateOption)!));
     }
 
     private static int Execute(CommandContext context)

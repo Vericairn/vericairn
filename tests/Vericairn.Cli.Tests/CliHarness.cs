@@ -65,6 +65,9 @@ internal static class CliHarness
     internal static Outcome RunWithUpdates(ReleaseUpdates? updates, params string[] args)
         => RunCommand(updates, null, args);
 
+    internal static Outcome RunWithApiAndUpdates(IEstateApi api, ReleaseUpdates updates, params string[] args)
+        => RunCommand(updates, api, args);
+
     internal static Outcome RunWithApi(IEstateApi api, string? input, params string[] args)
     {
         TextReader previous = Console.In;

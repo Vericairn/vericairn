@@ -16,6 +16,6 @@ internal sealed class StatusCommand : Command
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         Options.Add(observeStatus);
         Options.Add(observer);
-        SetAction(parseResult => UpdateNotices.Run(context, updates, () => operations.Status(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(context.JsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), context.Presentation.Read(parseResult))));
+        SetAction(parseResult => UpdateNotices.Run(context, updates, () => operations.Status(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(context.JsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), context.Presentation.Read(parseResult)), parseResult.GetValue(context.EstateOption)!));
     }
 }

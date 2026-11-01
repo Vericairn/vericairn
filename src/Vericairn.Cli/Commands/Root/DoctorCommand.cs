@@ -12,6 +12,6 @@ internal sealed class DoctorCommand : Command
         : base("doctor", "Check this machine's prerequisites. " + UpdateNotices.Help)
     {
         var operations = new MachineDiagnostics(context);
-        SetAction(parseResult => UpdateNotices.Run(context, updates, () => operations.Doctor(parseResult.GetValue(context.EstateOption)!)));
+        SetAction(parseResult => UpdateNotices.Run(context, updates, () => operations.Doctor(parseResult.GetValue(context.EstateOption)!), parseResult.GetValue(context.EstateOption)!));
     }
 }

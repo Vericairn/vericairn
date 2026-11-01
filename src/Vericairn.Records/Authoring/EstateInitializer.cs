@@ -26,6 +26,12 @@ public sealed record EstateInitialization(string Name, string Slug, string Purpo
 {
     /// <summary>Optional verified published dependency; absent, initialization retains its offline source pin.</summary>
     public VerifiedRelease? Release { get; init; }
+
+    /// <summary>The followed release line, defaulting to current.</summary>
+    public string Line { get; init; } = "current";
+
+    /// <summary>The followed release channel, defaulting to stable.</summary>
+    public string Channel { get; init; } = "stable";
 }
 
 /// <summary>The records and manifest of a new estate before anything is written.</summary>
@@ -107,6 +113,8 @@ public static class EstateInitializer
         };
         if (initialization.Release is { } release)
         {
+            if (!ReleaseFollowing.Allows(initialization.Line, initialization.Channel, "current", "stable", release.Build.Version))
+                throw new InvalidOperationException("The verified dependency belongs to current/stable and does not match the requested line and channel. Use a published release record for another line. Nothing changed.");
             if (!string.Equals(initialization.Repository, VerifiedRelease.Repository, StringComparison.OrdinalIgnoreCase) || initialization.Commit != release.Build.Commit
                 || release.Build.Writes != RecordFormats.Current || RecordFormats.Reads.Any(f => !release.Build.Reads.Contains(f)))
                 throw new InvalidOperationException("The verified release does not match this initialization's source or record formats. Run the target release's command line and use its repository and commit. Nothing changed.");
@@ -120,6 +128,8 @@ public static class EstateInitializer
                 ["release"] = new JsonObject { ["type"] = "observation", ["id"] = observation.Envelope.Id, ["hash"] = observation.Envelope.ComputedHash },
             };
         }
+        if (initialization.Line != "current") manifest["vericairn"]!["line"] = initialization.Line;
+        if (initialization.Channel != "stable") manifest["vericairn"]!["channel"] = initialization.Channel;
         byte[] manifestBytes;
         using (JsonDocument document = JsonDocument.Parse(manifest.ToJsonString()))
         {
