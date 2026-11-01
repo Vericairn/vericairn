@@ -223,9 +223,10 @@ public class DocsTests
             Assert.True(pinStart >= 0);
             int pinEnd = pinReference.IndexOf("\n#", pinStart + 1, StringComparison.Ordinal);
             string pinSection = System.Net.WebUtility.HtmlDecode(pinEnd < 0 ? pinReference[pinStart..] : pinReference[pinStart..pinEnd]);
-            foreach (string option in new[] { "--by", "--summary", "--title", "--expected", "--render-template" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
-            Assert.Contains("exact estate file bytes", pinSection, StringComparison.Ordinal);
-            Assert.Contains("forks", pinSection, StringComparison.Ordinal);
+            foreach (string option in new[] { "--by", "--summary", "--title", "--expected", "--render-template", "--convert-revisions", "--decision" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
+            Assert.Contains("regenerate their revision history and hash authored content", pinSection, StringComparison.Ordinal);
+            Assert.Contains("existing whole-file pins keep their mode", pinSection, StringComparison.Ordinal);
+            foreach (string field in new[] { "hashMode", "revisionHistory", "authored-revisions-v1" }) Assert.Contains(field, records, StringComparison.Ordinal);
             Assert.Contains("docs companions", commands);
             Assert.Contains("docs render", commands);
             foreach (string action in new[] { "generate", "check", "compare" }) Assert.Contains("guides " + action, commands);
