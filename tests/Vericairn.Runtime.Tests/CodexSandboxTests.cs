@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -20,7 +21,7 @@ public class CodexSandboxTests
         LaunchContext context = fixture.Prepare();
         string configuration = File.ReadAllText(Path.Combine(context.Environment["CODEX_HOME"], "config.toml"));
         IReadOnlyList<string> command = fixture.Launcher.Command(context);
-        string[] expected = [Path.Combine(context.Workspace, ".git")];
+        string[] expected = [Path.Combine(context.Workspace, ".git"), .. context.Environment.TryGetValue("TMPDIR", out string? temporary) ? [temporary] : Array.Empty<string>()];
         Assert.Equal(expected, Roots(configuration.Split('\n')));
         Assert.Equal(expected, Roots(command));
         Assert.DoesNotContain("--add-dir", command);
@@ -107,7 +108,13 @@ public class CodexSandboxTests
         Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
         string[] command = JsonSerializer.Deserialize<string[]>(File.ReadAllText(fixture.Probe.Report))!;
         string workspace = command[Array.IndexOf(command, "--cd") + 1];
-        Assert.Equal([Path.Combine(workspace, ".git")], Roots(command));
+        string[] roots = Roots(command);
+        Assert.Equal(Path.Combine(workspace, ".git"), roots[0]);
+        // The run's own temporary directory, inside its run directory, is the only other writable root.
+        Assert.StartsWith(Path.Combine(VericairnHome.Path(), "estates") + Path.DirectorySeparatorChar, roots[1], StringComparison.Ordinal);
+        Assert.Equal("runs", Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(roots[1]))));
+        Assert.Equal("tmp", Path.GetFileName(roots[1]));
+        Assert.Equal(2, roots.Length);
         Assert.DoesNotContain(Path.Combine(fixture.Run.Clone, ".git"), Roots(command));
         Assert.Equal(0, fixture.Run.Service.Check().Errors);
     }
@@ -115,6 +122,9 @@ public class CodexSandboxTests
     private static string[] Roots(IEnumerable<string> configuration)
     {
         string value = Assert.Single(configuration, line => line.StartsWith(Prefix, StringComparison.Ordinal));
-        return JsonSerializer.Deserialize<string[]>(value[Prefix.Length..^1])!;
+        int end = value.IndexOf(']', Prefix.Length) + 1;
+        // Neither the inherited TMPDIR nor /tmp is ever a writable root.
+        Assert.Equal(",exclude_tmpdir_env_var=true,exclude_slash_tmp=true}", value[end..]);
+        return JsonSerializer.Deserialize<string[]>(value[Prefix.Length..end])!;
     }
 }

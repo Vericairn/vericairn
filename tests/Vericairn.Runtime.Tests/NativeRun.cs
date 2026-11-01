@@ -18,9 +18,13 @@ internal sealed class NativeRun : IDisposable
         Run = new(budget: budget ?? """{"wallMinutes":60,"attemptsPerStep":3}""", keepOperatorKey: keepOperatorKey || qualify);
         if (newer) Probe.Behavior("version", harness == "codex" ? "codex-cli 0.160.0" : "2.1.297 (Claude Code)");
         var environment = new Dictionary<string, string>(Probe.Context.Environment, WorkerEnvironment.Names) { ["LANG"] = "C" };
+        // Every run is given its own temporary directory, so the admitted inventory is inspected with one too.
+        foreach (string name in RunDirectory.TemporaryVariables) environment.TryAdd(name, Path.Combine(Path.GetTempPath(), "inspection"));
         string[] variables = ["VERICAIRN_RUN", "VERICAIRN_STOP_FILE", "VERICAIRN_BRIEF", "VERICAIRN_CONDITION"];
         foreach (string name in variables) environment[name] = "synthetic-binding";
         var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
+        // As at dispatch, Vericairn's MCP server keeps the worker's own temporary directory.
+        foreach (string name in RunDirectory.TemporaryVariables) serverEnvironment[name] = environment[name];
         IReadOnlyList<string> server = [.. Probe.Context.McpServer, "--estate", Run.Estate.Root, "mcp", "serve", "--as", Run.Estate.BuilderId];
         LaunchContext inspection = Probe.Context with { Environment = environment, McpServer = server, McpEnvironment = serverEnvironment };
         File.WriteAllText(inspection.McpConfiguration, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));

@@ -135,6 +135,28 @@ public sealed class RunDirectory
     /// <summary>The harness's output, as it wrote it.</summary>
     public string OutputLog => System.IO.Path.Combine(Path, "output.log");
 
+    /// <summary>The run's own temporary directory, given to the harness in place of the user's.</summary>
+    public string Temporary => System.IO.Path.Combine(Path, "tmp");
+
+    /// <summary>The variables that name a temporary directory on this platform.</summary>
+    public static IReadOnlyList<string> TemporaryVariables => OperatingSystem.IsWindows() ? ["TMPDIR", "TEMP", "TMP"] : ["TMPDIR"];
+
+    /// <summary>
+    /// Gives the harness <paramref name="temporary"/> in place of the user's temporary directory, and keeps the user's for Vericairn's MCP
+    /// server, which runs outside the harness's sandbox and must not keep its files where the agent can write. Dispatch and qualification
+    /// both use it, so their probes see the same environment names.
+    /// </summary>
+    public static void UseTemporary(IDictionary<string, string> harness, IDictionary<string, string> server, string temporary)
+    {
+        ArgumentNullException.ThrowIfNull(harness);
+        ArgumentNullException.ThrowIfNull(server);
+        foreach (string name in TemporaryVariables)
+        {
+            if (harness.TryGetValue(name, out string? shared)) server[name] = shared;
+            harness[name] = temporary;
+        }
+    }
+
     /// <summary>The MCP configuration the harness was given.</summary>
     public string McpConfiguration => System.IO.Path.Combine(Path, "mcp.json");
 
@@ -154,13 +176,15 @@ public sealed class RunDirectory
     /// <summary>True when this machine holds the run's directory.</summary>
     public bool Exists => Directory.Exists(Path);
 
-    /// <summary>Creates the directory, readable by its owner only on Linux and macOS.</summary>
+    /// <summary>Creates the directory and its temporary directory, readable by their owner only on Linux and macOS.</summary>
     public void Create()
     {
         Directory.CreateDirectory(Path);
+        Directory.CreateDirectory(Temporary);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(Temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
 

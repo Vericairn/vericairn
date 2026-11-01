@@ -176,7 +176,7 @@ public sealed class RunDirectoryRetryTests : IDisposable
     [InlineData(true)]
     public void AnAbsentFileOrDirectoryIsNotAnAccessFailure(bool missingDirectory)
     {
-        if (missingDirectory) Directory.Delete(observer.Path);
+        if (missingDirectory) Directory.Delete(observer.Path, recursive: true);
         var reader = new RunDirectory(estate, run)
         {
             RetryWait = _ => Assert.Fail("An absent file needs no retry."),
