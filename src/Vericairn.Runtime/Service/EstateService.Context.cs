@@ -162,10 +162,12 @@ public sealed partial class EstateService
                     string path = pinned.GetProperty("path").GetString()!;
                     if (model.ById.TryGetValue(revision, out RecordEnvelope? record) && record.Type == "document-revision" &&
                         record.ComputedHash == pinned.GetProperty("revisionHash").GetString() &&
-                        EstateModel.BodyString(record, "path") == path && EstateModel.BodyString(record, "hash") == byteHash)
+                        EstateModel.BodyString(record, "path") == path && EstateModel.BodyString(record, "hash") == byteHash
+                        && EstateModel.BodyString(record, "hashMode") == (pinned.TryGetProperty("hashMode", out JsonElement mode) ? mode.GetString() : null))
                     {
                         original = ContextSelection.LocalOriginal(model.Root, path, byteHash,
-                            pinned.TryGetProperty("history", out JsonElement history) && history.GetString() == "local" ? Providers.Source("git") : null);
+                            pinned.TryGetProperty("history", out JsonElement history) && history.GetString() == "local" ? Providers.Source("git") : null,
+                            EstateModel.BodyString(record, "hashMode"));
                     }
                 }
 

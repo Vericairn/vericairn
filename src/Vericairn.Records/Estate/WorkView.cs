@@ -178,7 +178,9 @@ public static class WorkView
             text.Append("## Design documents (current revisions)\n\n");
             foreach (RecordEnvelope revision in model.Current("document-revision").OrderBy(r => EstateModel.BodyString(r, "path"), StringComparer.Ordinal))
             {
-                text.Append("- ").Append(EstateModel.BodyString(revision, "path")).Append(" (revision ").Append(revision.Body.TryGetProperty("revision", out JsonElement rev) ? rev.GetRawText() : "?").Append(", ").Append(EstateModel.BodyString(revision, "hash")).Append(")\n");
+                string ordinal = RevisionLines.IsAuthored(revision) ? RevisionLines.Ordinal(model, revision).ToString(CultureInfo.InvariantCulture)
+                    : revision.Body.TryGetProperty("revision", out JsonElement rev) ? rev.GetRawText() : "?";
+                text.Append("- ").Append(EstateModel.BodyString(revision, "path")).Append(" (revision ").Append(ordinal).Append(", ").Append(EstateModel.BodyString(revision, "hash")).Append(")\n");
             }
         }
         else

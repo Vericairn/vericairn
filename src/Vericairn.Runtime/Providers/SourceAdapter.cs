@@ -75,6 +75,10 @@ public interface ISourceAdapter
     /// </summary>
     byte[]? ReadFileAtHash(string root, string relativePath, string hash) => null;
 
+    /// <summary>Reads the bytes selected by a document pin's hash mode. Implementations that only support whole files return null for other modes.</summary>
+    byte[]? ReadFileAtHash(string root, string relativePath, string hash, string? hashMode) =>
+        hashMode is null ? ReadFileAtHash(root, relativePath, hash) : null;
+
     /// <summary>
     /// Unexpected top-level estate entries that repository-owned ignore rules exclude and the index does not track,
     /// including descendants. Never uses machine-wide ignore rules or changes the repository.

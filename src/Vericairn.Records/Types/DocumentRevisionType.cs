@@ -12,7 +12,7 @@ public sealed class DocumentRevisionType : IRecordType
     public string Name => "document-revision";
 
     /// <inheritdoc />
-    public string Summary => "Pins a design or docs file at an exact content hash and revision number; editing the file requires a new revision record.";
+    public string Summary => "Pins a design or docs file at an exact content hash; authored-content pins generate their revision history from records.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -25,11 +25,14 @@ public sealed class DocumentRevisionType : IRecordType
     [
         new("path", "path", true, "Repository-relative path under design/ or docs/; format 3 also admits README.md for the estate's template instance."),
         new("title", "string", true, "Document title."),
-        new("hash", "hash", true, "sha256 of the file bytes."),
-        new("bytes", "integer", true, "File size in bytes."),
+        new("hash", "hash", true, "sha256 of the bytes selected by hashMode; whole-file bytes when absent."),
+        new("bytes", "integer", true, "Size of the bytes selected by hashMode."),
         new("mediaType", "string", true, "For example text/markdown."),
-        new("revision", "integer", true, "1 for the first revision; later revisions supersede the previous record."),
+        new("revision", "integer", true, "Sequential for whole-file pins; advisory for authored-revisions-v1, whose displayed ordinal comes from recorded time and id."),
         new("summary", "string", true, "What this revision is or changes."),
+        new("hashMode", "string", false, "authored-revisions-v1 excludes the generated revision payload, retaining its markers.", 3),
+        new("decision", "ulid", false, "The exact decision carried by this revision.", 3),
+        new("revisionHistory", "object[]", false, "Conversion's preserved lines, each bound to an old revision id and record hash.", 3),
     ];
 
     /// <inheritdoc />
@@ -42,9 +45,30 @@ public sealed class DocumentRevisionType : IRecordType
         body.Text("title", true, 300);
         body.Hash("hash", true);
         body.Number("bytes", true, 0, 1L << 40);
-        body.Text("mediaType", true, 100);
+        string? mediaType = body.Text("mediaType", true, 100);
         long? revision = body.Number("revision", true, 1, 1_000_000);
         body.Text("summary", true, 4000);
+        bool authored = body.Since(3, "hashMode") && body.Enum("hashMode", false, RevisionLines.HashMode) == RevisionLines.HashMode;
+        if (authored && mediaType != "text/markdown") context.Error("document.hash-mode", "The generated revision hash mode requires Markdown content.");
+        if (body.Has("revisionHistory") && !authored) context.Error("document.history", "Preserved history belongs to an authored-content revision pin.");
+        if (body.Since(3, "decision")) context.RequireReference("decision", body.Ulid("decision", false), "decision");
+        if (body.Since(3, "revisionHistory"))
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (BodyReader entry in body.NestedArray("revisionHistory", false) ?? [])
+            {
+                string? id = entry.Ulid("id", true);
+                string? hash = entry.Hash("hash", true);
+                string? line = entry.Text("line", true, 16000);
+                entry.NoOtherKeys();
+                Model.RecordEnvelope? pin = context.RequireReference("revisionHistory.id", id, Name);
+                if (!authored || pin is null || pin.Id == context.Record.Id || pin.AtTime > context.Record.AtTime
+                    || EstateModel.BodyString(pin, "path") != path || pin.ComputedHash != hash || id is null || !seen.Add(id)
+                    || line is null || !pin.Body.TryGetProperty("revision", out var number) || !number.TryGetInt64(out long value)
+                    || !RevisionLines.ValidLegacyLine(line, value))
+                    context.Error("document.history", "Each preserved revision line must name one exact earlier revision of this path and its original advisory number.");
+            }
+        }
         body.NoOtherKeys();
         if (path is null || revision is null)
         {
@@ -64,6 +88,16 @@ public sealed class DocumentRevisionType : IRecordType
         Model.RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
         if (previous is not null && previous.Type == Name)
         {
+            if (authored)
+            {
+                var ancestors = new HashSet<string>(StringComparer.Ordinal) { context.Record.Id };
+                for (Model.RecordEnvelope? ancestor = previous; ancestor is not null; ancestor = context.Find(ancestor.Supersedes))
+                {
+                    if (ancestors.Add(ancestor.Id)) continue;
+                    context.Error("document.cycle", "Document revision predecessors must form an acyclic history.");
+                    break;
+                }
+            }
             string? previousPath = previous.Body.TryGetProperty("path", out System.Text.Json.JsonElement p) ? p.GetString() : null;
             long previousRevision = previous.Body.TryGetProperty("revision", out System.Text.Json.JsonElement r) && r.TryGetInt64(out long value) ? value : 0;
             if (previousPath != path)
@@ -71,12 +105,12 @@ public sealed class DocumentRevisionType : IRecordType
                 context.Error("document.path-changed", "A document revision supersedes a revision of the same path.");
             }
 
-            if (revision != previousRevision + 1)
+            if (!authored && revision != previousRevision + 1)
             {
                 context.Error("document.revision", $"Revision must be {previousRevision + 1}, following the superseded record.");
             }
         }
-        else if (revision != 1)
+        else if (!authored && revision != 1)
         {
             context.Error("document.revision", "The first revision of a document is revision 1 and supersedes nothing.");
         }

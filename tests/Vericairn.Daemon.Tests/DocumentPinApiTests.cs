@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Template;
 using Microsoft.Extensions.DependencyInjection;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -37,8 +38,32 @@ public sealed class DocumentPinApiTests
         JsonElement schema = contract.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("DocumentPinRequest");
         Assert.Equal(["path", "by", "summary"], schema.GetProperty("required").EnumerateArray().Select(p => p.GetString()));
         Assert.True(schema.GetProperty("properties").TryGetProperty("expected", out _));
+        Assert.Equal("boolean", schema.GetProperty("properties").GetProperty("convertRevisions").GetProperty("type").GetString());
+        Assert.Equal("string", schema.GetProperty("properties").GetProperty("decision").GetProperty("type").GetString());
         Assert.True(RequestScope.Covers("POST /v1/documents/pin"));
         Assert.True(RequestScope.Covers(typeof(DocumentPinRequest)));
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task SdkCarriesTheAdditiveConversionAndDecisionFieldsThroughTheApi()
+    {
+        using var estate = new TestEstate(3);
+        const string path = "design/example.md";
+        estate.WriteFile(path, "# Example\n\nAuthored body.\n");
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Revise the design","statement":"Carry this direction.","summary":"Carry this direction.","synthesis":"Keep exact decisions.","effects":["Revise the design."],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[]}""");
+        using EstateService service = EstateService.Open(estate.Root);
+        using var http = new HttpClient(new PinRouteHandler(service)) { BaseAddress = new Uri("http://fixture.invalid") };
+        using var sdk = new VericairnClient(http);
+        DocumentPinResponse response = await sdk.DocumentPinAsync(new(path, estate.OperatorId, "Generate the revision history.")
+            { ConvertRevisions = true, Decision = decision.Id }, TestContext.Current.CancellationToken);
+        Assert.True(response.Ok, response.Problem?.Message);
+        Assert.Equal(1, response.Revision);
+        RecordEnvelope pin = service.Session.Load().ById[response.Written!.Id];
+        Assert.True(RevisionLines.IsAuthored(pin));
+        Assert.Equal(decision.Id, EstateModel.BodyString(pin, "decision"));
+        byte[] document = File.ReadAllBytes(Path.Combine(estate.Root, path));
+        Assert.Equal(ContentHash.Sha256(RevisionLines.AuthoredContent(document)), EstateModel.BodyString(pin, "hash"));
+        Assert.Contains("carries decision `" + decision.Id + "`:", Encoding.UTF8.GetString(document), StringComparison.Ordinal);
     }
 
     [Fact(Timeout = 30000)]

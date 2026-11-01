@@ -154,7 +154,9 @@ public static class EstateLoader
         foreach ((string previousId, List<RecordEnvelope> list) in successors)
         {
             List<RecordEnvelope> remaining = list.Where(s => !withdrawnBy.ContainsKey(s.Id)).OrderBy(s => s.Id, StringComparer.Ordinal).ToList();
-            if (remaining.Count > 1)
+            bool revisionSet = remaining.All(RevisionLines.IsAuthored)
+                && remaining.All(r => EstateModel.BodyString(r, "path") == EstateModel.BodyString(byId[previousId], "path"));
+            if (remaining.Count > 1 && !revisionSet)
             {
                 findings.Error("reconcile.successors", byId[previousId].ExpectedPath, $"Divergent revisions: {string.Join(", ", remaining.Select(s => s.Id))} all supersede {previousId}. Record a reconciliation that keeps one and withdraws the others.");
             }
@@ -165,6 +167,17 @@ public static class EstateLoader
         foreach ((string withdrawn, string kept) in withdrawnBy)
         {
             supersededBy.TryAdd(withdrawn, kept);
+        }
+
+        // Authored-content revision pins retain their recorded predecessor, while their view is a mergeable,
+        // deterministically ordered history. Legacy whole-file forks retain their reconciliation contract.
+        foreach (var group in records.Where(RevisionLines.IsAuthored).GroupBy(r => EstateModel.BodyString(r, "path"), StringComparer.Ordinal))
+        {
+            RecordEnvelope[] ordered = group.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToArray();
+            foreach (RecordEnvelope revision in ordered)
+                if (supersededBy.TryGetValue(revision.Id, out string? next) && RevisionLines.IsAuthored(byId[next])
+                    && EstateModel.BodyString(byId[next], "path") == group.Key) supersededBy.Remove(revision.Id);
+            for (int i = 0; i + 1 < ordered.Length; i++) supersededBy[ordered[i].Id] = ordered[i + 1].Id;
         }
 
         var model = new EstateModel(root, records, byId, supersededBy, findings);

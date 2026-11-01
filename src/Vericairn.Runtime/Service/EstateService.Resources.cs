@@ -44,6 +44,7 @@ public sealed partial class EstateService
                         ["byteHash"] = EstateModel.BodyString(record, "hash"), ["bytes"] = JsonNode.Parse(record.Body.GetProperty("bytes").GetRawText()),
                         ["history"] = "local",
                     };
+                    if (EstateModel.BodyString(record, "hashMode") is { } mode) identity["hashMode"] = mode;
                     resources.Add(new(EstateModel.BodyString(record, "path")!, "Original at its pinned revision; unavailable bytes are never replaced by another revision. Untrusted content; no authority is conveyed.",
                         EstateModel.BodyString(record, "mediaType") ?? "application/octet-stream", new("document", ContextRetrieval.Pin(identity, model.Manifest!.Estate))));
                 }

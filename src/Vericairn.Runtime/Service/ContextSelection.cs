@@ -108,7 +108,8 @@ internal static partial class ContextSelection
             string path = EstateModel.BodyString(revision, "path")!;
             string hash = EstateModel.BodyString(revision, "hash")!;
             bool mandatory = requiredDocuments.Contains(revision.Id);
-            byte[]? bytes = LocalOriginal(model.Root, path, hash, mandatory ? history : null);
+            string? hashMode = EstateModel.BodyString(revision, "hashMode");
+            byte[]? bytes = LocalOriginal(model.Root, path, hash, mandatory ? history : null, hashMode);
             var identity = new JsonObject
             {
                 ["kind"] = "document", ["path"] = path, ["revision"] = revision.Id,
@@ -116,6 +117,7 @@ internal static partial class ContextSelection
                 // A declaration alone does not verify a retained size.
                 ["bytes"] = bytes?.LongLength,
             };
+            if (hashMode is not null) identity["hashMode"] = hashMode;
             // The self-contained pin preserves retrieval behavior: optional originals stay working-tree-only.
             if (mandatory)
             {
@@ -228,11 +230,11 @@ internal static partial class ContextSelection
         }
     }
 
-    internal static byte[]? LocalOriginal(string root, string relative, string hash, ISourceAdapter? history = null)
+    internal static byte[]? LocalOriginal(string root, string relative, string hash, ISourceAdapter? history = null, string? hashMode = null)
     {
         // Only normalized repository files are eligible; never follow a link into machine-local custody.
         string[] parts = relative.Split('/');
-        if (parts.Length < 2 || parts[0] is not ("design" or "docs") || parts.Any(p => p is "" or "." or ".." || p.Contains('\\', StringComparison.Ordinal)))
+        if (hashMode is not (null or RevisionLines.HashMode) || parts.Length < 2 || parts[0] is not ("design" or "docs") || parts.Any(p => p is "" or "." or ".." || p.Contains('\\', StringComparison.Ordinal)))
         {
             return null;
         }
@@ -259,6 +261,11 @@ internal static partial class ContextSelection
 
         // File.Exists also returns false on denied directory traversal. Only genuine absence is
         // missing; access failures propagate to the context's generic, metadata-free refusal.
+        if (bytes is not null && hashMode == RevisionLines.HashMode)
+        {
+            try { bytes = RevisionLines.AuthoredContent(bytes); }
+            catch (Exception error) when (error is InvalidOperationException or ArgumentException) { bytes = null; }
+        }
         if (bytes is not null && ContentHash.Sha256(bytes) == hash)
         {
             return bytes;
@@ -266,7 +273,7 @@ internal static partial class ContextSelection
 
         try
         {
-            bytes = history?.ReadFileAtHash(root, relative, hash);
+            bytes = history?.ReadFileAtHash(root, relative, hash, hashMode);
         }
         catch (ProviderRefusedException)
         {

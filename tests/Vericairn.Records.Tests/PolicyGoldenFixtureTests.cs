@@ -36,6 +36,9 @@ public class PolicyGoldenFixtureTests
         Assert.False(requestModel.Findings.HasErrors, string.Join('\n', requestModel.Findings));
         using TestEstate firstParty = FirstPartyTemplateTests.RecordedFixture();
         EstateModel firstPartyModel = firstParty.Load();
+        using TestEstate revisionHistory = RevisionConversionHistoryTests.RecordedFixture();
+        EstateModel revisionModel = revisionHistory.Load();
+        Assert.False(revisionModel.Findings.HasErrors, string.Join('\n', revisionModel.Findings));
         using PolicyFixture lines = ProductCadenceTests.RecordedFixture();
         // A work order held from disclosure carries the format-3 disclosure field.
         lines.Add("work-order", new JsonObject
@@ -63,9 +66,9 @@ public class PolicyGoldenFixtureTests
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)).Concat(revisionModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))).Concat(revisionModel.Records.Select(r => (r, revisionHistory.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));
