@@ -111,4 +111,7 @@ Which harnesses have been observed using this server, from the estate's qualific
 | Windsurf | non-claim: not observed |
 | aider | non-claim: not observed |
 | Cline | non-claim: not observed |
+| LangGraph | non-claim: not observed |
+| CrewAI | non-claim: not observed |
+| AutoGen | non-claim: not observed |
 

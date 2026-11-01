@@ -22,7 +22,7 @@ public static class Orientation
     public static readonly IReadOnlyList<(string File, string Harness)> Pointers = [("CLAUDE.md", "Claude Code"), ("GEMINI.md", "Gemini CLI")];
 
     /// <summary>Harnesses the matrix names; every one is a non-claim until an observation says otherwise.</summary>
-    public static readonly IReadOnlyList<string> Harnesses = ["Claude Code", "Codex", "Gemini CLI", "GitHub Copilot", "Cursor", "Windsurf", "aider", "Cline"];
+    public static readonly IReadOnlyList<string> Harnesses = ["Claude Code", "Codex", "Gemini CLI", "GitHub Copilot", "Cursor", "Windsurf", "aider", "Cline", "LangGraph", "CrewAI", "AutoGen"];
 
     /// <summary>What follows the harness's name in the profile of a qualification of its use of this server: "Claude Code over MCP".</summary>
     public const string HarnessProfileSuffix = " over MCP";
