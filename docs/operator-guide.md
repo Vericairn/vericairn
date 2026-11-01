@@ -1001,7 +1001,7 @@ To dispatch the next eligible goal step instead:
 vericairn goal step <goal> --by <authorized principal> --repository <repository id> --wall-minutes 10
 ```
 
-`claude-code` and `codex` configure the harness's native goal mode and the estate's stdio MCP server. Generic dispatch is refused because it has no complete environment inventory. Install and authenticate a native harness separately. The compiled baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; no adjacent version or other alpha build is implicitly qualified. Codex must expose its goals feature and the complete supported feature inventory. Settings listed by `worker launchers` include local command overrides and `stall-seconds`. Inventory probes and stand-in tests do not establish live inference, sign-in or provider billing.
+`claude-code` and `codex` configure the harness's native goal mode and the estate's stdio MCP server. Generic dispatch is refused because it has no complete environment inventory. Install and authenticate a native harness separately. The compiled baselines are codex-cli `0.159.0-alpha.12.1` (from 0.9.0 also `0.163.0-alpha.10.2`, bundled with the desktop app, and `0.163.0`; FIX-81) and Claude Code `2.1.296`; no adjacent version or other alpha build is implicitly qualified. A desktop app update that moves its bundled Codex to another version stops Codex workers that run it, and the refusal names the version or each feature that differs; pin an installation as the [software guide](software.md#desktop-app-updates-and-a-pinned-codex-fix-81) describes. Codex must expose its goals feature and the complete supported feature inventory. Settings listed by `worker launchers` include local command overrides and `stall-seconds`. Inventory probes and stand-in tests do not establish live inference, sign-in or provider billing.
 
 FIX-18 admits Codex's `max` effort as well as `none`, `minimal`, `low`, `medium`, `high` and `xhigh`.
 The harness checks whether the selected model supports the effort at launch; an observed refusal settles
@@ -1086,7 +1086,7 @@ vericairn goal custody-exception <goal> --by <sponsor or operator for an agent-s
 
 The exception covers this goal revision, appears in each run's intent, and is checked again immediately before launch. It grants no extra spending or publication authority. A revised goal needs a fresh exception.
 
-With `--detach`, a serving daemon supervises the run after the command returns. Otherwise the command waits; Ctrl+C requests a stop. Stop or hand over explicitly:
+With `--detach`, a serving daemon supervises the run after the command returns. Otherwise the command waits; Ctrl+C requests a stop. A foreground run must outlive its shell: when no daemon serves the estate, the command's own process supervises the run, and closing its terminal ends that supervision while the harness may run on. For a run that should outlive the shell, start the daemon with `vericairn runtime start` and launch with `--detach`. If a supervising process dies anyway, `worker stop` or `worker settle` settles the run as exited without observation once that process and the harness are gone and nothing was observed for longer than its stall limit: it is charged the usage observed up to its last heartbeat, never more than its cap, its branch is released and its workspace is kept for the next attempt (`software.md` has the rule). Stop or hand over explicitly:
 
 ```sh
 vericairn worker stop <run> --by <authorized principal> --reason "The operator is taking over." --grace 10

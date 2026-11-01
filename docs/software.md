@@ -837,8 +837,9 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
 5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and the whole
    containment boundary's exit. Root exit or closed output alone does not end a run. A worker that stops observing
-   leaves the run in flight, charged at its cap. A run approaching its wall or reported-token allowance is stopped by
-   the worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
+   leaves the run in flight, charged at its cap, until a stop or settlement finds that worker and the harness gone (a
+   run whose supervising worker died, below). A run approaching its wall or reported-token allowance is stopped by the
+   worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
@@ -861,6 +862,13 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
+
+**A foreground run must outlive its shell.** When no daemon serves the estate, `worker run` and `goal step` without
+`--detach` supervise the run in their own process, as `runtime serve` serves in the foreground. Closing that terminal or
+shell ends the process and its observation, while the harness may run on unobserved. For a run that must outlive the
+shell, start the daemon in the background with `vericairn runtime start` (or register it with `runtime install`),
+launch with `--detach` and follow the run with `worker runs`. A run whose supervising process died is settled as
+described below.
 
 **The custody precondition** (design/goals.md § 10). A key that a store of this machine holds for the operating-system
 user the worker runs as can be used by the agent, which runs as that user. So the worker launches nothing while a device
@@ -890,7 +898,8 @@ file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to its proc
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
 named) has passed, the worker terminates its containment boundary; containment requires observing the whole boundary exited. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
-and the run stays in flight. Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
+and the run stays in flight, unless the worker that supervised it died: then the stop settles it as described below.
+Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
 an agent sponsors) and the principal who started the run may stop it, on every profile; anyone else is refused before
 anything is asked of the run. For a device-signed request, the runtime rechecks the requesting device's admission and
 authenticated key (and its local-network permission on that profile) under the estate's write lock before storing the
@@ -914,6 +923,28 @@ twice. Merge any branch or copy that holds it. Once none does, `vericairn worker
 marked and the requester confirmed the records. The runtime's start never settles such a run. A fact the
 observation lacks stays unresolved with the confirmation too, and a recorded settlement is never written twice.
 
+**A run whose supervising worker died (0.9.0).** When the process supervising a run dies, for example a foreground
+`worker run` whose shell closed, nothing observes the run's exit. `worker stop`, `worker settle` and the runtime's start
+settle such a run as exited without observation, on all of this evidence from the retained observation on the machine
+that ran it: no worker there supervises it; nothing, neither its last heartbeat nor later output or event, was observed
+for longer than its stall limit (the `stallSeconds` its intent pinned, and at least the freshness window); the recorded
+worker process is gone; and the harness's whole boundary is gone. On Linux and macOS no member of its process group may
+remain; on Windows its Job Object closed with the worker's last handle, which ended every member. A process that exists
+and started by the launch, or that cannot be inspected, counts as running, so a reused process id never settles a run.
+
+The settlement is `known-failure`. Its observed summary and evidence say that the exit was not observed; its scope and
+attempt audits are unverified, with an `audit-unverified` warning; a stop asked of the run is recorded with the facts
+observed, normally requested only, and never as contained. It is charged the usage observed up to the last heartbeat:
+wall minutes from launch to that heartbeat and the tokens reported by then, each at most its cap. A unit not observed is
+listed as unreported and charged at its cap, as tokens are when the harness reported none, and currency always is, since
+no launcher reads a price. The settlement releases the branch and leaves the workspace untouched, with its commits and
+uncommitted files, for the next attempt; no branch is fetched into the registered clone. It is recorded once, like any
+settlement; a later stop, settle or start finds it settled.
+
+Anything less keeps the earlier answer: the run stays in flight, charged at its cap, and the stop or settle reply says
+what is missing. On Linux and macOS a harness can outlive its worker, and no worker then transmits a stop to it; its run
+settles once its process group has exited, so end it yourself if it must stop sooner.
+
 The same principals who may stop a run may request settlement. Startup uses the original run author's current
 standing; record validation and signing still apply. A run still being observed, or already settled, is refused
 with its reason. A missing, unreadable, inconsistent or insufficient observation stays unresolved, keeps its
@@ -925,7 +956,9 @@ Current workers retain the monotonic duration, reported usage and final audits b
 Older observations can supply the exit, timestamps, token usage, stop facts and signals they actually retained.
 For those observations, elapsed time comes from the retained UTC timestamps; absent currency usage remains
 unreported and charged at its cap, and missing final scope and attempt audits are explicitly unverified.
-Recovery never infers an exit from a stale heartbeat, a missing process or closed output.
+Recovery from retained exit facts never infers an exit from a stale heartbeat, a missing process or closed output; only
+the rule for a run whose supervising worker died, above, settles a run whose exit was not observed, and only on all of
+its evidence.
 
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
 ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
@@ -977,7 +1010,8 @@ the machine that ran them, never in a record or a repository.
 Limitations: launcher protocol tests use stand-in processes. The seven live Codex observations
 listed below include FIX-19's successful macOS commit; they qualify only the reported run path, not other
 harnesses, accounts or platforms.
-RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`. RUN-03 lets an
+RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`; FIX-81 in 0.9.0 adds Codex
+`0.163.0-alpha.10.2` and `0.163.0`, each Codex baseline checked against its own feature inventory. RUN-03 lets an
 authorized human qualify another exact installed version from the same local probes, without a product release.
 Stand-in executables test version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
 help established the flag baselines; these qualification tests do not start a real coding agent or its configured MCP
@@ -1776,15 +1810,31 @@ Qualification belongs to a launcher and one exact observed version. These compil
 
 | Launcher | Shipped baseline | Admission evidence |
 |---|---|---|
-| `codex` | `0.159.0-alpha.12.1` | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
+| `codex` | `0.159.0-alpha.12.1`; from 0.9.0 (FIX-81) also `0.163.0-alpha.10.2`, bundled with the desktop app, and `0.163.0`, each with its own exact effective feature inventory | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
 | `claude-code` | `2.1.296` | Exact `--version` response and documented flags in `--help`; fixed built-in tool selection; fresh login-only home; no external setting sources; strict, verified explicit MCP file; configuration and instruction inspection. |
 | `generic` | None | No complete inventory implementation. Worker dispatch stays refused, before executing its command. |
 
 A missing flag, failed or malformed probe, missing required feature, unexpected enabled feature, unqualified version,
 extra MCP server (even disabled), altered transport, duplicate MCP field or unaccounted MCP option refuses admission.
 Help must declare the short aliases used by the commands too: Codex's `-c` and Claude Code's `-p`.
-The generic launcher cannot inherit either native launcher's qualification. No version before or after the two exact
-versions above is implicitly qualified, including another Codex alpha build.
+From 0.9.0 (FIX-81) a Codex refusal names each enabled feature the launcher does not admit and the baseline's admitted
+list it was checked against. Every run switches off every baseline's disabled features, which an earlier baseline that
+does not know a feature ignores. A qualified version other than the baselines is checked against the newest baseline's
+features, and its exact inventory is pinned by its probe digests.
+The generic launcher cannot inherit either native launcher's qualification. No version before, between or after the
+exact versions above is implicitly qualified, including another Codex alpha build.
+
+#### Desktop app updates and a pinned Codex (FIX-81)
+
+The ChatGPT desktop app updates its bundled Codex in place. A worker that runs that executable keeps running only while
+the installed version is a shipped baseline or has a current qualification; after an update to another version, every
+Codex launch is refused before intent, naming the version or each feature that differs. Two routes keep workers running:
+
+- Pin an installation the desktop app does not update. Install a baseline into a directory of its own, for example
+  `npm install @openai/codex@0.163.0` there, and pass its executable to each run with
+  `--setting command=<path to that codex executable>`. Its login is provisioned the same way as any other Codex.
+- Qualify the new exact version with `worker qualify --launcher codex` when its features are admitted. A version that
+  enables a feature no baseline admits stays refused until a release qualifies it; the refusal names the feature.
 
 An operator can qualify an updated installation with either command:
 
@@ -1941,6 +1991,16 @@ Round three normalizes the comparisons, explicitly enables long paths in isolate
 link-safe cleanup for product scratch repositories and test workspaces. Main includes subsequent Windows path
 and cleanup corrections. The macOS observations listed here alone do not establish their Windows behavior.
 FIX-19 ships in 0.7.3; its live committing qualification remains macOS-only.
+
+FIX-81's live run, on macOS, used codex-cli `0.163.0-alpha.10.2`, the build the desktop app bundles, under this fix's development
+build, with the probe-scratch correction below, in a private copy of the public example estate. The worker admitted it
+as a shipped baseline. At `medium` effort it recorded 2 wall minutes and 242,266 tokens, authored its signed attempt and
+result through the estate MCP server, committed exactly the permitted `README.md` change in its own workspace repository,
+and settled observed-success; settlement fetched its branch into the registered clone. It raised `audit-unverified` and a
+`burn-rate` warning for its early token rate, and no tool-inventory or execution discrepancy. Codex 0.163's read-only probes
+name their empty scratch directory `tmp/arg0-<platform>` (`tmp/arg0-macos` here) instead of `tmp/arg0`, so the probe-scratch
+check admits either name, still only as an empty directory without links. This observation covers macOS and that exact build;
+`0.163.0` shares its reported feature inventory and was not run live.
 FIX-20 in 0.7.3 adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
 write forms through every supported wrapper, directory changes, opaque inputs and null devices. Stand-in worker
 runs check that credential and outside-write signals request containment, while null redirects and opaque warnings

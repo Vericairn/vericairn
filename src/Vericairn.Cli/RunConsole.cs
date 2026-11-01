@@ -55,7 +55,7 @@ internal static class RunConsole
         PrintRun(context, row);
         if (row.Status is "dispatched" or "not-started" or "uncertain")
         {
-            context.Output.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
+            context.Output.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run. Once the worker that supervised it and its harness are gone, with nothing observed for longer than its stall limit, worker stop or worker settle settles it as exited without observation.");
         }
     }
 

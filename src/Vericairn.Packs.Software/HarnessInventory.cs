@@ -210,10 +210,11 @@ internal static class HarnessInventory
             }
             if (name == "tmp")
             {
-                // Codex's read-only probes create empty tmp/arg0 directories. No files or aliases are admitted there.
+                // Codex's read-only probes create an empty tmp/arg0 directory, named tmp/arg0-<platform> from 0.163. No files or aliases
+                // are admitted there.
                 foreach (string child in Directory.EnumerateFileSystemEntries(entry))
                 {
-                    if (Path.GetFileName(child) != "arg0" || File.GetAttributes(child).HasFlag(FileAttributes.ReparsePoint)
+                    if (!ProbeScratch(Path.GetFileName(child)) || File.GetAttributes(child).HasFlag(FileAttributes.ReparsePoint)
                         || !Directory.Exists(child) || Directory.EnumerateFileSystemEntries(child).Any())
                     {
                         throw new ProviderRefusedException("The Codex probe scratch directory contains unadmitted entries.");
@@ -223,6 +224,9 @@ internal static class HarnessInventory
         }
         return home;
     }
+
+    private static bool ProbeScratch(string name) => name == "arg0"
+        || name.StartsWith("arg0-", StringComparison.Ordinal) && name.Length is > 5 and <= 24 && name[5..].All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c));
 
     public static bool Exists(string path)
     {

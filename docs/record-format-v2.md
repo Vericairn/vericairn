@@ -946,7 +946,8 @@ A superseding record may only revoke a qualified record, with `status: revoked` 
 version and probe digests. Requalification creates a new record from fresh probes. This differs from the
 existing release/platform `qualification` type, whose subject is a release and which feeds the MCP matrix.
 
-The worker admits the compiled codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296` baselines or another
+The worker admits the compiled codex-cli `0.159.0-alpha.12.1` (from 0.9.0 also `0.163.0-alpha.10.2` and `0.163.0`, FIX-81)
+and Claude Code `2.1.296` baselines or another
 exact version whose local probe digests match a current unrevoked qualification. Its immutable
 `execution.harnessAdmission` contains `kind` (`baseline` or `qualification`), launcher, version and probes;
 a qualification admission also pins `record` and `hash`. The runtime rechecks admission after the dispatch
