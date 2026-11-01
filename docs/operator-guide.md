@@ -1533,3 +1533,27 @@ The [operator request guide](operator-requests.md) explains exact draft hashes,
 publication intent and observed destinations, cited operator words for an agent's
 close, observations that close a request, and carrying existing open asks over.
 Request closure does not accept work or answer a decision question.
+
+## 31. Asking for help: the support bundle
+
+When you ask for help, whether from a support service, an agent or a public issue, `vericairn support bundle`
+gathers what support needs and prints all of it:
+
+```sh
+vericairn support bundle
+vericairn support bundle --out bundle.json
+```
+
+It holds the Vericairn version and build, the platform, which runtime served it (daemon or embedded), the
+estate's pin, record count, status counts by state (work orders, assignments, releases, operations, runs), the
+estate check's counts with each finding's severity, code and location, the runtime log's recent error lines,
+and whether the local-network profile and each native launcher are configured.
+
+It leaves out every record body, title and text, the estate's and principals' names, network addresses, and
+each finding's message, which may quote a record. It then redacts every string by the shapes the estate check
+refuses: credentials in the formats it knows, values under secret-named keys, and absolute machine paths.
+Your home, temporary, working and Vericairn directories are named by role instead. The `redacted` section
+counts what was removed.
+
+`--out` writes the same bytes as shown to a new file, and never replaces an existing one. Nothing is sent
+anywhere: sharing the bundle is always your own act.
