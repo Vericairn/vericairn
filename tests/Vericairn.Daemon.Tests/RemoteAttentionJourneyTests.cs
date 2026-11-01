@@ -53,9 +53,12 @@ public sealed class RemoteAttentionJourneyTests
             Assert.Null(written.Record);
             Assert.Null(written.Hash);
 
-            // The app's own storage survives a new view model and an unreachable runtime.
+            // The app's own storage survives a new view model and an unreachable runtime. The device home also holds
+            // the other two pairings, so the reopened app selects this phone's connection explicitly.
+            string paired = remote.Selected!.Connection.Id;
             await harness.Host.StopAsync();
             var reopened = new RemoteViewModel(connections);
+            reopened.Selected = Assert.Single(reopened.Estates, e => e.Connection.Id == paired);
             Assert.Equal(ConnectionStates.Cached, reopened.ConnectionState);
             Assert.StartsWith("cached from ", reopened.Freshness, StringComparison.Ordinal);
             Assert.Contains("seconds old", reopened.ObservationAge, StringComparison.Ordinal);
