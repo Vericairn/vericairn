@@ -62,7 +62,7 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
         if (findings.Count == 0 || findings.Any(f => f.Policy != context.Policy.Reference || f.Rule != context.Key || f.Kind != kind || f.Version != version || f.Basis != context.Basis.Digest || f.AsOf != context.Basis.AsOf ||
             f.Verdict is not ("satisfied" or "unmet" or "unavailable") || f.Disposition is not ("none" or "scheduled" or "due-within-grace" or "discharged" or "discharged-late" or "ended-unmet") ||
             f.Disposition == "ended-unmet" && kind != Vericairn.Records.Types.DutyRecords.Kind || !f.Exceptions.IsEmpty || f.SubjectCount is < 0 or > 1 ||
-            f.Enforced != context.Enforced || f.Level != Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "level") || f.Owner != Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "owner")) ||
+            f.IsReleaseCadence || f.Enforced != context.Enforced || f.Level != Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "level") || f.Owner != Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "owner")) ||
             findings.GroupBy(f => (f.Target.Identity, f.Item)).Any(g => g.Count() != 1))
             return [context.Unavailable("The kind violated the finding contract; it cannot alter policy identity, level, owner, exceptions or item uniqueness.")];
         return findings;
