@@ -78,8 +78,10 @@ Content checks apply to pinned blocks and mapped owning-row cells. Source prose
 outside those quotations, such as a family file's parent link to its catalog or
 an unquoted code example, is not guide content. Catalog family links still require
 their sources in the allowlist. Quoted active markup, embeds, unsafe schemes,
-protocol-relative links and parent traversal produce findings. Admitted relative
-links are displayed as inert text; generation never resolves or follows them.
+protocol-relative links and parent traversal produce findings, except a relative
+link that resolves to another allowlisted source, such as a family file's link
+to its catalog. Admitted relative links are displayed as inert text; generation
+never resolves or follows them.
 
 A successful preview contains `index.md`, `index.html`, `source-index.json`,
 `source-manifest.json`, `coverage-manifest.json` and

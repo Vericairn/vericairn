@@ -83,6 +83,9 @@ public static partial class GuideGenerator
             catch (DecoderFallbackException) { Fail(source.Id, "invalid-utf8", "The source must be valid UTF-8."); }
         }
         var blocks = new Dictionary<string, GuideQuote>(StringComparer.Ordinal);
+        var sourcePaths = index.Sources.GroupBy(s => s.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var allowlisted = index.Sources.Select(s => s.Area + ":" + s.Path).ToHashSet(StringComparer.Ordinal);
+        bool Unsafe(string text, string source) => UnsafeMarkup(text, sourcePaths.GetValueOrDefault(source), allowlisted);
         var sourceLines = sourceText.ToDictionary(p => p.Key, p => GuideMarkdown.Lines(p.Value), StringComparer.Ordinal);
         long blockBytes = 0;
         foreach (GuideBlockPin pin in index.Blocks.OrderBy(b => b.Id, StringComparer.Ordinal))
@@ -98,7 +101,7 @@ public static partial class GuideGenerator
             { Fail(pin.Id, "input-limit", "The selected source spans exceed the combined input byte bound."); break; }
             if (string.IsNullOrWhiteSpace(payload) || pin.Sha256 != Hash(GuideMarkdown.Utf8.GetBytes(payload)))
             { Fail(pin.Id, "block-hash-mismatch", "A required block is empty or differs from its exact pin."); continue; }
-            if (UnsafeMarkup(payload))
+            if (Unsafe(payload, pin.Source))
             { Fail(pin.Id, "malicious-markup", "A quoted block contains active markup, embeds, an unsafe link scheme or traversal."); continue; }
             blocks.TryAdd(pin.Id, new(pin.Id, pin.Source, pin.Sha256, payload));
         }
@@ -164,7 +167,7 @@ public static partial class GuideGenerator
             }
             GuideEntryBinding entry = matches[0];
             int before = findings.Count;
-            if (row.Cells.Any(c => c.Key != "#" && (UnsafeMarkup(c.Key) || UnsafeMarkup(c.Value))))
+            if (row.Cells.Any(c => c.Key != "#" && (Unsafe(c.Key, row.Source) || Unsafe(c.Value, row.Source))))
                 Fail(entry.Key, "malicious-markup", "A quoted owning-row cell contains active markup, embeds, an unsafe link scheme or traversal.");
             if (!matched.Add(entry.Key)) Fail(entry.Key, "duplicate-key", "More than one owning row resolves to this key.");
             GuideTableBinding[] tableMatches = index.Tables.Where(t => t.Source == row.Source && t.Heading == row.Heading).ToArray();
@@ -393,12 +396,32 @@ public static partial class GuideGenerator
 
     private static bool Strings(string[]? values) => values is { Length: <= 20000 } && values.All(s => s is not null);
 
-    private static bool UnsafeMarkup(string text)
+    private static bool UnsafeMarkup(string text, GuideSourcePin? source, IReadOnlySet<string> allowlisted)
     {
         if (text.Any(c => char.IsControl(c) && c is not ('\n' or '\r' or '\t'))) return true;
         string decoded = text;
         for (int i = 0; i < 4; i++) decoded = Uri.UnescapeDataString(WebUtility.HtmlDecode(decoded));
-        return ActiveMarkup().IsMatch(decoded) || UnsafeLink().IsMatch(decoded);
+        if (ActiveMarkup().IsMatch(decoded)) return true;
+        // A relative link to another allowlisted source, such as a family file's link to its catalog, is shown as inert quoted text and
+        // never resolved or followed, so its parent step is admitted; any other traversal, scheme or protocol-relative link is refused.
+        string links = source is null ? decoded : SourceLink().Replace(decoded, m => Allowlisted(source, m.Groups[1].Value, allowlisted) ? "](inert)" : m.Value);
+        return UnsafeLink().IsMatch(links);
+    }
+
+    private static bool Allowlisted(GuideSourcePin source, string target, IReadOnlySet<string> allowlisted)
+    {
+        var path = new List<string>(source.Path.Split('/')[..^1]);
+        foreach (string segment in target.Split('/'))
+        {
+            if (segment == "..")
+            {
+                if (path.Count == 0) return false;
+                path.RemoveAt(path.Count - 1);
+            }
+            else if (segment is not ("" or ".")) path.Add(segment);
+        }
+
+        return allowlisted.Contains(source.Area + ":" + string.Join('/', path));
     }
 
     [GeneratedRegex(@"^[a-z0-9][a-z0-9.-]{0,119}$", RegexOptions.CultureInvariant)]
@@ -413,4 +436,6 @@ public static partial class GuideGenerator
     private static partial Regex UnsafeLink();
     [GeneratedRegex(@"\]\((catalog/[^)#\s]+\.md)(?:#[^)]*)?\)", RegexOptions.CultureInvariant)]
     private static partial Regex CatalogLink();
+    [GeneratedRegex(@"\]\(\s*((?:\.\./)*[A-Za-z0-9][A-Za-z0-9._/-]*\.md)(?:#[A-Za-z0-9._-]*)?\s*\)", RegexOptions.CultureInvariant)]
+    private static partial Regex SourceLink();
 }

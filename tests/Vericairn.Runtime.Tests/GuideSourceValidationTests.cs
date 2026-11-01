@@ -51,6 +51,11 @@ public sealed class GuideSourceValidationTests
     [InlineData("[action](//invalid.example/action)")]
     [InlineData("[action](%2f%2finvalid.example/action)")]
     [InlineData("<!-- hidden obligation -->")]
+    [InlineData("[escape](../outside.md)")]
+    [InlineData("[escape](../../catalog.md)")]
+    [InlineData("[escape](..%2f..%2fcatalog.md)")]
+    [InlineData("[escape](../catalog.md/../../outside.md)")]
+    [InlineData("[escape](../catalog.md\\..\\outside.md)")]
     public void QuotedBlocksAndMappedCellsRefuseActiveContentAfterRepinning(string markup)
     {
         foreach (bool block in new[] { true, false })
@@ -68,6 +73,8 @@ public sealed class GuideSourceValidationTests
     [InlineData("notes.md")]
     [InlineData("./notes.md#scope")]
     [InlineData("notes/detail.md")]
+    [InlineData("../catalog.md#scope")]
+    [InlineData("../catalog/workshop01.md")]
     public void QuotedRelativeLinksAreInertText(string target)
     {
         GuideFixture fixture = GuideFixture.Create();
@@ -84,6 +91,15 @@ public sealed class GuideSourceValidationTests
         JsonElement quote = Assert.Single(guide.RootElement.GetProperty("sections").EnumerateArray()
             .SelectMany(s => s.GetProperty("quotes").EnumerateArray()), q => q.GetProperty("id").GetString() == "family00.common");
         Assert.StartsWith(text + "\n", quote.GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMappedCellsLinkToAnAllowlistedSourceIsAdmitted()
+    {
+        GuideFixture fixture = GuideFixture.Create();
+        fixture.Replace("family00", "Builders prepare measured sketches", "Builders prepare [measured sketches](../catalog.md#scope)");
+        GuideBundle bundle = Generate(fixture);
+        Assert.DoesNotContain(bundle.Findings, f => f.Code == "malicious-markup");
     }
 
     [Theory]
