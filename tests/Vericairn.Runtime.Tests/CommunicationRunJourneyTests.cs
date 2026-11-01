@@ -118,7 +118,7 @@ public class CommunicationRunJourneyTests
     }
 
     [Theory]
-    [InlineData("adapter", "claude", "{\"adapter\":\"local\"}", "EFF-01")]
+    [InlineData("adapter", "claude", "{\"adapter\":\"local\"}", "efficiency-adapter")]
     [InlineData("hook", "inventory-unexpected", "{}", "inventory differs")]
     [InlineData("tool", "inventory-tool", "{}", "inventory differs")]
     [InlineData("environment", "inventory-environment", "{}", "unadmitted environment need")]

@@ -139,7 +139,7 @@ public sealed partial class WorkerConfigurationStore
         {
             choices = new { model = configuration.Model, effort = configuration.Effort, provider = capabilities.Providers.Single(),
                 destination = capabilities.Destinations.Single(), dataBoundary = capabilities.DataBoundaries.Single(), adapter = "disabled" },
-        }), configuration.AllowedModels ?? [configuration.Model], Efforts: configuration.AllowedEfforts);
+        }), configuration.AllowedModels ?? [configuration.Model], Efforts: configuration.AllowedEfforts) { AdapterPermission = ReadAdapter() };
     }
 
     private string PathOf(IAgentLauncher launcher)

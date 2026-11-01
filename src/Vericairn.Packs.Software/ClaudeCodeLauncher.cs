@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.Win32;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
+using Vericairn.Records.Representation;
 
 namespace Vericairn.Packs.Software;
 
@@ -17,7 +18,7 @@ namespace Vericairn.Packs.Software;
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true) { Adapters = [RepresentationContract.LocalLossless] };
 
     /// <inheritdoc />
     public RunPreflight Preflight(LaunchContext context)
@@ -126,6 +127,22 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         return context with { Environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CLAUDE_CONFIG_DIR"] = home } };
     }
 
+    /// <inheritdoc />
+    public Uri EfficiencyUpstream(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        // The generated isolated configuration admits only this built-in provider; no run setting supplies a host.
+        return new Uri("https://api.anthropic.com/");
+    }
+
+    /// <inheritdoc />
+    public LaunchContext ConfigureEfficiencyHook(LaunchContext context, Uri? address)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        HarnessEfficiency.CheckAddress(address);
+        return context with { AdapterAddress = address };
+    }
+
     private static void RefuseManagedSettings()
     {
         string directory = OperatingSystem.IsWindows() ? Path.Combine(Environment.GetEnvironmentVariable("ProgramW6432") ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClaudeCode")
@@ -188,7 +205,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
         }
 
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", ClaudeCodeInventory.Settings, "--tools", ClaudeCodeInventory.ToolList, .. selection, .. limits];
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", ClaudeCodeInventory.SettingsFor(context), "--tools", ClaudeCodeInventory.ToolList, .. selection, .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>

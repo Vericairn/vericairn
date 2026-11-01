@@ -4,10 +4,12 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Representation;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 
@@ -23,6 +25,10 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Efforts">Optional narrower native effort allowlist; it cannot add to the launcher's vocabulary.</param>
 public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null, IReadOnlyList<string>? Efforts = null)
 {
+    /// <summary>Explicit machine admission; a policy source cannot supply or widen it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EfficiencyAdapterConfiguration? AdapterPermission { get; init; }
+
     /// <summary>Portable configuration identity.</summary>
     public string Name { get; init; } = Name;
 
@@ -68,6 +74,10 @@ public sealed record RunConfiguration(string Name, string Launcher, JsonElement 
 public sealed record RunCapabilities(IReadOnlyList<string> Scopes, IReadOnlyList<string> Efforts, IReadOnlyList<string> Providers,
     IReadOnlyList<string> Destinations, IReadOnlyList<string> DataBoundaries, bool ProviderDefault = false, bool ClosedEnvironment = false)
 {
+    /// <summary>Adapters supported by this launcher; absent means none. Copied on initialization.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Adapters { get; init => field = value is null ? null : OptionCollections.List(value); }
+
     /// <summary>Supported choice scopes, in precedence order. Copied into owned read-only storage on initialization.</summary>
     public IReadOnlyList<string> Scopes
     {
@@ -164,10 +174,8 @@ public static class RunSelection
             {
                 foreach (JsonProperty choice in choices.EnumerateObject())
                 {
-                    if (choice.Name == "adapter" && choice.Value.GetString() != "disabled")
-                    {
-                        throw new ProviderRefusedException("The efficiency Adapter is unsupported; every run keeps it disabled. EFF-01 belongs to release 0.8.4.");
-                    }
+                    if (choice.Name == "adapter" && choice.Value.GetString() is not ("disabled" or RepresentationContract.LocalLossless))
+                        throw new ProviderRefusedException("The efficiency-adapter choice is unsupported; select disabled or an explicitly admitted local-lossless adapter.");
                     requested[choice.Name] = choice.Value.GetString();
                 }
             }
@@ -186,6 +194,10 @@ public static class RunSelection
         Require("provider", capabilities.Providers);
         Require("destination", capabilities.Destinations);
         Require("dataBoundary", capabilities.DataBoundaries);
+        string adapter = requested["adapter"]?.GetValue<string>() ?? "disabled";
+        if (adapter != "disabled" && (adapter != RepresentationContract.LocalLossless || capabilities.Adapters?.Contains(adapter, StringComparer.Ordinal) != true
+            || configuration.AdapterPermission?.Allows(adapter, configuration.Launcher) != true))
+            throw new ProviderRefusedException("The efficiency-adapter worker setting must explicitly name local-lossless and this launcher. The adapter stays disabled by default; a brief or goal cannot enable it. Do not enable it before its security review.");
         IReadOnlyList<string> efforts = capabilities.Efforts.Count == 0 ? ["not-supported"]
             : capabilities.ProviderDefault ? [.. capabilities.Efforts, "provider-default"] : capabilities.Efforts;
         Require("effort", configuration.Efforts is null ? efforts : efforts.Intersect(configuration.Efforts, StringComparer.Ordinal).ToArray());

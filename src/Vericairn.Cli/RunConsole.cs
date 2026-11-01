@@ -66,6 +66,8 @@ internal static class RunConsole
         context.Output.WriteLine($"  cap {Units(row.Cap)}");
         context.Output.WriteLine(row.Usage is JsonElement usage ? $"  usage {Units(usage)}" : "  usage: not settled yet, so charged at its cap");
         context.Output.WriteLine($"  charged {Units(row.Charged)}");
+        if (row.ExecutionObserved is JsonElement facts && facts.TryGetProperty("adapter", out JsonElement adapter))
+            context.Output.WriteLine("  " + Vericairn.Runtime.Workers.AdapterPresentation.Describe(adapter));
         foreach (RunSignal signal in row.Signals ?? [])
         {
             context.Output.WriteLine($"  worker {signal.Severity} {signal.Code}: {signal.Summary} ({(signal.Attention is null ? "attention recording pending" : "ask " + signal.Attention)})");

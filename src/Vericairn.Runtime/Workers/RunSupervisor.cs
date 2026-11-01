@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
@@ -308,6 +309,8 @@ public sealed class RunSupervisor
             reader.Join(TimeSpan.FromSeconds(5));
         }
 
+        // Freeze forwarding before the last snapshot, including requests still finishing when the harness exited.
+        options.StopAdapter?.Invoke();
         lock (gate)
         {
             // The boundary has exited. Artifact discrepancies remain observations, not a new stop of an exited process.
@@ -315,7 +318,7 @@ public sealed class RunSupervisor
             {
                 _ = watch.Reported(report);
             }
-            state.Execution = watch.ExecutionObserved;
+            state.Execution = ExecutionObserved();
             for (int retry = 0; retry < 3; retry++)
             {
                 PublishSignals();
@@ -329,7 +332,7 @@ public sealed class RunSupervisor
                 state.Stop = state.Stop with { ContainedAt = RecordParser.FormatTimestamp(exited) };
             }
 
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), watch.ExecutionObserved);
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), state.Execution);
             state.Outcome = outcome;
             Save();
             process.Close();
@@ -513,7 +516,7 @@ public sealed class RunSupervisor
                         lock (gate)
                         {
                             foreach (RunSignal observation in watch.Reported(reported)) AddSignal(observation);
-                            state.Execution = watch.ExecutionObserved;
+                            state.Execution = ExecutionObserved();
                         }
                     }
                 }
@@ -681,6 +684,7 @@ public sealed class RunSupervisor
     {
         try
         {
+            if (options.AdapterMeasurement is not null) state.Execution = ExecutionObserved();
             directory.Write(state);
             failedStateWriteHeartbeat = null;
         }
@@ -706,6 +710,15 @@ public sealed class RunSupervisor
                 state.Signals[existing] = signal with { Summary = signal.Summary[..Math.Min(signal.Summary.Length, available)] + " " + summary };
             }
         }
+    }
+
+    private JsonElement? ExecutionObserved()
+    {
+        JsonElement? observed = watch.ExecutionObserved;
+        if (options.AdapterMeasurement is null) return observed;
+        JsonObject facts = observed is JsonElement value ? JsonNode.Parse(value.GetRawText())!.AsObject() : new JsonObject();
+        facts["adapter"] = options.AdapterMeasurement();
+        return JsonSerializer.SerializeToElement(facts);
     }
 
     private static bool IsAcknowledgment(string line)

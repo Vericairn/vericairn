@@ -65,10 +65,15 @@ internal sealed partial class RunDispatchService(
         try
         {
             supervisor = runAdmission.Launch(admitted, command =>
-                RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection)), out priorAttempts, out lapsed);
+                RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions with
+                {
+                    AdapterMeasurement = admitted.Efficiency is null ? null : admitted.Efficiency.Measurement,
+                    StopAdapter = admitted.Efficiency is null ? null : admitted.Efficiency.Dispose,
+                }, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection)), out priorAttempts, out lapsed);
         }
         catch (RunLaunchException exception)
         {
+            admitted.Efficiency?.Dispose();
             WriteOutcome uncertain = Revise(run, request.By, previous =>
             {
                 previous["status"] = "uncertain";
@@ -85,6 +90,7 @@ internal sealed partial class RunDispatchService(
                 previous["observed"] = new JsonObject { ["summary"] = $"The {launcher.Launcher} harness could not be started on the machine that ran the worker, so nothing ran and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
                 previous["usage"] = ZeroUsage(plan.Cap);
                 previous["executionObserved"] = new RunExecutionObservation(Element(plan.Selection)).Snapshot();
+                if (admitted.Efficiency is not null) previous["executionObserved"]!["adapter"] = admitted.Efficiency.Measurement();
             });
             return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
         }
@@ -116,7 +122,11 @@ internal sealed partial class RunDispatchService(
         }
 
         var abandon = new CancellationTokenSource();
-        supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token)), abandon);
+        supervisions[run] = (Task.Run(() =>
+        {
+            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency); }
+            finally { admitted.Efficiency?.Dispose(); }
+        }), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
         if (excepted is not null)
         {
@@ -213,7 +223,7 @@ internal sealed partial class RunDispatchService(
                 run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
                 signals,
                 run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
-                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : null));
+                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : observed?.Execution));
         }
 
         var ledgers = new List<LedgerRow>();
@@ -504,7 +514,7 @@ internal sealed partial class RunDispatchService(
     };
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon)
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null)
     {
         RunOutcome? outcome;
         try
@@ -516,6 +526,7 @@ internal sealed partial class RunDispatchService(
             supervisor.Settled(null, $"The worker lost its observation of the run: {exception.Message}");
             return;
         }
+        finally { efficiency?.Dispose(); }
 
         if (outcome is null)
         {

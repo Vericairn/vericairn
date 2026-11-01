@@ -17,13 +17,21 @@ internal sealed class WorkerConfigureCommand : Command
         var effort = new Option<string?>("--effort") { Description = "Default effort in the launcher's native vocabulary; required with --model when setting." };
         var models = new Option<string[]>("--allow-model") { Description = "Permitted model selector; repeatable, including the default. Omitted: only the default model.", AllowMultipleArgumentsPerToken = false };
         var efforts = new Option<string[]>("--allow-effort") { Description = "Permitted native effort; repeatable, including the default. Omitted: the launcher's supported efforts. Never expands its capabilities.", AllowMultipleArgumentsPerToken = false };
+        var adapter = new Option<string?>("--adapter") { Description = "Operator-only efficiency-adapter admission: local-lossless or disabled. Separate from launcher defaults. Do not enable before its security review." };
+        var adapterLaunchers = new Option<string[]>("--allow-launcher") { Description = "Launcher admitted for --adapter local-lossless: codex or claude-code; repeatable.", AllowMultipleArgumentsPerToken = false };
         Options.Add(launcher);
         Options.Add(workspaces);
         Options.Add(model);
         Options.Add(effort);
         Options.Add(models);
         Options.Add(efforts);
-        SetAction(result => operations.Configure(result.GetValue(launcher), result.GetValue(model), result.GetValue(effort),
-            result.GetValue(models) ?? [], result.GetValue(efforts) ?? [], result.GetValue(workspaces), result.GetValue(context.JsonOption)));
+        Options.Add(adapter);
+        Options.Add(adapterLaunchers);
+        SetAction(result => result.GetValue(adapter) is not null || result.GetValue(adapterLaunchers) is { Length: > 0 }
+            ? operations.Adapter(result.GetValue(adapter), result.GetValue(adapterLaunchers) ?? [],
+                result.GetValue(launcher) is not null || result.GetValue(workspaces) is not null || result.GetValue(model) is not null || result.GetValue(effort) is not null
+                || result.GetValue(models) is { Length: > 0 } || result.GetValue(efforts) is { Length: > 0 }, result.GetValue(context.JsonOption))
+            : operations.Configure(result.GetValue(launcher), result.GetValue(model), result.GetValue(effort),
+                result.GetValue(models) ?? [], result.GetValue(efforts) ?? [], result.GetValue(workspaces), result.GetValue(context.JsonOption)));
     }
 }

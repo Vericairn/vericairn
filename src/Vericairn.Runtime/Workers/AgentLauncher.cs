@@ -3,6 +3,7 @@
 
 using Vericairn.Runtime.Providers;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Vericairn.Runtime.Workers;
 
@@ -17,7 +18,12 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Limits">Operational thresholds below the reserved cap, passed to supported native harness controls.</param>
 /// <param name="Execution">The admitted execution selection.</param>
 /// <param name="Environment">The environment the harness is started with, built from the allowlist.</param>
-public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment, RunLimits? Limits = null, JsonElement? Execution = null);
+public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment, RunLimits? Limits = null, JsonElement? Execution = null)
+{
+    /// <summary>The worker-owned loopback hook, absent for direct runs. Never supplied by a brief, header or run setting.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Uri? AdapterAddress { get; init; }
+}
 
 /// <summary>What one line of a harness's output told the worker; a field left null told nothing.</summary>
 /// <param name="Tokens">The tokens the run has spent, as a total that replaces the tally.</param>
@@ -94,6 +100,12 @@ public interface IAgentLauncher
 
     /// <summary>Builds the run-specific harness configuration and environment outside the workspace before launch.</summary>
     LaunchContext Prepare(LaunchContext context) => context;
+
+    /// <summary>The fixed configured provider base, checked before intent. Unsupported hooks refuse instead of silently running direct.</summary>
+    Uri EfficiencyUpstream(LaunchContext context) => throw new ProviderRefusedException("This launcher cannot apply an efficiency-adapter hook to its configured provider.");
+
+    /// <summary>Applies or removes the worker-owned address in the already isolated configuration. Unsupported launchers refuse.</summary>
+    LaunchContext ConfigureEfficiencyHook(LaunchContext context, Uri? address) => throw new ProviderRefusedException("This launcher does not implement an isolated efficiency-adapter hook.");
 
     /// <summary>Establishes the complete effective inventory before intent. An unobservable inventory is unsupported.</summary>
     RunPreflight Preflight(LaunchContext context) => throw new ProviderRefusedException("This launcher cannot establish a complete tool, configuration, dependency and route inventory; RUN-01 dispatch is unsupported.");

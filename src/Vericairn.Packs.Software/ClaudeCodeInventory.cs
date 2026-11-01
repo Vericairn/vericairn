@@ -15,6 +15,9 @@ internal static class ClaudeCodeInventory
     // /goal is a built-in evaluator hook: disableAllHooks would also disable the requested run.
     internal const string Settings = "{\"hooks\":{},\"enabledPlugins\":{}}";
 
+    internal static string SettingsFor(LaunchContext context) => context.AdapterAddress is null ? Settings
+        : JsonSerializer.Serialize(new { hooks = new { }, enabledPlugins = new { }, env = new { ANTHROPIC_BASE_URL = context.AdapterAddress.AbsoluteUri.TrimEnd('/'), CLAUDE_CODE_MAX_RETRIES = "0" } });
+
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
     {
         HarnessInventory.CommandPrefix(context, "claude");
@@ -33,6 +36,7 @@ internal static class ClaudeCodeInventory
         string configuration = HarnessInventory.Digest(new
         {
             qualification = "run-02-claude-code-v1", version, tools = ToolList, settings = Settings, settingSources = "none",
+            efficiency = context.AdapterAddress is null ? "disabled" : "local-lossless-loopback",
             strictMcp = true, home = "run-only-login", goal = "built-in-evaluator", help = HarnessInventory.Digest(help),
             arguments = HarnessInventory.Arguments(context, "claude"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json")),
