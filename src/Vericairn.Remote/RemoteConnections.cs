@@ -4,6 +4,8 @@
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 using Vericairn.Sdk;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Vericairn.Remote;
 
@@ -21,6 +23,12 @@ public interface IRemoteConnections
 
     /// <summary>A client of the connection's runtime over the local network, signed by this phone's device key.</summary>
     IEstateApi Connect(RuntimeConnection connection);
+
+    /// <summary>Restores this connection's last observation from app storage; it always starts cached.</summary>
+    RemoteObservation? LoadObservation(RuntimeConnection connection) => null;
+
+    /// <summary>Keeps an observation in app storage without queuing requests. Older implementations retain no persistent cache.</summary>
+    void SaveObservation(RuntimeConnection connection, RemoteObservation observation) { }
 }
 
 /// <summary>
@@ -31,6 +39,7 @@ public sealed class LocalNetworkConnections : IRemoteConnections
 {
     private readonly RuntimeConnections store;
     private readonly IDeviceKeyStore keys;
+    private readonly string observations;
 
     /// <summary>Keeps connections under <paramref name="home"/> with device keys in <paramref name="keys"/>.</summary>
     public LocalNetworkConnections(string home, IDeviceKeyStore keys)
@@ -38,6 +47,7 @@ public sealed class LocalNetworkConnections : IRemoteConnections
         ArgumentException.ThrowIfNullOrWhiteSpace(home);
         this.keys = keys ?? throw new ArgumentNullException(nameof(keys));
         store = new RuntimeConnections(home, keys);
+        observations = Path.Combine(home, "remote-observations");
     }
 
     /// <inheritdoc />
@@ -53,4 +63,43 @@ public sealed class LocalNetworkConnections : IRemoteConnections
 
     /// <inheritdoc />
     public IEstateApi Connect(RuntimeConnection connection) => store.Connect(connection);
+
+    /// <inheritdoc />
+    public RemoteObservation? LoadObservation(RuntimeConnection connection)
+    {
+        try
+        {
+            string path = ObservationPath(connection);
+            if (!File.Exists(path)) return null;
+            CachedObservation? cached = JsonSerializer.Deserialize<CachedObservation>(File.ReadAllText(path), ProtocolJson.Options);
+            return cached is { Version: 1, Observation: { AsOf: not null, Status.Json.ValueKind: JsonValueKind.Object, Attention.Items: not null, Communication: not null, Details: not null, Products: not null } } &&
+                cached.Binding == Binding(connection) && cached.Observation.Attention.Principal == connection.Principal && Complete(cached.Observation) ? cached.Observation : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException) { return null; }
+    }
+
+    /// <inheritdoc />
+    public void SaveObservation(RuntimeConnection connection, RemoteObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        Directory.CreateDirectory(observations);
+        string path = ObservationPath(connection);
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new CachedObservation(1, Binding(connection), observation), ProtocolJson.Options));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private string ObservationPath(RuntimeConnection connection) => Path.Combine(observations, Binding(connection) + ".json");
+    private static bool Complete(RemoteObservation observation) =>
+        observation.Attention.Items.All(n => n is { Kind: not null, Subject: not null, Why: not null, State: not null, AsOf: not null, NextAction: not null, SubjectType: not null, SubjectId: not null, Revision: not null }) &&
+        observation.Products.All(p => p is { Name: not null, Id: not null }) &&
+        observation.Details.Values.All(d => d is { Id: not null, AsOf: not null, Work.Json.ValueKind: JsonValueKind.Object, Runs: not null, Progress: not null } &&
+            d.Runs.All(r => r is not null) && d.Progress.All(p => p is { AsOf: not null }));
+    private static string Binding(RuntimeConnection connection) => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
+        new { connection.Id, connection.Estate, connection.Principal, connection.Identity, connection.Device }, ProtocolJson.Options)));
+    private sealed record CachedObservation(int Version, string Binding, RemoteObservation Observation);
 }

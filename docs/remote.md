@@ -3,8 +3,8 @@
 Remote is Vericairn's phone companion for iOS and Android: a client of an estate's runtime on your local network, never a host
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
-This guide describes Remote's first build (REMOTE-01, 0.9.0). It is a **developer build**: it is not in an app store, and no
-real-device qualification is recorded for it.
+This guide describes Remote's pairing, attention and work views (REMOTE-01 and REMOTE-02, 0.9.0). It is a **developer build**:
+it is not in an app store, and no real-device qualification is recorded for it.
 
 ## What this build does
 
@@ -13,8 +13,10 @@ real-device qualification is recorded for it.
   another from the home.
 - **Home**, for the selected estate, with its connection state (connecting, current, cached, partial, denied or unavailable) and
   how fresh the content is:
-  - **Attention:** what the runtime's status says needs a person, most urgent first.
-  - **Work:** work orders that are not accepted or retired, and assignments that are not accepted.
+  - **Attention:** what waits on the signed-in principal, from status and required communication attention, most urgent first.
+    Each notice shows its subject, reason, work state, attention state, freshness and next action.
+  - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
+    the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.
   - **Products:** the estate's products.
   - **Nodes:** the runtime this phone reaches: its identity, address, who the phone acts as, the phone's device and the last
     time a check was current. A healthy connection here says nothing about workers running on other machines.
@@ -24,11 +26,43 @@ Every area, input and command has a screen-reader name; states are words, never 
 than truncating; and text follows the phone's text-size setting (Dynamic Type on iOS, font size on Android) as Remote
 starts, so a change applies the next time it opens.
 
-Remote decides, accepts and changes nothing in this build. Opening a subject, acknowledging a notice, work detail and
-communicating with a contributor are not in it yet.
+Select an attention item and choose **Open subject**. A work order, assignment, attempt, result or agent run opens its work
+in the Work area. For subjects Remote cannot display yet, it names Workbench or the command-line action to use.
 
-Content shown after the runtime can no longer be reached is labelled cached, with the time it was current. A restored screen
-restores no permission: opening the app checks the selected estate again.
+**Acknowledge** changes only your attention state. The runtime keeps it per principal, keyed by the notice's kind and subject,
+so your other devices, Workbench's attention list and human `vericairn status` show the same acknowledgment after refreshing.
+It creates no record, asks for no record signature, and never resolves, hides or removes the item. The underlying state and next
+action stay visible. A changed item clears its acknowledgment; a stale tap is refused and asks you to refresh. Acknowledgment
+over the local network is kept in the runtime's write ledger even when the person's local signing devices require presence.
+Record-authoring writes still follow their own signing and presence rules.
+
+A work detail retains the complete admitted brief and result fields, including limitations, unresolved effects and the next
+step. The latest result remains a claim to inspect. The agent's requested progress is labeled as its claim, beside the worker's
+separate heartbeat and event observation. Each has its observation time and age; a fresh claim never establishes worker liveness,
+and a current phone connection never establishes that another machine's worker is current.
+Opening a result or run from an earlier assignment retains that assignment's exact admitted brief and work-order pin. Its
+historical context is labeled, including when the current work view does not establish its acceptance state.
+
+**Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
+freshness and a preview using the same presentation as Workbench. These settings are read-only in this step. Phone-signed
+changes belong to REMOTE-03; clarifications to running attempts arrive with PROMPT-02 in 0.9.1.
+
+## Cached observations
+
+The app keeps the last successful home observation and each work detail you opened in its own storage, separately for each
+connection, estate, runtime identity, principal and device. The cache includes attention, work, products and communication
+settings. It contains no pairing code or signing key. Clearing the app's cached observations removes those local copies;
+it changes no record, acknowledgment or running work on the runtime.
+
+When the runtime cannot be reached, the retained view is labeled **cached**, with its observation time and age. Its age continues
+to advance without sending requests. A detail that was never opened says it was not cached. Restored observations start cached;
+opening the app checks the selected estate again. A refreshed home does not renew a previously opened work detail's timestamp.
+If app storage cannot retain an observation, Remote keeps that limitation visible; restarting cannot restore unsaved content.
+
+Acknowledgment is disabled while offline and is never queued. Opening a cached detail and advancing its displayed age send
+nothing. **Refresh** explicitly checks whether the runtime can be reached again. If an acknowledgment loses its response,
+Remote says it was not confirmed and asks you to refresh its state; it never silently resends it. An unavailable observation says
+nothing about whether work or attention exists.
 
 ## Pairing a phone
 

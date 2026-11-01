@@ -164,9 +164,9 @@ internal static class RemoteFixtures
         return (window, view);
     }
 
-    public static TestEstate Seeded()
+    public static TestEstate Seeded(long recordFormat = 2)
     {
-        var estate = new TestEstate(2);
+        var estate = new TestEstate(recordFormat);
         estate.Add("product", estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
         estate.Add("work-order", estate.OperatorId, """{"key":"REMOTE-TEST","kind":"ordinary","title":"Shown on the phone","intent":"Exercise Remote's home.","scope":["tests"],"exitQuestion":"Shown?","inputs":[],"deliverables":["evidence"]}""");
         return estate;
