@@ -62,6 +62,7 @@ public sealed partial class EstateService
             SecretScan scan = scanner.Scan(directory, plan);
             claim.Body["scan"] = JsonSerializer.SerializeToNode(scan, ChangeJson);
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
+            RefuseHeldDisclosure(claim, adapter, directory, plan);
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
             adapter.Push(directory, remote, plan, scan);
@@ -77,6 +78,20 @@ public sealed partial class EstateService
             FinishChange(claim, "observed-success", "The scanned commit was observed at the remote branch.");
             return ChangeAnswer(claim, true, "The exact scanned head was pushed and observed.") with { Observation = receipt };
         });
+    }
+
+    // A held work order's key and distinctive text stay out of a public repository until the release carrying it is published,
+    // whoever wrote the commits. A repository whose visibility is not recorded as public is not held to this check.
+    private void RefuseHeldDisclosure(ChangeClaim claim, IPushAdapter adapter, string directory, PushPlan plan)
+    {
+        if (EstateModel.BodyString(claim.Configuration.Repository, "visibility") != "public") return;
+        IReadOnlyList<DisclosureHolds.Hold> holds;
+        lock (gate) holds = DisclosureHolds.Active(session.Load());
+        if (holds.Count == 0) return;
+        string text = adapter.PublishedText(directory, plan)
+            ?? throw new ProviderRefusedException("A disclosure hold is in force, and the push's text could not be read to check it; nothing was pushed.");
+        if (DisclosureHolds.Disclosed(holds, text) is string key)
+            throw new ProviderRefusedException($"The push would disclose held work order {key} in a public repository before the release that carries it is published; nothing was pushed.");
     }
 
     /// <summary>Opens only from a recorded successful push of the same repository, branch and exact head.</summary>

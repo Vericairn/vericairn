@@ -36,6 +36,7 @@ public sealed class WorkOrderType : IRecordType
         new("role", "string", false, "The role of the roster whose principals carry it: planner, builder, reviewer, evaluator, release-manager, publisher, decider, or a role the estate names; builder when omitted. A step whose role is publisher or decider is a reserved action: it reaches only a person who holds it, or an agent a grant in force covers, and otherwise becomes an ask.", 2),
         new("placement", "object", false, "Tagged release (carrier identity, product identity, version) or backlog (key). Placement grants no authority.", 3),
         new("releasePlan", "object", false, "The product identity and exact version this work order carries; it may place itself in its own plan.", 3),
+        new("disclosure", "held", false, "held: its key, title, intent and scope stay out of public repositories until the release that carries it is published.", 3),
     ];
 
     /// <summary>The records that can hold a work order.</summary>
@@ -119,6 +120,8 @@ public sealed class WorkOrderType : IRecordType
         {
             body.Text("role", false, 60, Patterns.Slug, "a lower-case role name such as builder");
         }
+
+        if (body.Since(3, "disclosure")) body.Enum("disclosure", false, "held");
 
         body.NoOtherKeys();
         After(context, after);

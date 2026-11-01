@@ -42,4 +42,10 @@ public interface IPushAdapter
 
     /// <summary>The remote branch's current head, or null when it does not exist.</summary>
     string? Observe(string directory, string remote, string branch);
+
+    /// <summary>
+    /// The text the plan's commits would publish: their messages and the lines they add. Null when the adapter cannot read it,
+    /// which refuses a push while a disclosure hold is in force.
+    /// </summary>
+    string? PublishedText(string directory, PushPlan plan) => null;
 }

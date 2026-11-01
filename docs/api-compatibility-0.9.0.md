@@ -151,3 +151,10 @@ members. No interface member is added without a default implementation.
 
 `ReleaseCadencePresentation.Render` formats due context without performing effects.
 The record format and the product's cadence reference shape are unchanged.
+
+## Disclosure holds (CODE-16)
+
+`IPushAdapter` adds `string? PublishedText(string directory, PushPlan plan)`, with a default implementation that returns null.
+It returns the text a push's commits would publish, their messages and added lines. An adapter that keeps the default cannot
+push to a public repository while a disclosure hold is in force; the shipped git adapter implements it. Work orders gain an
+optional `disclosure` field whose only value is `held`, within record format 3. See [disclosure holds](changes.md#disclosure-holds-090).
