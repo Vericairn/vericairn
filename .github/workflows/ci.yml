@@ -42,19 +42,10 @@ jobs:
         timeout-minutes: 10
         run: dotnet workload install ios --version 10.0.303.1
       - name: Select Xcode
-        # The pinned iOS workload builds with Xcode 26.5 or later, and it needs the macOS SDK as well as the simulator's: take the
-        # newest Xcode 26 the runner has with both.
+        # The pinned iOS workload (26.5) is built for Xcode 26.5; the runner's newer Xcode does not give the build its macOS tools.
         run: |
           set -eu
-          ls -d /Applications/Xcode*.app
-          for xcode in $(ls -d /Applications/Xcode_26*.app | sort -rV); do
-            if DEVELOPER_DIR="$xcode/Contents/Developer" xcrun --sdk macosx --show-sdk-path > /dev/null 2>&1 \
-              && DEVELOPER_DIR="$xcode/Contents/Developer" xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
-              sudo xcode-select -s "$xcode/Contents/Developer"
-              break
-            fi
-          done
-          xcode-select -p
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
           xcodebuild -version
       - name: Restore (locked)
         timeout-minutes: 10
