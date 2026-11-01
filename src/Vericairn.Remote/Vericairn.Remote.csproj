@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Remote, the phone client of an estate's runtime: pairing on the local network and the home's five areas, from the same presentation, state language and SDK as Workbench. The iOS and Android heads host it.</Description>
+    <IsPackable>false</IsPackable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The brand's token contract is Workbench's; Remote binds the same roles. -->
+    <AvaloniaXaml Include="../Vericairn.Workbench/Theme.axaml" Link="Theme.axaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Remote.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Presentation/Vericairn.Presentation.csproj" />
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+    <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>

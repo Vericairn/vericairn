@@ -1,0 +1,170 @@
+<!-- Remote's one view: pairing at first use, then the home's five areas for the selected estate. Every status is text, never colour
+     alone; every input and command has a screen-reader name; long text wraps rather than truncating. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Vericairn.Remote"
+             xmlns:p="using:Vericairn.Presentation"
+             x:Class="Vericairn.Remote.RemoteView"
+             x:DataType="vm:RemoteViewModel"
+             Background="{DynamicResource BrandSurface}">
+  <UserControl.Styles>
+    <Style Selector="TextBlock">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Foreground" Value="{DynamicResource BrandText}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource BrandTextMuted}" />
+    </Style>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource BrandSurfaceRaised}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource BrandOutline}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="10" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*">
+    <StackPanel Grid.Row="0" Margin="12,8,12,4" Spacing="6">
+      <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.BuildLabel}" />
+      <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding ShowHome}">
+        <ComboBox Grid.Column="0" HorizontalAlignment="Stretch" ItemsSource="{Binding Estates}" SelectedItem="{Binding Selected}"
+                  AutomationProperties.Name="Estate">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:RemoteEstate">
+              <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button Grid.Column="1" Margin="8,0,0,0" Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh this estate" />
+        <Button Grid.Column="2" Margin="8,0,0,0" Content="Add" Command="{Binding AddEstateCommand}" AutomationProperties.Name="Pair with another estate" />
+      </Grid>
+      <TextBlock x:Name="StatusText" IsVisible="{Binding ShowHome}" Text="{Binding StatusLine}" AutomationProperties.Name="{Binding StatusLine}" />
+      <TextBlock Classes="muted" FontSize="12" IsVisible="{Binding ShowHome}" Text="{Binding ConnectionMessage}" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" IsVisible="{Binding Pairing}">
+      <StackPanel Margin="12" Spacing="10">
+        <TextBlock Classes="heading" Text="Pair with an estate" />
+        <TextBlock Text="{x:Static vm:RemoteViewModel.Companion}" />
+        <TextBlock Classes="muted" Text="{x:Static vm:RemoteViewModel.PairingHelp}" />
+        <TextBlock Text="Runtime address" />
+        <TextBox x:Name="AddressBox" Text="{Binding Address}" PlaceholderText="192.168.1.20:7443" AutomationProperties.Name="Runtime address, host and port" />
+        <TextBlock Text="Pairing code" />
+        <TextBox x:Name="CodeBox" Text="{Binding Code}" PlaceholderText="One-time code" AutomationProperties.Name="Pairing code" />
+        <TextBlock Text="This phone's name" />
+        <TextBox x:Name="NameBox" Text="{Binding DeviceName}" AutomationProperties.Name="This phone's name on the estate" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button x:Name="PairButton" Content="Pair" Command="{Binding PairCommand}" AutomationProperties.Name="Pair with this runtime" />
+          <Button Content="Cancel" Command="{Binding CancelPairingCommand}" AutomationProperties.Name="Back to the home" />
+        </StackPanel>
+        <TextBlock x:Name="PairingResult" Text="{Binding PairingMessage}" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <TabControl Grid.Row="1" x:Name="Home" IsVisible="{Binding ShowHome}" TabStripPlacement="Bottom">
+      <TabItem Header="Attention" AutomationProperties.Name="Attention">
+        <ScrollViewer>
+          <StackPanel Margin="12" Spacing="6">
+            <TextBlock Classes="muted" IsVisible="{Binding AttentionEmpty}" Text="Nothing needs attention in the last observation. The absence of notices never proves the absence of issues; refresh to check." />
+            <ItemsControl x:Name="AttentionList" ItemsSource="{Binding Attention}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="p:AttentionItem">
+                  <Border Classes="card">
+                    <StackPanel Spacing="2">
+                      <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource BrandAttention}" Text="{Binding KindLabel}" />
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Subject}" />
+                      <TextBlock Text="{Binding Why}" />
+                      <TextBlock Classes="muted" Text="{Binding State, StringFormat='State: {0}'}" />
+                      <TextBlock Classes="muted" Text="{Binding NextAction, StringFormat='Next: {0}'}" />
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding AsOf, StringFormat='As of {0}'}" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.AttentionLater}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="Work" AutomationProperties.Name="Work">
+        <ScrollViewer>
+          <StackPanel Margin="12" Spacing="6">
+            <TextBlock Classes="muted" IsVisible="{Binding WorkEmpty}" Text="No open work in the last observation." />
+            <ItemsControl x:Name="WorkList" ItemsSource="{Binding Work}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="p:WorkOrderRow">
+                  <Border Classes="card">
+                    <StackPanel Spacing="2">
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Key}" />
+                      <TextBlock Text="{Binding Title}" />
+                      <TextBlock Classes="muted" Text="{Binding StatusLabel}" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ItemsControl x:Name="AssignmentList" ItemsSource="{Binding Assignments}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AssignmentItem">
+                  <Border Classes="card">
+                    <StackPanel Spacing="2">
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Key, StringFormat='Assignment of {0}'}" />
+                      <TextBlock Text="{Binding Contributor}" />
+                      <TextBlock Classes="muted" Text="{Binding State}" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.WorkLater}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="Products" AutomationProperties.Name="Products">
+        <ScrollViewer>
+          <ItemsControl x:Name="ProductList" Margin="12" ItemsSource="{Binding Products}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProductItem">
+                <Border Classes="card">
+                  <StackPanel Spacing="2">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Id}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="Nodes" AutomationProperties.Name="Nodes">
+        <ScrollViewer>
+          <StackPanel Margin="12" Spacing="4" x:Name="NodePanel">
+            <TextBlock Classes="heading" Text="{Binding Node.Estate, FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.State, StringFormat='Connection: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.Message, FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.Address, StringFormat='Address: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.Runtime, StringFormat='Runtime identity: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.ActingAs, StringFormat='Acting as: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.Device, StringFormat='Device of this phone: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.Profiles, StringFormat='Profiles: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.PairedAt, StringFormat='Paired: {0}', FallbackValue=''}" />
+            <TextBlock Text="{Binding Node.LastCurrent, StringFormat='Last current: {0}', FallbackValue=''}" />
+            <TextBlock Classes="muted" FontSize="12" Text="{x:Static vm:RemoteViewModel.NodesNote}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+      <TabItem Header="Handoffs" AutomationProperties.Name="Handoffs">
+        <TextBlock Margin="12" Text="{x:Static vm:RemoteViewModel.HandoffsLater}" />
+      </TabItem>
+    </TabControl>
+  </Grid>
+</UserControl>

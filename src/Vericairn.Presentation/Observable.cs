@@ -4,7 +4,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace Vericairn.Workbench;
+namespace Vericairn.Presentation;
 
 /// <summary>A minimal observable base for the view models.</summary>
 public abstract class Observable : INotifyPropertyChanged

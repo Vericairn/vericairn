@@ -12,6 +12,7 @@
     <Project Path="src/Vericairn.Providers.GitHub.Releases/Vericairn.Providers.GitHub.Releases.csproj" />
     <Project Path="src/Vericairn.Providers.NuGet/Vericairn.Providers.NuGet.csproj" />
     <Project Path="src/Vericairn.Records/Vericairn.Records.csproj" />
+    <Project Path="src/Vericairn.Remote/Vericairn.Remote.csproj" />
     <Project Path="src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <Project Path="src/Vericairn.Sdk/Vericairn.Sdk.csproj" />
     <Project Path="src/Vericairn.Workbench/Vericairn.Workbench.csproj" />
@@ -23,6 +24,7 @@
     <Project Path="tests/Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj" />
     <Project Path="tests/Vericairn.Daemon.Tests/Vericairn.Daemon.Tests.csproj" />
     <Project Path="tests/Vericairn.Records.Tests/Vericairn.Records.Tests.csproj" />
+    <Project Path="tests/Vericairn.Remote.Tests/Vericairn.Remote.Tests.csproj" />
     <Project Path="tests/Vericairn.Runtime.Tests/Vericairn.Runtime.Tests.csproj" />
     <Project Path="tests/Vericairn.Workbench.Tests/Vericairn.Workbench.Tests.csproj" />
   </Folder>
