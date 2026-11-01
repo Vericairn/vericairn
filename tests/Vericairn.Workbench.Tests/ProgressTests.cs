@@ -133,6 +133,13 @@ public class ProgressTests(HeadlessFixture fixture)
                 Assert.Contains(rows, row => row.Detail.Contains("accurate: 7 of 20 files", StringComparison.Ordinal));
                 Assert.Contains(rows, row => row.Heading == "Worker liveness");
             }
+            WriteOutcome result = api.Result(new ResultRequest(attempt, op, Seed.Json("""{"outcome":"partial","summary":"The review continues.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review the remaining files."}""")));
+            Assert.True(result.Ok, result.Problem?.Message);
+            ReviewWorkspace review = (await fixture.UiAsync(() => shell.OpenReviewAsync(result.Written!.Id, TestContext.Current.CancellationToken)))!;
+            Assert.Contains("Agent's last progress claim (context only; never evidence of completion)", review.SummaryText, StringComparison.Ordinal);
+            Assert.Contains("Reading the widget.", review.SummaryText, StringComparison.Ordinal);
+            Assert.Contains("\"done\": 7", review.SummaryText, StringComparison.Ordinal);
+            Assert.Empty(api.Record(result.Written!.Id)!.Envelope.GetProperty("body").GetProperty("evidence").EnumerateArray());
         }
         finally { await fixture.Ui(window.Close); }
     }

@@ -1350,7 +1350,8 @@ When a result is submitted, the runtime retains the last claim in optional
 format-3 `progressClaim`: its phase, note, time, phase-completion flag and source
 record when present, typed value and status text. This is labelled agent context,
 never completion evidence. It survives loss of the local live store and travels
-with the result. A 100% estimate does not complete or accept work. The result's
+with the result. Workbench's result review shows this context beside the ordinary
+result fields. A 100% estimate does not complete or accept work. The result's
 outcome, checks, evidence and separate review and acceptance retain their meanings.
 
 ## Command observations (0.7.0)

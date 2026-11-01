@@ -1039,6 +1039,12 @@ public sealed partial class ShellViewModel : Observable
             Str(body, "summary") ?? string.Empty,
             string.Empty,
         };
+        if (body.TryGetProperty("progressClaim", out JsonElement claim))
+        {
+            lines.Add("Agent's last progress claim (context only; never evidence of completion):");
+            lines.Add(JsonSerializer.Serialize(claim, Pretty));
+            lines.Add(string.Empty);
+        }
         foreach ((string name, string title) in new[] { ("outputs", "Outputs"), ("evidence", "Evidence"), ("checks", "Checks"), ("limitations", "Limitations"), ("unresolvedEffects", "Unresolved effects") })
         {
             if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array)
