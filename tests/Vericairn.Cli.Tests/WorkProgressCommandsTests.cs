@@ -34,7 +34,7 @@ public sealed class WorkProgressCommandsTests
             Assert.Contains("Reading the widget.", text.Out, StringComparison.Ordinal);
             Assert.Contains("Live state; no record written.", text.Out, StringComparison.Ordinal);
             Assert.Equal(records, service.Session.Load().Records.Count);
-            CliHarness.Outcome json = CliHarness.RunWithApi(service, value, ["--json", .. arguments, "--progress", "-"]);
+            CliHarness.Outcome json = CliHarness.RunWithApi(service, null, ["--json", .. arguments, "--progress", file]);
             Assert.Equal(0, json.Code);
             using JsonDocument original = JsonDocument.Parse(value);
             Assert.True(JsonElement.DeepEquals(original.RootElement, json.Json.GetProperty("claim").GetProperty("progress")));
@@ -42,10 +42,10 @@ public sealed class WorkProgressCommandsTests
             Assert.Equal(JsonValueKind.Null, json.Json.GetProperty("written").ValueKind);
 
             arguments[Array.IndexOf(arguments, "active")] = "completed";
-            CliHarness.Outcome completed = CliHarness.RunWithApi(service, value, ["--json", .. arguments, "--progress", "-"]);
+            CliHarness.Outcome completed = CliHarness.RunWithApi(service, null, ["--json", .. arguments, "--progress", file]);
             Assert.Equal(0, completed.Code);
             Assert.Equal(records + 1, service.Session.Load().Records.Count);
-            CliHarness.Outcome retry = CliHarness.RunWithApi(service, value, ["--json", .. arguments, "--progress", "-"]);
+            CliHarness.Outcome retry = CliHarness.RunWithApi(service, null, ["--json", .. arguments, "--progress", file]);
             Assert.Equal(completed.Json.GetProperty("written").GetProperty("id").GetString(), retry.Json.GetProperty("written").GetProperty("id").GetString());
             Assert.Equal(records + 1, service.Session.Load().Records.Count);
         }
@@ -62,13 +62,18 @@ public sealed class WorkProgressCommandsTests
             fixture.Set("estate", ProgressRequestTests.FullRequest);
             using EstateService service = EstateService.Open(fixture.Estate.Root);
             string[] arguments = ["--estate", fixture.Estate.Root, "--json", "work", "progress", fixture.Attempt.Id, "--by", fixture.Estate.BuilderId,
-                "--phase", "review", "--note", "Reviewing the widget.", "--state", "active", "--progress", "-"];
+                "--phase", "review", "--note", "Reviewing the widget.", "--state", "active"];
             int records = service.Session.Load().Records.Count;
+            // The in-process harness cannot feed the raw standard input that "-" reads, so each claim is passed as a file; a parse
+            // failure of an empty input must not stand in for the refusals under test.
+            int index = 0;
+            string Claim(string value) => CliHarness.WriteJson(scratch, $"claim-{index++}.json", value);
+            string measurable = Claim("""{"type":"not-measurable"}""");
             foreach (string malformed in new[] { "{}", "null", """{"type":"best-effort","percent":101}""", """{"type":"accurate","done":2,"total":1,"unit":"files"}""" })
-                Assert.NotEqual(0, CliHarness.RunWithApi(service, malformed, [.. arguments, "--status-text", "Reading the widget."]).Code);
-            Assert.NotEqual(0, CliHarness.RunWithApi(service, """{"type":"not-measurable"}""", arguments).Code);
+                Assert.NotEqual(0, CliHarness.RunWithApi(service, null, [.. arguments, "--progress", Claim(malformed), "--status-text", "Reading the widget."]).Code);
+            Assert.NotEqual(0, CliHarness.RunWithApi(service, null, [.. arguments, "--progress", measurable]).Code);
             arguments[Array.IndexOf(arguments, "active")] = "unknown";
-            Assert.NotEqual(0, CliHarness.RunWithApi(service, """{"type":"not-measurable"}""", [.. arguments, "--status-text", "Reading the widget."]).Code);
+            Assert.NotEqual(0, CliHarness.RunWithApi(service, null, [.. arguments, "--progress", measurable, "--status-text", "Reading the widget."]).Code);
             Assert.Equal(records, service.Session.Load().Records.Count);
             Assert.Null(service.Session.Live.Meta("work-progress:" + fixture.Attempt.Id));
         }
