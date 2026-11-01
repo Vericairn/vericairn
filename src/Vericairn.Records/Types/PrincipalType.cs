@@ -63,8 +63,7 @@ public sealed class PrincipalType : IRecordType
         bool selfAuthored = context.Record.By == context.Record.Id;
         if (selfAuthored)
         {
-            Model.RecordEnvelope? estate = context.Model.CurrentEstate;
-            string? rootOperator = estate?.Body.TryGetProperty("operator", out System.Text.Json.JsonElement op) == true ? op.GetString() : null;
+            string? rootOperator = context.Model.RootOperator;
             if (rootOperator != context.Record.Id)
             {
                 context.Error("principal.self-authored", "Only the estate's root operator principal may author its own record.");

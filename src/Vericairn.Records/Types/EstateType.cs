@@ -69,6 +69,11 @@ public sealed class EstateType : IRecordType
             context.Error("estate.operator", "The estate record must be authored by its own operator principal.");
         }
 
+        if (context.Record.Supersedes is not null && context.Model.RootOperator is { } rootOperator && operatorId != rootOperator)
+        {
+            context.Error("estate.operator", $"A charter revision keeps the root operator the first charter names ({rootOperator}); a revision cannot change it.");
+        }
+
         Model.RecordEnvelope? operatorRecord = context.Principal(operatorId);
         if (operatorRecord is null)
         {

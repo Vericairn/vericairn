@@ -1518,7 +1518,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             if (plan.Anchored.Count > 0)
             {
                 string anchoredIds = string.Join(", ", plan.Anchored.Select(a => a.Id));
-                string? rootOperator = model.CurrentEstate is { } charter ? EstateModel.BodyString(charter, "operator") : null;
+                string? rootOperator = model.RootOperator;
                 if (request.By != rootOperator && !model.HasScope(request.By, Scopes.Administer))
                 {
                     return (null, new Problem("refused", $"Moving to record format 2 anchors the admissions recorded without a signature ({anchoredIds}), and the migration that anchors them is the operator's or a principal's with the 'administer' scope; run the upgrade as one of them. Nothing changed.", []));

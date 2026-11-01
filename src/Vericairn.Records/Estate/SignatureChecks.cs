@@ -18,8 +18,8 @@ public static class SignatureChecks
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(findings);
         RecordEnvelope? estate = model.CurrentEstate;
-        bool required = estate is not null && estate.Body.TryGetProperty("policies", out System.Text.Json.JsonElement policies) && policies.TryGetProperty("signatures", out System.Text.Json.JsonElement policy) && policy.GetString() == "required";
-        string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
+        bool required = estate is not null && RequiresSignatures(estate);
+        string? rootOperator = model.RootOperator;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         IReadOnlySet<string> anchored = Anchored(model);
         foreach (RecordEnvelope record in model.Records)
@@ -46,7 +46,33 @@ public static class SignatureChecks
             Rotation(model, record, findings);
             RecoveryUse(model, record, rootOperator, firstAuthority, anchored, findings);
         }
+
+        foreach (RecordEnvelope revision in model.OfType("estate").Where(r => r.Supersedes is not null))
+        {
+            if (model.ById.TryGetValue(revision.Supersedes!, out RecordEnvelope? revised) && revised.Type == "estate" && !CharterRevisionCounts(model, revised, revision))
+            {
+                findings.Error("signature.charter", revision.ExpectedPath, "While the charter it revises requires signatures, a charter revision counts only when the root operator signs it with an admitted device. This one changes nothing: the estate keeps the charter it revises.");
+            }
+        }
     }
+
+    /// <summary>
+    /// Whether a charter revision counts. A charter that requires signatures changes only by the root operator's signed revision: a
+    /// revision another principal authored, an unsigned one or one whose signature does not verify counts for nothing, whatever it
+    /// says or whatever date it states, so it cannot leave signatures optional again, change who accepts a release or change the root
+    /// operator. While a charter leaves signatures optional it protects nothing, and any revision of it counts as before.
+    /// </summary>
+    public static bool CharterRevisionCounts(EstateModel model, RecordEnvelope revised, RecordEnvelope revision)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(revised);
+        ArgumentNullException.ThrowIfNull(revision);
+        return !RequiresSignatures(revised) || (revision.By == model.RootOperator && IsAuthentic(model, revision));
+    }
+
+    private static bool RequiresSignatures(RecordEnvelope charter) =>
+        charter.Body.TryGetProperty("policies", out JsonElement policies) && policies.ValueKind == JsonValueKind.Object &&
+        policies.TryGetProperty("signatures", out JsonElement policy) && policy.ValueKind == JsonValueKind.String && policy.GetString() == "required";
 
     /// <summary>Verifies attribution at authorship, including admission and key history, without changing any record.</summary>
     public static bool IsAuthentic(EstateModel model, RecordEnvelope record)
@@ -54,7 +80,7 @@ public static class SignatureChecks
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(record);
         if (record.Signatures.Count == 0 || record.DeclaredHash != record.ComputedHash) return false;
-        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        string? rootOperator = model.RootOperator;
         var findings = new FindingList();
         foreach (RecordSignature signature in record.Signatures)
             Verify(model, record, signature, rootOperator, FirstAuthority(model, rootOperator)?.Id, findings, Anchored(model));
@@ -227,7 +253,7 @@ public static class SignatureChecks
             return anchored;
         }
 
-        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        string? rootOperator = model.RootOperator;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         foreach (RecordEnvelope migration in model.OfType("migration").Where(m => m.Format >= 2 && m.Signatures.Count > 0))
         {
@@ -303,7 +329,7 @@ public static class SignatureChecks
 
     private static AdmissionState AdmissionStateAt(EstateModel model, RecordEnvelope device, string at, IReadOnlySet<string> anchored)
     {
-        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        string? rootOperator = model.RootOperator;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         var events = new List<(string Time, int Order, bool Admitted)>();
         foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")).Where(a => Counts(model, a, anchored)))

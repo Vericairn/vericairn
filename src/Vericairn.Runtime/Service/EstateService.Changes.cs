@@ -438,7 +438,7 @@ public sealed partial class EstateService
                 if (existing is not null) ask = new(existing.ExpectedPath, existing.Id, existing.ComputedHash);
                 else
                 {
-                    string op = EstateModel.BodyString(model.Current("estate").Single(), "operator")!;
+                    string op = model.RootOperator!;
                     JsonObject body = new() { ["to"] = op, ["state"] = "open", ["question"] = "The target branch's run failed at the recorded merge commit. How should it be corrected?",
                         ["recommendation"] = "Inspect the recorded failing checks and prepare a corrective change.", ["consequence"] = "The failed target run remains unresolved." };
                     WriteOutcome result = NewRecord(new("ask", claim.By, EstateServiceValues.Element(body), $"operation:{claim.Written.Id}:{claim.Written.Hash}"));

@@ -46,7 +46,19 @@ public sealed class EstateModel
     public FindingList Findings { get; }
 
     /// <summary>The manifest, when it loaded.</summary>
-    public EstateManifest? Manifest { get; set; }
+    public EstateManifest? Manifest
+    {
+        get => manifest;
+        set
+        {
+            manifest = value;
+            // The record format the manifest states decides which charter revisions count.
+            currentEstate = null;
+        }
+    }
+
+    private EstateManifest? manifest;
+    private Lazy<RecordEnvelope?>? currentEstate;
 
     /// <summary>True when no later record supersedes this one.</summary>
     public bool IsCurrent(RecordEnvelope record) => record is not null && !SupersededBy.ContainsKey(record.Id);
@@ -57,8 +69,32 @@ public sealed class EstateModel
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
 
-    /// <summary>The current estate charter, if exactly one exists (the lowest id wins when several do; validators flag that).</summary>
-    public RecordEnvelope? CurrentEstate => Current("estate").OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+    /// <summary>The estate's first charter, the one every later revision supersedes (the lowest id wins when several do; validators flag that).</summary>
+    public RecordEnvelope? FirstEstate => OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+
+    /// <summary>The root operator: the principal the first charter names. A later revision cannot change it.</summary>
+    public string? RootOperator => FirstEstate is { } first ? BodyString(first, "operator") : null;
+
+    /// <summary>
+    /// The current estate charter: the latest revision along the first charter's line that counts. While the charter a revision
+    /// supersedes requires signatures, the revision counts only when the root operator signs it with an admitted device, so an unsigned
+    /// or foreign revision changes nothing (<see cref="SignatureChecks.CharterRevisionCounts"/>). An estate without a first charter
+    /// falls back to the lowest current one, which validators flag.
+    /// </summary>
+    public RecordEnvelope? CurrentEstate => (currentEstate ??= new(CountingEstate, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
+    private RecordEnvelope? CountingEstate()
+    {
+        if (FirstEstate is not { } current) return Current("estate").OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
+        while (SupersededBy.TryGetValue(current.Id, out string? next) && ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" &&
+            seen.Add(successor.Id) && SignatureChecks.CharterRevisionCounts(this, current, successor))
+        {
+            current = successor;
+        }
+
+        return current;
+    }
 
     /// <summary>Follows the supersedes chain from a record to its latest successor.</summary>
     public RecordEnvelope Latest(RecordEnvelope record)
