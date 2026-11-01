@@ -834,7 +834,7 @@ public static class OpenApiDocument
             ["ReleaseResponse"] = releaseResponse,
             ["ReleaseCheckDetails"] = releaseCheck,
             ["ReleaseObjection"] = Object(("code", "string"), ("location", "string"), ("message", "string"), ("nextAction", "string")),
-            ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean"), ("from", "string"), ("clientBuild", "string")),
+            ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean"), ("from", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
             ["PairingHello"] = Object(("handle", "string"), ("nonce", "string")),

@@ -58,6 +58,15 @@ public class CompanionImplementationTests
             byte[] manifest = File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath));
             cases.Add("manifest.md", DocumentOnDemand.Manifest(model, manifest, DocumentOnDemand.ManifestSnapshot(model, manifest)));
             cases.Add("migrated-release-manifest.md", MigratedManifest());
+            JsonObject selected = JsonNode.Parse(manifest)!.AsObject();
+            selected["vericairn"]!["line"] = "1.x";
+            selected["vericairn"]!["channel"] = "lts";
+            byte[] selectedBytes = CanonicalJson.SerializePrettyUtf8(PolicyFixture.Element(selected));
+            var findings = new FindingList();
+            var selectedModel = new EstateModel(model.Root, model.Records, model.ById, model.SupersededBy, findings)
+            { Manifest = EstateManifest.Parse(selectedBytes, findings) };
+            Assert.False(findings.HasErrors, string.Join('\n', findings));
+            cases.Add("selected-line-manifest.md", DocumentOnDemand.Manifest(selectedModel, selectedBytes, DocumentOnDemand.ManifestSnapshot(selectedModel, selectedBytes)));
         }
         else if (id == "vericairn.records/items")
         {

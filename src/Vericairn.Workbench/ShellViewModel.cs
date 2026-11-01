@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Text.Json;
 using Vericairn.Presentation;
 using Vericairn.Protocol;
+using Vericairn.Records.Updates;
 using Vericairn.Sdk;
 
 namespace Vericairn.Workbench;
@@ -28,6 +29,8 @@ public sealed partial class ShellViewModel : Observable
     private readonly ReleaseUpdates updates;
     private string updateDisclosure = string.Empty;
     private string updateNotice = string.Empty;
+    private PublishedRelease? availableRelease;
+    private JsonElement updatePin;
     private IEstateConnection? connection;
     private EstateView estate = EstateView.From(default(JsonElement), string.Empty);
     private Document? selectedDocument;
@@ -170,10 +173,16 @@ public sealed partial class ShellViewModel : Observable
 
     internal async Task RefreshUpdatesAsync()
     {
-        var release = await updates.CheckAsync().ConfigureAwait(true);
+        availableRelease = await updates.CheckAsync().ConfigureAwait(true);
         UpdateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
+        RenderUpdateNotice();
+    }
+
+    private void RenderUpdateNotice()
+    {
         string installed = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-        UpdateNotice = ReleaseUpdates.Notice(release, installed);
+        UpdateNotice = connection is null ? ReleaseUpdates.Notice(availableRelease, installed)
+            : ReleaseUpdates.EstateNotice(availableRelease, installed, updatePin);
     }
 
     /// <summary>The path typed on the first screen.</summary>
@@ -248,6 +257,8 @@ public sealed partial class ShellViewModel : Observable
         }
 
         connection?.Dispose();
+        updatePin = default;
+        UpdateNotice = string.Empty;
         InvalidateCompanions();
         connection = connect(root);
         await connection.RefreshAsync(cancellationToken).ConfigureAwait(true);
@@ -296,6 +307,8 @@ public sealed partial class ShellViewModel : Observable
         try
         {
             StatusResponse response = (await connection.Api.StatusAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
+            updatePin = response.Json.TryGetProperty("vericairn", out JsonElement pin) ? pin.Clone() : default;
+            RenderUpdateNotice();
             LastPersonObservation = response.Json.TryGetProperty("lastObservedByPerson", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
                 ? $"Last observed by a person: {Str(observed, "at")} · {Str(observed, "name") ?? Str(observed, "by")} · observation {Str(observed, "record")}."
                 : "Last observed by a person: unknown (no estate observation recorded).";

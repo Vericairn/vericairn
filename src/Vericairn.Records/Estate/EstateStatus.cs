@@ -236,7 +236,7 @@ public static class EstateStatus
             },
             ["estate"] = estate is null ? null : new JsonObject { ["id"] = estate.Id, ["name"] = EstateModel.BodyString(estate, "name"), ["slug"] = EstateModel.BodyString(estate, "slug") },
             ["records"] = model.Records.Count,
-            ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version },
+            ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version, ["line"] = model.Manifest.Line, ["channel"] = model.Manifest.Channel },
             ["workOrders"] = new JsonArray(WorkItems(model).Select(i => (JsonNode)new JsonObject { ["key"] = i.Key, ["kind"] = i.Kind, ["title"] = i.Title, ["status"] = i.Status, ["id"] = i.Id }).ToArray()),
             ["releases"] = new JsonArray(model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
                 .Select(r => (JsonNode)new JsonObject { ["version"] = EstateModel.BodyString(r, "version"), ["status"] = EstateModel.BodyString(r, "status"), ["commit"] = EstateModel.BodyString(r, "commit"), ["id"] = r.Id }).ToArray()),

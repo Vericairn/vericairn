@@ -16,7 +16,7 @@ namespace Vericairn.Cli;
 internal sealed class EstateOperations(CommandContext context)
 {
     public int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string? commit, string profile, bool json,
-        bool release = false, string? from = null, string? buildIdentity = null)
+        bool release = false, string? from = null, string? buildIdentity = null, string line = "current", string channel = "stable")
     {
         if (commit is null)
         {
@@ -38,7 +38,7 @@ internal sealed class EstateOperations(CommandContext context)
                     : PublishedReleaseVerifier.FromDirectoryAsync(from, build, ReleaseBuild.Platform, context.CancellationToken).GetAwaiter().GetResult();
             }
             var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
-            initialization = initialization with { Release = verified };
+            initialization = initialization with { Release = verified, Line = line, Channel = channel };
             EstateBootstrap bootstrap = EstateBootstrap.Prepare(root);
             RecordEnvelope operatorRecord;
             RecordEnvelope estateRecord;
@@ -192,9 +192,9 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
-    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null) => context.WithApi(root, api =>
+    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null, string? line = null, string? channel = null) => context.WithApi(root, api =>
     {
-        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText() });
+        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText(), Line = line, Channel = channel });
         if (plan is null)
         {
             if (problem is not null && problem.Findings.Count > 0)
@@ -213,6 +213,7 @@ internal sealed class EstateOperations(CommandContext context)
         else
         {
             context.Output.WriteLine($"{(plan.Applied ? "upgraded" : "would upgrade")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release}");
+            context.Output.WriteLine($"  followed line: {plan.Line}; channel: {plan.Channel}");
             foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
             {
                 context.Output.WriteLine($"  {platform}  {hash}");

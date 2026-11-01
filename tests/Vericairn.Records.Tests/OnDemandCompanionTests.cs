@@ -88,6 +88,7 @@ public class OnDemandCompanionTests
         Assert.Contains(revised.ComputedHash, text, StringComparison.Ordinal);
         Assert.Contains("A revised, exact purpose.", text, StringComparison.Ordinal);
         Assert.Contains("manifest format default", text, StringComparison.Ordinal);
+        Assert.Contains("Followed line: current (manifest default). Followed channel: stable (manifest default).", text, StringComparison.Ordinal);
         Assert.Equal(before.Keys.Order(StringComparer.Ordinal), Directory.EnumerateFiles(estate.Root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal));
         foreach ((string path, string hash) in before) Assert.Equal(hash, ContentHash.Sha256File(path));
         Assert.Empty(model.OfType("living-document"));

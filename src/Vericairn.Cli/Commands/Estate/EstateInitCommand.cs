@@ -26,6 +26,8 @@ internal sealed class EstateInitCommand : Command
         var commitOption = new Option<string?>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits). Defaults to the running build's recorded commit; required when the build records none.", Arity = ArgumentArity.ExactlyOne };
         var releaseOption = new Option<bool>("--release") { Description = "Verify and pin the running published release, including its platform archive." };
         var fromOption = new Option<string?>("--from") { Description = "With --release, verify downloaded release responses, SHA256SUMS and archive in this directory without network access." };
+        var lineOption = new Option<string>("--line") { Description = "Release line to follow.", DefaultValueFactory = _ => "current" };
+        var channelOption = new Option<string>("--channel") { Description = "Release channel to follow: stable, lts, prerelease or nightly.", DefaultValueFactory = _ => "stable" };
         var profileOption = new Option<string>("--profile") { Description = "Storage profile: repository-synced (records as files in a git repository) or local-only (records in this machine's live store).", DefaultValueFactory = _ => "repository-synced" };
         Options.Add(profileOption);
         Options.Add(nameOption);
@@ -38,6 +40,8 @@ internal sealed class EstateInitCommand : Command
         Options.Add(commitOption);
         Options.Add(releaseOption);
         Options.Add(fromOption);
+        Options.Add(lineOption);
+        Options.Add(channelOption);
         SetAction(parseResult => operations.Init(
             parseResult.GetValue(context.EstateOption)!,
             parseResult.GetValue(nameOption)!,
@@ -51,7 +55,7 @@ internal sealed class EstateInitCommand : Command
             parseResult.GetValue(profileOption)!,
             parseResult.GetValue(context.JsonOption),
             parseResult.GetValue(releaseOption),
-            parseResult.GetValue(fromOption), versionText));
+            parseResult.GetValue(fromOption), versionText, parseResult.GetValue(lineOption)!, parseResult.GetValue(channelOption)!));
     }
 
     private static string? RecordedCommit(string versionText)

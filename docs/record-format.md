@@ -67,6 +67,33 @@ Unknown keys, absent references, wrong types or hashes, and non-duty rules are
 refused. The field records a reference only; cadence execution is separate work.
 
 
+## Estate release selection (0.9.0)
+
+The `vericairn.estate-manifest/1` manifest's `vericairn` object accepts optional `line` and
+`channel` strings in both source and release mode. Their names and values follow the release
+field rules above, with absent fields reading as `current` and `stable`. The manifest has
+no `endOfSupport` field: support comes from matching published releases and their product's
+current line declarations. Existing manifests retain their exact bytes when read; no record
+format migration or inferred publication accompanies these defaults.
+
+Newer-release checks and upgrade targets require the same line and an equal or more stable
+channel. `stable` and `lts` are equally stable, then `prerelease`, then `nightly`. Prerelease
+versions are excluded for stable and LTS followers even when a historical record omitted its
+channel. Version ordering uses semantic version precedence, ignoring build metadata.
+
+Only explicit upgrade `line` and `channel` choices change the manifest's followed stream.
+Ordinary upgrades preserve it even when the selected release is more stable. The upgrade
+plan includes the resulting line and channel; the migration's `changes` describe an explicit
+selection change. Pin descriptions include `[line/channel]` for a nondefault selection, so an
+interrupted channel-only move is distinguishable and resumes with one migration. Default
+`current/stable` pin descriptions are unchanged. Current status includes both effective manifest fields under `vericairn`.
+
+`manifest.line-unsupported` is a check warning after the followed LTS line's support timestamp,
+naming the supported lines known for the manifest's repository. It is evaluated at check time
+and does not inject wall-clock or cached release knowledge into canonical status. No supported
+lines known is reported explicitly. Legacy dependency observations and the shared latest-release
+cache retain their `current/stable` meaning; other lines use published release records.
+
 ## Published Vericairn dependency observations (0.8.3)
 
 An existing `observation` record may have kind `vericairn-release`. This additive kind uses the

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text.Json;
 using Vericairn.Records.Updates;
 
 namespace Vericairn.Sdk;
@@ -121,10 +122,24 @@ internal sealed class ReleaseUpdates(ReleaseUpdateStore store, IReleaseSource so
         ? "Release check: on. CLI version, doctor and status, and Workbench, share at most one unauthenticated GitHub release check per 24 hours; no identifiers or usage telemetry are sent. Disable: vericairn updates configure --enabled false."
         : "Release check: off; no request is made. Cached release information may still be shown. Enable: vericairn updates configure --enabled true.";
 
-    internal static string Notice(PublishedRelease? release, string installed) => release is null || !release.IsNewerThan(installed) ? string.Empty
-        : $"Newer Vericairn release: {release.Version} (installed {installed.Split('+')[0]}).\n"
+    internal static string Notice(PublishedRelease? release, string installed, string? repository = PublishedRelease.Repository,
+        string line = "current", string channel = "stable", string? pinnedVersion = null) => release is null
+        || !string.Equals(repository, PublishedRelease.Repository, StringComparison.OrdinalIgnoreCase)
+        || !ReleaseFollowing.Allows(line, channel, "current", "stable", release.Version)
+        || !release.IsNewerThan(pinnedVersion ?? installed) ? string.Empty
+        : $"Newer Vericairn release: {release.Version} ({(pinnedVersion is null ? string.Empty : $"estate pins {pinnedVersion}; ")}installed {installed.Split('+')[0]}).\n"
             + $"Release notes: {release.NotesUrl}\n"
             + $"NuGet tool: dotnet tool update --global dotnet-vc --version {release.Version} (omit --global for a local tool).\n"
             + $"Archive download (CLI or Workbench): {release.NotesUrl} (choose your platform and verify its hashes).\n"
             + $"Estate: vericairn estate upgrade --to {release.Version} --check; then apply with --by <operator>, once its published release record is in the estate. Nothing installs or upgrades automatically.";
+
+    // A connected client uses the runtime's manifest projection. Missing line/channel fields from an older
+    // runtime retain their format defaults; an unavailable pin cannot justify an estate upgrade notice.
+    internal static string EstateNotice(PublishedRelease? release, string installed, JsonElement pin)
+    {
+        if (pin.ValueKind != JsonValueKind.Object) return string.Empty;
+        string? Field(string key) => pin.TryGetProperty(key, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return Notice(release, installed, Field("repository"), Field("line") ?? "current", Field("channel") ?? "stable",
+            Field("mode") == "release" ? Field("version") : null);
+    }
 }

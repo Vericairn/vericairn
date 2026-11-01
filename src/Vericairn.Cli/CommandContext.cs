@@ -24,6 +24,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     private ClientBoundary? boundary;
     private readonly HashSet<string> daemonWarnings = new(StringComparer.Ordinal);
     internal IEstateApi? BorrowedApi { get; init; }
+    internal JsonElement? ReleaseNoticePin { get; set; }
 
     public bool UsingDaemon { get; private set; }
 

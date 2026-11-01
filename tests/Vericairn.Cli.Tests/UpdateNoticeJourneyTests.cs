@@ -6,7 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Tests;
 using Vericairn.Records.Updates;
+using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
 
 namespace Vericairn.Cli.Tests;
@@ -16,6 +18,47 @@ public sealed class UpdateNoticeJourneyTests : IDisposable
 {
     private readonly string home = CliHarness.TempDirectory("update-notice");
     private readonly string estate = CliHarness.TempDirectory("update-estate");
+
+    [Fact]
+    public void StatusUsesTheServingRuntimesLineInsteadOfTheLocalManifestSnapshot()
+    {
+        Init();
+        using var followed = new EstateLineFixture();
+        followed.Follow("1.x", "lts", "1.0.0", "Vericairn/vericairn");
+        using var api = EstateService.Open(followed.Estate.Root);
+        var source = new ReleaseUpdatesTests.Source();
+        var updates = new ReleaseUpdates(new(home), source, new ReleaseUpdatesTests.Clock());
+        CliHarness.Outcome actual = CliHarness.RunWithApiAndUpdates(api, updates, "--estate", estate, "--json", "status");
+        Assert.Equal(0, actual.Code);
+        Assert.Equal("1.x", actual.Json.GetProperty("vericairn").GetProperty("line").GetString());
+        Assert.Contains("Release check: on", actual.Err, StringComparison.Ordinal);
+        Assert.DoesNotContain("Newer Vericairn release", actual.Err, StringComparison.Ordinal);
+        Assert.DoesNotContain("estate upgrade", actual.Err, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("doctor")]
+    [InlineData("status")]
+    public void ASelectedLtsEstateNeverGetsTheSharedCurrentLineUpgradeNotice(string command)
+    {
+        Init();
+        string path = Path.Combine(estate, "estate", "manifest.json");
+        JsonObject manifest = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        manifest["vericairn"]!["line"] = "1.x";
+        manifest["vericairn"]!["channel"] = "lts";
+        File.WriteAllBytes(path, CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(manifest)));
+        byte[] before = File.ReadAllBytes(path);
+        var source = new ReleaseUpdatesTests.Source();
+        var updates = new ReleaseUpdates(new(home), source, new ReleaseUpdatesTests.Clock());
+        CliHarness.Outcome actual = CliHarness.RunWithUpdates(updates, "--estate", estate, command);
+        Assert.Equal(0, actual.Code);
+        Assert.Contains("Release check: on", actual.Err, StringComparison.Ordinal);
+        Assert.DoesNotContain("Newer Vericairn release", actual.Err, StringComparison.Ordinal);
+        Assert.DoesNotContain("estate upgrade", actual.Err, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Equal(1, source.Calls);
+    }
 
     [Fact]
     public void VersionDoctorAndStatusDiscloseAndShowEveryUpgradeRouteWithoutChangingStdout()

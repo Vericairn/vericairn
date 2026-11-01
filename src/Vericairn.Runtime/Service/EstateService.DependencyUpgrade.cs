@@ -34,7 +34,7 @@ public sealed partial class EstateService
     {
         // Preserve the first-party publication and acceptance path, including its unpublished-release refusals.
         if (EstateUpgrade.RecordedTargets(model, request.Version).Count > 0)
-            return (EstateUpgrade.Plan(model, request.Version), null);
+            return (EstateUpgrade.Plan(model, request.Version, request.Line, request.Channel), null);
         if (!string.Equals(model.Manifest!.Repository, VerifiedRelease.Repository, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("This estate pins a different source repository. Use its published release records or explicitly select the Vericairn repository before observing a Vericairn dependency. Nothing changed.");
         ReleaseBuild build = DependencyBuild ?? ReleaseBuild.Parse(Version);
@@ -57,11 +57,11 @@ public sealed partial class EstateService
             string[] identity = ["repository", "version", "tag", "commit", "checksumsHash", "artifactNames", "artifactPlatforms", "artifactHashes", "reads", "writes"];
             if (identity.Any(key => !JsonElement.DeepEquals(recorded.GetProperty(key), facts.GetProperty(key))))
                 throw new InvalidOperationException("The published release differs from this estate's earlier observation of that version. Nothing changed. Investigate the changed tag, checksum file or target build before choosing a release.");
-            return (EstateUpgrade.Plan(model, previous), null);
+            return (EstateUpgrade.Plan(model, previous, request.Line, request.Channel), null);
         }
         string by = Ulid.IsValid(request.By) ? request.By! : EstateModel.BodyString(model.CurrentEstate!, "operator")!;
         AuthoredRecord observation = RecordAuthor.Create(new RecordDraft("observation", by, body,
             model.CurrentEstate!.Reference, At: verified.ObservedAt, Format: model.Manifest.RecordFormat));
-        return (EstateUpgrade.Plan(model, observation.Envelope), observation);
+        return (EstateUpgrade.Plan(model, observation.Envelope, request.Line, request.Channel), observation);
     }
 }
