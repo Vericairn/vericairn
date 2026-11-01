@@ -69,8 +69,11 @@ These are the first-party copies embedded in the installed command line, whose s
 `src/Vericairn.Cli/Bootstrap/` in the product repository. Both have LF line endings, and `bootstrap`
 is executable on Linux and macOS, and both commands keep them LF on every checkout by adding
 `bootstrap text eol=lf` and `bootstrap.ps1 text eol=lf` to `.gitattributes` when those lines are missing.
-Commit them and `.gitattributes` with the estate, and keep `.vericairn/` in its
-`.gitignore` for the bootstrap's local downloads. A fresh estate or clone can run `./bootstrap estate check`
+From 0.9.0 they also add `* text=auto eol=lf`, `*.json text eol=lf` and `*.md text eol=lf`, so a clone made
+where Git converts line endings, Git for Windows' default, keeps every record, object and document LF and
+its hashes intact, and they add `.vericairn/` to `.gitignore` for the bootstrap's local downloads. Commit
+the scripts, `.gitattributes` and `.gitignore` with the estate. An estate made before 0.9.0 gets the lines
+from `vericairn estate bootstrap`; renormalize it once afterwards (`git add --renormalize .`, then commit). A fresh estate or clone can run `./bootstrap estate check`
 on Linux and macOS, or `./bootstrap.ps1 estate check` in Windows PowerShell 5.1 or PowerShell 7.
 The scripts use the manifest's source or release pin; [Route A](install.md#1-route-a-as-part-of-an-estate-through-its-bootstrap)
 describes the prerequisites and cold start.
@@ -89,8 +92,8 @@ even with `--force`. Refreshing the scripts keeps the estate's records and manif
 Initialization also refuses an existing differing copy before creating the estate; keep a copy of
 any customizations and move the file aside before retrying initialization.
 
-Both commands name the two scripts and `.gitattributes` in their receipt. Human output adds lines such as
-`written   bootstrap`, `written   bootstrap.ps1` and `written   .gitattributes`; `--json` adds a `bootstrap`
+Both commands name the two scripts, `.gitattributes` and, from 0.9.0, `.gitignore` in their receipt. Human output adds lines such as
+`written   bootstrap`, `written   bootstrap.ps1`, `written   .gitattributes` and `written   .gitignore`; `--json` adds a `bootstrap`
 array of `path` and `status` objects.
 
 Vericairn also offers opt-in `estate init --release`. Run the published target release's own command line,

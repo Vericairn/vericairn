@@ -45,8 +45,11 @@ embedded in the installed Vericairn command line, from `src/Vericairn.Cli/Bootst
 repository. Every release from 0.8.4 carries them. Both use LF line endings; `bootstrap` is executable
 on Linux and macOS. The same commands add `bootstrap text eol=lf` and `bootstrap.ps1 text eol=lf` to the
 estate's `.gitattributes`, appending only missing lines, because Git for Windows converts text to CRLF on
-checkout by default, which would break the POSIX script. Commit the scripts and `.gitattributes` with the
-estate so a fresh clone can use Route A.
+checkout by default, which would break the POSIX script. From 0.9.0 they also add `* text=auto eol=lf`,
+`*.json text eol=lf` and `*.md text eol=lf`, so the conversion leaves every record, object and document LF
+and its hash intact, and add `.vericairn/` to the estate's `.gitignore`. Commit the scripts, `.gitattributes`
+and `.gitignore` with the estate so a fresh clone can use Route A. For an estate made before 0.9.0, run the
+refresh below, then renormalize once (`git add --renormalize .`, then commit).
 
 For an existing estate, use an installed command line from 0.8.4 or later:
 
@@ -54,7 +57,7 @@ For an existing estate, use an installed command line from 0.8.4 or later:
 vericairn --estate <estate root> estate bootstrap
 ```
 
-The command reports each script and `.gitattributes` as `written` or `unchanged`. It checks both files before writing and
+The command reports each script, `.gitattributes` and `.gitignore` as `written` or `unchanged`. It checks both files before writing and
 refuses to replace a differing copy unless you add `--force`; preserve any estate customizations
 before doing so. It restores the POSIX script's executable permission even when its bytes are
 unchanged. With `--json`, the `bootstrap` array gives each file's `path` and `status`. This refresh

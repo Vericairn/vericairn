@@ -11,24 +11,28 @@ internal sealed class EstateBootstrap
     private sealed record Copy(string Name, string Destination, byte[] Bytes, bool Exists, bool Identical);
 
     private readonly Copy[] copies;
-    private readonly Copy attributes;
+    private readonly Copy[] gitFiles;
 
-    private EstateBootstrap(Copy[] copies, Copy attributes) => (this.copies, this.attributes) = (copies, attributes);
+    private EstateBootstrap(Copy[] copies, Copy[] gitFiles) => (this.copies, this.gitFiles) = (copies, gitFiles);
 
-    // Git for Windows converts text to CRLF on checkout by default, which breaks the POSIX script and makes both differ from
-    // the shipped bytes. The estate's .gitattributes keeps them LF on every checkout; only missing lines are appended.
-    private static readonly string[] AttributeLines = ["bootstrap text eol=lf", "bootstrap.ps1 text eol=lf"];
+    // Git for Windows converts text to CRLF on checkout by default, which breaks the POSIX script and changes the canonical
+    // bytes of records, objects and documents, so their hashes no longer match. The estate's .gitattributes keeps every text
+    // file LF on every checkout, and its .gitignore keeps the per-clone working directory out of commits; only missing lines
+    // are appended to either.
+    private static readonly string[] AttributeLines = ["* text=auto eol=lf", "*.json text eol=lf", "*.md text eol=lf", "bootstrap text eol=lf", "bootstrap.ps1 text eol=lf"];
+    private static readonly string[] IgnoreLines = [".vericairn/"];
 
     // Check every destination before initialization or refresh writes anything.
     internal static EstateBootstrap Prepare(string root, bool force = false)
     {
         Copy[] copies = [Read(root, "bootstrap", force), Read(root, "bootstrap.ps1", force)];
-        return new(copies, Attributes(root));
+        return new(copies, [Lines(root, ".gitattributes", AttributeLines), Lines(root, ".gitignore", IgnoreLines)]);
     }
 
     internal BootstrapReceipt[] Write()
     {
-        if (!attributes.Identical) Replace(attributes);
+        foreach (Copy file in gitFiles)
+            if (!file.Identical) Replace(file);
         foreach (Copy copy in copies)
         {
             if (copy.Identical)
@@ -48,20 +52,18 @@ internal sealed class EstateBootstrap
             finally { File.Delete(temporary); }
         }
 
-        return [.. copies.Select(copy => new BootstrapReceipt(copy.Name, copy.Identical ? "unchanged" : "written")),
-            new BootstrapReceipt(attributes.Name, attributes.Identical ? "unchanged" : "written")];
+        return [.. copies.Concat(gitFiles).Select(copy => new BootstrapReceipt(copy.Name, copy.Identical ? "unchanged" : "written"))];
     }
 
-    private static Copy Attributes(string root)
+    private static Copy Lines(string root, string name, string[] lines)
     {
-        const string name = ".gitattributes";
         string destination = Path.Combine(root, name);
         if (new FileInfo(destination).LinkTarget is not null || Directory.Exists(destination))
             throw new InvalidOperationException($"{name} is a link or directory. Move it aside before writing the first-party bootstrap. Nothing changed.");
         bool exists = File.Exists(destination);
         string text = exists ? File.ReadAllText(destination) : string.Empty;
         HashSet<string> present = text.Split('\n').Select(line => line.Trim()).ToHashSet(StringComparer.Ordinal);
-        string[] missing = AttributeLines.Where(line => !present.Contains(line)).ToArray();
+        string[] missing = lines.Where(line => !present.Contains(line)).ToArray();
         if (missing.Length == 0) return new(name, destination, [], exists, true);
         string separator = text.Length == 0 || text.EndsWith('\n') ? string.Empty : "\n";
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text + separator + string.Concat(missing.Select(line => line + "\n")));
