@@ -185,6 +185,15 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
     /// <inheritdoc />
     public string ManualPublicationCommand(string destination, string tag) => $"gh release edit {tag} -R {destination} --draft=false --latest";
 
+    public string ManualPublicationCommand(string destination, string tag, string channel) =>
+        $"gh release edit {tag} -R {destination} --draft=false " + (channel switch
+        {
+            "stable" => "--latest",
+            "lts" => "--latest=false",
+            "prerelease" or "nightly" => "--prerelease",
+            _ => throw new ArgumentOutOfRangeException(nameof(channel)),
+        });
+
     /// <inheritdoc />
     public byte[]? ReadAsset(string destination, string tag, string name)
     {

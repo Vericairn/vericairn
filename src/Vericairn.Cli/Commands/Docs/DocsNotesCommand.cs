@@ -14,10 +14,12 @@ internal sealed class DocsNotesCommand : Command
         var toOption = new Option<string>("--to") { Description = "The release's version; its publication ends the notes once it is recorded, the second before they are generated until then.", Required = true };
         var notesOutOption = new Option<string>("--out") { Description = "Directory of the documentation set the notes belong to.", Required = true };
         var sinceOption = new Option<string?>("--since") { Description = "The time the notes begin, for example 2026-10-16T04:29:43Z, no later than the previous set's end; widens the window to include records the previous set missed and records the chosen start in the manifest." };
+        var lineOption = new Option<string?>("--line") { Description = "Select a release line and show backports both into and out of it." };
         Options.Add(fromOption);
         Options.Add(toOption);
         Options.Add(notesOutOption);
         Options.Add(sinceOption);
-        SetAction(parseResult => Docs.Notes(context, parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(notesOutOption)!, parseResult.GetValue(sinceOption), parseResult.GetValue(context.JsonOption)));
+        Options.Add(lineOption);
+        SetAction(parseResult => Docs.Notes(context, parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(notesOutOption)!, parseResult.GetValue(sinceOption), parseResult.GetValue(context.JsonOption), line: parseResult.GetValue(lineOption)));
     }
 }

@@ -14,7 +14,7 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
     // Bump only the affected identities when emitted bytes or meaning change; retain their golden fixtures.
     private const string DecisionsImplementation = "vericairn.records/decisions/2";
     private const string WorkOrdersImplementation = "vericairn.records/work-orders/1";
-    private const string ReleasesImplementation = "vericairn.records/releases/1";
+    private const string ReleasesImplementation = "vericairn.records/releases/2";
     private const string PoliciesImplementation = "vericairn.estate/policies/1";
     private const string PolicyExceptionsImplementation = "vericairn.estate/policy-exceptions/1";
     private const string WritingExceptionsImplementation = "vericairn.estate/writing-exceptions/1";

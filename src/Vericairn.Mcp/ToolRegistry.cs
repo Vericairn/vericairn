@@ -161,7 +161,11 @@ public sealed partial class ToolRegistry
                     var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), Arg(a, "by"),
                         OptionalArg(a, "ref"), OptionalArg(a, "workflow"), OptionalArg(a, "reconciliation"), OptionalArg(a, "provider"),
                         a?["settings"] is JsonObject settings ? settings.Deserialize<Dictionary<string, string>>(ProtocolJson.Options) : null,
-                        Arg(a, "commit"), Arg(a, "expected")) { ClientBuild = Arg(a, "clientBuild") };
+                        Arg(a, "commit"), Arg(a, "expected"))
+                    {
+                        ClientBuild = Arg(a, "clientBuild"), Line = OptionalArg(a, "line"), Channel = OptionalArg(a, "channel"),
+                        EndOfSupport = OptionalArg(a, "endOfSupport"), BackportOf = a?["backportOf"]?.Deserialize<ReleaseBackportReference>(ProtocolJson.Options),
+                    };
                     ReleaseResponse result = await api.ReleaseCheckAsync(request, token).ConfigureAwait(false);
                     return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), !result.Ok);
                 }),
@@ -307,8 +311,15 @@ public sealed partial class ToolRegistry
         JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked."),
             ("commit", "Exact lower-case forty-digit commit."), ("expected", "Expected current product hash."), ("clientBuild", "Full informational version of the submitting client, including source commit."),
             ("repository", "Optional repository destination."), ("provider", "Optional release provider."), ("ref", "Optional provider ref setting."),
-            ("workflow", "Optional workflow setting."), ("reconciliation", "Optional settlement of the previous attempt."));
+            ("workflow", "Optional workflow setting."), ("reconciliation", "Optional settlement of the previous attempt."),
+            ("line", "Release line; defaults to current."), ("channel", "stable, lts, prerelease or nightly; defaults to stable."),
+            ("endOfSupport", "RFC 3339 end of support; required only for lts."));
         schema["properties"]!["settings"] = new JsonObject { ["type"] = "object", ["additionalProperties"] = new JsonObject { ["type"] = "string" } };
+        schema["properties"]!["backportOf"] = new JsonObject
+        {
+            ["type"] = "object", ["properties"] = new JsonObject { ["id"] = new JsonObject { ["type"] = "string" }, ["hash"] = new JsonObject { ["type"] = "string" } },
+            ["required"] = new JsonArray("id", "hash"), ["additionalProperties"] = false,
+        };
         schema["required"] = new JsonArray("product", "version", "by", "commit", "expected", "clientBuild");
         return schema;
     }

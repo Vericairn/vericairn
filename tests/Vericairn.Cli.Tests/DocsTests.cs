@@ -295,6 +295,8 @@ public class DocsTests
             submit = submit[..submit.IndexOf("\n### ", 5, StringComparison.Ordinal)];
             Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
             Assert.Contains("--check", submit, StringComparison.Ordinal);
+            foreach (string option in new[] { "--line", "--channel", "--end-of-support", "--backport-of", "--backport-hash" })
+                Assert.Contains(option, submit, StringComparison.Ordinal);
             Assert.DoesNotContain("--help", submit, StringComparison.Ordinal);
             string rootOptions = cli[..cli.IndexOf("## `vericairn ", StringComparison.Ordinal)];
             Assert.Contains("--recipient <recipient>", rootOptions, StringComparison.Ordinal);

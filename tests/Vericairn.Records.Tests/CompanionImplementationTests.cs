@@ -68,6 +68,16 @@ public class CompanionImplementationTests
             cases.Add("duties-item.md", RecordCompanionTests.Render([source], "item", "duties", "1"));
             cases.Add("list.md", RecordCompanionTests.Render([source], "list"));
             foreach (var template in TemplateCompanionTests.GoldenCases()) cases.Add(template.Key, template.Value);
+            cases.Add("release-backport.md", RecordCompanionTests.Render([BackportSource(model)]));
+            JsonObject product = ReleaseLineFixture.ProductBody();
+            product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "stable" },
+                new JsonObject { ["name"] = "1.x", ["channel"] = "lts", ["endOfSupport"] = "2028-01-01T00:00:00Z" });
+            RecordEnvelope policy = model.OfType("estate-policy").First(p => p.Body.GetProperty("rules").EnumerateArray()
+                .Any(r => r.GetProperty("kind").GetString() == "vericairn.estate/recurring-duty"));
+            product["cadence"] = new JsonObject { ["policy"] = PolicyFixture.Ref(policy), ["rule"] = "monthly" };
+            DocumentSourceSnapshot declaredProduct = RecordCompanionTests.Source("product", product);
+            cases.Add("product-lines-and-cadence.md", RecordCompanionTests.Render([declaredProduct]));
+            cases.Add("product-lines-list.md", RecordCompanionTests.Render([declaredProduct], "list", "lines"));
         }
         else
         {
@@ -90,8 +100,20 @@ public class CompanionImplementationTests
                 new(DocumentGenerationStatus.Success, [DocumentSourceSnapshot.Record(large)], null, null)).Members);
             cases.Add("partial-overview.md", DocumentRendering.Render(generator, overview.Context));
             Assert.Contains("## Partial overview", RecordCompanionTests.Text(cases["partial-overview.md"]), StringComparison.Ordinal);
+            if (id == "vericairn.records/releases")
+            {
+                DocumentMember backport = Assert.Single(DocumentGeneration.Members(RevisionCompanionTests.Carrier(id),
+                    new(DocumentGenerationStatus.Success, [BackportSource(model)], null, null)).Members);
+                cases.Add("backport.md", DocumentRendering.Render(generator, backport.Context));
+            }
         }
         return cases;
+    }
+
+    private static DocumentSourceSnapshot BackportSource(EstateModel model)
+    {
+        RecordEnvelope source = model.OfType("release").First(r => EstateModel.BodyString(r, "status") == "published");
+        return RecordCompanionTests.Source("release", ReleaseLineFixture.Body("1.9.1", "1.x", "lts", source));
     }
 
     private static DocumentRendition MigratedManifest()

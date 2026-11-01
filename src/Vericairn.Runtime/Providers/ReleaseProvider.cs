@@ -85,6 +85,14 @@ public interface IReleaseProvider
     string ManualPublicationCommand(string destination, string tag);
 
     /// <summary>
+    /// The operator's publication command for this channel. Older providers support stable through their original member;
+    /// other channels require an implementation and are never silently published as latest.
+    /// </summary>
+    string ManualPublicationCommand(string destination, string tag, string channel) => channel == "stable"
+        ? ManualPublicationCommand(destination, tag)
+        : throw new NotSupportedException($"The release provider does not support publication on channel '{channel}'.");
+
+    /// <summary>
     /// Reads one asset of a release by its name; null when the release or the asset does not exist, or when the implementation reads
     /// no assets, as one written before this member was added does not. The observer reads the documentation set a draft carries
     /// this way, for the record formats the release states, and holds what it read to the hash the release's checksum file names.

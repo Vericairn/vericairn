@@ -180,6 +180,30 @@ public class ReleaseProviderConformanceTests
 
     private static readonly Dictionary<string, string> Settings = new(StringComparer.Ordinal) { ["repository"] = Repository, ["workflow"] = "release.yml", ["ref"] = "main", ["checksums"] = "SHA256SUMS" };
 
+    [Theory]
+    [InlineData("stable", "--latest")]
+    [InlineData("lts", "--latest=false")]
+    [InlineData("prerelease", "--prerelease")]
+    [InlineData("nightly", "--prerelease")]
+    public void OnlyStablePublicationIsLatest(string channel, string flags)
+    {
+        foreach (IReleaseProvider provider in new IReleaseProvider[] { new GitHubReleaseProvider(), new FakeReleaseProvider() })
+        {
+            string command = provider.ManualPublicationCommand(Repository, "v1.1.0", channel);
+            Assert.Equal($"gh release edit v1.1.0 -R {Repository} --draft=false {flags}", command);
+            Assert.Equal(channel == "stable", command.Split(' ').Contains("--latest", StringComparer.Ordinal));
+            Assert.Equal(channel is "prerelease" or "nightly", command.Split(' ').Contains("--prerelease", StringComparer.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void TheLegacyGitHubCommandRemainsStableAndUnknownChannelsAreRefused()
+    {
+        var provider = new GitHubReleaseProvider();
+        Assert.Equal($"gh release edit v1.1.0 -R {Repository} --draft=false --latest", provider.ManualPublicationCommand(Repository, "v1.1.0"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => provider.ManualPublicationCommand(Repository, "v1.1.0", "unknown"));
+    }
+
     [Fact]
     public void TheInMemoryProviderDeclaresWhatTheGitHubProviderDeclares()
     {

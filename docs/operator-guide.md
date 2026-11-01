@@ -361,6 +361,52 @@ vericairn check observe --resource <resource id> --repository owner/name --run <
 
 ## 8. Releases
 
+### Release lines and channels in 0.9.0
+
+Use `release submit --line <name> --channel <channel>` to prepare a release on a
+named line. Omitted values mean `current` and `stable`. The same options apply
+with `--check`; validation happens before an intent or build is dispatched. The
+intent retains these values, and observation copies them into the candidate.
+
+A product can declare `lines` as an array of `{name, channel}` objects. Each LTS
+declaration also requires `endOfSupport`, an RFC 3339 timestamp. Line names match
+`^[a-z0-9][a-z0-9.-]{0,39}$`. Once declared or used, a line keeps its channel;
+stable and LTS lines may also carry prereleases of their next version. Nightly
+lines contain only nightly releases. Versions cannot be reused in another line
+of the same product, including across product revisions.
+
+For an LTS release, also supply `--end-of-support <timestamp>`; other channels
+refuse that field. It cannot precede the observed publication time. To carry a
+published change across lines, supply both `--backport-of <release-id>` and
+`--backport-hash <exact-hash>`. The source must be a current published release of
+the same product in another line. Every channel permits this reference.
+
+The GitHub provider prints these manual publication commands:
+
+| Channel | Command |
+| --- | --- |
+| `stable` | `gh release edit <tag> -R <repo> --draft=false --latest` |
+| `lts` | `gh release edit <tag> -R <repo> --draft=false --latest=false` |
+| `prerelease` | `gh release edit <tag> -R <repo> --draft=false --prerelease` |
+| `nightly` | `gh release edit <tag> -R <repo> --draft=false --prerelease` |
+
+Only stable marks GitHub latest. The operator still accepts the exact candidate
+and runs the publication command; every channel follows the existing acceptance
+and observation procedure. An older provider without channel support supplies
+its original stable command and reports other channels as unsupported.
+
+`docs notes --line <name> --from <version> --to <version> --out <set>` selects a
+line's release history and shows backports into and out of that line, with both
+versions and the exact source release. A backport appears in the notes window
+containing its publication; earlier frozen sets remain unchanged. The selected
+line and the existing exact notes window are recorded in the set's manifest.
+
+The product may also carry `cadence: {policy: {type: "estate-policy", id, hash}, rule}`,
+pinning a recurring-duty rule. This addition validates the reference; it does not
+schedule or automate a release. See [record fields](record-format.md#release-lines-and-channels-090).
+
+### Release procedure
+
 A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.8.4 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.

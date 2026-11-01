@@ -657,6 +657,14 @@ public static class OpenApiDocument
         releaseResponse["properties"]!["check"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseCheckDetails" };
         JsonObject releaseCheck = Object(("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("runtimeBuild", "string"), ("basisBytes", "integer"), ("objections", "array"));
         releaseCheck["properties"]!["objections"]!["items"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseObjection" };
+        JsonObject releaseSubmit = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string"), ("endOfSupport", "string"), ("backportOf", "object"));
+        releaseSubmit["properties"]!["line"]!["pattern"] = "^[a-z0-9][a-z0-9.-]{0,39}$";
+        releaseSubmit["properties"]!["channel"]!["enum"] = new JsonArray("stable", "lts", "prerelease", "nightly");
+        releaseSubmit["properties"]!["endOfSupport"]!["format"] = "date-time";
+        JsonObject backport = Object(("id", "string"), ("hash", "string"));
+        backport["required"] = new JsonArray("id", "hash");
+        backport["additionalProperties"] = false;
+        releaseSubmit["properties"]!["backportOf"] = backport;
 
         return new JsonObject
         {
@@ -800,7 +808,7 @@ public static class OpenApiDocument
             ["ReleaseReviewBriefResponse"] = Object(("text", "string"), ("hash", "string"), ("brief", "object"), ("reviewer", "string"), ("assignment", "object"), ("problem", "object"), ("requestedProgress", "string"), ("ok", "boolean")),
             ["WorkMovePlanRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedWork", "object"), ("to", "string"), ("expectedTarget", "string"), ("version", "string")),
             ["WorkMovePlanResponse"] = Object(("written", "array"), ("problem", "object"), ("ok", "boolean")),
-            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string")),
+            ["ReleaseSubmitRequest"] = releaseSubmit,
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string"), ("withdrawal", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
             ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("prompt", "object")),
