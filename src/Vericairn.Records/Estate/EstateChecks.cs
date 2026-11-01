@@ -185,12 +185,12 @@ public static partial class EstateChecks
         foreach (string line in text.Split('\n'))
         {
             lineNumber++;
-            if (AbsolutePath().IsMatch(line))
+            if (SecretShapes.AbsolutePath().IsMatch(line))
             {
                 findings.Error("portability.absolute-path", $"{relative}:{lineNumber}", "Machine-specific absolute path. Use repository-relative paths or placeholders.");
             }
 
-            if (SecretPattern().IsMatch(credentialLines[lineNumber - 1]))
+            if (SecretShapes.Secret().IsMatch(credentialLines[lineNumber - 1]))
             {
                 findings.Error("secrets.pattern", $"{relative}:{lineNumber}", "Looks like a credential. Credentials never enter the estate; reference them by purpose instead.");
             }
@@ -305,7 +305,7 @@ public static partial class EstateChecks
             case JsonValueKind.Object:
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    if (SecretKeyName().IsMatch(property.Name) && !(writingToken && path == "$.body" && property.Name == "token"))
+                    if (SecretShapes.SecretKeyName().IsMatch(property.Name) && !(writingToken && path == "$.body" && property.Name == "token"))
                     {
                         findings.Error("secrets.key", $"{relative}#{path}.{property.Name}", "Records never hold secret values; reference a credential by id and purpose.");
                     }
@@ -454,13 +454,4 @@ public static partial class EstateChecks
             }
         }
     }
-
-    [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
-    private static partial Regex AbsolutePath();
-
-    [GeneratedRegex(@"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}|\bsk-[A-Za-z0-9_-]{32,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}")]
-    private static partial Regex SecretPattern();
-
-    [GeneratedRegex(@"^(?i)(secret|token|password|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?secret)$")]
-    private static partial Regex SecretKeyName();
 }
