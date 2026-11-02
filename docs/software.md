@@ -2029,7 +2029,7 @@ record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Selection is
 refused unless the operator's `efficiency-adapter` machine setting names `local-lossless` and the launcher.
-It must not be enabled before its own security review, which precedes 0.9.0's release. It preserves protected
+0.9.0's release security review covers it. It preserves protected
 wire bytes, transforms only explicitly eligible retained context, fixes the upstream before intent and
 records eligible bytes before and after. Codex's fixed sign-in route refuses the hook. RUN-01 adds
 no remote launch, environment admission, observation, signing or qualification, and the local-network

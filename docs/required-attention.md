@@ -70,7 +70,9 @@ compact items point to the complete asks and state how many more are queued.
 Blocked goals, exhausted budgets and worker signals retain their existing
 workflow semantics. Worker signals can remain continuity concerns after an
 operation settles; settling an effect is not a disposition of every worker
-observation. No new acknowledgement, expiry scheduler or dismissal state is added.
+observation. From 0.9.0 a principal can acknowledge a notice, from Remote or Workbench: the acknowledgement is
+unsigned presentation state kept per principal, resolves nothing and clears when the notice changes. No expiry
+scheduler or dismissal state is added.
 
 ## Shared and structured surfaces
 
