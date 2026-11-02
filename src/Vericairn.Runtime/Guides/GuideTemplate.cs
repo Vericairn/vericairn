@@ -90,7 +90,7 @@ internal static class GuideTemplate
         }
     }
 
-    private static string Build(string kind) => kind switch
+    internal static string Build(string kind) => kind switch
     {
         "domain" => "1. Choose one row-derived task and a reviewable outcome that performs no reserved act.\n2. Define vocabulary, rules, workflows, templates and quality checks using owning platform capabilities.\n3. Declare records read/proposed, permissions, failures, dependencies, recovery and client contributions.\n4. Keep replaceable interfaces explicit and prove an alternative implementation.",
         "foundry" => "1. Preview Current estate, Intended outcome, Selected material, Dependencies and responsibilities, Change comparison, Apply and reconcile, and Aftercare.\n2. Consider initialize, expand, adopt, migrate, reconcile, repair, fork and extract; declare support, prerequisites, limits and reasoned non-applicability for each.\n3. Compare exact source and dependency versions with local customizations before applying.\n4. Deliver a usable first task and ongoing aftercare, with no hidden account, repository, publication or paid-provider step.",
@@ -99,7 +99,7 @@ internal static class GuideTemplate
         _ => "1. Select a bounded product contribution from the area's owns/boundary or capability role/collaborators/caveat.\n2. Use the applicable public foundation contract and preserve ownership of every collaborating capability.\n3. Test the boundary and compatibility and prepare the product pull request. This contribution is not an installable fifth Pack role and requires no private edition interface.",
     };
 
-    private static string Checks(string kind) => kind switch
+    internal static string Checks(string kind) => kind switch
     {
         "domain" => "Show the intended outcome, refusal for each reserved act, a proposal that cannot accept itself, installation without permission, honest dependency loss, invalidated review after changed input, and removal preserving records. Test an alternative implementation of each new replaceable interface.",
         "foundry" => "Exercise a usable first task; extraction blocked by a missing dependency with unrelated private material excluded; fork retaining lineage without authority; repair with missing source and intentional customization; interrupted migration with late source changes; partial apply and aftercare. Reconcile an uncertain original effect before retry.",

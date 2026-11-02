@@ -10,11 +10,15 @@ namespace Vericairn.Cli;
 internal sealed class GuidesCommand : Command
 {
     public GuidesCommand(CommandContext context)
-        : base("guides", "Deterministic community build guides from explicit local sources; private previews only, with no estate, network or publication operation.")
+        : base("guides", "Deterministic community build guides from explicit local sources; private previews and local catalog preparation, with no estate, network or publication operation.")
     {
         Subcommands.Add(new GuidesBuildCommand(context, check: false));
         Subcommands.Add(new GuidesBuildCommand(context, check: true));
         Subcommands.Add(new GuidesCompareCommand(context));
+        Subcommands.Add(new CatalogExportCommand(context, compare: false));
+        Subcommands.Add(new CatalogExportCommand(context, compare: true));
+        Subcommands.Add(new CatalogRequestCommand(context, reconcile: false));
+        Subcommands.Add(new CatalogRequestCommand(context, reconcile: true));
     }
 }
 

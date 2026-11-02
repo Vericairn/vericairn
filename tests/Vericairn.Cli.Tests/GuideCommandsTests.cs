@@ -18,7 +18,7 @@ public sealed class GuideCommandsTests
         Assert.Contains("private previews", CliHarness.Ok("guides", "--help").Out, StringComparison.Ordinal);
         RootCommand root = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
         Command guides = root.Subcommands.Single(c => c.Name == "guides");
-        Assert.Equal(["check", "compare", "generate"], guides.Subcommands.Select(c => c.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["check", "compare", "export", "generate", "publication-check", "request-validate", "requests-reconcile"], guides.Subcommands.Select(c => c.Name).Order(StringComparer.Ordinal));
         foreach (string action in new[] { "generate", "check" })
         {
             CliHarness.Outcome help = CliHarness.Ok("guides", action, "--help");
