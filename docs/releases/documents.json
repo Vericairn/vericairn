@@ -42,5 +42,13 @@
   "prompts.md",
   "prompt-record-reference.md",
   "operator-requests.md",
-  "api-compatibility-0.8.4.md"
+  "api-compatibility-0.8.4.md",
+  "remote.md",
+  "community-build-guides.md",
+  "efficiency-adapter.md",
+  "agent-builders.md",
+  "frameworks/langgraph.md",
+  "frameworks/crewai.md",
+  "frameworks/autogen.md",
+  "api-compatibility-0.9.0.md"
 ]

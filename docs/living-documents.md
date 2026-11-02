@@ -24,7 +24,8 @@ document due at `refuse` holds the release before intent or dispatch.
 A clearing `document-review` has outcome `current` or `revised` and pins the exact
 bytes. Reviewing the new bytes clears the own-file reason everywhere; `needs-change`
 does not. For an estate file, a newer `document-revision` can also clear its own
-content. Explicitly declared covered paths still require a clearing review of
+content when its author meets the declaration's `clearedBy` (never for
+`independent`) and the declared checks pass. Explicitly declared covered paths still require a clearing review of
 their content identity. Existing reviews remain usable: their `content` pin covers
 the document itself, and their separate `covered` pin covers the declared paths.
 No declaration rewrite or replacement review is required merely to adopt this rule.
