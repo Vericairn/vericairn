@@ -26,7 +26,7 @@ public sealed class RemoteDecisionJourneyTests
         var ordinary = new NewRecordRequest("acceptance", journey.Person,
             JsonSerializer.SerializeToElement(new { statement = "Accept this result.", basis = new[] { journey.Review.Id }, self = false }),
             Subject: "result:" + result.Id + ":" + result.ComputedHash);
-        await Assert.ThrowsAsync<HttpRequestException>(() => client.NewRecordAsync(ordinary, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ClientRefusedException>(() => client.NewRecordAsync(ordinary, TestContext.Current.CancellationToken));
 
         await journey.Open(ask);
         Assert.Contains(ask.ComputedHash, remote.DecisionIdentity, StringComparison.Ordinal);
