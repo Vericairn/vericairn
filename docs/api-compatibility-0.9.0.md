@@ -34,6 +34,50 @@ supports it. `GitCommandAdapter` implements both members and verifies the select
 bytes from local history without fetching or changing a checkout. No interface
 member is added without a default implementation.
 
+## IAgentLauncher.EfficiencyUpstream (EFF-01)
+
+`Uri EfficiencyUpstream(LaunchContext context)` has a default implementation that
+throws `ProviderRefusedException`. A launcher must establish its fixed provider
+base and support for a hook before an adapter run's intent. An existing implementer
+has no new obligation for disabled runs and cannot silently enable the adapter.
+
+## IAgentLauncher.ConfigureEfficiencyHook (EFF-01)
+
+`LaunchContext ConfigureEfficiencyHook(LaunchContext context, Uri? address)` has
+a default implementation that throws `ProviderRefusedException`. Implementers
+apply a worker-owned loopback address to isolated run configuration and restore
+the direct configuration for null. Both new launcher members have defaults;
+none is added without one.
+
+## Efficiency representation, configuration and measurements (EFF-01)
+
+Records adds `RepresentationContract` and `RepresentationBlock` for
+`vericairn.representation/1`. Runtime adds the separate `LosslessAdapter` and
+`RepresentationReduction`, `EfficiencyAdapterConfiguration`, the worker store's
+`ReadAdapter`/`WriteAdapter` operations and `AdapterPresentation.Describe`.
+`RunConfiguration.AdapterPermission`, `RunCapabilities.Adapters` and
+`LaunchContext.AdapterAddress` are init-only additions with absent defaults;
+their positional constructors and deconstructors are unchanged. Absent adapter
+permission and capabilities are omitted from JSON, preserving the earlier
+serialized shape for unconfigured launchers.
+
+Format-3 agent execution admits `local-lossless` beside the existing `disabled`
+choice and requires `adapterAddress` for that choice (a loopback authority, or
+null for startup fallback); disabled runs omit it. Its immutable
+intent still cannot change at settlement. `executionObserved.adapter` adds
+measured state and eligible byte counts, with tokens explicitly unknown. Worker
+run rows expose live local measurements through their existing nullable
+`ExecutionObserved` member; status adds `efficiencyAdapters` only when recorded
+measurements exist, preserving canonical status's record-only contract.
+Earlier readers cannot validate this new selection; update the serving runtime
+before selecting it. Format-2 runs keep the adapter disabled.
+
+The existing context-original route can also return an optional original from an
+adapter run's verified retained context when the working copy no longer matches.
+Access, exact revision and byte identity are rechecked; no newer original is
+substituted. There is no new record type, API route, MCP tool, exported telemetry,
+package dependency or record-format change. See the [adapter declaration](efficiency-adapter.md).
+
 ## Settling a run whose observation is marked settled (FIX-76)
 
 `RunSettleRequest` adds an init-only `bool RecordsChecked` property, default false.

@@ -11,6 +11,24 @@ namespace Vericairn.Cli;
 
 internal sealed class WorkerSettings(CommandContext context)
 {
+    public int Adapter(string? adapter, string[] launchers, bool otherChoices, bool json)
+    {
+        if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)
+            return context.Fail("Only the operator outside a worker run may set efficiency-adapter admission.");
+        if (adapter is null || otherChoices) return context.Fail("Set --adapter and --allow-launcher separately from launcher defaults and workspace placement.");
+        try
+        {
+            var permission = new EfficiencyAdapterConfiguration { Adapter = adapter, Launchers = launchers };
+            new WorkerConfigurationStore().WriteAdapter(permission);
+            if (json) context.Output.WriteLine(JsonSerializer.Serialize(permission, ProtocolJson.Options));
+            else context.Output.WriteLine("efficiency-adapter: " + adapter + "; allowed launchers: " + string.Join(", ", launchers)
+                + ". Runs remain disabled unless explicitly selected. Do not enable before its security review.");
+            return Clean;
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException or ArgumentException)
+        { return context.Fail(exception.Message); }
+    }
+
     public int Configure(string? launcher, string? model, string? effort, string[] models, string[] efforts, string? workspaces, bool json)
     {
         bool setting = model is not null || effort is not null || models.Length > 0 || efforts.Length > 0;

@@ -391,7 +391,7 @@ available. Single records are judged before publication, just as grouped records
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
-The efficiency Adapter is disabled and unsupported; EFF-01 remains unbuilt. Native worker
+The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Only the operator's machine configuration can admit it; no MCP tool enables it. It must not be enabled before its security review, which precedes 0.9.0's release. Native worker
 dispatch requires a complete inventory and either an exact codex-cli baseline (`0.159.0-alpha.12.1`, and from 0.9.0
 `0.163.0-alpha.10.2` and `0.163.0`) or the Claude Code `2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
 the release-specific MCP matrix above; the admission protocol alone establishes no live-agent or sign-in

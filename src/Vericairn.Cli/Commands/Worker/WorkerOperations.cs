@@ -40,6 +40,8 @@ internal sealed class WorkerOperations(CommandContext context)
                     context.Output.WriteLine($"  {field}: {string.Join(", ", execution.GetProperty(field).EnumerateArray().Select(v => v.GetString()))}");
                 }
                 context.Output.WriteLine($"  complete environment inventory: {execution.GetProperty("closedEnvironment").GetBoolean()}");
+                if (execution.TryGetProperty("adapters", out JsonElement adapters))
+                    context.Output.WriteLine("  adapters (machine admission required): " + string.Join(", ", adapters.EnumerateArray().Select(a => a.GetString())));
             }
             foreach (ProviderSettingRow setting in row.Settings)
             {

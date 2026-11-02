@@ -1335,8 +1335,8 @@ Codex and Claude Code qualify only for the exact versions and isolation evidence
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
-The efficiency Adapter is unsupported (EFF-01, 0.8.4); only `disabled` is allowed.
-These execution additions preserve API v1, existing authority checks and local-only dispatch. Their fields are available from record format 2 and remain available at format 3.
+The local efficiency adapter is built, disabled by default and refused unless the operator's `efficiency-adapter` worker setting admits `local-lossless` and the launcher. It must not be enabled before its own security review, which precedes 0.9.0's release. See [the representation, routing and measurement contract](efficiency-adapter.md).
+These execution additions preserve API v1, existing authority checks and local-only dispatch. The original execution fields are available from record format 2 and remain available at format 3; the local adapter selection, address and measurements require format 3.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 
 ## Harness qualification (RUN-03)

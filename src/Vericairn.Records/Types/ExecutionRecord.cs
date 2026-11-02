@@ -5,6 +5,7 @@ using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Representation;
 
 namespace Vericairn.Records.Types;
 
@@ -23,7 +24,16 @@ internal static class ExecutionRecord
             Identity(execution, "harnessVersion");
             if (execution.Nested("harnessAdmission", false) is BodyReader admission) Harness(context, execution, admission);
             Identity(execution, "role");
-            execution.Enum("adapter", true, "disabled");
+            string? adapter = execution.Enum("adapter", true, "disabled", RepresentationContract.LocalLossless);
+            if (adapter == RepresentationContract.LocalLossless) _ = execution.Since(3, "adapter");
+            if (adapter == RepresentationContract.LocalLossless && !execution.Has("adapterAddress"))
+                execution.Error("body.missing", "adapterAddress", "An admitted adapter records its loopback authority, or null for startup fallback.");
+            if (execution.Since(3, "adapterAddress") && execution.Has("adapterAddress"))
+            {
+                if (execution.Element.GetProperty("adapterAddress").ValueKind == JsonValueKind.Null) execution.Allow("adapterAddress");
+                else Loopback(execution, "adapterAddress");
+                if (adapter == "disabled") context.Error("operation.execution", "A disabled adapter has no hook address.");
+            }
             string? package = execution.Text("contextPackage", true, 71);
             if (package is not null and not "unknown" && !Hashing.ContentHash.IsValid(package))
             {
@@ -123,6 +133,27 @@ internal static class ExecutionRecord
             }
             observed.StringArray("unknown", true, allowEmpty: true, maxItemLength: 40);
             observed.StringArray("discrepancies", true, allowEmpty: true, maxItemLength: 40);
+            if (observed.Since(3, "adapter") && observed.Nested("adapter", false) is BodyReader measurement)
+            {
+                measurement.Enum("name", true, RepresentationContract.LocalLossless);
+                string? state = measurement.Enum("state", true, "engaged", "direct-start-fallback", "direct-request-fallback");
+                if (measurement.Has("address") && measurement.Element.GetProperty("address").ValueKind == JsonValueKind.Null) measurement.Allow("address");
+                else Loopback(measurement, "address");
+                long? requests = measurement.Number("requests", true, 0, CanonicalJson.MaxSafeInteger);
+                long? fallbacks = measurement.Number("fallbacks", true, 0, CanonicalJson.MaxSafeInteger);
+                long? before = measurement.Number("eligibleBeforeBytes", true, 0, CanonicalJson.MaxSafeInteger);
+                long? after = measurement.Number("eligibleAfterBytes", true, 0, CanonicalJson.MaxSafeInteger);
+                measurement.Enum("tokens", true, "unknown");
+                measurement.NoOtherKeys();
+                string? address = measurement.Element.TryGetProperty("address", out JsonElement measuredAddress) && measuredAddress.ValueKind == JsonValueKind.String ? measuredAddress.GetString() : null;
+                string? admittedAddress = execution is not null && execution.Element.TryGetProperty("adapterAddress", out JsonElement selectedAddress) && selectedAddress.ValueKind == JsonValueKind.String ? selectedAddress.GetString() : null;
+                if (fallbacks > requests || after > before || execution is null
+                    || !execution.Element.TryGetProperty("adapter", out JsonElement selected) || selected.ValueKind != JsonValueKind.String || selected.GetString() != RepresentationContract.LocalLossless
+                    || address != admittedAddress || (state == "direct-start-fallback") != (address is null)
+                    || state == "engaged" && fallbacks != 0
+                    || state == "direct-start-fallback" && (requests != 0 || fallbacks != 0 || before != 0 || after != 0))
+                    context.Error("operation.execution", "Adapter measurement agrees with the admitted adapter and counts only observed eligible bytes.");
+            }
             observed.NoOtherKeys();
             if (execution is null || status is not ("known-failure" or "observed-success")) context.Error("operation.execution", "Execution observations describe a settled run with an admitted execution snapshot.");
         }
@@ -150,6 +181,14 @@ internal static class ExecutionRecord
     private static void Identity(BodyReader reader, string field, bool required = true)
     {
         if (reader.Text(field, required, 160) is string value && !ExecutionPolicy.IsIdentity(value)) reader.Error("execution.identity", field, "A portable execution identity contains no machine path or environment value.");
+    }
+
+    private static void Loopback(BodyReader reader, string field)
+    {
+        if (reader.Text(field, true, 64) is string address && (!Uri.TryCreate(address, UriKind.Absolute, out Uri? uri)
+            || uri.Scheme != "http" || uri.Host != "127.0.0.1" || uri.Port is <= 0 or > 65535 || uri.UserInfo.Length != 0
+            || address != uri.GetLeftPart(UriPartial.Authority)))
+            reader.Error("execution.adapter-address", field, "An adapter address is an IPv4 loopback HTTP authority only, with no path or credential.");
     }
 
     private static void Harness(ValidationContext context, BodyReader execution, BodyReader admission)
@@ -210,7 +249,7 @@ internal static class ExecutionRecord
                 foreach (JsonProperty value in values.EnumerateObject())
                 {
                     choices[value.Name] = value.Value.GetString()!;
-                    if (value.Name == "adapter" && value.Value.GetString() != "disabled") Error("The efficiency Adapter is unsupported and remains disabled.");
+                    if (value.Name == "adapter" && value.Value.GetString() is not ("disabled" or RepresentationContract.LocalLossless)) Error("The adapter selection is unsupported.");
                 }
             }
             if (!policy.TryGetProperty("restrictions", out JsonElement restrictions)) continue;
@@ -230,6 +269,7 @@ internal static class ExecutionRecord
         }
         if (sources[0].GetProperty("scope").GetString() != "launcher" || requested.EnumerateObject().Count() != choices.Count
             || choices.Any(c => !requested.TryGetProperty(c.Key, out JsonElement value) || value.GetString() != c.Value)) Error("Requested execution choices are exactly the resolution of their recorded provenance.");
+        if (execution.GetProperty("adapter").GetString() != choices.GetValueOrDefault("adapter", "disabled")) Error("The admitted adapter matches the resolved choice.");
 
         JsonElement environment = execution.GetProperty("environment");
         JsonElement inventory = environment.GetProperty("inventory");

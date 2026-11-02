@@ -133,7 +133,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             json["attention"] = MeasureStatus("attention", () => JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
                 includeLocalObservations: false), ProtocolJson.Options), observe);
-            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
+            var adapters = AgentRuns.All(model).Where(r => r.Latest.Body.TryGetProperty("executionObserved", out JsonElement facts)
+                && facts.TryGetProperty("adapter", out _)).Select(r => new { run = r.Id, measurement = r.Latest.Body.GetProperty("executionObserved").GetProperty("adapter") }).ToArray();
+            if (adapters.Length > 0) json["efficiencyAdapters"] = JsonSerializer.SerializeToNode(adapters, ProtocolJson.Options);
+            string adapterText = adapters.Length == 0 ? string.Empty : "\nRecorded efficiency measurements:\n" + string.Join('\n', adapters.Select(a => "  run " + a.run + " " + AdapterPresentation.Describe(a.measurement))) + "\n";
+            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + adapterText + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
         }
     }
 

@@ -59,6 +59,7 @@ internal static class CodexInventory
 
     internal static string Configuration(LaunchContext context) => "mcp_servers=" + CodexLauncher.Mcp(context) + "\nprojects=" + CodexLauncher.Projects(context)
         + "\nsandbox_workspace_write=" + CodexLauncher.Sandbox(context)
+        + (context.AdapterAddress is null ? "" : "\n" + string.Join('\n', CodexLauncher.EfficiencySettings(context)))
         + "\nweb_search=\"disabled\"\nskills.bundled.enabled = false\n[features]\ngoals = true\n" + string.Join('\n', Enabled.Where(n => n != "goals").Select(n => n + " = true").Concat(Disabled.Select(n => n + " = false"))) + "\n";
 
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
@@ -94,6 +95,7 @@ internal static class CodexInventory
             sandbox = "workspace-write", additionalWritableRoot = "workspace/.git",
             arguments = HarnessInventory.Arguments(context, "codex"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
+            efficiency = context.AdapterAddress is null ? "disabled" : "local-lossless",
         });
         List<RunComponent> components = HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference");
         HarnessInventory.Recheck(context, command, binding, instructions, codex: true);

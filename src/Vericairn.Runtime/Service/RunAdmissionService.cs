@@ -149,8 +149,10 @@ internal sealed class RunAdmissionService(
         WorkspaceSnapshot? baseline = null;
         string brief;
         string? configuredRoot;
+        EfficiencyRun? efficiency = null;
         RunResponse Refused(RunResponse response)
         {
+            efficiency?.Dispose();
             if (workspace is null) return response;
             string? retained;
             try { retained = workspaces.DiscardUnused(workspace, baseline, plan.Brief); }
@@ -214,6 +216,12 @@ internal sealed class RunAdmissionService(
             };
             File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
             launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits, Element(plan.Selection)));
+            if (plan.Selection["adapter"]?.GetValue<string>() != "disabled")
+            {
+                efficiency = new EfficiencyRun(launcher, launch, plan.Context);
+                launch = efficiency.Context;
+                plan.Selection["adapterAddress"] = launch.AdapterAddress?.GetLeftPart(UriPartial.Authority);
+            }
             environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
             preflight = launcher.Probe(launch);
             lock (gate)
@@ -369,7 +377,7 @@ internal sealed class RunAdmissionService(
         }
 
         admitted = new AdmittedRun(request, plan, launcher, configuration, workspaces, workspace, baseline, configuredRoot,
-            directory, launch, environment, limits, environmentPolicy, admittedBinding, run, where, intent, excepted, Refused);
+            directory, launch, environment, limits, environmentPolicy, admittedBinding, run, where, intent, excepted, Refused, efficiency);
         return null;
     }
 
@@ -599,7 +607,7 @@ internal sealed class RunAdmissionService(
             {
                 return (null, "A context-package identity must be its exact content hash.", null);
             }
-            selection["adapter"] = "disabled";
+            selection["adapter"] = selection["requested"]?["adapter"]?.GetValue<string>() ?? "disabled";
         }
         catch (ProviderRefusedException exception)
         {
@@ -789,5 +797,5 @@ internal sealed class RunAdmissionService(
         IWorkspaceProvider Workspaces, PreparedWorkspace Workspace, WorkspaceSnapshot Baseline, string? ConfiguredRoot,
         RunDirectory Directory, LaunchContext Launch, Dictionary<string, string> Environment, RunLimits Limits,
         RunEnvironmentPolicy? EnvironmentPolicy, string? AdmittedBinding, string Run, string Where, RecordWritten Intent,
-        Excepted? Excepted, Func<RunResponse, RunResponse> Refused);
+        Excepted? Excepted, Func<RunResponse, RunResponse> Refused, EfficiencyRun? Efficiency);
 }

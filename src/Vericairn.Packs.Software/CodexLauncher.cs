@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
+using Vericairn.Records.Representation;
 
 namespace Vericairn.Packs.Software;
 
@@ -20,7 +21,7 @@ public sealed class CodexLauncher : IAgentLauncher
     internal const string McpToolsApproval = "approve";
 
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh", "max"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh", "max"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true) { Adapters = [RepresentationContract.LocalLossless] };
 
     /// <inheritdoc />
     public RunPreflight Preflight(LaunchContext context)
@@ -73,7 +74,7 @@ public sealed class CodexLauncher : IAgentLauncher
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Shipped baselines: codex-cli 0.159.0-alpha.12.1, 0.163.0-alpha.10.2 (bundled with the desktop app) and 0.163.0, each checked against its own exact feature inventory; a refusal names each enabled feature it does not admit. Another exact version needs a current human qualification with matching local probe digests and is checked against the newest baseline's features; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
             "Native efforts: none, minimal, low, medium, high, xhigh, max. The version, help, feature and MCP probes do not validate model/effort support; Codex validates it at launch. An observed nonzero exit, including an effort refusal, is recorded as known-failure, never success.",
-            "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
+            "Imports only the provisioned harness login file into its isolated home; environment provider keys never pass. The optional efficiency hook requires API-key mode in that file; the fixed sign-in route refuses the hook before intent.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport. The generated configuration and launch override pre-approve only vericairn's tools; the server still checks the run principal's authority on every call. Global approval_policy remains unset. The baseline's MCP list omits approval settings and tool lists, so approval verification rests on the exact generated configuration and isolation checks.",
             "Adds exactly the independent workspace's .git through sandbox_workspace_write.writable_roots in the generated configuration and fixed overrides; workspace-write otherwise protects it. Preparation and preflight refuse linked or shared Git administration, and the exact configuration probe refuses every other added root. The registered clone's .git is never added. The installed baseline's schema and a model-free local sandbox probe confirmed that this permits git add and commit while the clone's .git and the workspace's .codex and .agents remain protected; no approval reviewer or sandbox bypass is added.",
@@ -125,6 +126,33 @@ public sealed class CodexLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public Uri EfficiencyUpstream(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        try
+        {
+            using JsonDocument login = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")));
+            if (login.RootElement.TryGetProperty("auth_mode", out JsonElement mode) && mode.GetString() == "apikey")
+                return new Uri("https://api.openai.com/v1/");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException) { }
+        throw new ProviderRefusedException("Codex's configured sign-in route requires its fixed endpoint and cannot use the model-provider base-URL hook. The efficiency adapter is refused before intent; select disabled for this route.");
+    }
+
+    /// <inheritdoc />
+    public LaunchContext ConfigureEfficiencyHook(LaunchContext context, Uri? address)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        HarnessEfficiency.CheckAddress(address);
+        LaunchContext configured = context with { AdapterAddress = address };
+        File.WriteAllText(Path.Combine(context.Environment["CODEX_HOME"], "config.toml"), CodexInventory.Configuration(configured));
+        return configured;
+    }
+
+    internal static IEnumerable<string> EfficiencySettings(LaunchContext context) => context.AdapterAddress is { } address
+        ? ["model_providers.openai.base_url=" + Toml(address.AbsoluteUri.TrimEnd('/')), "model_providers.openai.request_max_retries=0", "model_providers.openai.stream_max_retries=0"] : [];
+
+    /// <inheritdoc />
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -151,7 +179,7 @@ public sealed class CodexLauncher : IAgentLauncher
 
     internal static IReadOnlyList<string> Overrides(LaunchContext context) => ["-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context),
         "-c", "sandbox_workspace_write=" + Sandbox(context),
-        .. CodexInventory.Settings.SelectMany(s => new[] { "-c", s })];
+        .. CodexInventory.Settings.Concat(EfficiencySettings(context)).SelectMany(s => new[] { "-c", s })];
 
     internal static string VerifyMcp(LaunchContext context)
     {

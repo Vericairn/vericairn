@@ -724,7 +724,7 @@ public sealed record RunSignal(string Code, string Severity, string At, string S
 /// <param name="Liveness">The worker's event-stream observation and any stall attention.</param>
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
 /// <param name="Execution">Immutable admitted execution snapshot, absent on older runs.</param>
-/// <param name="ExecutionObserved">Reported execution facts and unknowns at settlement.</param>
+/// <param name="ExecutionObserved">Reported execution facts, adapter byte measurements and unknowns; local observations while running, recorded facts at settlement.</param>
 public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null, JsonElement? Execution = null, JsonElement? ExecutionObserved = null)
 {
     /// <summary>The agent's reporting status beside, never substituted for, worker liveness.</summary>

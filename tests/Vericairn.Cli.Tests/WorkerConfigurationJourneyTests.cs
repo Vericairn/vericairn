@@ -51,7 +51,7 @@ public class WorkerConfigurationJourneyTests
             Assert.Equal("model-a", shown.GetProperty("model").GetString());
             Assert.Equal(effort, shown.GetProperty("effort").GetString());
             Assert.Equal(["model-a", "model-b"], shown.GetProperty("allowedModels").EnumerateArray().Select(v => v.GetString()));
-            foreach (string choice in new[] { "model=model-c", "effort=low", "effort=unlimited", "destination=unapproved" })
+            foreach (string choice in new[] { "model=model-c", "effort=low", "effort=unlimited", "destination=unapproved", "adapter=local-lossless" })
             {
                 Assert.Equal(2, (await Binary([.. run, "--execution", choice])).Code);
                 Assert.False(File.Exists(report + ".probed"));

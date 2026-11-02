@@ -1776,7 +1776,7 @@ Selection and inventory are checked before the intent and again immediately befo
 requires fresh admission. A refusal before the intent writes no run or routed assignment. A change found
 after the intent but before launch settles an unstarted failure with zero usage. The intent's `execution`
 snapshot is immutable and includes the requested choices and provenance, configuration identity, resolved
-revision, harness version, role, `adapter: disabled`, environment inventory, allocation and context-package
+revision, harness version, role, the adapter choice (default `disabled`), environment inventory, allocation and context-package
 identity. The package identity and its byte accounting come from CONTEXT-01, which owns construction,
 withheld content and measurements. Missing token allocations stay explicitly unknown; byte counts do
 not supply model tokens, harness overhead or a fit claim. The package body stays in local run custody.
@@ -2017,9 +2017,44 @@ existing `worker-user`, workspace-audit and process-containment limitations. Cro
 still requires the builder's three-platform CI run. API v1 stays additive; harness qualifications add a type within
 record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
-The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
-refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.4. Remote is not
+The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Selection is
+refused unless the operator's `efficiency-adapter` machine setting names `local-lossless` and the launcher.
+It must not be enabled before its own security review, which precedes 0.9.0's release. It preserves protected
+wire bytes, transforms only explicitly eligible retained context, fixes the upstream before intent and
+records eligible bytes before and after. Codex's fixed sign-in route refuses the hook. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
+
+### Optional efficiency adapter: not enabled until security review
+
+The operator's independent `efficiency-adapter` worker configuration admits
+`local-lossless` for explicitly named launchers. After the adapter's security review,
+`worker configure --adapter local-lossless --allow-launcher codex --allow-launcher claude-code`
+sets that permission. A run separately selects `--execution adapter=local-lossless`;
+the default stays `disabled`. A brief or goal alone cannot grant machine admission.
+`worker configure --adapter disabled` revokes admission for subsequent runs.
+Configuration is read again before dispatch, and these settings cannot choose an upstream.
+
+The worker binds a run-owned listener to 127.0.0.1. Its forwarding destination is
+the launcher's existing provider base. Codex's model-provider hook requires a
+provisioned API-mode login; its fixed sign-in route refuses before intent. Claude
+Code receives the API-base hook only in the run's explicit settings. Listener
+startup failure keeps the direct configuration, while a reduction failure sends
+the original request once through the forwarding boundary. An uncertain send is
+never retried by the adapter. Run exit closes the listener and removes the hook.
+
+`executionObserved.adapter` records the adapter's state, loopback authority and
+summed eligible UTF-8 bytes before and after. Worker run detail shows live local
+counts and the settlement; status shows recorded measurements. Tokens remain
+unknown. The adapter has no header log, payload store, telemetry, proxy discovery
+or optimizer service. Explicitly eligible envelopes can reference and normalize
+optional retained originals. System instructions, tool definitions, brief content,
+exact material and unclassified requests pass byte for byte. The existing original
+route can recover a transformed optional source from the run's verified retained
+context after its working copy changes or the adapter is removed.
+
+See [the complete representation and data-handling declaration](efficiency-adapter.md)
+for supported request shapes, bounds, same-machine process access, transport failure
+limits and the separate security and live-provider qualification requirements.
 
 ## Newer-release notices (0.7.3)
 

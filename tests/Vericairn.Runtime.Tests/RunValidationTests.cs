@@ -33,7 +33,7 @@ public class RunValidationTests
     [InlineData("local")]
     [InlineData("efficiency")]
     [InlineData("enabled")]
-    public void AnEfficiencyAdapterRequestIsUnsupportedEvenWhenALaterScopeDisablesIt(string adapter)
+    public void AnUnknownEfficiencyAdapterIsUnsupportedEvenWhenALaterScopeDisablesIt(string adapter)
     {
         RunPolicySource source = new("goal", "goal", RunEstate.Json("{\"choices\":{\"adapter\":\"" + adapter + "\"}}"));
         Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(Configuration, Capabilities, [source], RunEstate.Json("""{"adapter":"disabled"}"""), RunEstate.Json("{}")));

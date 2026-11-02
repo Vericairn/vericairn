@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class ExecutionOptions
 {
     private readonly Option<string?> configuration = new("--configuration") { Description = "Named local launcher configuration; required choices never fall back to ambient harness settings." };
-    private readonly Option<string[]> execution = new("--execution") { Description = "An explicit execution choice as name=value: model, effort, provider, destination, dataBoundary or adapter=disabled; repeatable. Inherited restrictions still apply.", AllowMultipleArgumentsPerToken = false };
+    private readonly Option<string[]> execution = new("--execution") { Description = "An explicit execution choice as name=value: model, effort, provider, destination, dataBoundary or adapter (disabled or local-lossless); repeatable. Adapter admission requires the operator's efficiency-adapter setting. Inherited restrictions still apply.", AllowMultipleArgumentsPerToken = false };
     private readonly Option<long?> inputTokens = new("--input-tokens") { Description = "Context input allocation, within the run's token reservation; not measured consumption." };
     private readonly Option<long?> outputTokens = new("--output-tokens") { Description = "Output allocation, within the run's token reservation; not measured consumption." };
     private readonly Option<long?> contextBytes = new("--context-bytes") { Description = "Maximum canonical context payload bytes, separate from token reservations; mandatory originals and accounting must fit." };
