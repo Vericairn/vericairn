@@ -47,6 +47,63 @@ public class SigningTests : IDisposable
         Assert.DoesNotContain(model.Findings, f => f.Code == "signature.required" && f.Location.Contains(order.Id, StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("unsigned")]
+    [InlineData("another principal's device")]
+    [InlineData("another device in the operator's name")]
+    public void ARequiredCharterIsNotRevisedExceptByTheRootOperatorsSignature(string revision)
+    {
+        using var estate = new TestEstate();
+        (RecordEnvelope operatorDevice, RecordEnvelope builderDevice, RecordEnvelope required) = RequiredCharter(estate);
+        string optional = estate.Estate.Body.GetRawText();
+        RecordEnvelope attempt = revision switch
+        {
+            "unsigned" => estate.Add("estate", estate.OperatorId, optional, supersedes: required.Id),
+            "another principal's device" => estate.Add("estate", estate.BuilderId, optional, supersedes: required.Id, signer: Signer(builderDevice)),
+            _ => estate.Add("estate", estate.OperatorId, optional, supersedes: required.Id, signer: Signer(builderDevice)),
+        };
+        RecordEnvelope order = estate.Add("work-order", estate.BuilderId, OrderBody);
+        EstateModel model = estate.Load();
+
+        // The revision changes nothing: signatures stay required, so the unsigned record after it is still refused.
+        Assert.Equal(required.Id, model.CurrentEstate?.Id);
+        Assert.Contains(model.Findings, f => f.Code == "signature.charter" && f.Location == attempt.ExpectedPath);
+        Assert.Contains(model.Findings, f => f.Code == "signature.required" && f.Location.Contains(order.Id, StringComparison.Ordinal));
+        Assert.NotNull(operatorDevice);
+    }
+
+    [Fact]
+    public void TheRootOperatorsSignedRevisionChangesARequiredCharterButNeverItsRootOperator()
+    {
+        using var estate = new TestEstate();
+        (RecordEnvelope operatorDevice, _, RecordEnvelope required) = RequiredCharter(estate);
+        RecordEnvelope relaxed = estate.Add("estate", estate.OperatorId, estate.Estate.Body.GetRawText(), supersedes: required.Id, signer: Signer(operatorDevice));
+        RecordEnvelope order = estate.Add("work-order", estate.BuilderId, OrderBody);
+        EstateModel model = estate.Load();
+        Assert.Equal(relaxed.Id, model.CurrentEstate?.Id);
+        Assert.DoesNotContain(model.Findings, f => f.Code is "signature.charter" or "signature.required");
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(order.Id, StringComparison.Ordinal));
+
+        // A signed revision naming another root operator is refused, and the root operator stays the first charter's.
+        string handover = relaxed.Body.GetRawText().Replace(estate.OperatorId, estate.BuilderId, StringComparison.Ordinal);
+        RecordEnvelope changed = estate.Add("estate", estate.OperatorId, handover, supersedes: relaxed.Id, signer: Signer(operatorDevice));
+        model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "estate.operator" && f.Location.StartsWith(changed.ExpectedPath, StringComparison.Ordinal));
+        Assert.Equal(estate.OperatorId, model.RootOperator);
+    }
+
+    private (RecordEnvelope OperatorDevice, RecordEnvelope BuilderDevice, RecordEnvelope Required) RequiredCharter(TestEstate estate)
+    {
+        RecordEnvelope operatorDevice = CreateDevice(estate, estate.OperatorId, "Operator laptop");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Root operator's own device."}""", operatorDevice.Reference, signer: Signer(operatorDevice));
+        RecordEnvelope builderDevice = CreateDevice(estate, estate.BuilderId, "Build machine");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.BuilderId}}","status":"admitted","note":"Builder's machine."}""", builderDevice.Reference, signer: Signer(operatorDevice));
+        string charter = estate.Estate.Body.GetRawText().Replace("\"optional\"", "\"required\"", StringComparison.Ordinal);
+        RecordEnvelope required = estate.Add("estate", estate.OperatorId, charter, supersedes: estate.Estate.Id, signer: Signer(operatorDevice));
+        Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+        return (operatorDevice, builderDevice, required);
+    }
+
     [Fact]
     public void TheOperatorAdmitsItsOwnDeviceOnceAndEveryLaterDeviceUnderAnAdmittedOne()
     {

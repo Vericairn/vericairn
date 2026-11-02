@@ -112,11 +112,12 @@ public class WorkerScopeTests
     public void TheAuditUsesTheTemporaryDirectoryActuallyGivenToTheHarness()
     {
         using var run = new RunEstate(brief: Brief("path:NOTES.md"));
-        string temporary = Path.Combine(run.Scratch, "harness-temporary");
-        Directory.CreateDirectory(temporary);
+        // The worker's own temporary directory is never the harness's: each run is given its own inside its run directory.
+        string shared = Path.Combine(run.Scratch, "worker-temporary");
+        Directory.CreateDirectory(shared);
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
-            Environment = new Dictionary<string, string>(run.Service.WorkerOptions.Environment!, WorkerEnvironment.Names) { ["TMPDIR"] = temporary },
+            Environment = new Dictionary<string, string>(run.Service.WorkerOptions.Environment!, WorkerEnvironment.Names) { ["TMPDIR"] = shared },
         };
         string report = run.Report("temporary-write");
         File.WriteAllText(report + ".command", "mkdir -p \"$TMPDIR/x\"");
@@ -127,7 +128,9 @@ public class WorkerScopeTests
         Assert.Null(settled.Stop);
         Assert.DoesNotContain(settled.Signals!, s => s.Code is "scope" or "audit-unverified");
         using JsonDocument launched = JsonDocument.Parse(File.ReadLines(report).Last());
+        string temporary = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).Temporary;
         Assert.Equal(temporary, launched.RootElement.GetProperty("environment").GetProperty("TMPDIR").GetString());
+        Assert.NotEqual(shared, temporary);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 

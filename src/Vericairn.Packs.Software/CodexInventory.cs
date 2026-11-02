@@ -92,7 +92,7 @@ internal static class CodexInventory
             qualification = "run-02-codex-v1", version, tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal),
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
             webSearch = "disabled", projectTrust = "untrusted", bundledSkills = "disabled", estateToolsApproval = CodexLauncher.McpToolsApproval,
-            sandbox = "workspace-write", additionalWritableRoot = "workspace/.git",
+            sandbox = "workspace-write", additionalWritableRoots = "workspace/.git and the run's temporary directory", sharedTemporary = "excluded",
             arguments = HarnessInventory.Arguments(context, "codex"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
             efficiency = context.AdapterAddress is null ? "disabled" : "local-lossless",

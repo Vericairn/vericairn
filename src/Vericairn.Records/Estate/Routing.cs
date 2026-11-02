@@ -316,7 +316,7 @@ public static class Routing
     public static string? RootOperator(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.CurrentEstate is RecordEnvelope charter ? EstateModel.BodyString(charter, "operator") : null;
+        return model.RootOperator;
     }
 
     /// <summary>

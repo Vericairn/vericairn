@@ -82,7 +82,7 @@ public sealed class MigrationType : IRecordType
 
             // Anchors count only for the principals SignatureChecks.Anchored reads them from; a list by any other author, another
             // principal with the operator role among them, would validate and anchor nothing, so it is refused.
-            string? rootOperator = context.Model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+            string? rootOperator = context.Model.RootOperator;
             if (context.Record.By != rootOperator && !context.HasScope(context.Record.By, Scopes.Administer))
             {
                 body.Error("migration.anchor-author", "anchored", "Admissions are anchored by the estate's root operator, the operator its charter names, or a principal with the 'administer' scope; no one else's list counts.");

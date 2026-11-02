@@ -189,6 +189,9 @@ internal sealed class RunAdmissionService(
         var directory = new RunDirectory(plan.Estate, run);
         IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent];
         var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
+        // A run never shares the user's temporary directory, where other processes keep their files; it gets its own inside its run
+        // directory. Vericairn's MCP server, which runs outside the harness's sandbox, keeps the user's.
+        RunDirectory.UseTemporary(environment, serverEnvironment, directory.Temporary);
         environment["VERICAIRN_RUN"] = run;
         environment["VERICAIRN_STOP_FILE"] = directory.StopFile;
         environment["VERICAIRN_BRIEF"] = brief;

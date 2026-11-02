@@ -43,6 +43,10 @@ public sealed partial class EstateService
             var environment = WorkerEnvironment.Build(WorkerOptions.Environment ?? WorkerEnvironment.Current(), launcher.EnvironmentNames);
             environment["VERICAIRN_MCP_CONFIG"] = mcpFile;
             var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
+            // As at dispatch, the harness is probed with a temporary directory of its own and the MCP server keeps the user's.
+            string temporary = Directory.CreateDirectory(Path.Combine(scratch, "tmp")).FullName;
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            RunDirectory.UseTemporary(environment, serverEnvironment, temporary);
             IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", request.By];
             File.WriteAllText(mcpFile, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));
             var context = new LaunchContext(workspace, "Qualification probes only", "", mcpFile, server, serverEnvironment, settings, environment,

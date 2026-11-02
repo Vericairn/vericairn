@@ -59,7 +59,7 @@ public sealed partial class EstateService
                 throw new InvalidOperationException("The published release differs from this estate's earlier observation of that version. Nothing changed. Investigate the changed tag, checksum file or target build before choosing a release.");
             return (EstateUpgrade.Plan(model, previous, request.Line, request.Channel), null);
         }
-        string by = Ulid.IsValid(request.By) ? request.By! : EstateModel.BodyString(model.CurrentEstate!, "operator")!;
+        string by = Ulid.IsValid(request.By) ? request.By! : model.RootOperator!;
         AuthoredRecord observation = RecordAuthor.Create(new RecordDraft("observation", by, body,
             model.CurrentEstate!.Reference, At: verified.ObservedAt, Format: model.Manifest.RecordFormat));
         return (EstateUpgrade.Plan(model, observation.Envelope, request.Line, request.Channel), observation);
