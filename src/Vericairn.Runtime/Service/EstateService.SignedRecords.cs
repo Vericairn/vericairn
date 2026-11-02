@@ -49,6 +49,8 @@ public sealed partial class EstateService
                 Math.Min(model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat, RecordFormats.Current));
             if (IsPolicyWrite(draft) || IsDutyEvidence(draft, model))
                 return Unprepared("refused", "Policy writes and duty evidence are authored on the runtime's machine, with their expected hashes; they are not prepared for a device's signature.");
+            // A device cannot observe the estate's repository: a change set it states must be the one the runtime observes now.
+            if (DecisionBasisRefusal(draft) is string basis) return Unprepared("refused", basis);
 
             // The same authoring path as every write, with no signature: the exact record the device will sign, or why there is none.
             (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, model, []);
@@ -79,13 +81,34 @@ public sealed partial class EstateService
         if (!preparedRecords.TryRemove(new KeyValuePair<string, PreparedRecord>(request.Plan, plan)))
             return Refuse("No prepared record waits under this plan: it was written, lapsed or never made. Prepare it again.");
         if (plan.ExpiresAt <= PreparedClock.GetUtcNow()) return Refuse("The prepared record lapsed unsigned. Prepare it again.");
-        if (string.IsNullOrEmpty(request.Signature) || !RecordSigning.Verify(device.PublicKey, RecordSigning.Digest(plan.Hash), request.Signature))
-            return Refuse($"The signature does not verify with device {device.Device}'s key over the prepared record; nothing was written.");
 
         lock (gate)
         {
+            EstateModel model = session.Load();
+            string signer = string.IsNullOrEmpty(request.Device) ? device.Device : request.Device;
+            string key = device.PublicKey;
+            if (!string.Equals(signer, device.Device, StringComparison.Ordinal))
+            {
+                // Another device signs only when it is its principal's, admitted now, and each of its signatures needs its owner's
+                // presence: a phone's presence key, never a second unattended key standing in for the requesting one.
+                if (Standing(model, device.Device) is not DeviceStanding requester || Standing(model, signer) is not DeviceStanding signing
+                    || signing.Admission != "admitted" || !string.Equals(signing.Principal, requester.Principal, StringComparison.Ordinal))
+                    return WriteOutcome.Fail(new Problem("denied", $"Device {signer} is not an admitted device of device {device.Device}'s principal, so it cannot sign this plan.", []));
+                if (EstateModel.BodyString(model.Latest(model.ById[signing.Identity]), "presence") != "required")
+                    return Refuse($"Device {signer} does not need its owner's presence at each signature, so it cannot sign a plan another device prepared.");
+                // The record's signature names the device's identity, whichever of its record ids the request gave.
+                signer = signing.Identity;
+                key = signing.PublicKey;
+            }
+
+            if (string.IsNullOrEmpty(request.Signature) || !RecordSigning.Verify(key, RecordSigning.Digest(plan.Hash), request.Signature))
+                return Refuse($"The signature does not verify with device {signer}'s key over the prepared record; nothing was written.");
+
+            // The basis a decision states is observed again: the repository may have moved while the person reviewed and signed.
+            if (DecisionBasisRefusal(plan.Draft) is string basis) return Refuse(basis + " Nothing was written.");
+
             // The write rechecks the device under the gate, re-authors the same record and judges the estate with it, as every write does.
-            return WriteLocked(plan.Draft, session.Load(), [new PresignedSigner(device.Device, plan.Hash, request.Signature)]);
+            return WriteLocked(plan.Draft, model, [new PresignedSigner(signer, plan.Hash, request.Signature)]);
         }
     }
 

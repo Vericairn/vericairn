@@ -137,7 +137,9 @@
     "file-owner-only"
   ],
   "Vericairn.Records.Signing.DeviceKeyStores.PresenceKinds": [
-    "macos-secure-enclave"
+    "macos-secure-enclave",
+    "ios-secure-enclave",
+    "android-keystore"
   ],
   "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
     "work-order",

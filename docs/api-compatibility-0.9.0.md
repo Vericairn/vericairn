@@ -411,3 +411,119 @@ request, SDK methods and cancellation bridges are unchanged; the OpenAPI documen
 declares no response schema for this route, so it does not change. Earlier servers
 omit the field, which reads as empty. The migration record adds `changes` lines
 naming each register's rewritten count and implementations. Record format remains 3.
+
+## Remote device signing (REMOTE-03)
+
+`IRemoteConnections.WriteSignedAsync(RuntimeConnection, NewRecordRequest,
+Func<RecordPrepared, bool>, CancellationToken)` has a default implementation that
+returns an `unsupported` refusal. Existing implementations remain source compatible
+and cannot submit phone decisions until they implement it. `LocalNetworkConnections`
+uses `DeviceSignedRecords.WriteAsync` with the paired connection's device and the
+app's key store. The callback reviews the exact prepared record before signing.
+This adds no API route or record format.
+
+## Remote decision loading (REMOTE-03)
+
+`IRemoteConnections.LoadDecisions(RuntimeConnection)` has a default implementation
+returning an empty list. `RemoteDecisionReview`, `RemoteDecisionEvidence` and
+`RemoteDecisionDraft` describe the complete observed material, original target,
+operator's words and submission observations. `LocalNetworkConnections` restores
+versioned app storage bound to the connection, estate, runtime identity, principal
+and device. Unreadable storage is reported instead of hiding an uncertain submission.
+
+## Remote decision persistence (REMOTE-03)
+
+`IRemoteConnections.SaveDecision(RuntimeConnection, RemoteDecisionDraft)` has a
+default implementation that throws `NotSupportedException`. An implementation that
+cannot retain a draft cannot enable submission. `LocalNetworkConnections` atomically
+stores drafts and reserves the prepared record identity before signing. A retained
+submission cannot be replaced with new words, a different request or a fresh identity;
+a known receipt cannot be removed. Stored submissions are reconciled by reading
+their exact records. Loading or refreshing never sends a stored draft.
+
+## IEstateApi.DecisionBasis (REMOTE-11)
+
+`IEstateApi` adds `DecisionBasis(string? baseCommit = null)` and its cancellable
+`DecisionBasisAsync`, with default implementations: the read answers an
+`unsupported` problem and the asynchronous member is the usual synchronous bridge.
+`CancellationBoundApi` and `VericairnClient` implement both; the route is
+`GET /v1/decisions/basis` with an optional `base` query, declared in the OpenAPI
+document and in the daemon's request scope as a read naming no principal. New
+contracts: `DecisionBasisResponse` (`ok`, `baseCommit`, `head`, `documents`,
+`problem`; `DocumentsChanged` is computed and not serialized) and
+`DecisionBasisDocument` (`path`, `hash`). Earlier servers answer `404`.
+`DecisionFromAsk` now takes an empty `baseCommit` as the head the runtime observes
+when it reads the change set; an explicit commit behaves as before.
+
+## Records signed by a presence device (REMOTE-11)
+
+`SignedRecordRequest` adds the nullable init-only `Device`: the signing device,
+the requesting device when omitted. Its positional constructor is unchanged. The
+runtime accepts another signing device only when it is admitted, belongs to the
+requesting device's principal and states presence `required`; a device of another
+principal is refused as `denied` before the service reads the request. The SDK adds
+`DeviceSignedRecords.WriteWithPresenceAsync`, which signs with a presence store's
+key, calls an optional `beforeSend` callback after signing and before sending, and
+reports a `not-signed` problem when the key did not sign. A device-signed `decision`
+with a change set must state the head the runtime observes, no pins and no design
+document changed since its base, at preparation and again at the write; REMOTE-03's
+phone answers were not checked against the repository. Earlier servers ignore
+`device` and verify the signature against the requesting device, so a presence
+signature is refused there and nothing is written.
+
+## Pairing a presence device (REMOTE-11)
+
+The pairing contracts add nullable init-only members: `PairingHello.Presence`,
+`PairingChallenge.PresenceRecord`, `PairingConfirm.PresenceDevice` and
+`PresenceSignature`, and `PairingCompleted.PresenceDevice`, `PresenceAdmission` and
+`PresenceHash`. Positional constructors are unchanged. Their fields enter the
+challenge, confirmation and completion transcripts after a `presence` label only
+when present, so a pairing of one device is byte-for-byte the exchange of earlier
+releases in both directions; a runtime offers a presence record only when the hello
+asks for one. The SDK adds `PairingOptions.PresenceKeyStore`, the presence members
+of `PairedRuntime` (`PresenceDevice`, `PresenceDevicePublicKey`,
+`PresenceAdmission`, `PresenceCustody`) and of `RuntimeConnection`
+(`PresenceDevice`, `PresenceDevicePublicKey`, kept with the connection), and
+`RuntimeConnections.AddPresenceAsync` with `PresencePairingTimeout`. Pairing now
+refuses a presence claim from a store whose custody cannot enforce it before any
+key is made. The runtime adds `EstateService.PairingPlan(string, bool)`, the
+`PairingPlan.PresenceRecord` init-only member and a `PairDevice` overload taking the
+presence device; the existing overloads are unchanged. `DeviceKeyStores.PresenceKinds`
+adds `ios-secure-enclave` and `android-keystore`, so a person's phone device in that
+custody may state presence `required`; an agent's or a service's still may not.
+Record format remains 3.
+
+## IRemoteConnections.WriteSignedAsync signs with the presence key (REMOTE-11)
+
+`IRemoteConnections.WriteSignedAsync` gains a `Func<RecordPrepared, bool> beforeSend`
+parameter after `review`, called once the presence key has signed and before the
+signature is sent; its default implementation still returns an `unsupported`
+refusal. It replaces REMOTE-03's member of the same name, unreleased before 0.9.0.
+`LocalNetworkConnections` signs only with the connection's presence device and
+refuses with `presence-required`, preparing nothing, when the phone holds none.
+
+## IRemoteConnections.HasPresenceKey (REMOTE-11)
+
+`IRemoteConnections.HasPresenceKey(RuntimeConnection)` has a default implementation
+returning false, so an existing implementation signs no decision until it holds a
+presence key.
+
+## IRemoteConnections.AddPresenceKeyAsync (REMOTE-11)
+
+`IRemoteConnections.AddPresenceKeyAsync(RuntimeConnection, string, string,
+CancellationToken)` has a default implementation returning a task faulted with
+`NotSupportedException`. `LocalNetworkConnections` pairs one more device with the
+new code through `RuntimeConnections.AddPresenceAsync`.
+
+## Remote presence keys and the supplied basis (REMOTE-11)
+
+`LocalNetworkConnections` adds a constructor taking a presence store, which must
+be of a custody that enforces presence; the two-argument constructor keeps no
+presence store. `RemoteDecisionReview` adds the init-only `Head`, the head the
+runtime supplied for an answer. `RemoteDecisionDraft` drops `BaseCommit` and
+`NoDocumentChanges`, and `RemoteViewModel` drops `DecisionBaseCommit` and
+`DecisionHasNoDocumentChanges`, all REMOTE-03 members unreleased before 0.9.0;
+stored drafts that carry those fields still load. `RemoteViewModel` adds
+`DecisionBasis`, `HasPresenceKey`, `NeedsPresenceKey`, `PresenceCode`,
+`PresenceMessage`, `PresenceHelp` and `AddPresenceKeyCommand`. No route or record
+format is added by Remote itself.

@@ -53,6 +53,7 @@
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding ObservationAge}" AutomationProperties.Name="Observation age" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding DetailMessage}" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding CacheMessage}" />
+      <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding DecisionStorageProblem}" />
       <TextBlock IsVisible="{Binding ObservationUnavailable}" Text="This estate has not been observed. Refresh to read it; an unavailable view says nothing about its work or attention." />
       <Expander Header="Communication" IsVisible="{Binding ShowHome}" AutomationProperties.Name="Read-only communication settings">
         <ScrollViewer MaxHeight="240">
@@ -83,7 +84,58 @@
       </StackPanel>
     </ScrollViewer>
 
-    <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedArea}" x:Name="Home" IsVisible="{Binding ShowHome}" TabStripPlacement="Bottom">
+    <ScrollViewer Grid.Row="1" x:Name="DecisionScroll" IsVisible="{Binding HasDecisionReview}">
+      <StackPanel Margin="12" Spacing="10">
+        <Button Content="Back to home" Command="{Binding CloseDecisionCommand}" AutomationProperties.Name="Leave this review and retain the draft or original submission" />
+        <TextBlock Classes="heading" Text="Decision review" />
+        <TextBlock Text="{Binding DecisionTarget}" AutomationProperties.Name="Decision estate, runtime, person and phone device" />
+        <TextBlock Text="{Binding DecisionIdentity}" AutomationProperties.Name="Exact reviewed revision, hash and freshness" />
+        <TextBlock Text="{Binding DecisionQuestion}" />
+        <ComboBox x:Name="DecisionOptions" ItemsSource="{Binding DecisionOptions}" SelectedItem="{Binding SelectedDecisionOption}"
+                  IsVisible="{Binding IsAsk}" IsEnabled="{Binding CanEditDecision}" HorizontalAlignment="Stretch" AutomationProperties.Name="Choose an answer's exact words without submitting">
+          <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock FontWeight="SemiBold" Text="Complete review material, reviews and evidence" />
+        <TextBlock x:Name="DecisionMaterial" Text="{Binding DecisionMaterial}" />
+        <Expander Header="Original draft material" AutomationProperties.Name="Original subject retained with this draft">
+          <TextBlock Text="{Binding OriginalDecisionMaterial}" />
+        </Expander>
+        <TextBlock Text="Your answer or acceptance statement" />
+        <TextBox x:Name="DecisionStatement" Text="{Binding DecisionStatement}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100"
+                 IsEnabled="{Binding CanEditDecision}" AutomationProperties.Name="Your exact answer or acceptance statement, saved as a draft" />
+        <StackPanel IsVisible="{Binding IsAsk}" Spacing="6" IsEnabled="{Binding CanEditDecision}">
+          <TextBlock Text="How much rides on this decision" />
+          <ComboBox ItemsSource="{x:Static vm:RemoteViewModel.DecisionStakes}" SelectedItem="{Binding DecisionStake}" AutomationProperties.Name="Decision stake" />
+          <TextBlock Text="Estate basis, as the runtime supplied it" />
+          <TextBlock x:Name="DecisionBasis" Text="{Binding DecisionBasis}" AutomationProperties.Name="The estate head commit and design document changes the runtime supplied for this answer" />
+        </StackPanel>
+        <TextBlock FontWeight="SemiBold" Text="Proposed record" />
+        <TextBlock Text="Your words are recorded verbatim. An answer's summary, synthesis and effect use those same words. The runtime supplies its record identity and authoring time. No external action is dispatched." />
+        <TextBlock Text="{Binding DecisionPreview}" />
+        <CheckBox IsChecked="{Binding MaterialReviewed}" IsEnabled="{Binding CanEditDecision}" AutomationProperties.Name="Confirm review of this exact subject, evidence and proposed record">
+          <TextBlock Text="I reviewed this exact revision, all material above and the proposed record." />
+        </CheckBox>
+        <TextBlock x:Name="DecisionEligibility" Text="{Binding DecisionEligibility}" />
+        <StackPanel x:Name="PresenceKeyPanel" IsVisible="{Binding NeedsPresenceKey}" Spacing="6">
+          <TextBlock FontWeight="SemiBold" Text="Add this phone's presence key" />
+          <TextBlock Classes="muted" Text="{x:Static vm:RemoteViewModel.PresenceHelp}" />
+          <TextBox x:Name="PresenceCodeBox" Text="{Binding PresenceCode}" PlaceholderText="One-time code for this person" AutomationProperties.Name="Pairing code that adds this phone's presence key" />
+          <Button x:Name="AddPresenceKey" Content="Add presence key" Command="{Binding AddPresenceKeyCommand}" AutomationProperties.Name="Add a presence key to this connection; it asks for your presence once" />
+          <TextBlock Text="{Binding PresenceMessage}" AutomationProperties.Name="What adding the presence key observed" />
+        </StackPanel>
+        <WrapPanel Orientation="Horizontal">
+          <Button Content="Refresh review" Command="{Binding RefreshDecisionCommand}" AutomationProperties.Name="Read current decision material without submitting" />
+          <Button x:Name="SignDecision" Content="Sign and submit" Command="{Binding SubmitDecisionCommand}" AutomationProperties.Name="Sign the reviewed answer or acceptance once with this phone's presence key, which asks for your presence" />
+          <Button Content="Reconcile" Command="{Binding ReconcileDecisionCommand}" AutomationProperties.Name="Read the original submitted record without resending" />
+          <Button Content="Defer" Command="{Binding DeferDecisionCommand}" AutomationProperties.Name="Defer by acknowledging this notice only" />
+          <Button Content="Request changes" Command="{Binding RequestDecisionChangesCommand}" AutomationProperties.Name="Show the desktop route for requesting changes" />
+        </WrapPanel>
+        <TextBlock x:Name="DecisionOutcome" Text="{Binding DecisionMessage}" AutomationProperties.Name="Observed submission outcome" />
+        <TextBlock Text="{Binding DecisionReceipt}" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedArea}" x:Name="Home" IsVisible="{Binding ShowAreas}" TabStripPlacement="Bottom">
       <TabItem Header="Attention" AutomationProperties.Name="Attention">
         <Grid RowDefinitions="*,Auto">
           <ScrollViewer Grid.Row="0">
@@ -106,6 +158,14 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock FontWeight="SemiBold" Text="Local drafts and original submissions" />
+              <ListBox ItemsSource="{Binding DecisionDrafts}" SelectedItem="{Binding SelectedDraft}" AutomationProperties.Name="Drafts and submissions for this exact phone connection">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RemoteDecisionDraft"><TextBlock Text="{Binding Label}" /></DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Button Content="Open retained draft or submission" Command="{Binding OpenDraftCommand}" AutomationProperties.Name="Open the retained original without sending it" />
+              <TextBlock Text="{Binding DecisionMessage}" />
             </StackPanel>
           </ScrollViewer>
           <StackPanel Grid.Row="1" Margin="12,4,12,8" Spacing="6">

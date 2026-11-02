@@ -25,5 +25,7 @@
   <dict/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Remote connects to your estate's runtime on your local network, at the address you enter.</string>
+  <key>NSFaceIDUsageDescription</key>
+  <string>Remote asks for Face ID before its presence key signs a decision or a release acceptance, so only you can sign them.</string>
 </dict>
 </plist>

@@ -9,11 +9,27 @@ namespace Vericairn.Remote.iOS;
 
 /// <summary>
 /// Device keys generated inside this iPhone's or iPad's Secure Enclave: P-256, usable only on this device while it is unlocked,
-/// never exported, never in a backup. Signing never exposes key bytes; the Secure Enclave signs the digest it is given.
+/// never exported, never in a backup. Signing never exposes key bytes; the Secure Enclave signs the digest it is given. The request
+/// store's keys sign without asking; the presence store's keys need the owner's presence (Face ID, Touch ID or the passcode) at every
+/// signature, enforced by the Secure Enclave's access control, and exist only while the device has a passcode.
 /// </summary>
 public sealed class SecureEnclaveDeviceKeyStore : IDeviceKeyStore
 {
-    private const string TagPrefix = "com.vericairn.remote.device.";
+    private readonly string tagPrefix;
+    private readonly bool presence;
+
+    /// <summary>The request store: keys that sign every request without asking for presence.</summary>
+    public SecureEnclaveDeviceKeyStore()
+        : this(presence: false)
+    {
+    }
+
+    /// <summary>The request store, or with <paramref name="presence"/> the presence store, whose keys are kept apart under their own tags.</summary>
+    public SecureEnclaveDeviceKeyStore(bool presence)
+    {
+        this.presence = presence;
+        tagPrefix = presence ? "com.vericairn.remote.presence." : "com.vericairn.remote.device.";
+    }
 
     /// <inheritdoc />
     public string Kind => DeviceKeyStores.IosSecureEnclaveKind;
@@ -29,7 +45,9 @@ public sealed class SecureEnclaveDeviceKeyStore : IDeviceKeyStore
     public byte[] Create(string deviceId)
     {
         if (Has(deviceId)) throw new InvalidOperationException($"This device already holds a key for device {deviceId}.");
-        using var access = new SecAccessControl(SecAccessible.WhenUnlockedThisDeviceOnly, SecAccessControlCreateFlags.PrivateKeyUsage);
+        using var access = presence
+            ? new SecAccessControl(SecAccessible.WhenPasscodeSetThisDeviceOnly, SecAccessControlCreateFlags.PrivateKeyUsage | SecAccessControlCreateFlags.UserPresence)
+            : new SecAccessControl(SecAccessible.WhenUnlockedThisDeviceOnly, SecAccessControlCreateFlags.PrivateKeyUsage);
         var parameters = new SecKeyGenerationParameters
         {
             KeyType = SecKeyType.ECSecPrimeRandom,
@@ -53,6 +71,8 @@ public sealed class SecureEnclaveDeviceKeyStore : IDeviceKeyStore
     public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest)
     {
         if (digest.Length != 32) throw new ArgumentException("A device signs a 32-byte digest.", nameof(digest));
+        // The system's presence prompt blocks the signing thread until the person answers, so it is never the interface's thread.
+        if (presence && NSThread.IsMain) throw new InvalidOperationException("A presence key does not sign on the interface's thread.");
         using SecKey key = Find(deviceId) ?? throw new InvalidOperationException($"This device holds no key for device {deviceId}.");
         using NSData data = NSData.FromArray(digest.ToArray());
         using NSData signature = key.CreateSignature(SecKeyAlgorithm.EcdsaSignatureDigestX962Sha256, data, out NSError? error)
@@ -72,9 +92,9 @@ public sealed class SecureEnclaveDeviceKeyStore : IDeviceKeyStore
     public void Promote(string keyId, string deviceId) =>
         throw new NotSupportedException("Rotating a phone's device key is not built yet; pair the phone again, and revoke the old device.");
 
-    private static NSData Tag(string deviceId) => NSData.FromString(TagPrefix + deviceId, NSStringEncoding.UTF8);
+    private NSData Tag(string deviceId) => NSData.FromString(tagPrefix + deviceId, NSStringEncoding.UTF8);
 
-    private static SecKey? Find(string deviceId)
+    private SecKey? Find(string deviceId)
     {
         using var query = new SecRecord(SecKind.Key) { ApplicationTag = Tag(deviceId), KeyClass = SecKeyClass.Private };
         return SecKeyChain.QueryAsConcreteType(query, out SecStatusCode status) is SecKey key && status == SecStatusCode.Success ? key : null;

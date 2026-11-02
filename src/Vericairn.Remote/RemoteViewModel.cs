@@ -52,7 +52,7 @@ public sealed record NodeView(string Runtime, string Address, string Estate, str
 /// <summary>
 /// Remote's shell: first use explains the companion role and pairs with an authorized estate; the home then shows the selected
 /// estate's Attention, Work, Products, Nodes and Handoffs with its connection state and freshness. Every state shown is the runtime's
-/// or the SDK's, in the shared state language; nothing here decides, accepts or changes the estate.
+/// or the SDK's, in the shared state language. Eligible decisions use the phone's own key after an exact review.
 /// </summary>
 public sealed partial class RemoteViewModel : Observable
 {
@@ -83,6 +83,7 @@ public sealed partial class RemoteViewModel : Observable
         RefreshCommand = new AsyncCommand(RefreshAsync, () => !Busy && Selected is not null);
         AddEstateCommand = new AsyncCommand(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
         CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
+        InitializeDecisionCommands();
         InitializeInspectionCommands();
         foreach (RuntimeConnection connection in connections.List())
         {
@@ -93,6 +94,7 @@ public sealed partial class RemoteViewModel : Observable
 
         pairing = Estates.Count == 0;
         selected = Estates.FirstOrDefault();
+        RestoreDecisions();
         Show(selected);
     }
 
@@ -100,10 +102,10 @@ public sealed partial class RemoteViewModel : Observable
     public static string BuildLabel => "Developer build: installed for testing, not from an app store.";
 
     /// <summary>What Remote is for, shown at first use.</summary>
-    public static string Companion => "Remote is the phone companion of an estate you already run: it shows what needs you, what is happening and where, and later lets you decide what can safely be decided here. Your estate stays on its own runtime; nothing is copied to a cloud.";
+    public static string Companion => "Remote is the phone companion of an estate you already run: it shows what needs you, what is happening and where, and lets you decide when the complete material can be reviewed here. Your estate stays on its own runtime; nothing is copied to a cloud.";
 
     /// <summary>How to pair, shown beside the form.</summary>
-    public static string PairingHelp => "On a machine running the estate's runtime with its local-network profile, an administrator runs vericairn devices pair for you; enter the address and the one-time code it prints. This phone keeps its own key and connection.";
+    public static string PairingHelp => "On a machine running the estate's runtime with its local-network profile, an administrator runs vericairn devices pair for you; enter the address and the one-time code it prints. This phone keeps its own keys and connection: a request key that signs its requests without asking, and, where the phone can require your presence, a presence key that asks for Face ID, Touch ID, a fingerprint or the passcode and alone signs your decisions. Pairing asks for your presence once.";
 
     /// <summary>Estates this phone is paired with.</summary>
     public ObservableCollection<RemoteEstate> Estates { get; } = [];
@@ -115,6 +117,9 @@ public sealed partial class RemoteViewModel : Observable
         set
         {
             if (!Set(ref selected, value)) return;
+            SetDecision(null);
+            RestoreDecisions();
+            DecisionMessage = string.Empty;
             detailCurrent = false;
             SelectedAttention = null;
             SelectedWork = null;
@@ -129,7 +134,7 @@ public sealed partial class RemoteViewModel : Observable
     public bool Pairing
     {
         get => pairing;
-        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
+        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ShowAreas)); Raise(nameof(HasDecisionReview)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
     }
 
     /// <summary>Whether the home is shown.</summary>
@@ -150,6 +155,7 @@ public sealed partial class RemoteViewModel : Observable
             AddEstateCommand.NotifyCanExecuteChanged();
             CancelPairingCommand.NotifyCanExecuteChanged();
             NotifyInspectionCommands();
+            NotifyDecisionCommands();
         }
     }
 
@@ -215,7 +221,7 @@ public sealed partial class RemoteViewModel : Observable
     public static string AttentionLater => "Acknowledging marks only your attention state. The item stays visible and its work remains unchanged. Offline acknowledgments are never queued.";
 
     /// <summary>What Work cannot do yet.</summary>
-    public static string WorkLater => "Communication settings are read-only here until phone-signed writes in REMOTE-03. Clarifications to running attempts arrive with PROMPT-02 in 0.9.1; use Workbench or the command line for actions available there.";
+    public static string WorkLater => "Communication settings are read-only here. Clarifications to running attempts arrive with PROMPT-02 in 0.9.1; use Workbench or the command line for actions available there.";
 
     /// <summary>What Nodes means, and does not.</summary>
     public static string NodesNote => "This is the runtime this phone reaches. A healthy connection here says nothing about workers running on other machines.";
@@ -251,7 +257,9 @@ public sealed partial class RemoteViewModel : Observable
             Estates.Clear();
             foreach (RuntimeConnection kept in connections.List()) Estates.Add(Restore(kept));
             Code = string.Empty;
-            PairingMessage = $"Paired with {connection.EstateName ?? connection.Estate} as {connection.PrincipalName ?? connection.Principal}.";
+            PairingMessage = $"Paired with {connection.EstateName ?? connection.Estate} as {connection.PrincipalName ?? connection.Principal}." +
+                (connections.HasPresenceKey(connection) ? " Its presence key signs your decisions after you confirm your presence."
+                    : " This phone holds no presence key for it, so it signs no decision; a decision review offers to add one with a new code.");
             Pairing = false;
             Selected = Estates.FirstOrDefault(e => e.Connection.Id == connection.Id) ?? Estates.LastOrDefault();
         }
@@ -277,6 +285,9 @@ public sealed partial class RemoteViewModel : Observable
         Busy = true;
         estate.Current = false;
         detailCurrent = false;
+        decisionCurrent = false;
+        MaterialReviewed = false;
+        NotifyDecision();
         ConnectionState = ConnectionStates.Connecting;
         ConnectionMessage = "Checking the runtime's identity and this phone's access.";
         try
@@ -312,6 +323,8 @@ public sealed partial class RemoteViewModel : Observable
             }
         }
         finally { Busy = false; }
+        if (Selected == estate && estate.Current && decision is { Attempted: false } draft)
+            await OpenDecisionAsync(draft.Review.Subject.Id).ConfigureAwait(true);
     }
 
     private RemoteEstate Restore(RuntimeConnection connection) => new(connection) { Observation = connections.LoadObservation(connection) };
