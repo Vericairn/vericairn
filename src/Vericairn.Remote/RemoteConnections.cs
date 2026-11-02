@@ -29,13 +29,23 @@ public interface IRemoteConnections
 
     /// <summary>Keeps an observation in app storage without queuing requests. Older implementations retain no persistent cache.</summary>
     void SaveObservation(RuntimeConnection connection, RemoteObservation observation) { }
+
+    /// <summary>Prepares a record, gives the caller its exact unsigned form, then signs only with this phone's device key.</summary>
+    Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review,
+        CancellationToken cancellationToken = default) => Task.FromResult(WriteOutcome.Fail(new("unsupported", "This connection cannot sign records on the phone.", [])));
+
+    /// <summary>Restores drafts and attempted submissions for this exact connection. Unreadable storage must refuse, never appear empty.</summary>
+    IReadOnlyList<RemoteDecisionDraft> LoadDecisions(RuntimeConnection connection) => [];
+
+    /// <summary>Durably retains input or reserves a prepared identity before signing. An attempted identity cannot be replaced or cleared.</summary>
+    void SaveDecision(RuntimeConnection connection, RemoteDecisionDraft draft) => throw new NotSupportedException("This connection cannot retain decision drafts and submission identities.");
 }
 
 /// <summary>
 /// The phone's connections, kept by the SDK under the app's own storage, with the device keys in the store the platform head
 /// supplies. Pairing, the runtime identity check, request signing and connection states are the SDK's, never re-implemented here.
 /// </summary>
-public sealed class LocalNetworkConnections : IRemoteConnections
+public sealed partial class LocalNetworkConnections : IRemoteConnections
 {
     private readonly RuntimeConnections store;
     private readonly IDeviceKeyStore keys;
@@ -63,6 +73,16 @@ public sealed class LocalNetworkConnections : IRemoteConnections
 
     /// <inheritdoc />
     public IEstateApi Connect(RuntimeConnection connection) => store.Connect(connection);
+
+    /// <inheritdoc />
+    public async Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(review);
+        using VericairnClient client = store.Connect(connection);
+        return await DeviceSignedRecords.WriteAsync(client, request, keys, connection.Device, review, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public RemoteObservation? LoadObservation(RuntimeConnection connection)

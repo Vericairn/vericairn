@@ -69,7 +69,7 @@ public sealed partial class RemoteViewModel
 
     private void InitializeInspectionCommands()
     {
-        OpenAttentionCommand = new(() => OpenDetailAsync(SelectedAttention!.SubjectId, SelectedAttention.SubjectType), () => !Busy && SelectedAttention is not null);
+        OpenAttentionCommand = new(OpenAttentionAsync, () => !Busy && SelectedAttention is not null);
         AcknowledgeCommand = new(AcknowledgeAsync, () => !Busy && Selected?.Current == true && SelectedAttention?.Notice is { AcknowledgedAt: null });
         OpenWorkCommand = new(() => OpenDetailAsync(SelectedWork!.Id, "work-order"), () => !Busy && SelectedWork is not null);
         OpenAssignmentCommand = new(() => OpenDetailAsync(SelectedAssignment!.Id, "assignment"), () => !Busy && SelectedAssignment is not null);
@@ -90,6 +90,15 @@ public sealed partial class RemoteViewModel
         OpenWorkCommand?.NotifyCanExecuteChanged();
         OpenAssignmentCommand?.NotifyCanExecuteChanged();
         BackToWorkCommand?.NotifyCanExecuteChanged();
+        NotifyDecisionCommands();
+    }
+
+    private async Task OpenAttentionAsync()
+    {
+        if (SelectedAttention is not { SubjectId: { } id } item) return;
+        RemoteEstate? estate = Selected;
+        if (item.SubjectType is not ("ask" or "release")) await OpenDetailAsync(id, item.SubjectType).ConfigureAwait(true);
+        if (Selected == estate && item.SubjectType is "ask" or "result" or "release") await OpenDecisionAsync(id).ConfigureAwait(true);
     }
 
     /// <summary>Advances displayed ages locally. This sends no request, including while offline.</summary>

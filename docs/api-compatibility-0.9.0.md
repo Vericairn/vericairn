@@ -395,3 +395,32 @@ request, SDK methods and cancellation bridges are unchanged; the OpenAPI documen
 declares no response schema for this route, so it does not change. Earlier servers
 omit the field, which reads as empty. The migration record adds `changes` lines
 naming each register's rewritten count and implementations. Record format remains 3.
+
+## Remote device signing (REMOTE-03)
+
+`IRemoteConnections.WriteSignedAsync(RuntimeConnection, NewRecordRequest,
+Func<RecordPrepared, bool>, CancellationToken)` has a default implementation that
+returns an `unsupported` refusal. Existing implementations remain source compatible
+and cannot submit phone decisions until they implement it. `LocalNetworkConnections`
+uses `DeviceSignedRecords.WriteAsync` with the paired connection's device and the
+app's key store. The callback reviews the exact prepared record before signing.
+This adds no API route or record format.
+
+## Remote decision loading (REMOTE-03)
+
+`IRemoteConnections.LoadDecisions(RuntimeConnection)` has a default implementation
+returning an empty list. `RemoteDecisionReview`, `RemoteDecisionEvidence` and
+`RemoteDecisionDraft` describe the complete observed material, original target,
+operator's words and submission observations. `LocalNetworkConnections` restores
+versioned app storage bound to the connection, estate, runtime identity, principal
+and device. Unreadable storage is reported instead of hiding an uncertain submission.
+
+## Remote decision persistence (REMOTE-03)
+
+`IRemoteConnections.SaveDecision(RuntimeConnection, RemoteDecisionDraft)` has a
+default implementation that throws `NotSupportedException`. An implementation that
+cannot retain a draft cannot enable submission. `LocalNetworkConnections` atomically
+stores drafts and reserves the prepared record identity before signing. A retained
+submission cannot be replaced with new words, a different request or a fresh identity;
+a known receipt cannot be removed. Stored submissions are reconciled by reading
+their exact records. Loading or refreshing never sends a stored draft.

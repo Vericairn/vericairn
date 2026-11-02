@@ -135,7 +135,7 @@ public sealed class RemoteScreenReaderTests(HeadlessFixture fixture) : IDisposab
         {
             var model = new RemoteViewModel(connections, new RemoteFixtures.FixedTime());
             (Window window, RemoteView view) = RemoteFixtures.Show(model);
-            foreach (Control control in view.GetLogicalDescendants().OfType<Control>().Where(c => c is TextBox or Button or ComboBox or TabItem))
+            foreach (Control control in view.GetLogicalDescendants().OfType<Control>().Where(c => c is TextBox or Button or ComboBox or TabItem or CheckBox))
             {
                 Assert.False(string.IsNullOrWhiteSpace(AutomationProperties.GetName(control)), $"{control.GetType().Name} {control.Name} has no screen-reader name.");
             }

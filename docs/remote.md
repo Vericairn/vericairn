@@ -3,7 +3,7 @@
 Remote is Vericairn's phone companion for iOS and Android: a client of an estate's runtime on your local network, never a host
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
-This guide describes Remote's pairing, attention and work views (REMOTE-01 and REMOTE-02, 0.9.0). It is a **developer build**:
+This guide describes Remote's pairing, attention, work and decision views (REMOTE-01 to REMOTE-03, 0.9.0). It is a **developer build**:
 it is not in an app store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -27,7 +27,8 @@ than truncating; and text follows the phone's text-size setting (Dynamic Type on
 starts, so a change applies the next time it opens.
 
 Select an attention item and choose **Open subject**. A work order, assignment, attempt, result or agent run opens its work
-in the Work area. For subjects Remote cannot display yet, it names Workbench or the command-line action to use.
+in the Work area. An ask addressed to you, a result awaiting review or a release candidate also opens its decision review.
+For subjects Remote cannot display completely, it explains why and directs you to the desktop.
 
 **Acknowledge** changes only your attention state. The runtime keeps it per principal, keyed by the notice's kind and subject,
 so your other devices, Workbench's attention list and human `vericairn status` show the same acknowledgment after refreshing.
@@ -44,8 +45,65 @@ Opening a result or run from an earlier assignment retains that assignment's exa
 historical context is labeled, including when the current work view does not establish its acceptance state.
 
 **Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
-freshness and a preview using the same presentation as Workbench. These settings are read-only in this step. Phone-signed
-changes belong to REMOTE-03; clarifications to running attempts arrive with PROMPT-02 in 0.9.1.
+freshness and a preview using the same presentation as Workbench. These settings remain read-only in this step;
+clarifications to running attempts arrive with PROMPT-02 in 0.9.1.
+
+## Decisions and acceptances
+
+The review identifies the estate, runtime, person and phone device, followed by the exact subject revision and hash.
+For an ask it shows the recommendation first, the question, every option, the consequence of leaving it unanswered, and
+the records it names with their hashes. No option is selected automatically. Choosing an option copies its exact words;
+you can also write your own answer. The statement stays verbatim. The proposed record shows every field before submission,
+including the answer's summary, synthesis and effect, which use those same words without adding an interpretation.
+
+Record format 3 pairs an exact ask answer with a document change set. This phone flow supports answers with **no design
+document changes**: supply the exact estate commit as both base and head, choose the stake and confirm that no documents
+change. The phone cannot discover or verify that repository commit through the current API; it never substitutes the
+Vericairn software pin for it. If you cannot supply that basis, or the decision changes documents, keep the draft and
+decide on the desktop. The answer pins the exact ask id, hash and answer time.
+
+A result or candidate review includes its complete recorded fields, reviews of that exact subject, verification records
+and evidence summaries. Acceptance pins that subject's exact revision and hash; its basis names the displayed reviews of
+the same revision, and its self-attribution follows who authored the subject. An acceptance records your judgment. It does
+not publish a release or establish another external effect.
+
+Signing is available only to an operator reviewing a currently waiting ask or an unaccepted result or candidate, with all
+material accessible here. Referenced records are read in full. Hashed evidence must be available as verified, readable text;
+missing evidence, binary material, desktop document readers and material exceeding the reader's capacity lead to the
+desktop. Nothing is truncated to make a decision eligible. The runtime still judges every write and the device's current
+authority.
+
+Confirm review of the material and proposed record, then choose **Sign and submit**. Remote reads the subject and material
+again, asks the runtime to prepare the exact record, checks that it matches what you reviewed, and rechecks current material
+immediately before allowing the phone's own device key to sign its digest. A change leaves your words and original material
+as a draft beside the new revision; another review is required. Device authentication before record signing is a platform
+follow-up; this shared flow makes no Face ID, fingerprint or presence claim.
+
+**Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
+the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing desktop handoffs
+remains a later step; the draft stays on this phone.
+
+## Drafts and observed outcomes
+
+Input is kept in app storage with its original material and target, separately for each connection, estate, runtime identity,
+principal and device. Attention lists **Local drafts and original submissions** so you can reopen them. Offline input is a
+draft only: no prepare, signature or submission is queued. Reconnecting refreshes the current facts and requires a new review;
+it never submits the draft automatically. Input and material confirmations are separate, and a confirmation is never restored
+after restart or a target switch. A storage failure remains visible and blocks signing.
+
+Before signing, Remote durably retains the prepared record's original id, hash, request and reviewed material. Repeated taps
+cannot create another submission, and an attempted original stays blocked from resubmission across app restarts. A receipt
+is retained before any follow-up read. **Accepted for processing** means a receipt was returned; **completed** means the exact
+record and this phone's signature were read back. **Rejected** reports a runtime refusal. A lost response, a contradictory
+read or a runtime recovery problem remains **uncertain**. **Reconcile** reads the original record, never sends it again;
+an absent record is not permission to retry. These outcomes concern the recorded answer or acceptance only.
+
+An uncertain original also blocks a new decision on a later revision of the same subject. Reconcile that original first.
+After completion or an observed refusal, a later revision can open a separate blank draft; the earlier identity and receipt
+remain in the retained list. A new revision still needs its own words and complete review.
+
+Draft and submission storage is separate from cached observations. Clearing observations does not delete drafts, change estate
+records or cancel any remote effect. Preserve uncertain originals for reconciliation, including when app storage needs recovery.
 
 ## Cached observations
 
