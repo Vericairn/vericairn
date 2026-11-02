@@ -155,3 +155,171 @@ Publication requires its own reviewed source selection, rights, destination and
 authorization. Community packages retain their own publisher names; an `implements`
 claim must identify the exact target revision, covered scope and evidence and
 grants no first-party identity or authority.
+
+## Prepare the proposed catalog repository
+
+The 0.9.0 development build also prepares the proposed `Vericairn/catalog`
+repository as a separate local bundle. Repository creation, request activation
+and each publication remain the operator's separate decisions. These commands
+make no network call, initialize no repository and activate no site. The provider
+importer and publication operation are planned.
+
+Prepare a private export plan alongside the reviewed source index. Its
+`format` is `vericairn.catalog-export/1`, with these members:
+
+| Member | Meaning |
+|---|---|
+| `indexIdentity` | SHA-256 of the index serialized with `GuideJson.Options`, UTF-8 without a byte-order mark, followed by one LF. Compute it with `GuideGenerator.Hash`; an identity of differently formatted input JSON is not this identity. |
+| `allowlist` | The exact source pins from the index: `id`, `area`, `path`, `sha256`. The complete set must match before any catalog or contract file is read. |
+| `entries` | Explicit cleared owning entry keys. Unknown keys, aliases, references and withheld entries are refused. All declared dependencies must also be in the public selection. |
+| `retirements` | One reviewed public disposition for each selected retired or fully available entry; none for active planned scope. Fields are `key`, `date` (`yyyy-MM-dd`), `revision`, `replacement` and `migration`. |
+| `restrictedText` | Additional private strings and restricted names to reject from every output file and file name. This private input is never exported or quoted in findings. |
+
+The allowlist limits reads; the entry and boundary review establishes clearance.
+Keep private records, credentials, restricted names and machine locations out of
+all selected prose, aliases and public retirement metadata. Public replacement
+links use HTTPS without credentials or query strings. Supply explicit migration
+limits, including when no automated route or assessed community version exists.
+The exporter validates the entire GUIDE-01 inventory, then emits only selected
+rows, their applicable quoted blocks and the role recipes. It never copies a
+private preview, private source manifest, source index, coverage or Git history.
+
+```sh
+vericairn guides export --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --plan inputs/export-plan.json --out artifacts/catalog-first
+vericairn guides export --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --plan inputs/export-plan.json --out artifacts/catalog-second
+vericairn guides publication-check --catalog inputs/catalog --contracts inputs/contracts --index inputs/index.json --plan inputs/export-plan.json --destination artifacts/catalog-first --json
+```
+
+Choose new or empty output directories separate from all inputs. Existing output
+is refused, even when identical; nothing is overwritten. Compare the complete
+membership and bytes of independent exports. `publication-check` regenerates the
+exact proposal and compares it with an existing local directory or destination
+checkout, reporting `add`, `change` and `remove` without modifying it. Exit 0 means
+the comparison completed without findings; inspect its changes even when it exits
+0. Linked inputs or destinations, incomplete comparisons and disappearing guide
+addresses are findings: a chosen file or directory, and everything below it, must
+not be a symbolic link, while links above it, such as macOS's `/tmp`, are admitted.
+Checkout Git metadata is neither read nor exported.
+
+The bundle contains:
+
+- `README.md`, `LICENSE.md`, `NOTICE.md` and `CONTRIBUTING.md`, with CC BY 4.0
+  for guide prose and catalog renditions and Apache-2.0 for any separately reviewed
+  original samples. This exporter includes no samples.
+- `sources/catalog/` and `sources/contracts/`: cleared contribution renditions;
+  `templates/`: the template convention and role recipes.
+- `guides/<kind>/<entry-key>.md`: a complete guide or retained retirement page.
+- `indexes/`: entry, family and role navigation, a public inventory and the issue map.
+- `manifests/`: exact public rendition digests and template/generator versions.
+  The output manifest lists every other file and excludes itself.
+- `.github/ISSUE_TEMPLATE/request-implementation.yml`: one shared request form.
+
+For supplied public issue observations, add `--issues inputs/tracking-issues.json`
+to both export and comparison. That explicit file is a JSON array of
+`{"key":"provider.workshop.routes","number":17}` objects. Keys and positive
+issue numbers must be distinct and belong to selected entries. Omission produces
+an empty map; it makes no claim that demand is zero. No issues are seeded.
+
+The disclosure scan checks every file and name, including decoded text. It rejects
+private identifier and credential shapes, machine locations and configured
+restricted text. Only exact, verified public manifest identity fields may contain
+digests. Automated checks supplement complete source, disclosure and rights review;
+they cannot determine whether arbitrary prose has been cleared. A failed export
+returns no public files or partial public inventory. Keep all private inputs and
+validation evidence outside the proposed public repository.
+
+## Validate requests and reconcile observations
+
+The form uses a stable entry key, a deliberate request checkbox, optional intended
+use of at most 500 characters, optional offers to test or contribute, and an
+unchecked status-notice opt-in. Empty optional fields are valid. The explanation
+states that requests inform priority without a timeline, public requests are
+visible on the host, and personal or confidential data must not be included.
+Offers are not assignments and the notice checkbox enables no subscription.
+
+The native form creates an issue; it cannot atomically enforce uniqueness or
+append to an existing issue. Its submission must be validated against the exact
+public inventory. For an existing tracking issue, `CONTRIBUTING.md` supplies
+**Add my request** instructions using the same headings and checkbox labels in a
+structured comment. Ordinary discussion, stars, reactions and subscriptions are
+not votes. `CatalogRequests.Parse` recognizes these shared fields; a future
+qualified importer or responsible manual observer supplies their provider
+attribution separately. Body text cannot assert an account identity.
+
+```sh
+vericairn guides request-validate --inventory artifacts/catalog-first/indexes/entries.json --request inputs/request.json
+vericairn guides requests-reconcile --inventory artifacts/catalog-first/indexes/entries.json --observations inputs/observations.json
+```
+
+Both commands read explicit JSON files and return JSON. A minimal request is
+`{"entryKey":"provider.workshop.routes","request":true}`. Optional members are
+`intendedUse`, `offerToTest`, `offerToContribute` and `noticeOptIn`. Unknown and
+duplicate properties are refused. Only exact requestable keys are accepted;
+unknown keys point to the entry index, while retired or available scope points to
+its retained guide and replacement. An explicit planned remainder remains
+requestable under the same stable key.
+
+The private observation snapshot has `repository`, `complete`, `windowStart`,
+`windowEnd`, `asOf` and `observations`. The interval is inclusive at the start and
+exclusive at the end; all times are UTC and `asOf` is within that interval.
+Include complete history through `asOf`, including earlier revisions needed to
+resolve edits, withdrawals and deletions, even if they precede the window.
+The `CatalogRequestSnapshot` and `CatalogRequestObservation` types define the
+contract. Every observation has:
+
+- `kind` (`issue` or `comment`), stable `objectId`, containing `issueId`, stable
+  `accountId`, `accountKind` (`human`, `bot` or `app`) and provider-established
+  `verified` attribution;
+- positive ordered `revision`, `issueCreatedAt`, `createdAt` and `updatedAt`;
+- `deleted`, `closed` and `fields` (the request object, or null for removed fields
+  or ordinary discussion).
+
+The earliest valid issue creation time, then stable issue ID in ordinal order,
+selects one canonical issue per entry. Duplicate deliveries and reordered input
+produce the same result. The latest attributable action per account and entry
+updates one vote; edits and repeated submissions add no extra vote, withdrawal or
+deletion removes it, and restoration restores at most one. Equal action timestamps
+are ordered by object kind, stable object ID and revision. Closed duplicates keep
+their attribution; closing or reopening an issue is not itself a request action.
+Bots, apps and unverifiable submissions do not count. Authenticated hosting
+attribution proves control of that account, not one unique person.
+
+Reconciliation proposes canonical issues and duplicate links; it performs no
+provider writes. An authorized maintainer must reconcile duplicates at the host,
+preserve original attributable submissions and record the guide's public revision
+on the canonical issue. The importer is planned. Until qualified, aggregates must
+be labeled manual with their observation window. An incomplete or conflicting
+basis returns no fresh votes or totals; prior aggregates remain stale or unavailable,
+never reset to zero. Reconciliation output is private: it includes account keys
+and consent and must not be copied into the public bundle. Only separately reviewed
+aggregates may be published.
+
+## Publication, retirement and recovery
+
+Issues report corrections or observations; pull requests change owning sources,
+boundary mappings, role recipes, templates or reviewed samples. Generated guides
+are never edited directly. Reconcile accepted source patches to the authoritative
+catalog, rebase if its basis changed, review again and regenerate. A public merge
+is publication and needs the operator's decision.
+
+After independent review of sources, rights, disclosure and regenerated bytes,
+compare the exact proposed bundle with the intended local checkout. Every prior
+guide address must remain present. A reviewed retirement replaces that address
+with its public date and revision, replacement, migration limits and history and
+community notices. Partial availability keeps the planned remainder active;
+retirement does not manufacture migration compatibility or replay old demand.
+
+Repository creation and publication of the exact reviewed bundle require separate
+operator decisions. The publication operation and request activation remain
+planned; a preview labels the request action unavailable. No successful check
+enables either. Activation needs qualified host links, the form, duplicate
+reconciliation and explicit subscription instructions. The notice checkbox alone
+does not change hosting subscriptions or authorize a message.
+
+After a separately authorized publication, observe that destination and compare
+complete membership and bytes before claiming it current. If an effect is failed
+or uncertain, reconcile the original destination before retrying. Retain the last
+observed good revision, prepare a corrective bundle from reviewed sources and
+obtain a new publication decision. A repository observation establishes no claim
+about a separate site. Keep retired addresses in every correction and preserve
+attributable public history without importing private estate history.
