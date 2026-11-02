@@ -1477,7 +1477,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", exception.Message, []));
             }
 
-            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)]) { Line = plan.Line, Channel = plan.Channel };
+            // Generated members whose bytes are exactly an earlier generator implementation's output move to the current bytes with the
+            // migration; a member that differs in any other way was edited, stays as it is, and the estate check keeps reporting it.
+            ImmutableArray<GeneratedMemberUpgrade> regenerated = GeneratedDocumentUpgrade.Prepare(model);
+            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)])
+                { Line = plan.Line, Channel = plan.Channel, Regenerated = [.. regenerated.Select(m => m.Path)] };
             if (request.Check)
             {
                 return (response, null);
@@ -1500,7 +1504,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     return (null, new Problem("refused", $"The manifest is pinned to {plan.ToPin}, and no migration record names that pin: an earlier upgrade stopped after it moved the manifest and before it recorded the move. Inspect the repository's last change to {EstateLayout.ManifestPath}, then record that migration with `vericairn records new migration`, naming its fromPin, toPin {plan.ToPin}, fromFormat, toFormat {plan.ToFormat}, the steps it ran and release {plan.Release.Id}. Nothing changed.", []));
                 }
 
-                return (response, null);
+                // Reapplying the installed target changes nothing, generated members included.
+                return (response with { Regenerated = [] }, null);
             }
 
             if (request.By is null || !Ulid.IsValid(request.By))
@@ -1553,7 +1558,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     return (null, new Problem("refused", $"Migration {pending.Id} is recorded, and the manifest still could not be replaced: {exception.Message} Rerun the upgrade to finish it.", []));
                 }
 
-                return (response with { Applied = true, Migration = new RecordWritten(pending.ExpectedPath, pending.Id, pending.ComputedHash) }, null);
+                return (response with { Applied = true, Migration = new RecordWritten(pending.ExpectedPath, pending.Id, pending.ComputedHash), Regenerated = [] }, null);
             }
 
             // Migrations stage their files first; nothing is written until every step succeeded.
@@ -1575,6 +1580,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 changes.Add($"followed line/channel changed explicitly from {model.Manifest.Line}/{model.Manifest.Channel} to {plan.Line}/{plan.Channel}");
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
+            changes.AddRange(regenerated.GroupBy(m => (m.Destination, m.Earlier, m.Current)).OrderBy(g => g.Key.Destination, StringComparer.Ordinal)
+                .ThenBy(g => g.Key.Earlier, StringComparer.Ordinal).Select(g => $"{g.Key.Destination}: {g.Count()} generated member{(g.Count() == 1 ? string.Empty : "s")} rewritten by {g.Key.Current}; each held exactly the bytes {g.Key.Earlier} wrote for the same sources"));
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             var migrationDraft = new RecordDraft("migration", request.By, body.RootElement,
                 Subject: VericairnReleaseObservation.Is(plan.Release) ? plan.Release.Reference : null, Format: Math.Min(plan.ToFormat, RecordFormats.Current));
@@ -1614,7 +1621,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             UpgradeStage?.Invoke("staged");
             // The migration record comes before the manifest: a run that stops between them leaves a record that says what to finish,
             // never a moved manifest with nothing recording the move.
-            (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null);
+            (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null, null,
+                regenerated.IsEmpty ? null : [.. regenerated.Select(m => m.Change)]);
             RecordWritten? stored = written.FirstOrDefault(r => r.Id == migration.Envelope.Id);
             var outcome = new WriteOutcome(stored, storageProblem);
             if (outcome.Written is null)

@@ -206,6 +206,13 @@ observation states that the builds are unsigned developer builds and that only t
 CLI archive was verified. Review and commit the estate change. The bootstrap's release mode stays the
 same: it verifies the downloaded archive against the manifest hash.
 
+From 0.9.0 an upgrade also rewrites generated register members whose files hold exactly what an
+earlier implementation of their generator wrote for the same records, such as the work-order and
+release members 0.8.4 wrote; the plan and `--check` list them, and the migration record counts them
+per register. Records and authored files are never rewritten. A member edited by hand is left as it is and stays
+`document.generated-edited` in `estate check`; inspect it, then run `vericairn docs regenerate <path>`.
+See [upgrading an estate](operator-guide.md#9-upgrading-an-estate).
+
 For a fresh estate, run the published build with `--release`:
 
 ```sh

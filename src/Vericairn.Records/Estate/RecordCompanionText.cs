@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -51,11 +52,12 @@ internal static class RecordCompanionText
         return text.ToString();
     }
 
-    internal static IEnumerable<string> Body(DocumentSourceSnapshot source)
+    internal static IEnumerable<string> Body(DocumentSourceSnapshot source, ImmutableArray<string> omitted = default)
     {
         IRecordType type = RecordTypeRegistry.Find(source.RecordType!)!;
         JsonElement body = source.Body!.Value;
-        foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat <= source.RecordFormat))
+        // An earlier implementation's fields are the current ones without those added after it.
+        foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat <= source.RecordFormat && (omitted.IsDefault || !omitted.Contains(f.Name))))
         {
             // Preserve earlier rendition bytes when the additive prompt-use field was not recorded.
             if (field.Name == "promptUse" && !body.TryGetProperty(field.Name, out _)) continue;

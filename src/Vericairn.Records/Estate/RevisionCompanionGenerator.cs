@@ -29,11 +29,30 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
         ("vericairn.estate/writing-exceptions", "writing-exception", "writing-exceptions", WritingExceptionsImplementation),
     ];
 
+    // Earlier implementations whose bytes differed from the next only by the record fields it added; their golden fixtures are retained.
+    // An upgrade proves a member was generated, not edited, by reproducing these bytes exactly (FIX-83).
+    private static readonly ImmutableDictionary<string, ImmutableArray<(string Implementation, ImmutableArray<string> Omitted)>> Earlier =
+        new Dictionary<string, ImmutableArray<(string Implementation, ImmutableArray<string> Omitted)>>(StringComparer.Ordinal)
+        {
+            ["vericairn.records/decisions"] = [("vericairn.records/decisions/1", ["answer", "changeSet", "releaseReview"])],
+            ["vericairn.records/work-orders"] = [("vericairn.records/work-orders/1", ["disclosure"])],
+            ["vericairn.records/releases"] = [("vericairn.records/releases/1", ["line", "channel", "endOfSupport", "backportOf"])],
+        }.ToImmutableDictionary(StringComparer.Ordinal);
+
+    private readonly ImmutableArray<string> omitted;
+
     internal RevisionCompanionGenerator(string id)
+        : this(id, Registers.Single(r => r.Id == id).Implementation, [])
+    {
+        EarlierImplementations = [.. Earlier.GetValueOrDefault(id, []).Select(e => new RevisionCompanionGenerator(id, e.Implementation, e.Omitted))];
+    }
+
+    private RevisionCompanionGenerator(string id, string implementation, ImmutableArray<string> omitted)
     {
         var register = Registers.Single(r => r.Id == id);
         Id = id;
-        Descriptor = new(id, 1, register.Implementation, CompanionImplementation.Hash(register.Implementation),
+        this.omitted = omitted;
+        Descriptor = new(id, 1, implementation, CompanionImplementation.Hash(implementation),
             new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"], ["selection"] = ["all-revisions", "current"] }.ToImmutableDictionary(StringComparer.Ordinal),
             [register.Type], ["record"], ["item", "list", "all-revisions", "current"], "text/markdown", "Source UTC time then ordinal revision identity; nested arrays retain recorded order", "Internal", "record-revision")
         {
@@ -44,6 +63,7 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
 
     public string Id { get; }
     public DocumentGeneratorDescriptor Descriptor { get; }
+    public IReadOnlyList<IDocumentGenerator> EarlierImplementations { get; } = [];
 
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {
@@ -52,7 +72,8 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
         DocumentSourceSnapshot[] primary = context.Sources.Where(s => !context.Sources.Any(other => other.Supersedes == s.Identity)).ToArray();
         if (primary.Length != 1) return DocumentRenderResult.Error("A revision item requires one exact source and only its predecessor.");
         DocumentSourceSnapshot source = primary[0];
-        if (!RecordCompanionText.KnownFields(source)) return DocumentRenderResult.Unavailable("The source schema is unavailable.");
+        if (!RecordCompanionText.KnownFields(source) || omitted.Any(f => source.Body!.Value.TryGetProperty(f, out _)))
+            return DocumentRenderResult.Unavailable("The source schema is unavailable.");
         if (context.Sources.Length != (source.Supersedes is null ? 1 : 2)) return DocumentRenderResult.Unavailable("The exact predecessor basis is unavailable.");
         string header = RecordCompanionText.Header(source, context, "../../../../");
         if (source.Supersedes is { } previous)
@@ -63,7 +84,7 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
         }
         var content = new StringBuilder(header);
         int bytes = Encoding.UTF8.GetByteCount(header);
-        foreach (string block in RecordCompanionText.Body(source))
+        foreach (string block in RecordCompanionText.Body(source, omitted))
         {
             bytes += Encoding.UTF8.GetByteCount(block);
             if (bytes > Descriptor.MaxMemberBytes)

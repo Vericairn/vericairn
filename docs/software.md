@@ -1247,6 +1247,15 @@ checking a format-2 reader's refusal. Synthetic steps additionally test staged f
 succeed before publication, and a failed step or refused migration record leaves the prior files and directories.
 Migrations never rewrite records.
 
+FIX-83 in 0.9.0 lets an upgrade rewrite generated members, never records. A generator lists the earlier
+implementations of its contract whose exact bytes the build still reproduces (`IDocumentGenerator.EarlierImplementations`).
+The first-party registers retain `vericairn.records/decisions/1`, `vericairn.records/work-orders/1` and
+`vericairn.records/releases/1`, each the current renderer without the record fields added after it and with its own
+implementation identity in the input digest; tests hold them to their retained golden bytes. `estate upgrade` rewrites
+a strict generated member only when its file equals one of those renditions of the same sources, byte for byte, and
+leaves every other difference to `document.generated-edited`. The rewritten members are published through the
+upgrade's batch journal with the migration record.
+
 ## Progress claims (0.7.0)
 
 An agent may submit `work_progress` through MCP while carrying its own attempt. `vericairn progress`, its API, and Workbench show its latest claim with the attempt and phase. Interim notes stay in the runtime's local live store; only a completed phase creates a signed record, at most once. Workbench polls these claims every five seconds while its window is open; F5 also refreshes them. Worker liveness continues to come from the harness event stream, independently of these claims.

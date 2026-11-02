@@ -24,6 +24,13 @@ public interface IDocumentGenerator
 
     /// <summary>Renders a region with its owning declaration; existing generators retain their original contract.</summary>
     string? GenerateRegion(EstateModel model, RecordEnvelope declaration, string region, IReadOnlyList<string> inputs) => Generate(model, region, inputs);
+
+    /// <summary>
+    /// Earlier implementations of this generator's contract whose exact bytes this build still reproduces, newest first: each has this
+    /// identity and contract version with an earlier implementation and its hash. An estate upgrade rewrites a generated member only when
+    /// its bytes are exactly what one of them renders for the same sources. None by default.
+    /// </summary>
+    IReadOnlyList<IDocumentGenerator> EarlierImplementations => [];
 }
 
 /// <summary>The generators installed here: the foundation's, and those packs register. Registering one makes its name available.</summary>
@@ -89,6 +96,8 @@ public static class DocumentGenerators
         public DocumentGeneratorDescriptor Descriptor => revisions.Descriptor;
 
         public DocumentRenderResult Generate(DocumentGenerationContext context) => revisions.Generate(context);
+
+        public IReadOnlyList<IDocumentGenerator> EarlierImplementations => revisions.EarlierImplementations;
 
         public string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs)
         {

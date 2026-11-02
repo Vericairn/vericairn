@@ -647,6 +647,19 @@ bytes, and this machine verifies only its own platform archive. Existing record 
 format contract are unchanged. Review and commit the change; the bootstrap verifies the archive
 against the manifest's hash as before. Do not author a product release record for a dependency.
 
+An upgrade also keeps generated registers valid when the target's generators write different bytes
+(FIX-83). In 0.9.0 the work-order register adds a Disclosure section and the release register adds
+line, channel, end-of-support and backport sections, so members 0.8.4 wrote no longer match. The
+plan lists each declared generated member whose file holds exactly what an earlier implementation of
+its generator wrote for the same records, input digest included; `--check` names them and writes
+nothing. Applying rewrites only those members to the current generator's bytes, in the same change
+as the migration record, which states per register how many members were rewritten and by which
+implementations. Records, authored files and other documents are not touched. A member that matches
+neither the earlier nor the current output was edited by hand. It is never overwritten:
+`estate check` keeps reporting it as `document.generated-edited` until you inspect it and run
+`vericairn docs regenerate <path>`. This release reproduces the first implementations of the
+decision, work-order and release registers; reapplying the installed target rewrites nothing.
+
 Add `--from <download-directory>` to both check and apply to use the [offline inputs](install.md#offline-inputs).
 The directory belongs on the runtime's machine and holds downloaded release/tag responses,
 `SHA256SUMS` and the archive. Verification reads these inputs without network access or file changes.
