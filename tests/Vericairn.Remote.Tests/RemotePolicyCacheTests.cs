@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json.Nodes;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Remote;
@@ -24,7 +25,10 @@ public sealed class RemotePolicyCacheTests(HeadlessFixture fixture)
             await model.OpenAttentionCommand.ExecuteAsync();
             string original = model.PolicyDetail!.Notice.Revision;
             await model.ClosePolicyCommand.ExecuteAsync();
-            policy.Add("decision", policy.DecisionBody());
+            // An unrelated record keeps the notice's revision; revoking its exception changes the condition itself.
+            JsonObject revoked = PolicyFixture.Body(seed.Exception);
+            revoked["state"] = "revoked";
+            policy.Add("policy-exception", revoked, subject: seed.Excepted.Reference, supersedes: seed.Exception.Id);
             await model.RefreshCommand.ExecuteAsync();
             model.SelectedAttention = Assert.Single(model.Attention, a => a.Notice?.Policy?.Finding.Policy.Id == seed.Excepted.Id);
             Assert.NotEqual(original, model.SelectedAttention.Notice!.Revision);
