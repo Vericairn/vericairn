@@ -36,7 +36,11 @@ public sealed partial class EstateService
                 why += $"\nWaiting on {waiting.Operator}; owner {waiting.Owner}. {waiting.Preparation}" +
                     (waiting.Asks.Count == 0 ? "" : " Linked asks: " + string.Join(", ", waiting.Asks.Select(a => a.Id + " at " + a.Hash)) + ".");
             yield return new(kind, finding.PolicyKey + "/" + finding.Rule + ": " + finding.Target.Identity, why,
-                finding.Disposition, finding.AsOf ?? "unavailable", finding.NextAction, "policy-finding", id, Digest(detail))
+                finding.Disposition, finding.AsOf ?? "unavailable", finding.NextAction, "policy-finding", id, Digest(new
+                {
+                    Finding = Condition(finding), detail.Origin,
+                    Operator = detail.Operator.Select(d => new { d.Operator, d.Owner, d.Asks, Finding = Condition(d.Finding) }),
+                }))
             {
                 Target = new(target.Type, target.Id, target.Hash),
                 Policy = detail,
@@ -49,6 +53,15 @@ public sealed partial class EstateService
                 policies.Basis.AsOf ?? "unavailable", "Inspect the policy sources in Workbench or run vericairn policies check.",
                 "policy-source", "evaluation", Digest(new { policies.Basis, policies.Diagnostics, policies.Problem }));
     }
+
+    // The revision names the condition, not the evaluation that observed it. A later unrelated record moves the basis digest,
+    // its time and elapsed counters, which must not undo an acknowledgment; a changed verdict, disposition, evidence, exception,
+    // duty state or waiting ask renews the notice. Release admission compares findings the same way.
+    private static PolicyFindingDto Condition(PolicyFindingDto finding) => finding with
+    {
+        Basis = "", AsOf = null, Actual = "", Required = "", NextAction = "",
+        Duty = finding.Duty is { } duty ? duty with { LateSeconds = 0 } : null,
+    };
 
     private static string Digest<T>(T value) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value, ProtocolJson.Options)));
 }

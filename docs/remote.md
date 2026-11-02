@@ -134,6 +134,8 @@ Choose **Open subject** to inspect the exact original condition beside a freshly
 history. The detail retains occurrence identity, due and grace deadlines, completed and missed flags, exact result and proof
 references, and every completion interval, including a withdrawn qualification. Operator preparation and linked asks remain
 with their original finding, owner and basis. Acknowledgment neither completes the work nor removes its debt or release hold.
+It lasts while the condition is unchanged: a newer basis from unrelated records keeps it, while a changed verdict,
+disposition, evidence, exception, completion or linked ask returns the notice as unacknowledged.
 
 Policy inspection offers **Refresh policy** and **Prepare desktop handoff**. Both recheck the connection and read current policy
 authority and basis. The handoff reads the existing complete context package, then checks the policy basis and authority again;
