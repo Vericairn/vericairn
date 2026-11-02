@@ -120,7 +120,7 @@ assignment from another work order is unavailable for that work brief, and
 full presentation remains visible.
 
 No presentation choice changes a draft's pinned hash, permission, acceptance
-or exported handoff bytes. Remote has no communication UI yet.
+or exported handoff bytes. [Remote](remote.md#what-this-build-does) shows communication settings read-only.
 
 ## Keyboard
 

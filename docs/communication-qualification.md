@@ -26,9 +26,9 @@ not-applicable portions of the same design case are separate rows.
 | Case | Status | Exercised behavior or remaining boundary |
 |---|---|---|
 | D08-A: one person across surfaces | Passed | Two people independently choose different depths. CLI, runtime API, daemon/SDK, MCP reads and Workbench resolve their own values and attributed revisions. Assignment and view overrides retain their origins; view choices do not persist. Exported briefs include the recipient profile. Canonical status, brief, hand-over, decision and record artifacts remain unchanged by depth. |
-| D08-A: Remote profile | Not applicable | Remote is unbuilt. No mobile profile or synchronization claim is made. Requalify with Remote implementation and a COMMS-02 follow-up. |
+| D08-A: Remote profile | Built; not qualified | [Remote](remote.md) is a developer build that shows a person's effective settings read-only. These fixtures exercised no mobile profile or synchronization, and no such claim is made. Requalify with a COMMS-02 follow-up. |
 | D08-B: mandatory attention | Passed | At `none` frequency and short depth, uncertain effects, failed checks and an open ask remain visible through CLI, API/SDK, MCP reads and Workbench. The ask retains its recommendation first, both alternatives and the consequence of no answer. Reading neither answers it nor accepts work. |
-| D08-B: phone evidence and hand-off | Not applicable | Remote is unbuilt. No phone evidence display, hand-off or acceptance behavior was exercised. Return this portion to the operator with the Remote work. |
+| D08-B: phone evidence and hand-off | Built; not qualified | [Remote](remote.md#decisions-and-acceptances) shows decision material and signs answers and acceptances with the phone's presence key, with no real-device qualification recorded. These fixtures exercised no phone evidence display, hand-off or acceptance behavior. Return this portion to the operator with a COMMS-02 follow-up. |
 | D08-C: measured omission | Passed | A large multibyte optional original is withheld under a byte allocation. CLI and MCP preparation agree with the API; the generated CLI retrieval command and authenticated SDK retrieval return the pinned bytes. Original and derivative hashes are distinct. Editing the file makes the old pin unavailable and changes the prepared package; an unverified size becomes unknown. Final UTF-8 accounting includes the manifest, withheld entries, wrappers and accounting itself. Mandatory overflow returns no package. |
 | D08-C: Workbench context controls | Not applicable | Workbench has no context-allocation editor or pinned-original retrieval control. Its existing work and assignment routes are tested for complete context refusals. A future control needs CONTEXT-01 follow-up implementation and COMMS-02 qualification; API tests are not a claim that the control exists. |
 | D08-D: bounded run, adapter disabled | Passed | Round two exercises both native launcher adapters with stand-in executables at all three depths. The saved intent precedes dispatch and pins explicit model/effort, provenance, disabled adapter, admitted inventory, retained context hash and byte/token allocations. Observations keep reported model/effort separate from unknown facts; absent token usage reserves the full cap. All run revisions, retained context and canonical runs/status/progress/hand-over output remain byte-identical across view depths. Adapter requests, unallowlisted hooks, tools and environment needs, unsupported effort and model/provider/route fallback are refused before intent or dispatch. |
@@ -246,10 +246,10 @@ extracted for reuse.
    Hand-over remains a record-only selection: source-file contents, output
    objects, unrecorded conversation and external health are outside it. Missing
    originals are not reconstructed from summaries.
-3. **Remote — not applicable while unbuilt.** No mobile profile synchronization,
-   phone full-evidence display or phone hand-off is claimed. Requalify through
-   COMMS-02 with the Remote implementation and return this exclusion to the
-   operator.
+3. **Remote — built as a developer build, not qualified here.** These fixtures
+   claim no mobile profile synchronization, phone full-evidence display or phone
+   hand-off. Requalify through COMMS-02 with [Remote](remote.md) and return this
+   exclusion to the operator.
 4. **Templates — TPL-COMMS-01, 0.8.4.** Generated/quoted fields, locked
    sections, versioned instances and protection against silent migration remain
    deferred; no template check is counted as passed.

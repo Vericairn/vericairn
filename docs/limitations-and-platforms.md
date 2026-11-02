@@ -79,7 +79,7 @@ The release workflow requires a Release build and the suite on three runners bef
 
 A passing release run supplies this automation evidence; the release record states which platforms were qualified. `linux-arm64`, `osx-x64` and `win-arm64` are cross-published by the workflow and are not executed by that matrix. The Intel Mac helper is compiled for its architecture, but that job executes only the arm64 helper. Providing an archive does not qualify its architecture.
 
-The archives are self-contained .NET applications and require no separate .NET runtime, but still depend on the operating system's native libraries. Workbench needs a desktop; on Linux its Avalonia desktop uses X11 or XWayland. Secret-service custody needs a running service and `secret-tool`. The macOS helper is compiled for macOS 13.0 and later and probes enclave availability at runtime. A machine that cannot use it falls back to other available custody. No iOS or Android client is built by this solution.
+The archives are self-contained .NET applications and require no separate .NET runtime, but still depend on the operating system's native libraries. Workbench needs a desktop; on Linux its Avalonia desktop uses X11 or XWayland. Secret-service custody needs a running service and `secret-tool`. The macOS helper is compiled for macOS 13.0 and later and probes enclave availability at runtime. A machine that cannot use it falls back to other available custody. The release carries no iOS or Android client: [Remote](remote.md#building-from-source), the phone companion, is a developer build made from `src/Vericairn.Mobile.slnx`, outside this solution.
 
 The workflow packages unsigned developer builds. There is no application-signing or notarization step, application bundle or installer. Check downloaded bytes against `SHA256SUMS` and the estate's recorded hashes; see `install.md` for quarantine and SmartScreen behavior. These checks establish the downloaded bytes, not a platform signature.
 
@@ -319,7 +319,7 @@ FIX-10 makes path matching deterministic, ordinal and case-sensitive on every pl
 
 ## Pairing and the local-network profile
 
-The listener is off by default and needs an explicit address, restart, network reachability and an administrator-issued pairing code. There is no discovery, relay or firewall configuration. Public/wildcard binding requires `--allow-public`. `--no-loopback` does not disable a configured local-network listener. The Remote profile is not implemented.
+The listener is off by default and needs an explicit address, restart, network reachability and an administrator-issued pairing code. There is no discovery, relay or firewall configuration. Public/wildcard binding requires `--allow-public`. `--no-loopback` does not disable a configured local-network listener. [Remote](remote.md), the phone companion, connects through this profile only; the relay that would reach a runtime from elsewhere is a design.
 
 - Pairing codes contain 16 secret characters (80 bits), displayed in four groups, valid ten minutes for one device, with, from 0.9.0, that phone's presence device in the same exchange; five failed confirmations invalidate a code. Pairing is not a password-authenticated key exchange: a man-in-the-middle who obtains a hello can test guesses offline, which is why the code has that entropy. Whoever learns a code can consume its one admission. Inspect the device list and revoke an unwanted device.
 - Since 0.6.1 a code retains its issuing device, admission revision and the operator-role revision or `administer` grant used at issuance. Loss of admission, or revocation or expiry of that authority, invalidates the code and its open exchanges. Readmission or restored authority does not revive it; another device or grant cannot rescue it. A rename, key rotation retaining admission, or authority revision retaining its scope without an expiry gap leaves it valid. The runtime rechecks the issuer under the estate write lock before writing either pairing record. This corrects code revocation, not the interruption limits below.
@@ -624,7 +624,8 @@ nothing. Synchronous SDK methods preserve their earlier timeouts and exception b
 Workbench marks interrupted retained views as cached and retains uncertain-effect
 notices. Companion access loss or an unavailable refresh clears protected content.
 Headless behavior does not establish native screen-reader, keyboard or desktop
-qualification for 0.9.0. Policies have CLI/API/SDK/MCP inspection; a separate Workbench
+qualification for 0.9.0. Policies have CLI/API/SDK/MCP inspection, and [Remote](remote.md#policy-conditions-and-recurring-duties) shows policy
+and recurring-duty conditions; a separate Workbench
 policy editor or inspector is not supplied by this release.
 
 Shared public array fields become `ImmutableArray` values, and the runtime's fake

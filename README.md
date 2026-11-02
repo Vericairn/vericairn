@@ -98,7 +98,9 @@ the [SDK guide](docs/api-v1.md#the-sdk).
   baselines, or another version a person qualifies there. Live runs have qualified one Codex configuration,
   which the [software guide](docs/software.md#native-inventory-qualification-run-02-and-run-03) describes.
   Spending caps are soft: unknown usage is charged at the cap.
-- **Not built yet.** Remote, the phone client, and every entry of the planned catalog below.
+- **Remote.** The phone companion for iOS and Android is a developer build: you build it from source, it is not
+  in an app store, and no real-device qualification is recorded ([Remote](docs/remote.md)).
+- **Not built yet.** Every entry of the planned catalog below.
 - **Support.** Help is self-service, with no promised response time.
 
 The [limitations and platforms](docs/limitations-and-platforms.md) guide gives every current limit, and the
@@ -107,8 +109,9 @@ disclosures and security notices.
 
 ## Planned
 
-- Remote, the phone client for accepting releases and steering work, in 0.9.0, with a community build guide
-  for every planned catalog entry and a way to request the implementations you need most.
+- A published community build guide for every planned catalog entry and a way to request the implementations you
+  need most. 0.9.0 prepares the guides and the proposed catalog repository locally; publishing them and opening
+  requests remain the operator's separate decisions ([community build guides](docs/community-build-guides.md)).
 - The first creator domains in a 0.10.x series: websites and web applications, then books, book series and
   world building, courses and video, and crowdfunding.
 - Paid editions on the same software, with Community staying free: Standard for one person and Pro for teams
@@ -207,7 +210,8 @@ The following capabilities are in 0.9.0.
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
   its next request, a device acts only for its own principal, and `vericairn devices writes` shows what paired
-  devices wrote through the runtime, whose own devices sign those records until paired devices sign their own.
+  devices wrote through the runtime, whose own devices sign those records unless, from 0.9.0, the paired device
+  signs its own.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   lists and renders readable companions and keeps the estate's living documents: their declarations, what is
   due and why, reviews and generated regions. `vericairn mcp serve` is the Model Context Protocol server for
@@ -218,7 +222,12 @@ The following capabilities are in 0.9.0.
   results, review and decisions, goals, releases, living documents, readable views, communication settings,
   hand-over/resume and the runtime, documented in
   [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
-  the state language Workbench shares with the command line and the clients to come.
+  the state language Workbench shares with the command line and Remote.
+- `Vericairn.Remote`, with its iOS and Android heads in `src/Vericairn.Mobile.slnx`: Remote, the phone companion, a
+  client of an estate's runtime on the local network that uses the same presentation, state language and SDK as
+  Workbench: pairing, attention, work, decision and policy views, and the presence key that alone signs a decision
+  on the phone. It is a developer build, not in an app store, with no real-device qualification recorded,
+  documented in [docs/remote.md](docs/remote.md).
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record
   references and its manifest from the build, and refuses a set that disagrees with the build. The release
   workflow runs that comparison and `vericairn docs check` before it builds a draft.

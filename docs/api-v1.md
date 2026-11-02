@@ -1218,7 +1218,8 @@ Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
 by the caller. Preparing it writes nothing: no objects, records, status ledger
 or authority are stored.
-Remote does not use it yet.
+From 0.9.0, [Remote](remote.md#policy-conditions-and-recurring-duties) reads it only to prepare a policy or duty
+condition's desktop handoff.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,
 `payload`). The SDK operation is `ResumeHandoff(package)`. Despite its POST body,
@@ -1295,7 +1296,8 @@ the read becomes an unavailable profile, never a claim that defaults were
 applied. Unknown recipients, assignments and unsupported values are labeled
 unavailable. Missing personal records use the stated defaults. Reads author
 nothing. Existing canonical status, progress, brief and record JSON do not
-vary with any recipient or one-view selection. Remote does not use it yet.
+vary with any recipient or one-view selection. From 0.9.0, [Remote](remote.md#what-this-build-does) reads
+the person's profile to show their settings, read-only.
 
 `GET /v1/work/{key}/brief` additionally accepts the same optional recipient,
 assignment and five one-view parameters. The SDK method is `BriefFor`.
@@ -1404,7 +1406,7 @@ Qualification is machine-local. A paired local-network device receives `401` wit
 before probes or record writes, even when acting for an authorized human or supplying a local `command`
 override. The local socket and signed loopback retain the existing human authority checks. A qualification
 record can be used on another machine only when that machine's exact local probe digests match; the record
-does not permit network-triggered probes. Remote remains unbuilt.
+does not permit network-triggered probes. A phone paired with [Remote](remote.md) is such a local-network device.
 
 ## Templates and section evidence (0.8.4)
 

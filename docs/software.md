@@ -86,7 +86,7 @@ the read-only MCP tool `communication_get` at the next settled boundary.
 Enforcement covers stored authority, conflicts and first-party rendering;
 following the brief is an instruction to an external agent, not an observed
 guarantee of its prose. Communication settings do not select a run configuration or model; RUN-01 resolves those separately.
-No Remote communication behavior is claimed.
+[Remote](remote.md#what-this-build-does) shows a person's effective settings read-only and changes none.
 
 The [first-party adoption procedure](communication-adoption.md) preserves the
 operator's exact existing decision as an explicit personal record. It is a
@@ -102,7 +102,7 @@ The protection boundaries are explicit:
 | Complete originals and stable machine output | Shared first-party renderers and byte-for-byte regression checks |
 | Required attention at every frequency | Structured asks, checks, blocked results, uncertain effects and worker/budget observations in first-party surfaces |
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
-| Remote | Not built; no implementation or qualification claimed |
+| Remote | Read-only display of the effective settings in a developer build; no real-device or communication qualification claimed ([Remote](remote.md)) |
 
 This document describes 0.9.0: 0.8.0's estate policies and duties, readable companions,
 checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's, 0.8.4's and 0.9.0's corrections and
@@ -155,7 +155,8 @@ working-tree-only. A shallow clone, absent or unreadable history, or no matching
 blob still refuses with guidance to restore the exact bytes or use a complete
 local clone. Nothing is fetched or checked out; no other revision or object
 store is substituted. Missing mandatory originals refuse the dependent step.
-Remote does not read context packages yet.
+Remote prepares no work context package; it reads the runtime's hand-over package only to prepare a
+policy or duty condition's [desktop handoff](remote.md#policy-conditions-and-recurring-duties).
 
 Briefs on every surface, preparation, retrieval and hand-over author nothing and
 write nothing. At run dispatch, the worker retains `context.json` (the complete
@@ -2030,8 +2031,9 @@ The [local efficiency adapter](efficiency-adapter.md) is built and disabled by d
 refused unless the operator's `efficiency-adapter` machine setting names `local-lossless` and the launcher.
 It must not be enabled before its own security review, which precedes 0.9.0's release. It preserves protected
 wire bytes, transforms only explicitly eligible retained context, fixes the upstream before intent and
-records eligible bytes before and after. Codex's fixed sign-in route refuses the hook. Remote is not
-built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
+records eligible bytes before and after. Codex's fixed sign-in route refuses the hook. RUN-01 adds
+no remote launch, environment admission, observation, signing or qualification, and the local-network
+profile that [Remote](remote.md) uses refuses worker launch.
 
 ### Optional efficiency adapter: not enabled until security review
 
