@@ -1,6 +1,6 @@
 # Templates and document sections
 
-The 0.8.4 development build adds declarative templates to Community. A template
+0.8.4 added declarative templates to Community. A template
 states what a document contains, how each part is made, and what evidence clears
 it. An instance is an authored living document with an exact template pin. The
 existing record format remains 3.
@@ -12,7 +12,7 @@ review never supply acceptance, publication permission or a policy exception.
 
 ## First-party contracts
 
-The development build ships these six contracts at `1.0.0`. They are available
+The six first-party contracts below are at `1.0.0`. They are available
 through `templates list` and `templates show` without copying files into an estate.
 Each generated section names its installed `vericairn.estate/*-v1` implementation
 and `version=1`; changing emitted meaning requires another version.

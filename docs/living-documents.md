@@ -78,7 +78,7 @@ review fields and the other triggers.
 
 ## Generated revision histories
 
-In the development build for 0.9.0, `docs pin --convert-revisions` converts one
+From 0.9.0, `docs pin --convert-revisions` converts one
 Markdown document's opening hand-written history from its existing revision pins.
 The builder performs this migration explicitly; installing the build changes no
 estate document. Conversion requires the exact current whole-file pin, preserves
@@ -109,7 +109,7 @@ authored body; generated history can be rendered from the records. The Git adapt
 can retrieve those same hashed bytes from local history, while old whole-file pins
 still retrieve their exact complete files.
 
-## Template sections in the development build
+## Template sections (0.8.4)
 
 [Templates](templates.md) add exact version pins and per-section states to authored
 living documents in record format 3. `docs new` creates an instance; `docs sections`

@@ -1,15 +1,15 @@
 # API version 1
 
-The 0.8.4 development build also exposes `GET /v1/resources` and
+From 0.8.4, the API also exposes `GET /v1/resources` and
 `POST /v1/resources/read` for the MCP adapter. Both are reads with the existing
 estate read permission; the POST has no signature, presence or write ledger.
 The catalogue returns `ResourcesResponse`; retrieval accepts `ResourceRequest`
 and returns exact base64 bytes, their SHA-256 and media type in `ResourceResponse`.
 Typed refusals use HTTP 200 with `Problem` and no bytes. See the
-[resource contract](mcp.md#resources-084-development) and
+[resource contract](mcp.md#resources-084) and
 [API compatibility additions](api-compatibility-0.8.4.md#mcp-resources-mcp-02).
 
-The 0.8.4 development build adds `/v1/prompts`, `/v1/prompts/preferences`,
+0.8.4 added `/v1/prompts`, `/v1/prompts/preferences`,
 `/v1/prompts/copy` and `/v1/prompts/use`. [Saved prompts](prompts.md#api-and-sdk)
 describes the requests, receipts, preference history and recorded uses.
 
@@ -31,13 +31,20 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.8.4. It adds, in `IEstateApi` and over the daemon, the release-review brief and
-its assignment (CODE-09), the operator-request queue and its signed outcomes (OPS-03), the publication
-documentation pass (DOCS-12), read-only MCP resources and saved-prompt prompts (MCP-02), the `operator
-close` candidates and batch (OPS-02), the saved-prompt library (PROMPT-01), worker-settlement recovery
-(FIX-65), a guided decision from an answered ask (CODE-10) and reserved placeholder package versions
-(FIX-72); every added `IEstateApi` member has a default implementation, so existing implementers stay
-source-compatible, and [API compatibility for 0.8.4](api-compatibility-0.8.4.md) lists them. 0.8.3 added
+This document describes 0.9.0. It adds, in `IEstateApi` and over the daemon, records prepared by the
+runtime and signed by a paired device or by that principal's presence device (REMOTE-03 and REMOTE-11),
+the estate's basis for an answer (REMOTE-11), each principal's attention and its acknowledgment (REMOTE-02)
+with policy and recurring-duty notices (POLICY-05), requested progress, its typed claim and its read
+(WATCH-02 and WATCH-03), release lines, channels and cadence in submissions, upgrades and policy
+responses (CODE-12, CODE-13 and CODE-14), the generated members an upgrade rewrites (FIX-83), and
+settlement of a run whose observation is marked settled or whose supervising worker died (FIX-76 and
+FIX-82); every added `IEstateApi` member has a default implementation, so existing implementers stay
+source-compatible, and [API compatibility for 0.9.0](api-compatibility-0.9.0.md) lists them. 0.8.4 added
+the release-review brief and its assignment (CODE-09), the operator-request queue and its signed outcomes
+(OPS-03), the publication documentation pass (DOCS-12), read-only MCP resources and saved-prompt prompts
+(MCP-02), the `operator close` candidates and batch (OPS-02), the saved-prompt library (PROMPT-01),
+worker-settlement recovery (FIX-65), a guided decision from an answered ask (CODE-10) and reserved
+placeholder package versions (FIX-72), each `IEstateApi` member with a default implementation. 0.8.3 added
 `POST /v1/work/new` (CODE-07), `POST /v1/releases/withdraw` and `POST /v1/work/{key}/move-plan` (CODE-08),
 `POST /v1/releases/check` (FIX-55), the upgrade request's `from` and `clientBuild` fields (FIX-52) and a
 diagnosable failure for a retained basis that cannot resolve (FIX-58), each described below. 0.8.2 added `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
@@ -48,12 +55,12 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, and [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, and [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.8.4 package availability
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.0 package availability
 requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
@@ -1211,7 +1218,8 @@ Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
 by the caller. Preparing it writes nothing: no objects, records, status ledger
 or authority are stored.
-Remote does not use it yet.
+From 0.9.0, [Remote](remote.md#policy-conditions-and-recurring-duties) reads it only to prepare a policy or duty
+condition's desktop handoff.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,
 `payload`). The SDK operation is `ResumeHandoff(package)`. Despite its POST body,
@@ -1288,7 +1296,8 @@ the read becomes an unavailable profile, never a claim that defaults were
 applied. Unknown recipients, assignments and unsupported values are labeled
 unavailable. Missing personal records use the stated defaults. Reads author
 nothing. Existing canonical status, progress, brief and record JSON do not
-vary with any recipient or one-view selection. Remote does not use it yet.
+vary with any recipient or one-view selection. From 0.9.0, [Remote](remote.md#what-this-build-does) reads
+the person's profile to show their settings, read-only.
 
 `GET /v1/work/{key}/brief` additionally accepts the same optional recipient,
 assignment and five one-view parameters. The SDK method is `BriefFor`.
@@ -1372,7 +1381,7 @@ Codex and Claude Code qualify only for the exact versions and isolation evidence
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
-The local efficiency adapter is built, disabled by default and refused unless the operator's `efficiency-adapter` worker setting admits `local-lossless` and the launcher. It must not be enabled before its own security review, which precedes 0.9.0's release. See [the representation, routing and measurement contract](efficiency-adapter.md).
+The local efficiency adapter is built, disabled by default and refused unless the operator's `efficiency-adapter` worker setting admits `local-lossless` and the launcher. 0.9.0's release security review covers it. See [the representation, routing and measurement contract](efficiency-adapter.md).
 These execution additions preserve API v1, existing authority checks and local-only dispatch. The original execution fields are available from record format 2 and remain available at format 3; the local adapter selection, address and measurements require format 3.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 
@@ -1397,9 +1406,9 @@ Qualification is machine-local. A paired local-network device receives `401` wit
 before probes or record writes, even when acting for an authorized human or supplying a local `command`
 override. The local socket and signed loopback retain the existing human authority checks. A qualification
 record can be used on another machine only when that machine's exact local probe digests match; the record
-does not permit network-triggered probes. Remote remains unbuilt.
+does not permit network-triggered probes. A phone paired with [Remote](remote.md) is such a local-network device.
 
-## Templates and section evidence in 0.8.4 development
+## Templates and section evidence (0.8.4)
 
 | Route | Contract |
 | --- | --- |

@@ -1,6 +1,6 @@
 # Community build guides
 
-The 0.9.0 development build turns a reviewed Markdown catalog selection into a
+From 0.9.0, `vericairn guides` turns a reviewed Markdown catalog selection into a
 deterministic private guide bundle. Each selected planned owning row gets one
 semantic guide, rendered as JSON, Markdown and HTML. Grouped Providers stay one
 entry; shared profiles refer to their owner; implemented subsets can retain an
@@ -158,7 +158,7 @@ grants no first-party identity or authority.
 
 ## Prepare the proposed catalog repository
 
-The 0.9.0 development build also prepares the proposed `Vericairn/catalog`
+0.9.0 also prepares the proposed `Vericairn/catalog`
 repository as a separate local bundle. Repository creation, request activation
 and each publication remain the operator's separate decisions. These commands
 make no network call, initialize no repository and activate no site. The provider

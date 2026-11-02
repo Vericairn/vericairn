@@ -1,6 +1,6 @@
 # Adopting the operator's existing communication choice
 
-In 0.8.4 development, [presentation templates](presentation-templates.md) have a
+From 0.8.4, [presentation templates](presentation-templates.md) have a
 separate explicit adoption. Choosing the five communication values below does
 not adopt a template. Without that separate record, communication and context
 renderings retain their existing behavior.
@@ -51,4 +51,4 @@ not evidence that a typed preference was written to the first-party estate. Insp
 before acting: `--expected absent` deliberately refuses an existing setting, including a reset.
 If the decision has changed, review its current revision instead of silently reusing this basis.
 An authorized person applies the procedure; installing or building the software never performs it automatically.
-No other person's preference is created. Remote does not show communication settings yet.
+No other person's preference is created. [Remote](remote.md#what-this-build-does) shows communication settings read-only and writes none.

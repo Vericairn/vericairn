@@ -2,7 +2,7 @@
 
 `vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; estate state comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings). The shell also shows separately labelled machine-local release information.
 
-This guide describes Workbench in 0.8.4: cancellable client commands, readable companion views
+This guide describes Workbench in 0.9.0: cancellable client commands, readable companion views
 and release submissions with an exact commit, expected product hash and visible policy holds. From 0.8.2
 (FIX-39), a record stored while its companion publication was interrupted keeps its identity beside the
 recovery action in the assignment, review, acceptance and document-review views.
@@ -120,7 +120,7 @@ assignment from another work order is unavailable for that work brief, and
 full presentation remains visible.
 
 No presentation choice changes a draft's pinned hash, permission, acceptance
-or exported handoff bytes. Remote has no communication UI yet.
+or exported handoff bytes. [Remote](remote.md#what-this-build-does) shows communication settings read-only.
 
 ## Keyboard
 

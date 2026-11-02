@@ -1,6 +1,6 @@
 # Complete presentation templates
 
-The 0.8.4 development build installs four version `1.0.0` content forms on the
+From 0.8.4, Vericairn installs four version `1.0.0` content forms on the
 template catalogue. Installation does not adopt them or alter existing
 communication and context output.
 

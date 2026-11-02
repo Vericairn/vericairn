@@ -1,27 +1,31 @@
-# The operator's guide, Vericairn 0.8.4
+# The operator's guide, Vericairn 0.9.0
 
-This guide walks the journeys an operator and the agents working for them perform with the 0.8.4 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
+This guide walks the journeys an operator and the agents working for them perform with the 0.9.0 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
 
-0.8.4 follows published 0.8.3 with declarative document templates and their sections, reviews and
+0.9.0 follows published 0.8.4 with Remote, the phone companion for iOS and Android, as a developer
+build: pairing, attention and work views, decisions and acceptances signed with the phone's presence key,
+and policy and recurring-duty attention (REMOTE-01, REMOTE-02, REMOTE-03, REMOTE-11 and POLICY-05; see
+[Remote](remote.md)). It also adds release lines, channels and cadence, with estates that follow a line
+(CODE-12, CODE-13 and CODE-14), disclosure holds and blocked terms (CODE-16 and CODE-17), a redacted
+support bundle (CODE-11), requested progress with its typed claim and the overdue signal (WATCH-02 and
+WATCH-03), warnings withdrawn when their runs settle (OPS-04), generated document revision histories
+(DOCS-10), locally prepared community build guides and catalog (GUIDE-01 and GUIDE-02), the opt-in local
+efficiency adapter, disabled by default (EFF-01), guides for the three operating modes and for LangGraph,
+CrewAI and AutoGen agents (DOCS-13 and DOCS-14), and FIX-73, FIX-75, FIX-76, FIX-77, FIX-78, FIX-80,
+FIX-81, FIX-82 and FIX-83.
+0.8.4 followed published 0.8.3 with declarative document templates and their sections, reviews and
 cohesion (TPL-01, TPL-02 and TPL-COMMS-01), a shared library of saved prompts (PROMPT-01), a signed
 `operator close` action (OPS-02) and durable operator requests (OPS-03), a release-review brief
 generated from the records and run as an assignment (CODE-09), a guided decision from an answered ask
 (CODE-10), a release documentation pass (DOCS-12), read-only MCP resources and prompts (MCP-02), the
 first-party bootstrap for every estate (FIX-68), and FIX-64, FIX-65, FIX-66, FIX-69 and FIX-72, with
-time limits on CI steps and jobs (CI-05). It also hardens how a checked push reads its local objects
-(FIX-67), as the release notes' Security section describes.
-0.8.3 followed published 0.8.2 with `estate init` pinning the running build's exact source commit
-(FIX-47), work orders created from flags (CODE-07), candidate withdrawal and moving planned work
-(CODE-08), verified pins of a published Vericairn release (FIX-52), a submission check that records
-nothing (FIX-55), the same library builds in every platform's archive (FIX-61), a warning when an older
-background runtime still serves an upgraded estate (FIX-62), FIX-50 and FIX-56 through FIX-59, CI that
-runs each platform's published command line (CI-04), and a correction to how a checked push runs git
-(FIX-60). Earlier published releases, and the withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and
-0.8.1, are recorded in their own frozen sets.
-0.8.4 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0, 0.8.2 or 0.8.3 without a format step. The format-3 upgrade from 0.7.3 preserves
-historical records and requires explicit adoption afterwards. 0.8.3's, 0.8.2's and 0.8.0's features and
-earlier corrections remain. Earlier sets stay frozen.
+time limits on CI steps and jobs (CI-05). It also hardened how a checked push reads its local objects
+(FIX-67), as its release notes' Security section describes. Earlier published releases, and the
+withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
+0.9.0 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2, 0.8.3 or 0.8.4 without a format step. The format-3 upgrade from 0.7.3
+preserves historical records and requires explicit adoption afterwards. 0.8.4's, 0.8.3's, 0.8.2's and
+0.8.0's features and earlier corrections remain. Earlier sets stay frozen.
 
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
@@ -67,7 +71,7 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.4 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.0 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
@@ -112,7 +116,7 @@ in release mode and pins that observation by hash. It creates no product or prod
 `--release`; omit `--release` to retain ordinary offline source initialization. `--from <download-directory>` supplies downloaded
 publication evidence and archive bytes for offline verification; see [offline inputs](install.md#offline-inputs).
 
-In 0.8.4, successful `estate init --release` also prints the observation's receipt after the operator,
+From 0.8.4, successful `estate init --release` also prints the observation's receipt after the operator,
 estate and manifest lines:
 
 ```text
@@ -223,7 +227,7 @@ A question for a person is an `ask` record: whom it is put to, the question, the
 
 ### Record an answered ask with its design changes
 
-In the 0.8.4 development build, `decisions new` records an answer the operator has already supplied in conversation. Supply their exact words and the time they answered. The ask identifies the deciding operator; `--by` identifies the recorder. The command neither chooses an answer nor treats waiting as consent. Recording the decision makes the ask's derived state answered.
+From 0.8.4, `decisions new` records an answer the operator has already supplied in conversation. Supply their exact words and the time they answered. The ask identifies the deciding operator; `--by` identifies the recorder. The command neither chooses an answer nor treats waiting as consent. Recording the decision makes the ask's derived state answered.
 
 ```sh
 vericairn decisions new --by <recorder id> --ask <ask id> \
@@ -331,7 +335,7 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
 
-### Closing finished steps in the 0.8.4 development build
+### Closing finished steps (0.8.4)
 
 The per-release closing scripts are retired. `vericairn operator close` lists every latest
 completed, reviewed and unaccepted result, showing its exact hash, passing reviews and their
@@ -446,15 +450,15 @@ publishes a release automatically.
 
 ### Release procedure
 
-A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.8.4 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
+A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.0 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
-vericairn release submit --check --product <product id> --version 0.8.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
-vericairn release submit --product <product id> --version 0.8.4 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
-vericairn release observe --version 0.8.4 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
+vericairn release submit --check --product <product id> --version 0.9.0 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
+vericairn release submit --product <product id> --version 0.9.0 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
+vericairn release observe --version 0.9.0 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
 ```
 
 From 0.8.3, `release submit --check` uses the intended submission's options and reports
@@ -544,8 +548,8 @@ The operator accepts the exact candidate before publishing:
 
 ```sh
 vericairn records new acceptance --by <operator id> --subject release:<candidate id>:<candidate hash> --body accept-release.json
-gh release edit v0.8.4 -R owner/name --draft=false --latest
-vericairn release observe --version 0.8.4 --product <product id> --by <builder id>
+gh release edit v0.9.0 -R owner/name --draft=false --latest
+vericairn release observe --version 0.9.0 --product <product id> --by <builder id>
 vericairn release list
 ```
 
@@ -679,7 +683,7 @@ without making a release request. `manifest.release-behind` covers release pins 
 for source pins its comparison is to the build performing the check. It names the target's
 upgrade check command and leaves the pin unchanged. The cache is knowledge, not automatic approval.
 
-An estate running 0.8.0 or 0.8.2 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
+An estate running 0.8.0, 0.8.2, 0.8.3 or 0.8.4 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
 between the two resumes from that migration record when run again, and until then opening the estate
 warns `upgrade.incomplete`. A legacy release pin with no migration record is refused; a fresh `init --release` pin has its exact dependency observation instead.
@@ -829,20 +833,20 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:
 
 ```sh
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.8.4 --documents docs/releases/documents.json
-vericairn docs check docs/releases/0.8.4
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.8.4
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.9.0 --documents docs/releases/documents.json
+vericairn docs check docs/releases/0.9.0
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.0
 ```
 
 The manifest names the exact reference build commit, distinct from the later documentation or release commit. Comparison checks version, record formats, public inventories, complete reference bytes and retained companion inputs. A later documentation-only commit can retain that build pin only when the build sources agree; both commits must be locally available. A structural docs check does not judge prose, note completeness or release acceptance. FIX-09's frozen-set checksum guard detects changed, missing or added files in earlier sets, including withdrawn 0.7.0; never repair an earlier set in place.
 
-The notes command renders the estate's records from 0.8.3 to 0.8.4:
+The notes command renders the estate's records from 0.8.4 to 0.9.0:
 
 ```sh
-vericairn --estate <root> docs notes --from 0.8.3 --to 0.8.4 --out docs/releases/0.8.4
+vericairn --estate <root> docs notes --from 0.8.4 --to 0.9.0 --out docs/releases/0.9.0
 ```
 
-`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.3's recorded end.
+`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.4's recorded end.
 From 0.8.4, decisions, work orders, acceptances, identity and policy records, and migrations are listed
 once per supersession chain, at the revision current when the window ends. Revised entries name all
 replaced revision IDs, earliest first, including those recorded before the window. A later revision does
@@ -1089,7 +1093,7 @@ The person must hold the operator role or an operator-granted `qualify` scope. `
 
 To revoke a qualification, an authorized human writes a superseding `harness-qualification` with the same launcher, version and probe digests and `status: "revoked"`, using `records new ... --supersedes <id> --body <file>`. `records describe harness-qualification` lists the fields. Requalification is a new record from fresh probes; revoking one cannot revoke a compiled baseline or rewrite historical run admissions. Section 19 describes the machine-local boundary for qualification.
 
-Run choices resolve through the local launcher configuration, roster defaults and role policy, goal defaults and role policy, assignment, then explicit run choices. Restrictions accumulate; later choices cannot relax a model/effort requirement, exact revision, destination, provider, data boundary or currency bound. `worker run` and `goal step` accept `--configuration`, repeated `--execution name=value`, `--input-tokens`, `--output-tokens`, `--context-bytes` and an optional `--context-package` identity assertion. Missing choices, unsupported effort, an unobservable required revision or an inventory mismatch refuse dispatch. There is no ambient model fallback. The intent pins choices, their sources and the admitted environment; observed execution stays separate, with discrepancies and unknowns retained. The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default; selecting it requires operator machine admission of both the adapter and launcher. It must not be enabled before its security review, which precedes 0.9.0's release.
+Run choices resolve through the local launcher configuration, roster defaults and role policy, goal defaults and role policy, assignment, then explicit run choices. Restrictions accumulate; later choices cannot relax a model/effort requirement, exact revision, destination, provider, data boundary or currency bound. `worker run` and `goal step` accept `--configuration`, repeated `--execution name=value`, `--input-tokens`, `--output-tokens`, `--context-bytes` and an optional `--context-package` identity assertion. Missing choices, unsupported effort, an unobservable required revision or an inventory mismatch refuse dispatch. There is no ambient model fallback. The intent pins choices, their sources and the admitted environment; observed execution stays separate, with discrepancies and unknowns retained. The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default; selecting it requires operator machine admission of both the adapter and launcher. 0.9.0's release security review covers it.
 
 The worker creates or resumes an independent repository on `work/<work-order key>` unless `--branch` names another branch; `--base` chooses a new branch's base. The measured assignment brief is exported under an ignored `.vericairn` directory, with the complete machine context retained in local run custody. The intent reserves the run's cap before launch; observed usage settles it, and unreported units remain charged at their full cap. An exited harness is not an accepted result. Since 0.6.1, previously recorded settlement facts, including usage, scope and containment, cannot be rewritten. Evidence may be appended and missing facts added only under the record and chronology rules; the ledger retains the first settlement's usage and does not refund it through a later revision. An uncertain run cannot be retried for the same assignment until the original operation identity is reconciled; a new identity is not a bypass.
 
@@ -1207,7 +1211,7 @@ vericairn runtime rotate --compromised
 vericairn connections remove <connection id>
 ```
 
-Revocation is checked on the next request, including on an existing connection, and again under the write lock before an authenticated write. Rotation of a device key or withdrawal of its local-network profile also prevents a request authenticated under the old state from writing. Disconnecting or removing a saved connection revokes nothing and keeps the key in local custody. `runtime rotate` replaces the TLS certificate without changing the identity pin; `--compromised` also closes open connections and pending handshakes. If the runtime identity key may have leaked, `runtime rotate --identity` replaces that identity and every client must pair again. These commands are run on the runtime's machine. The Remote profile is not implemented in 0.8.4.
+Revocation is checked on the next request, including on an existing connection, and again under the write lock before an authenticated write. Rotation of a device key or withdrawal of its local-network profile also prevents a request authenticated under the old state from writing. Disconnecting or removing a saved connection revokes nothing and keeps the key in local custody. `runtime rotate` replaces the TLS certificate without changing the identity pin; `--compromised` also closes open connections and pending handshakes. If the runtime identity key may have leaked, `runtime rotate --identity` replaces that identity and every client must pair again. These commands are run on the runtime's machine. [Remote](remote.md), the phone companion, connects through this profile only; the relay that would reach a runtime from elsewhere is a design.
 
 FIX-21, retained from 0.7.3, corrects the concurrent certificate first-use race present since 0.6.1. Loaded and
 rotated certificates have their typed extension caches initialized before TLS listeners receive them,
@@ -1429,8 +1433,8 @@ These rules do not infer disposition from prose, an unrelated acceptance, a chan
 release. A changed verification environment does not match an old check. Missing records, mismatched
 pins, unavailable sources, malformed projections or incomplete resolution chains keep the affected item
 unknown. Quiet settings, acknowledgement or dismissal resolve nothing. Open asks retain their queue;
-worker signals can remain continuity concerns after the operation settles. There is no new dismissal,
-acknowledgement or expiry state. [Required attention](required-attention.md) states the exact rules.
+worker signals can remain continuity concerns after the operation settles. From 0.9.0 an acknowledgement is
+per-principal presentation state that clears when the notice changes; there is no dismissal or expiry state. [Required attention](required-attention.md) states the exact rules.
 
 Canonical status JSON derives attention from records alone and is identical on machines with the same
 records. Progress also reads this runtime's worker observations; human status, progress and Workbench
@@ -1545,7 +1549,7 @@ describe deadlines, refusal and uncertain outcomes across transports.
 
 ## 30. Durable operator requests
 
-The 0.8.4 request commands keep the actions a builder or agent asks the operator
+From 0.8.4, the request commands keep the actions a builder or agent asks the operator
 to perform. `vericairn operator list`, status and Workbench attention deliver the
 oldest three open requests with their recommendation first and identify the rest
 in order. `operator done <request-revision> --by <operator-id>` records completion;

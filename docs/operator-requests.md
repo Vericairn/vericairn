@@ -14,8 +14,8 @@ The list shows each request's recommendation first. It delivers the oldest three
 open requests and identifies the rest in order. Closing one brings the next into
 view. The JSON list contains every open request, including its current revision
 and hash. Status and Workbench's attention view show the same queue. Workbench
-opens the exact request when you select it. Remote request presentation is planned
-for 0.9.0.
+opens the exact request when you select it. From 0.9.0, Remote's Attention lists the same
+requests; complete or dismiss one from Workbench or the command line.
 
 ## Close a request
 

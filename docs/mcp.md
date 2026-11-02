@@ -1,6 +1,6 @@
 # The MCP server
 
-The 0.8.4 development build offers estate briefs, records, pinned documents and
+From 0.8.4, the server offers estate briefs, records, pinned documents and
 context packages as read-only MCP resources, alongside standard `prompts/list`
 and `prompts/get` and the prompt library tools. Prompt offers carry categories
 and arguments and are filtered for the connected principal. Hidden,
@@ -54,7 +54,7 @@ Preparing these files does not establish that either public listing exists.
 With the .NET 10 SDK and published package version, the client's stdio command is:
 
 ```sh
-dnx dotnet-vc@0.8.4 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+dnx dotnet-vc@0.9.0 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
 ```
 
 The registry manifest requires `estate_root` (the existing estate's root directory) and
@@ -79,7 +79,7 @@ current result without a continuation cursor; an unknown cursor is refused.
 Clients refresh a listing when needed. Reads and listings support request
 cancellation through the existing transport.
 
-## Resources (0.8.4 development)
+## Resources (0.8.4)
 
 `resources/list` returns current records of every type, work briefs, assignment
 briefs, pinned estate documents and work context packages. It lists metadata
@@ -218,10 +218,10 @@ contracts; a companion does not replace required original evidence.
 
 ## Running it
 
-After 0.8.4 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.9.0 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.8.4
+dotnet tool install --global dotnet-vc --version 0.9.0
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 
@@ -391,7 +391,7 @@ available. Single records are judged before publication, just as grouped records
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
-The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Only the operator's machine configuration can admit it; no MCP tool enables it. It must not be enabled before its security review, which precedes 0.9.0's release. Native worker
+The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Only the operator's machine configuration can admit it; no MCP tool enables it. 0.9.0's release security review covers it. Native worker
 dispatch requires a complete inventory and either an exact codex-cli baseline (`0.159.0-alpha.12.1`, and from 0.9.0
 `0.163.0-alpha.10.2` and `0.163.0`) or the Claude Code `2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
 the release-specific MCP matrix above; the admission protocol alone establishes no live-agent or sign-in
@@ -409,7 +409,7 @@ preparation and handshake diagnostics apply when MCP reaches a daemon through TL
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not qualified by these features.
 
-## Template sections in 0.8.4 development
+## Template sections (0.8.4)
 
 `document_sections` reads a template instance's sections by `document` declaration
 id or estate path, optionally at an exact repository `commit`. `section_brief`

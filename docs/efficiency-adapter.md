@@ -1,9 +1,8 @@
 # Local efficiency adapter
 
-**Built for 0.9.0; disabled by default; not enabled until its security review.**
-The operator must complete the adapter's own security review before enabling it
-anywhere and before 0.9.0's release. Implementation and fixture coverage do not
-constitute that review or live provider qualification.
+**Built in 0.9.0; disabled by default; covered by 0.9.0's release security review.**
+Enabling it stays the operator's choice for each launcher. Implementation and
+fixture coverage do not constitute live provider qualification.
 
 ## Selection and removal
 

@@ -150,7 +150,7 @@ route. Cancellation is a read interruption and cannot leave an unknown write.
 with `subscribe: false` and `listChanged: false`. Existing prompt definitions,
 categories, arguments and recorded-use behavior are retained. The ordinary CLI
 brief is unchanged; its new `--agent-context` and `--max-bytes` options select the
-measured MCP representation. See [MCP resources](mcp.md#resources-084-development)
+measured MCP representation. See [MCP resources](mcp.md#resources-084)
 for exact URI, representation, hash and permission contracts.
 
 ## Operator close (OPS-02)
