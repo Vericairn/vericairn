@@ -29,8 +29,9 @@ public sealed partial class RemoteViewModel
             (policyDetail.Authority.Count == 0 ? "none" : string.Join(", ", policyDetail.Authority)) + ". Exact bounds and current authority must be rechecked on the desktop.");
     /// <summary>The complete existing handoff rendering, or its refusal; preparing is distinct from opening or acting.</summary>
     public string PolicyHandoff => policyDetail?.Handoff is not { } handoff ? "No desktop package observed." :
+        PolicyDestination + "\n" + policyDetail.DesktopRoute + "\n" + PolicyAuthority + "\n" +
         (handoff.Problem is { } problem ? "Handoff unavailable: " + problem.Message : handoff.Package is { } package ?
-            $"Desktop context {package.Hash}; {package.Bytes} bytes. {PolicyFreshness}. No desktop opening or downstream effect observed." : "Handoff unavailable.") +
+            $"Runtime context package {package.Hash}; {package.Bytes} bytes. {PolicyFreshness}. No desktop opening or downstream effect observed." : "Handoff unavailable.") +
         "\n" + handoff.Text;
     /// <summary>The selected estate and runtime remain explicit in the desktop context.</summary>
     public string PolicyDestination => Selected is null ? "" :
@@ -92,24 +93,31 @@ public sealed partial class RemoteViewModel
         {
             ConnectionStatus connection = await connections.ProbeAsync(estate.Connection, CancellationToken.None).ConfigureAwait(true);
             estate.Connection = connection.Connection;
-            if (Selected != estate || epoch != policyEpoch) return;
             if (connection.State is not (ConnectionStates.Current or ConnectionStates.Partial))
             {
                 estate.Current = false;
-                Show(estate);
-                ShowNode(estate, connection.State, connection.Message);
-                PolicyMessage = "Current access is unavailable. Retained policy context is cached; nothing was submitted.";
+                if (Selected == estate)
+                {
+                    Show(estate);
+                    ShowNode(estate, connection.State, connection.Message);
+                    if (epoch == policyEpoch)
+                        PolicyMessage = "Current access is unavailable. Retained policy context is cached; nothing was submitted.";
+                }
                 return;
             }
+            if (Selected != estate || epoch != policyEpoch) return;
             string observedAt = Now;
             IReadOnlyList<string> authority = await api.PolicyAccessAsync(estate.Connection.Principal).ConfigureAwait(true);
+            if (Selected != estate || epoch != policyEpoch) return;
             PolicyResponse? policy = await api.PolicyAsync(source.Finding.Policy.Id).ConfigureAwait(true);
+            if (Selected != estate || epoch != policyEpoch) return;
             HandoffResponse? package = null;
             string message = "Policy and authority observed. Review requires the desktop; nothing was approved or written.";
             if (policy is null) message = "The selected policy is unavailable. The original condition remains visible; no empty history or approval is inferred.";
             else if (handoff)
             {
                 package = await api.HandoffAsync().ConfigureAwait(true);
+                if (Selected != estate || epoch != policyEpoch) return;
                 PolicyResponse? checkedPolicy = await api.PolicyAsync(source.Finding.Policy.Id).ConfigureAwait(true);
                 IReadOnlyList<string> checkedAuthority = await api.PolicyAccessAsync(estate.Connection.Principal).ConfigureAwait(true);
                 if (checkedPolicy?.Basis.Digest != policy.Basis.Digest || !authority.SequenceEqual(checkedAuthority))
@@ -126,7 +134,7 @@ public sealed partial class RemoteViewModel
             if (Selected != estate || epoch != policyEpoch) return;
             policyDetail = new(notice, observedAt, policy, authority, package);
             policyCurrent = true;
-            if (policy is not null && policy.Basis.Digest != source.Basis.Digest)
+            if (policy is not null && policy.Basis.Digest != source.Finding.Basis)
                 message += " The basis changed since this notice. Compare the original condition with the refreshed history; the subject was not replaced.";
             PolicyMessage = message;
             if (estate.Observation is { } observation)
@@ -139,10 +147,11 @@ public sealed partial class RemoteViewModel
         catch (Exception exception) when (DecisionFailure(exception))
         {
             estate.Current = false;
-            if (Selected == estate && epoch == policyEpoch)
+            if (Selected == estate)
             {
                 Show(estate);
-                PolicyMessage = "Current policy, authority or handoff material is unavailable. Retained context is cached. Nothing was approved, written or queued.";
+                if (epoch == policyEpoch)
+                    PolicyMessage = "Current policy, authority or handoff material is unavailable. Retained context is cached. Nothing was approved, written or queued.";
             }
         }
         finally { Busy = false; NotifyPolicy(); }

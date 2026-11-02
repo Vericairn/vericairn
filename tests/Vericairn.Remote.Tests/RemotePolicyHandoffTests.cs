@@ -42,6 +42,9 @@ public sealed class RemotePolicyHandoffTests(HeadlessFixture fixture)
             Assert.Contains("basis changed", model.PolicyMessage, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Exact bounds", model.PolicyAuthority, StringComparison.Ordinal);
             Assert.Contains("No desktop opening", model.PolicyHandoff, StringComparison.Ordinal);
+            Assert.Contains(original.Target.Hash!, model.PolicyHandoff, StringComparison.Ordinal);
+            Assert.Contains(original.Policy.Finding.Basis, model.PolicyHandoff, StringComparison.Ordinal);
+            Assert.Contains(model.PolicyAuthority, model.PolicyHandoff, StringComparison.Ordinal);
             Assert.Contains(model.Selected!.Connection.Estate, model.PolicyDestination, StringComparison.Ordinal);
             Assert.Null(model.Decision);
             model.MaterialReviewed = true;
@@ -52,6 +55,34 @@ public sealed class RemotePolicyHandoffTests(HeadlessFixture fixture)
             Assert.Equal(0, connections.SignedWrites);
             return true;
         });
+    }
+
+    [Fact]
+    public void FileConditionContextKeepsTheOriginalContentHashBesideANewerObservation()
+    {
+        using var policy = new PolicyFixture();
+        var seed = new RemotePolicySeed(policy);
+        using var connections = new FakeConnections(policy.Estate.Root);
+        AttentionNotice notice = Assert.Single(connections.Service.AttentionGet(policy.Estate.OperatorId).Items, a => a.Policy?.Finding.Policy.Id == seed.Unavailable.Id);
+        string originalHash = "sha256:" + new string('a', 64);
+        string changedHash = "sha256:" + new string('b', 64);
+        PolicyFindingDto original = notice.Policy!.Finding with
+        {
+            Target = new("file", "repository:docs/guide.md", null, "repository", "docs/guide.md", originalHash),
+        };
+        notice = notice with { Policy = notice.Policy with { Finding = original } };
+        PolicyResponse fresh = connections.Service.Policy(seed.Unavailable.Id)! with
+        {
+            Findings = [original with { Target = original.Target with { Hash = changedHash } }],
+        };
+        var detail = new RemotePolicyDetail(notice, "2026-11-01T12:00:00Z", fresh, []);
+        Assert.Contains(originalHash, detail.DesktopRoute, StringComparison.Ordinal);
+        Assert.DoesNotContain(changedHash, detail.DesktopRoute, StringComparison.Ordinal);
+        Assert.Contains("docs/guide.md", detail.DesktopRoute, StringComparison.Ordinal);
+        Assert.Contains("repository repository", detail.DesktopRoute, StringComparison.Ordinal);
+        Assert.Contains(notice.Policy.Finding.Basis, detail.DesktopRoute, StringComparison.Ordinal);
+        Assert.Contains(originalHash, detail.Material, StringComparison.Ordinal);
+        Assert.Contains(changedHash, detail.Material, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -75,6 +106,44 @@ public sealed class RemotePolicyHandoffTests(HeadlessFixture fixture)
             Assert.Equal(original, model.PolicyDetail.Notice);
             Assert.Contains("changed while preparing", model.PolicyMessage, StringComparison.Ordinal);
             Assert.Equal(0, connections.PreparedCalls);
+            return true;
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LeavingTheSelectionDuringRefreshCannotPublishAHandoffOrRetainFalseCurrentness(bool failedRead)
+    {
+        using var policy = new PolicyFixture();
+        var seed = new RemotePolicySeed(policy);
+        using var connections = new FakeConnections(policy.Estate.Root);
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            model.SelectedAttention = Assert.Single(model.Attention, a => a.Notice?.Policy?.Finding.Policy.Id == seed.Missed.Id);
+            await model.OpenAttentionCommand.ExecuteAsync();
+            RemoteEstate selected = model.Selected!;
+            var calls = new List<string>();
+            connections.BeforeApiCall = name =>
+            {
+                calls.Add(name);
+                if (name != nameof(IEstateApi.PolicyAccessAsync)) return;
+                model.Selected = null;
+                model.Selected = selected;
+                if (failedRead) throw new IOException("The policy authority read did not finish.");
+            };
+            await model.PolicyHandoffCommand.ExecuteAsync();
+            Assert.Null(model.PolicyDetail);
+            Assert.False(model.HasPolicyDetail);
+            Assert.DoesNotContain(nameof(IEstateApi.HandoffAsync), calls);
+            Assert.False(model.SubmitDecisionCommand.CanExecute(null));
+            if (failedRead)
+            {
+                Assert.Equal(ConnectionStates.Cached, model.ConnectionState);
+                Assert.StartsWith("cached from ", model.Freshness, StringComparison.Ordinal);
+                Assert.All(model.Attention, item => Assert.StartsWith("cached ", item.AsOf, StringComparison.Ordinal));
+            }
             return true;
         });
     }

@@ -27,8 +27,8 @@ public sealed class AttentionStateJourneyTests
             string human = CliHarness.Ok("--estate", fixture.Estate.Root, "--depth", depth, "status").Out;
             Assert.Contains("due-within-grace", human, StringComparison.Ordinal);
             Assert.Contains("work incomplete", human, StringComparison.Ordinal);
-            Assert.Contains(notice.Policy!.Basis.Digest, human, StringComparison.Ordinal);
-            Assert.Contains(notice.Policy.Basis.AsOf!, human, StringComparison.Ordinal);
+            Assert.Contains(notice.Policy!.Finding.Basis, human, StringComparison.Ordinal);
+            Assert.Contains(notice.Policy.Finding.AsOf!, human, StringComparison.Ordinal);
             Assert.Contains("acknowledged at ", human, StringComparison.Ordinal);
         }
         Assert.Equal(canonical, CliHarness.Ok("--estate", fixture.Estate.Root, "--json", "status").Out);

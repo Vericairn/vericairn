@@ -37,7 +37,8 @@ public sealed class RemotePolicyJourneyTests
         Assert.Contains(remote.Attention, a => a.Kind == "information");
         foreach (var notice in remote.Attention.Where(a => a.Notice?.Policy is not null).Select(a => a.Notice!))
         {
-            Assert.Equal(expected.Basis.Digest, notice.Policy!.Basis.Digest);
+            Assert.Equal(expected.Basis.Digest, notice.Policy!.Finding.Basis);
+            Assert.Equal(expected.Basis.Origin, notice.Policy.Origin);
             Assert.Equal(expected.Basis.AsOf, notice.AsOf);
         }
         remote.SelectedAttention = Assert.Single(remote.Attention, a => a.Notice?.Policy?.Finding.Policy.Id == seed.Late.Id);

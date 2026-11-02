@@ -110,6 +110,7 @@ public sealed class RemotePolicyCacheTests(HeadlessFixture fixture)
                 var restored = store.LoadObservation(connection)!;
                 var detail = Assert.Single(restored.PolicyDetails).Value;
                 Assert.Equal(model.PolicyDetail!.Material, detail.Material);
+                Assert.Equal(model.PolicyDetail.EvaluationBasis, detail.EvaluationBasis);
                 Assert.Contains(key, detail.Material, StringComparison.Ordinal);
                 Assert.Equal(model.PolicyDetail.AsOf, detail.AsOf);
                 Assert.Null(store.LoadObservation(connection with { Principal = policy.Estate.BuilderId }));

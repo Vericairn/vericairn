@@ -92,6 +92,9 @@
         <TextBlock Text="{Binding PolicyFreshness}" AutomationProperties.Name="Policy observation time and age" />
         <TextBlock Text="{Binding PolicyMessage}" />
         <TextBlock x:Name="PolicyMaterial" Text="{Binding PolicyDetail.Material}" AutomationProperties.Name="Exact condition, occurrences, completion proofs and exception history" />
+        <Expander Header="Evaluation basis" AutomationProperties.Name="Complete observed policy evaluation inputs">
+          <TextBlock Text="{Binding PolicyDetail.EvaluationBasis}" />
+        </Expander>
         <TextBlock Text="{Binding PolicyAuthority}" />
         <TextBlock Text="{Binding PolicyDetail.DesktopRoute}" AutomationProperties.Name="Exact subject and desktop review route" />
         <TextBlock Text="This inspection grants no approval or effect. Acknowledgment does not discharge a duty. Review and any action require the desktop's current material and authority." />

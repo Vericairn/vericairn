@@ -3,6 +3,8 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Avalonia.Controls;
+using Avalonia.Media;
 using Vericairn.Protocol;
 using Vericairn.Records.Tests;
 using Vericairn.Remote;
@@ -20,6 +22,7 @@ public sealed class RemotePolicyAttentionTests(HeadlessFixture fixture)
         await fixture.UiAsync(async () =>
         {
             RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            (Window window, RemoteView view) = RemoteFixtures.Show(model);
             string[] before = policy.Estate.Load().Records.Select(r => r.ComputedHash).ToArray();
             PolicyResponse evaluated = connections.Service.Policies();
             var notices = model.Attention.Where(a => a.Notice?.Policy is not null).ToArray();
@@ -30,7 +33,8 @@ public sealed class RemotePolicyAttentionTests(HeadlessFixture fixture)
                 PolicyFindingDto exact = Assert.Single(evaluated.Findings, f => f.Policy.Id == source.Finding.Policy.Id &&
                     f.Rule == source.Finding.Rule && f.Target.Identity == source.Finding.Target.Identity && f.Item == source.Finding.Item);
                 Assert.Equal(JsonSerializer.Serialize(exact, ProtocolJson.Options), JsonSerializer.Serialize(source.Finding, ProtocolJson.Options));
-                Assert.Equal(evaluated.Basis.Digest, source.Basis.Digest);
+                Assert.Equal(evaluated.Basis.Digest, source.Finding.Basis);
+                Assert.Equal(evaluated.Basis.Origin, source.Origin);
                 Assert.Contains(source.Finding.Basis, item.Why, StringComparison.Ordinal);
                 Assert.Contains(source.Finding.AsOf!, item.AsOf, StringComparison.Ordinal);
                 Assert.Contains(source.Finding.Owner, item.Why, StringComparison.Ordinal);
@@ -66,9 +70,19 @@ public sealed class RemotePolicyAttentionTests(HeadlessFixture fixture)
             Assert.Contains(seed.Proof.ComputedHash, model.PolicyDetail.Material, StringComparison.Ordinal);
             Assert.Contains(seed.Proof.ComputedHash, Assert.Single(model.PolicyDetail.Policy!.Findings, f => f.Disposition == "discharged-late").Duty!.Completions.Single().Evidence.Select(e => e.Hash));
             Assert.Contains("Qualified from", model.PolicyDetail.Material, StringComparison.Ordinal);
+            Assert.True(view.FindControl<ScrollViewer>("PolicyScroll")!.IsVisible);
+            Assert.False(view.FindControl<ScrollViewer>("DecisionScroll")!.IsVisible);
+            Assert.False(view.FindControl<TabControl>("Home")!.IsVisible);
+            Assert.False(view.FindControl<Button>("SignDecision")!.IsEffectivelyEnabled);
+            TextBlock material = view.FindControl<TextBlock>("PolicyMaterial")!;
+            Assert.Equal(model.PolicyDetail.Material, material.Text);
+            Assert.Equal(TextWrapping.Wrap, material.TextWrapping);
+            using JsonDocument basis = JsonDocument.Parse(model.PolicyDetail.EvaluationBasis);
+            Assert.Equal(model.PolicyDetail.Policy.Basis.Digest, basis.RootElement.GetProperty("digest").GetString());
             Assert.Equal(before, policy.Estate.Load().Records.Select(r => r.ComputedHash));
             Assert.Equal(0, connections.PreparedCalls);
             Assert.Equal(0, connections.SignedWrites);
+            window.Close();
             return true;
         });
     }
@@ -197,7 +211,7 @@ public sealed class RemotePolicyAttentionTests(HeadlessFixture fixture)
             Assert.False(item.Notice.Policy.Finding.Duty.Completed);
             Assert.True(item.Notice.Policy.Finding.ReleaseHold);
             Assert.Equal("blocked", item.Kind);
-            Assert.Contains(item.Notice.Policy.Basis.AsOf!, item.AsOf, StringComparison.Ordinal);
+            Assert.Contains(item.Notice.Policy.Finding.AsOf!, item.AsOf, StringComparison.Ordinal);
             model.SelectedAttention = item;
             await model.OpenAttentionCommand.ExecuteAsync();
             Assert.Contains("unavailable", model.PolicyDetail!.Material, StringComparison.Ordinal);

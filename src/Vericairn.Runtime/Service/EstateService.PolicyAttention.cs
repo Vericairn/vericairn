@@ -23,7 +23,7 @@ public sealed partial class EstateService
                 finding.Disposition is "excepted" or "ended-unmet" || finding.Level == "remind" ? "information" : "failed check";
             // An occurrence is its own notice. A later due date cannot collapse or acknowledge older debt.
             string id = Digest(new { finding.PolicyIdentity, finding.Rule, finding.Target.Identity, finding.Item });
-            var detail = new PolicyAttention(finding, policies.Basis, duties.Where(d => d.Operator == principal &&
+            var detail = new PolicyAttention(finding, policies.Basis.Origin, duties.Where(d => d.Operator == principal &&
                 d.Finding.PolicyIdentity == finding.PolicyIdentity && d.Finding.Rule == finding.Rule &&
                 d.Finding.Target.Identity == finding.Target.Identity && d.Finding.Item == finding.Item).ToArray());
             PolicyRecordReference target = finding.Duty?.Subject ?? finding.Target.Record ?? finding.Policy;

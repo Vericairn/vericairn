@@ -3,8 +3,9 @@
 ## AttentionNotice.Policy and PolicyAttention (POLICY-05)
 
 `AttentionNotice` adds nullable init-only `Policy`, omitted from JSON when absent. Its constructor, deconstructor, target,
-acknowledgment contract and existing routes are unchanged. `PolicyAttention` carries the existing `PolicyFindingDto`,
-`PolicyBasisDto` and principal-specific `OperatorDutyDto` preparation and linked asks. OpenAPI describes the optional member.
+acknowledgment contract and existing routes are unchanged. `PolicyAttention` carries the existing `PolicyFindingDto`, including
+its basis digest and time, the time `Origin`, and principal-specific `OperatorDutyDto` preparation and linked asks. The full
+`PolicyBasisDto` inventory remains in the policy read instead of being repeated in every notice. OpenAPI describes the optional member.
 
 `GET /v1/attention` adds notices for policy findings and recurring-duty occurrences from the same evaluation used by progress.
 The notice's `policy-finding` subject id identifies the condition, including its occurrence; `Target` retains the exact record
@@ -23,9 +24,9 @@ The cache keeps its existing connection, estate, runtime, principal and device b
 ## Remote policy inspection members (POLICY-05)
 
 `RemoteViewModel` adds `PolicyDetail`, `HasPolicyDetail`, `PolicyMessage`, `PolicyFreshness`, `PolicyAuthority`, `PolicyHandoff`,
-`PolicyDestination`, `RefreshPolicyCommand`, `PolicyHandoffCommand` and `ClosePolicyCommand`. `RemotePolicyDetail.Material` and
-`DesktopRoute` expose the complete observed history and original desktop selection. Policy inspection uses the existing
-connection probe, policy reads, access read and handoff read. It exposes no signing or record authoring command. A home refresh
+`PolicyDestination`, `RefreshPolicyCommand`, `PolicyHandoffCommand` and `ClosePolicyCommand`. `RemotePolicyDetail.Material`,
+`EvaluationBasis` and `DesktopRoute` expose the complete observed history, full evaluation inputs and original desktop selection.
+Policy inspection uses the existing connection probe, policy reads, access read and handoff read. It exposes no signing or record authoring command. A home refresh
 does not renew the detail; offline commands do not send or queue requests. No interface member is added without a default
 implementation; this slice adds no interface member.
 

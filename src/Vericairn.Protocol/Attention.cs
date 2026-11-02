@@ -23,8 +23,8 @@ public sealed record AttentionNotice(string Kind, string Subject, string Why, st
     public PolicyAttention? Policy { get; init; }
 }
 
-/// <summary>A policy condition and its evaluation basis, with the operator's permitted preparation and linked asks.</summary>
-public sealed record PolicyAttention(PolicyFindingDto Finding, PolicyBasisDto Basis, IReadOnlyList<OperatorDutyDto> Operator);
+/// <summary>An exact condition with its basis digest, time and origin, plus operator preparation. The policy read carries the full basis inventory.</summary>
+public sealed record PolicyAttention(PolicyFindingDto Finding, string Origin, IReadOnlyList<OperatorDutyDto> Operator);
 
 /// <summary>One principal's complete current attention, including acknowledged items.</summary>
 public sealed record AttentionResponse(string Principal, string AsOf, IReadOnlyList<AttentionNotice> Items);

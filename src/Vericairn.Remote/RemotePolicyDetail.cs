@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
@@ -21,7 +22,7 @@ public sealed record RemotePolicyDetail(AttentionNotice Notice, string AsOf, Pol
             var text = new StringBuilder("Original attention condition\n");
             if (Notice.Policy is { } original)
             {
-                text.AppendLine($"Basis {original.Basis.Digest}; as of {original.Basis.Origin} time {original.Basis.AsOf ?? "unavailable"}.");
+                text.AppendLine($"Basis {original.Finding.Basis}; as of {original.Origin} time {original.Finding.AsOf ?? "unavailable"}.");
                 Condition(text, original.Finding);
                 foreach (OperatorDutyDto duty in original.Operator)
                 {
@@ -45,13 +46,22 @@ public sealed record RemotePolicyDetail(AttentionNotice Notice, string AsOf, Pol
         }
     }
 
+    /// <summary>The full observed evaluation inputs, including inventories; kept out of repeated attention notices.</summary>
+    [JsonIgnore]
+    public string EvaluationBasis => Policy is null ? "The complete evaluation basis was not observed." :
+        CanonicalJson.SerializePretty(JsonSerializer.SerializeToElement(Policy.Basis, ProtocolJson.Options));
+
     /// <summary>Exact original selection to carry to the desktop, including non-record sources and occurrence identity.</summary>
     [JsonIgnore]
     public string DesktopRoute => Notice.Policy is not { } policy ? "Inspect policies in Workbench." :
         $"Open {policy.Finding.PolicyKey}/{policy.Finding.Rule} in Workbench.\n" +
-        $"vericairn policies show {policy.Finding.Policy.Id}\n" +
+        $"Current evaluation: vericairn policies show {policy.Finding.Policy.Id}\n" +
         $"Exact policy {policy.Finding.Policy.Id} at {policy.Finding.Policy.Hash}\n" +
+        $"vericairn records show {policy.Finding.Policy.Id}\n" +
         $"Subject {policy.Finding.Target.Identity}; item {policy.Finding.Item}\n" +
+        $"Original basis {policy.Finding.Basis}; as of {policy.Origin} time {policy.Finding.AsOf ?? "unavailable"}.\n" +
+        (policy.Finding.Target.Repository is not null || policy.Finding.Target.Path is not null || policy.Finding.Target.Hash is not null
+            ? $"Source {policy.Finding.Target.Kind}; repository {policy.Finding.Target.Repository ?? "none"}; path {policy.Finding.Target.Path ?? "none"}; content {policy.Finding.Target.Hash ?? "unavailable"}.\n" : "") +
         (Notice.Target is { } target ? $"Exact {target.Type} {target.Id} at {target.Hash}\nvericairn records show {target.Id}\n" : "") +
         (policy.Finding.Duty is { } duty ? $"Occurrence {CanonicalJson.Serialize(duty.Occurrence)}; origin {duty.Origin.Id} at {duty.Origin.Hash}\n" : "") +
         "Review the exact sources, completion proofs and exceptions there. Refresh the basis and authority on the desktop before acting; this context grants nothing.";
