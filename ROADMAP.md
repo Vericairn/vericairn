@@ -4,38 +4,44 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.8.4 — current published release
+## 0.9.0 — current published release
 
-0.8.4 follows 0.8.3. Reusable templates give an estate's documents, roadmaps, communication, context,
-commits and reviews consistent sections and checks, and existing documents can be adopted without losing
-their history. Saved prompts, each with a title, description, category, placeholders and the roles it
-suits, can be shared across an estate, kept as personal favorites, and used with new agent runs,
-assignments and answers to an agent's questions, from the command line or as prompts in coding agents that
-support them. The operator closes finished work in one signed action, and every request the builder or an
-agent makes of the operator is kept until it is done or dismissed. A release's review brief, the decision
-behind an answered question and the documentation pass after each publication now come from the records,
-and coding agents can read briefs, records, pinned documents and context packages as read-only MCP
-resources. Every new estate gets the first-party bootstrap, `status` stays within its deadline on a large
-estate, and a checked push no longer trusts a clone's cached object data, as the release notes' Security
-section describes. Its [release notes](docs/releases/0.8.4/release-notes.md) and
-[documentation set](docs/releases/0.8.4/README.md) describe what shipped and its limits.
+0.9.0 follows 0.8.4. Remote, the phone companion for iOS and Android, brings pairing, attention and work to
+your phone on the local network, with decisions and acceptances signed by the phone's presence key and an
+estate's policy and recurring-duty findings handed to the desktop for review; it is a developer build you
+make from source, not in an app store. Releases follow lines and channels, an estate follows a release line,
+and a release cadence is a recurring duty; under a disclosure hold, Vericairn's checked push refuses a fix's
+held description in a public repository until its release, and configured blocked terms are refused in
+records and generated documents. Agents report progress
+when their configuration asks for it, with a signal when a report is overdue. A support bundle collects what
+a support case needs, with secrets and paths removed, and shows you everything in it before you share it, and
+design documents' revision lines are generated from the revisions the estate records. The optional local
+efficiency adapter is built and disabled by default, for the operator to admit on a machine. Guides show how
+to run Vericairn with people only, with people and agents, and with agents only, and how to connect LangGraph,
+CrewAI and AutoGen agents over MCP, and a public example estate and app show the whole loop on GitHub and are
+upgraded with every release. Community build guides and the proposed public catalog repository are prepared
+locally; publishing them and opening implementation requests remain separate decisions. `status` stays fast
+as an estate grows, the release check gives up within seconds instead of holding a command, and a run whose
+settlement was interrupted can still settle. Each worker run has its own temporary directory, a charter that
+requires signatures changes only by the root operator's signed revision, and a document clears only as its
+declaration allows, as the release notes' Security section describes. This release's cycle also designed the
+editions and their services, the contract for foundries with the first software foundries, and the website,
+web application, book, book series and world-building domains, among designs whose builds follow in later
+releases. Its [release notes](docs/releases/0.9.0/release-notes.md) and
+[documentation set](docs/releases/0.9.0/README.md) describe what shipped and its limits.
 
-## 0.9.0 — planned
+## 0.9.1 — planned
 
-The Remote companion brings supervision, eligible decisions and readable records to a phone, with handoff
-to the desktop for work that needs it. From Workbench or the phone, a saved prompt can be sent to a
-running agent in one step; it steers the agent without widening what the agent may do. Every planned
-catalog entry gets a community build guide, and anyone can request the implementations they need most,
-one request per account, to inform what is built next. A support bundle collects what a support case
-needs, with secrets and paths removed, and shows you everything in it before you share it. Work planned for 0.8.4 arrives here too: the optional efficiency adapter, once the agent hook it uses
-is qualified; design documents whose revision lines are generated from the revisions the estate records;
-and a public example estate and app that show the whole loop on GitHub and are upgraded with every release.
-0.9.0 also builds the release lines and channels and the progress agents report, both designed during
-0.8.4's cycle, keeps `status` fast as an estate grows under a performance budget, and keeps the release
-check from ever hanging a command on a slow network. This release's
-cycle also designs the editions and their services, the contract for foundries that start or reshape a
-project with the first software foundries, and the website, web application, book, book series and
-world-building domains.
+Remote grows from attention and decisions to supervision: from the phone you ask for running work to be
+paused, cancelled or contained and see the observed result, see the estate's nodes and connections, and hand a
+task to Workbench; Remote notifies you over the local network, handles lost, replaced and shared phones and
+opens readable records. From Workbench or the phone, a saved
+prompt can be sent to a running agent in one step; it steers the agent without widening what the agent may
+do. A release runs as a goal on a declared procedure: each step's position comes from the records, agents
+carry the steps they may take, and each step reserved to the operator waits with its exact command shown only
+when it is next. An upgrade replaces an older background runtime, so the estate is served only by the release
+it pins. An agent finds the decisions and documents its brief needs by searching the estate, with every
+selected source pinned and nothing it may not read revealed.
 
 ## 0.10.x — planned
 
