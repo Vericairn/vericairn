@@ -209,12 +209,22 @@ public sealed partial class RemoteViewModel
         {
             RemoteDecisionReview fresh = await new RemoteDecisionReader(api).ReadAsync(id, estate.Connection.Principal, Now).ConfigureAwait(true);
             if (Selected != estate || epoch != decisionEpoch) return;
-            cached ??= DecisionDrafts.FirstOrDefault(d => d.Key == fresh.Root);
-            RemoteDecisionDraft draft = cached is null ? new(fresh.Root, fresh, fresh, "") : cached.Attempted ? cached : cached with { Review = fresh };
+            RemoteDecisionDraft[] related = DecisionDrafts.Where(d => d.Review.Root == fresh.Root).ToArray();
+            // An unresolved original holds the entire subject history. A later revision gets a separate draft only after
+            // the earlier submission has an observed outcome; its retained identity and receipt are never replaced.
+            cached = related.FirstOrDefault(d => d.Attempted && d.State is not ("completed" or "rejected"))
+                ?? related.FirstOrDefault(d => d.Review.Subject.Id == fresh.Subject.Id)
+                ?? related.FirstOrDefault(d => !d.Attempted) ?? cached ?? related.LastOrDefault();
+            bool newRevision = cached is { Attempted: true, State: "completed" or "rejected" } && cached.Review.Subject.Id != fresh.Subject.Id;
+            RemoteDecisionDraft draft = newRevision ? new(fresh.Subject.Id, fresh, fresh, "") :
+                cached is null ? new(fresh.Root, fresh, fresh, "") : cached.Attempted ? cached : cached with { Review = fresh };
             SetDecision(draft);
             decisionCurrent = !draft.Attempted;
             KeepDecision(estate, draft);
-            DecisionMessage = draft.Attempted ? draft.Message : cached is not null && !RemoteDecisionReader.Same(cached.Review, fresh)
+            DecisionMessage = draft.Attempted ? draft.Message + (draft.Review.Subject.Id == fresh.Subject.Id ? "" :
+                    " A newer revision " + fresh.Subject.Id + " at " + fresh.Subject.Hash + " was observed. Reconcile this original before starting another decision.") :
+                newRevision ? "The earlier submission's outcome is retained separately. This is a new draft for the current revision; review it and enter your words before signing." :
+                cached is not null && !RemoteDecisionReader.Same(cached.Review, fresh)
                 ? "The subject or its review material changed. Your original and words remain a draft. Review the current revision before deciding."
                 : "Current material observed. Review your draft and the proposed record; nothing has been signed or sent.";
             NotifyDecision();

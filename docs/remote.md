@@ -98,6 +98,10 @@ record and this phone's signature were read back. **Rejected** reports a runtime
 read or a runtime recovery problem remains **uncertain**. **Reconcile** reads the original record, never sends it again;
 an absent record is not permission to retry. These outcomes concern the recorded answer or acceptance only.
 
+An uncertain original also blocks a new decision on a later revision of the same subject. Reconcile that original first.
+After completion or an observed refusal, a later revision can open a separate blank draft; the earlier identity and receipt
+remain in the retained list. A new revision still needs its own words and complete review.
+
 Draft and submission storage is separate from cached observations. Clearing observations does not delete drafts, change estate
 records or cancel any remote effect. Preserve uncertain originals for reconciliation, including when app storage needs recovery.
 

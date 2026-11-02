@@ -74,4 +74,57 @@ public sealed class RemoteReleaseDecisionTests(HeadlessFixture fixture)
             return true;
         });
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ANewCandidateNeedsAKnownPriorOutcomeAndKeepsBothSubmissionIdentities(bool lostResponse)
+    {
+        using TestEstate estate = RemoteFixtures.Seeded(3);
+        RecordEnvelope product = estate.Load().Current("product").Single();
+        RecordEnvelope first = estate.Add("release", estate.OperatorId, Candidate, product.Reference);
+        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true, LoseSignedResponse = lostResponse };
+        await fixture.UiAsync(async () =>
+        {
+            RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
+            await RemoteDecisionSeed.Open(model, first);
+            RemoteDecisionSeed.Ready(model, "Accept the original candidate.");
+            await model.SubmitDecisionCommand.ExecuteAsync();
+            string originalId = model.Decision!.Prepared!.Id;
+            Assert.Equal(lostResponse ? "uncertain" : "completed", model.Decision.State);
+            RecordEnvelope next = estate.Add("release", estate.OperatorId,
+                Candidate.Replace("available evidence", "revised evidence", StringComparison.Ordinal), product.Reference, first.Id);
+            await model.CloseDecisionCommand.ExecuteAsync();
+            await model.RefreshCommand.ExecuteAsync();
+            await RemoteDecisionSeed.Open(model, next);
+            if (lostResponse)
+            {
+                Assert.Equal(originalId, model.Decision!.Prepared!.Id);
+                Assert.Contains(next.ComputedHash, model.DecisionMessage, StringComparison.Ordinal);
+                await model.SubmitDecisionCommand.ExecuteAsync();
+                Assert.Equal(1, connections.SignedWrites);
+                await model.ReconcileDecisionCommand.ExecuteAsync();
+                Assert.Equal("completed", model.Decision.State);
+                await model.RefreshDecisionCommand.ExecuteAsync();
+            }
+            Assert.Equal(next.Id, model.Decision!.Review.Subject.Id);
+            Assert.False(model.Decision.Attempted);
+            Assert.Equal("", model.DecisionStatement);
+            Assert.False(model.MaterialReviewed);
+            Assert.Equal(2, model.DecisionDrafts.Count);
+            RemoteDecisionDraft retained = Assert.Single(model.DecisionDrafts, d => d.Prepared?.Id == originalId);
+            Assert.Equal("completed", retained.State);
+            Assert.Equal(first.ComputedHash, retained.Original.Subject.Hash);
+            Assert.False(model.SubmitDecisionCommand.CanExecute(null));
+            connections.LoseSignedResponse = false;
+            RemoteDecisionSeed.Ready(model, "Accept the revised candidate.");
+            await model.SubmitDecisionCommand.ExecuteAsync();
+            Assert.Equal("completed", model.Decision.State);
+            Assert.NotEqual(originalId, model.Decision.Prepared!.Id);
+            Assert.Equal(2, connections.SignedWrites);
+            Assert.Equal(2, estate.Load().Current("acceptance").Count());
+            Assert.Equal(0, estate.Load().Findings.Errors);
+            return true;
+        });
+    }
 }
