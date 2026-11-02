@@ -793,6 +793,12 @@ public sealed record UpgradeResponse(string FromPin, string ToPin, long FromForm
 
     /// <summary>The followed channel after applying this plan.</summary>
     public string Channel { get; init; } = "stable";
+
+    /// <summary>
+    /// The generated members, by path, that the upgrade rewrites to its generators' current bytes, or rewrote when applied: each held
+    /// exactly what an earlier implementation of its generator wrote for the same sources. A member edited by hand is never listed or rewritten.
+    /// </summary>
+    public IReadOnlyList<string> Regenerated { get; init; } = [];
 }
 
 /// <summary>A reconcile task.</summary>

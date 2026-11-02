@@ -371,3 +371,27 @@ estate, runtime identity, principal and device. Invalid or mismatched cached dat
 unavailable. Restoring a snapshot establishes neither current access nor action authority.
 Only successful observations and confirmed acknowledgments are stored; no offline
 request queue is introduced. The record format remains 3.
+
+## Generated members rewritten by an upgrade (FIX-83)
+
+`IDocumentGenerator` adds `IReadOnlyList<IDocumentGenerator> EarlierImplementations`
+with a default implementation returning an empty list, so existing generators have
+no new obligation. An earlier implementation has the same identity and contract
+version as its generator, an earlier `Implementation` and its hash, and renders the
+exact bytes that implementation wrote. The first-party decision, work-order and
+release registers return `vericairn.records/decisions/1`,
+`vericairn.records/work-orders/1` and `vericairn.records/releases/1`.
+
+Records adds `GeneratedDocumentUpgrade.Prepare(EstateModel)` and the
+`GeneratedMemberUpgrade` record (path, owning destination, earlier and current
+implementation, guarded `DocumentOutputChange`). It writes nothing; it selects a
+strict generated member only when its file equals an earlier implementation's
+rendition of the same sources byte for byte.
+
+`UpgradeResponse` adds an init-only `Regenerated` list of paths, empty by default:
+the generated members `--check` would rewrite, or the applied upgrade rewrote.
+Its positional constructor and deconstructor are unchanged. The upgrade route,
+request, SDK methods and cancellation bridges are unchanged; the OpenAPI document
+declares no response schema for this route, so it does not change. Earlier servers
+omit the field, which reads as empty. The migration record adds `changes` lines
+naming each register's rewritten count and implementations. Record format remains 3.

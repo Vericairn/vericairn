@@ -224,6 +224,15 @@ internal sealed class EstateOperations(CommandContext context)
                 context.Output.WriteLine($"{(plan.Applied ? "anchored" : "anchors")} the admissions recorded without a signature, which count after the move only because the signed migration lists them: {string.Join(", ", anchored)}");
             }
 
+            if (plan.Regenerated is { Count: > 0 } regenerated)
+            {
+                context.Output.WriteLine($"{(plan.Applied ? "rewrote" : "rewrites")} {regenerated.Count} generated member{(regenerated.Count == 1 ? string.Empty : "s")} holding exactly an earlier generator's output, to the current generator's bytes:");
+                foreach (string path in regenerated)
+                {
+                    context.Output.WriteLine($"  {path}");
+                }
+            }
+
             if (plan.Migration is not null)
             {
                 context.Output.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");
