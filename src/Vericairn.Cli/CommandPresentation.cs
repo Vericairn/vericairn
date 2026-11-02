@@ -18,7 +18,21 @@ internal static class CommandPresentation
         api.Communication(selection?.Recipient, selection?.Assignment, selection?.Values(kind));
 
     public static string Status(IEstateApi api, StatusResponse status, CommunicationSelection? selection) =>
-        CommunicationPresentation.Status(status, Profile(api, "status", selection)) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, selection?.Recipient));
+        CommunicationPresentation.Status(status, Profile(api, "status", selection)) + Attention(api, selection?.Recipient);
+
+    public static string Attention(IEstateApi api, string? recipient)
+    {
+        try
+        {
+            AttentionResponse attention = api.AttentionGet(recipient);
+            return attention.Items.Count == 0 ? string.Empty : "\nRequired attention (every frequency):\n" +
+                string.Join('\n', attention.Items.Select(item => item.Kind + ": " + item.Why + "\n  " + item.AttentionState +
+                    (item.AcknowledgedAt is null ? "" : " at " + item.AcknowledgedAt) + "; subject state: " + item.State + "; as of " + item.AsOf + "; " + item.NextAction));
+        }
+        catch (NotSupportedException) { return CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, recipient)); }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        { return CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, recipient)); }
+    }
 
     public static string Protected(IEstateApi api, string kind, string subject, string original, CommunicationSelection? selection) =>
         CommunicationPresentation.Protected(Profile(api, kind, selection), kind, subject, "Complete source material follows; no recorded content is shortened.", original);

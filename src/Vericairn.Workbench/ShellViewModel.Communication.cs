@@ -69,6 +69,25 @@ public sealed partial class ShellViewModel
     private async Task AddCommunicationAttentionAsync(string? recipient, ProgressResponse? progress, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is not { } api) { return; }
+        try
+        {
+            AttentionResponse current = await api.AttentionGetAsync(ActingPrincipalId, cancellationToken).ConfigureAwait(true);
+            List<Presentation.AttentionItem> notices = current.Items.Select(Presentation.AttentionItem.From).ToList();
+            if (progress is null)
+            {
+                // The runtime's notices do not know that this view's shared progress read failed; keep its mandatory unknown item.
+                foreach (CommunicationAttention item in (await CommunicationPresentation.AttentionAsync(api, recipient, null, progressObserved: true, cancellationToken: cancellationToken).ConfigureAwait(true))
+                    .Where(i => i.Kind == "unknown-check" && i.Record is null))
+                {
+                    notices.Add(new Presentation.AttentionItem(item.Kind, "Required attention", item.Text, item.State ?? "unknown", item.AsOf ?? "unknown",
+                        item.Command ?? "vericairn status", item.Target?.Type ?? item.RecordType, item.Target?.Id));
+                }
+            }
+            Replace(Attention, notices);
+            return;
+        }
+        catch (NotSupportedException) { } // Older runtimes retain the complete derived attention below.
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound) { }
         int deliveredAsks = 0;
         foreach (CommunicationAttention item in (await CommunicationPresentation.AttentionAsync(api, recipient, progress, progressObserved: true, cancellationToken: cancellationToken).ConfigureAwait(true)))
         {

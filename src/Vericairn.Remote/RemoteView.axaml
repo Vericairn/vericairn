@@ -50,6 +50,18 @@
       </Grid>
       <TextBlock x:Name="StatusText" IsVisible="{Binding ShowHome}" Text="{Binding StatusLine}" AutomationProperties.Name="{Binding StatusLine}" />
       <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" IsVisible="{Binding ShowHome}" Text="{Binding ConnectionMessage}" />
+      <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding ObservationAge}" AutomationProperties.Name="Observation age" />
+      <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding DetailMessage}" />
+      <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding CacheMessage}" />
+      <TextBlock IsVisible="{Binding ObservationUnavailable}" Text="This estate has not been observed. Refresh to read it; an unavailable view says nothing about its work or attention." />
+      <Expander Header="Communication" IsVisible="{Binding ShowHome}" AutomationProperties.Name="Read-only communication settings">
+        <ScrollViewer MaxHeight="240">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{Binding Communication}" />
+            <TextBlock Text="{x:Static vm:RemoteViewModel.WorkLater}" />
+          </StackPanel>
+        </ScrollViewer>
+      </Expander>
     </StackPanel>
 
     <ScrollViewer Grid.Row="1" IsVisible="{Binding Pairing}">
@@ -71,61 +83,92 @@
       </StackPanel>
     </ScrollViewer>
 
-    <TabControl Grid.Row="1" x:Name="Home" IsVisible="{Binding ShowHome}" TabStripPlacement="Bottom">
+    <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedArea}" x:Name="Home" IsVisible="{Binding ShowHome}" TabStripPlacement="Bottom">
       <TabItem Header="Attention" AutomationProperties.Name="Attention">
-        <ScrollViewer>
-          <StackPanel Margin="12" Spacing="6">
-            <TextBlock Classes="muted" IsVisible="{Binding AttentionEmpty}" Text="Nothing needs attention in the last observation. The absence of notices never proves the absence of issues; refresh to check." />
-            <ItemsControl x:Name="AttentionList" ItemsSource="{Binding Attention}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="p:AttentionItem">
-                  <Border Classes="card">
-                    <StackPanel Spacing="2">
-                      <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource BrandAttention}" Text="{Binding KindLabel}" />
-                      <TextBlock FontWeight="SemiBold" Text="{Binding Subject}" />
-                      <TextBlock Text="{Binding Why}" />
-                      <TextBlock Classes="muted" Text="{Binding State, StringFormat='State: {0}'}" />
-                      <TextBlock Classes="muted" Text="{Binding NextAction, StringFormat='Next: {0}'}" />
-                      <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding AsOf, StringFormat='As of {0}'}" />
-                    </StackPanel>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+        <Grid RowDefinitions="*,Auto">
+          <ScrollViewer Grid.Row="0">
+            <StackPanel Margin="12" Spacing="6">
+              <TextBlock Classes="muted" IsVisible="{Binding AttentionEmpty}" Text="Nothing needs attention in the last observation. The absence of notices never proves the absence of issues; refresh to check." />
+              <ListBox x:Name="AttentionList" ItemsSource="{Binding Attention}" SelectedItem="{Binding SelectedAttention}" AutomationProperties.Name="Attention">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:AttentionItem">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource BrandAttention}" Text="{Binding KindLabel}" />
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Subject}" />
+                        <TextBlock Text="{Binding Why}" />
+                        <TextBlock Classes="muted" Text="{Binding State, StringFormat='State: {0}'}" />
+                        <TextBlock Text="{Binding AttentionDescription}" />
+                        <TextBlock Classes="muted" Text="{Binding NextAction, StringFormat='Next: {0}'}" />
+                        <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{Binding AsOf, StringFormat='As of {0}'}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </ScrollViewer>
+          <StackPanel Grid.Row="1" Margin="12,4,12,8" Spacing="6">
+            <WrapPanel Orientation="Horizontal">
+              <Button Content="Open subject" Command="{Binding OpenAttentionCommand}" AutomationProperties.Name="Open the selected attention subject" />
+              <Button Margin="8,0,0,0" Content="Acknowledge" Command="{Binding AcknowledgeCommand}" AutomationProperties.Name="Acknowledge the selected notice without changing work" />
+            </WrapPanel>
             <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.AttentionLater}" />
           </StackPanel>
-        </ScrollViewer>
+        </Grid>
       </TabItem>
       <TabItem Header="Work" AutomationProperties.Name="Work">
-        <ScrollViewer>
+        <ScrollViewer x:Name="WorkScroll">
           <StackPanel Margin="12" Spacing="6">
-            <TextBlock Classes="muted" IsVisible="{Binding WorkEmpty}" Text="No open work in the last observation." />
-            <ItemsControl x:Name="WorkList" ItemsSource="{Binding Work}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="p:WorkOrderRow">
-                  <Border Classes="card">
-                    <StackPanel Spacing="2">
-                      <TextBlock FontWeight="SemiBold" Text="{Binding Key}" />
-                      <TextBlock Text="{Binding Title}" />
-                      <TextBlock Classes="muted" Text="{Binding StatusLabel}" />
-                    </StackPanel>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <ItemsControl x:Name="AssignmentList" ItemsSource="{Binding Assignments}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:AssignmentItem">
-                  <Border Classes="card">
-                    <StackPanel Spacing="2">
-                      <TextBlock FontWeight="SemiBold" Text="{Binding Key, StringFormat='Assignment of {0}'}" />
-                      <TextBlock Text="{Binding Contributor}" />
-                      <TextBlock Classes="muted" Text="{Binding State}" />
-                    </StackPanel>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <StackPanel IsVisible="{Binding ShowWorkList}" Spacing="6">
+              <TextBlock Classes="muted" IsVisible="{Binding WorkEmpty}" Text="No open work in the last observation." />
+              <ListBox x:Name="WorkList" ItemsSource="{Binding Work}" SelectedItem="{Binding SelectedWork}" AutomationProperties.Name="Work">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:WorkOrderRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Key}" />
+                        <TextBlock Text="{Binding Title}" />
+                        <TextBlock Classes="muted" Text="{Binding StatusLabel}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Button Content="Open work" Command="{Binding OpenWorkCommand}" AutomationProperties.Name="Open the selected work order" />
+              <ListBox x:Name="AssignmentList" ItemsSource="{Binding Assignments}" SelectedItem="{Binding SelectedAssignment}" AutomationProperties.Name="Assignments">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AssignmentItem">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Key, StringFormat='Assignment of {0}'}" />
+                        <TextBlock Text="{Binding Contributor}" />
+                        <TextBlock Classes="muted" Text="{Binding State}" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Button Content="Open assignment" Command="{Binding OpenAssignmentCommand}" AutomationProperties.Name="Open the selected assignment" />
+            </StackPanel>
+            <Border Classes="card" IsVisible="{Binding HasWorkDetail}">
+              <StackPanel x:Name="WorkDetailPanel" Spacing="8">
+                <Button Content="Back to work" Command="{Binding BackToWorkCommand}" AutomationProperties.Name="Back to the work list" />
+                <TextBlock Classes="heading" Text="{Binding WorkDetail.Title}" />
+                <TextBlock Text="{Binding DetailFreshness}" AutomationProperties.Name="Work detail freshness" />
+                <TextBlock Text="{Binding WorkDetail.Goal}" />
+                <TextBlock FontWeight="SemiBold" Text="Admitted scope" />
+                <TextBlock Text="{Binding WorkDetail.Scope}" />
+                <TextBlock FontWeight="SemiBold" Text="Latest result" />
+                <TextBlock Text="{Binding WorkDetail.LatestResult}" />
+                <TextBlock FontWeight="SemiBold" Text="Attempts and results" />
+                <TextBlock Text="{Binding WorkDetail.History}" />
+                <TextBlock FontWeight="SemiBold" Text="Runs and worker observations" />
+                <TextBlock Text="{Binding RunObservations}" />
+                <TextBlock FontWeight="SemiBold" Text="Agent progress claims beside worker observations" />
+                <TextBlock Text="{Binding ProgressClaims}" />
+              </StackPanel>
+            </Border>
             <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" Text="{x:Static vm:RemoteViewModel.WorkLater}" />
           </StackPanel>
         </ScrollViewer>

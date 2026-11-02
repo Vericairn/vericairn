@@ -22,18 +22,26 @@ public sealed class RemoteEstate(RuntimeConnection connection)
     /// <summary>Who this phone acts as, and where the runtime is.</summary>
     public string Detail => $"{Connection.PrincipalName ?? Connection.Principal} at {Connection.Address}";
 
-    internal EstateView? LastView { get; set; }
-
-    internal IReadOnlyList<ProductItem> LastProducts { get; set; } = [];
-
     internal IEstateApi? Client { get; set; }
+
+    internal RemoteObservation? Observation { get; set; }
+
+    internal bool Current { get; set; }
+
+    internal string? DetailKey { get; set; }
+
+    internal string? CacheProblem { get; set; }
 
     /// <inheritdoc />
     public override string ToString() => Name;
 }
 
 /// <summary>An assignment as the phone lists it: the work, who holds it, and its state's words.</summary>
-public sealed record AssignmentItem(string Key, string Contributor, string State);
+public sealed record AssignmentItem(string Key, string Contributor, string State)
+{
+    /// <summary>The exact assignment to open.</summary>
+    public string Id { get; init; } = string.Empty;
+}
 
 /// <summary>A product of the estate, as its record names it.</summary>
 public sealed record ProductItem(string Name, string Id);
@@ -46,7 +54,7 @@ public sealed record NodeView(string Runtime, string Address, string Estate, str
 /// estate's Attention, Work, Products, Nodes and Handoffs with its connection state and freshness. Every state shown is the runtime's
 /// or the SDK's, in the shared state language; nothing here decides, accepts or changes the estate.
 /// </summary>
-public sealed class RemoteViewModel : Observable
+public sealed partial class RemoteViewModel : Observable
 {
     private readonly IRemoteConnections connections;
     private readonly TimeProvider clock;
@@ -75,16 +83,17 @@ public sealed class RemoteViewModel : Observable
         RefreshCommand = new AsyncCommand(RefreshAsync, () => !Busy && Selected is not null);
         AddEstateCommand = new AsyncCommand(() => { Pairing = true; return Task.CompletedTask; }, () => !Busy);
         CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
+        InitializeInspectionCommands();
         foreach (RuntimeConnection connection in connections.List())
         {
-            Estates.Add(new RemoteEstate(connection));
+            Estates.Add(Restore(connection));
         }
 
         Estates.CollectionChanged += (_, _) => Raise(nameof(HasEstates));
 
         pairing = Estates.Count == 0;
         selected = Estates.FirstOrDefault();
-        if (selected is not null) ShowNode(selected, selected.Connection.Observed?.State ?? string.Empty, selected.Connection.Observed?.Message ?? string.Empty);
+        Show(selected);
     }
 
     /// <summary>Says how this copy of Remote was installed; there is no store distribution yet.</summary>
@@ -106,6 +115,11 @@ public sealed class RemoteViewModel : Observable
         set
         {
             if (!Set(ref selected, value)) return;
+            detailCurrent = false;
+            SelectedAttention = null;
+            SelectedWork = null;
+            SelectedAssignment = null;
+            DetailMessage = string.Empty;
             Show(value);
             RefreshCommand.NotifyCanExecuteChanged();
         }
@@ -115,7 +129,7 @@ public sealed class RemoteViewModel : Observable
     public bool Pairing
     {
         get => pairing;
-        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
+        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
     }
 
     /// <summary>Whether the home is shown.</summary>
@@ -135,6 +149,7 @@ public sealed class RemoteViewModel : Observable
             RefreshCommand.NotifyCanExecuteChanged();
             AddEstateCommand.NotifyCanExecuteChanged();
             CancelPairingCommand.NotifyCanExecuteChanged();
+            NotifyInspectionCommands();
         }
     }
 
@@ -163,6 +178,9 @@ public sealed class RemoteViewModel : Observable
     /// <summary>What the last check said.</summary>
     public string ConnectionMessage { get => connectionMessage; private set => Set(ref connectionMessage, value); }
 
+    /// <summary>Whether the current observation could be retained across app restarts.</summary>
+    public string CacheMessage => Selected?.CacheProblem ?? string.Empty;
+
     /// <summary>How fresh the home's content is.</summary>
     public string Freshness { get => freshness; private set { if (Set(ref freshness, value)) Raise(nameof(StatusLine)); } }
 
@@ -173,13 +191,16 @@ public sealed class RemoteViewModel : Observable
     public IReadOnlyList<AttentionItem> Attention { get => attention; private set { if (Set(ref attention, value)) Raise(nameof(AttentionEmpty)); } }
 
     /// <summary>Whether nothing needs attention in the last observation.</summary>
-    public bool AttentionEmpty => Attention.Count == 0;
+    public bool AttentionEmpty => Selected?.Observation is not null && Attention.Count == 0;
+
+    /// <summary>No successful observation has been kept for this connection.</summary>
+    public bool ObservationUnavailable => ShowHome && Selected is not null && Selected.Observation is null;
 
     /// <summary>Work orders that are not accepted or retired.</summary>
     public IReadOnlyList<WorkOrderRow> Work { get => work; private set { if (Set(ref work, value)) Raise(nameof(WorkEmpty)); } }
 
     /// <summary>Whether no open work order was observed.</summary>
-    public bool WorkEmpty => Work.Count == 0 && Assignments.Count == 0;
+    public bool WorkEmpty => Selected?.Observation is not null && Work.Count == 0 && Assignments.Count == 0;
 
     /// <summary>Assignments that are not accepted.</summary>
     public IReadOnlyList<AssignmentItem> Assignments { get => assignments; private set { if (Set(ref assignments, value)) Raise(nameof(WorkEmpty)); } }
@@ -191,10 +212,10 @@ public sealed class RemoteViewModel : Observable
     public NodeView? Node { get => node; private set => Set(ref node, value); }
 
     /// <summary>What Attention cannot do yet.</summary>
-    public static string AttentionLater => "Opening a subject and acknowledging a notice are not in this build yet; act from Workbench or the command line.";
+    public static string AttentionLater => "Acknowledging marks only your attention state. The item stays visible and its work remains unchanged. Offline acknowledgments are never queued.";
 
     /// <summary>What Work cannot do yet.</summary>
-    public static string WorkLater => "Work detail, progress and communicating with a contributor are not in this build yet.";
+    public static string WorkLater => "Communication settings are read-only here until phone-signed writes in REMOTE-03. Clarifications to running attempts arrive with PROMPT-02 in 0.9.1; use Workbench or the command line for actions available there.";
 
     /// <summary>What Nodes means, and does not.</summary>
     public static string NodesNote => "This is the runtime this phone reaches. A healthy connection here says nothing about workers running on other machines.";
@@ -228,7 +249,7 @@ public sealed class RemoteViewModel : Observable
             // The SDK replaces an earlier connection to the same estate; show what it keeps.
             foreach (RemoteEstate earlier in Estates) (earlier.Client as IDisposable)?.Dispose();
             Estates.Clear();
-            foreach (RuntimeConnection kept in connections.List()) Estates.Add(new RemoteEstate(kept));
+            foreach (RuntimeConnection kept in connections.List()) Estates.Add(Restore(kept));
             Code = string.Empty;
             PairingMessage = $"Paired with {connection.EstateName ?? connection.Estate} as {connection.PrincipalName ?? connection.Principal}.";
             Pairing = false;
@@ -254,6 +275,8 @@ public sealed class RemoteViewModel : Observable
     {
         if (Selected is not RemoteEstate estate) return;
         Busy = true;
+        estate.Current = false;
+        detailCurrent = false;
         ConnectionState = ConnectionStates.Connecting;
         ConnectionMessage = "Checking the runtime's identity and this phone's access.";
         try
@@ -263,41 +286,71 @@ public sealed class RemoteViewModel : Observable
             if (status.State is ConnectionStates.Current or ConnectionStates.Partial)
             {
                 estate.Client ??= connections.Connect(estate.Connection);
+                string observedAt = Now;
                 StatusResponse response = await estate.Client.StatusAsync(CancellationToken.None).ConfigureAwait(true);
-                string asOf = Now;
-                estate.LastView = EstateView.From(response, asOf);
-                estate.LastProducts = await ProductsAsync(estate.Client).ConfigureAwait(true);
-                Show(estate);
-                Freshness = $"current as of {asOf}";
+                IReadOnlyList<ProductItem> observedProducts = await ProductsAsync(estate.Client).ConfigureAwait(true);
+                AttentionResponse observedAttention = await estate.Client.AttentionGetAsync(estate.Connection.Principal, CancellationToken.None).ConfigureAwait(true);
+                CommunicationProfile profile = await estate.Client.CommunicationAsync(estate.Connection.Principal, cancellationToken: CancellationToken.None).ConfigureAwait(true);
+                estate.Observation = new(response, observedAt, observedProducts, observedAttention, profile, estate.Observation?.Details ?? new Dictionary<string, RemoteWorkDetail>());
+                estate.Current = true;
+                Keep(estate);
             }
-            else
+            if (Selected == estate)
             {
                 Show(estate);
-                Freshness = estate.LastView is null ? "not observed yet" : $"cached from {estate.LastView.AsOf}; refresh before relying on it";
+                ShowNode(estate, status.State, status.Message);
             }
+        }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null || exception is NotSupportedException or JsonException or IOException or UnauthorizedAccessException)
+        {
+            estate.Current = false;
+            if (Selected == estate)
+            {
+                Show(estate);
+                ShowNode(estate, ClientFailure.FromException(exception)?.Code == "refused" ? ConnectionStates.Denied : estate.Observation is null ? ConnectionStates.Unavailable : ConnectionStates.Cached,
+                    ClientFailure.FromException(exception)?.Message ?? "The runtime did not provide a complete readable observation. Update the runtime if needed and refresh.");
+            }
+        }
+        finally { Busy = false; }
+    }
 
-            ShowNode(estate, status.State, status.Message);
-        }
-        catch (Exception exception) when (ClientFailure.FromException(exception) is ClientFailure failure)
-        {
-            Show(estate);
-            ShowNode(estate, ConnectionStates.Unavailable, failure.Message);
-            Freshness = estate.LastView is null ? "not observed yet" : $"cached from {estate.LastView.AsOf}; refresh before relying on it";
-        }
-        finally
-        {
-            Busy = false;
-        }
+    private RemoteEstate Restore(RuntimeConnection connection) => new(connection) { Observation = connections.LoadObservation(connection) };
+
+    private void Keep(RemoteEstate estate)
+    {
+        if (estate.Observation is null) return;
+        try { connections.SaveObservation(estate.Connection, estate.Observation); estate.CacheProblem = null; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        { estate.CacheProblem = "This observation could not be kept in app storage. It remains visible until the app closes."; }
+        if (Selected == estate) Raise(nameof(CacheMessage));
     }
 
     private void Show(RemoteEstate? estate)
     {
-        EstateView? view = estate?.LastView;
-        Attention = view?.Attention ?? [];
+        RemoteObservation? observation = estate?.Observation;
+        Raise(nameof(ObservationUnavailable));
+        Raise(nameof(CacheMessage));
+        EstateView? view = observation is null ? null : EstateView.From(observation.Status, observation.AsOf);
+        string? attentionKey = SelectedAttention?.Notice?.Key;
+        string? orderId = SelectedWork?.Id;
+        string? assignmentId = SelectedAssignment?.Id;
+        Attention = observation?.Attention.Items.Select(item => AttentionItem.From(item) with
+        {
+            AsOf = $"{(estate!.Current ? "observed" : "cached")} {observation.AsOf}; source {item.AsOf}",
+        }).ToList() ?? [];
         Work = view?.WorkOrders.Where(w => w.Status is not ("accepted" or "retired")).ToList() ?? [];
-        Assignments = view?.Assignments.Where(a => a.State != "accepted").Select(a => new AssignmentItem(a.Key, a.ContributorName ?? a.Contributor, a.StateLabel)).ToList() ?? [];
-        Products = estate?.LastProducts ?? [];
-        Freshness = view is null ? "not observed yet" : $"cached from {view.AsOf}; refresh before relying on it";
+        Assignments = view?.Assignments.Where(a => a.State != "accepted").Select(a => new AssignmentItem(a.Key, a.ContributorName ?? a.Contributor, a.StateLabel) { Id = a.Id }).ToList() ?? [];
+        SelectedAttention = Attention.FirstOrDefault(a => a.Notice?.Key == attentionKey);
+        SelectedWork = Work.FirstOrDefault(w => w.Id == orderId);
+        SelectedAssignment = Assignments.FirstOrDefault(a => a.Id == assignmentId);
+        Products = observation?.Products ?? [];
+        Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";
+        ObservationAge = observation is null ? "age unknown" : RemoteFreshness.Age(observation.AsOf, clock);
+        Communication = observation is null ? "Communication settings have not been observed." :
+            $"{(estate!.Current ? "Observed" : "Cached")} {observation.AsOf}; {ObservationAge}\n" + CommunicationPresentation.Describe(observation.Communication) +
+            "\nPreview\n" + CommunicationPresentation.Preview(observation.Communication);
+        WorkDetail = estate?.DetailKey is string key && observation?.Details.TryGetValue(key, out RemoteWorkDetail? detail) == true ? detail : null;
+        RaiseDetailFreshness();
         if (estate is null)
         {
             Node = null;
@@ -306,8 +359,11 @@ public sealed class RemoteViewModel : Observable
         }
         else
         {
-            ShowNode(estate, estate.Connection.Observed?.State ?? string.Empty, estate.Connection.Observed?.Message ?? string.Empty);
+            string state = estate.Current ? estate.Connection.Observed?.State ?? ConnectionStates.Current : observation is not null ? ConnectionStates.Cached :
+                estate.Connection.Observed?.State == ConnectionStates.Denied ? ConnectionStates.Denied : ConnectionStates.Unavailable;
+            ShowNode(estate, state, estate.Connection.Observed?.Message ?? string.Empty);
         }
+        NotifyInspectionCommands();
     }
 
     private void ShowNode(RemoteEstate estate, string state, string message)

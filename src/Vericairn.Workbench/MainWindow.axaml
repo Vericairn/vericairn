@@ -136,6 +136,7 @@
                       <TextBlock Grid.Column="0" Text="{Binding KindLabel}" FontWeight="SemiBold" Foreground="{DynamicResource BrandAttention}" />
                       <StackPanel Grid.Column="1">
                         <TextBlock Text="{Binding Subject}" />
+                        <TextBlock Text="{Binding AttentionDescription}" FontSize="11" />
                         <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
                       </StackPanel>
                     </Grid>

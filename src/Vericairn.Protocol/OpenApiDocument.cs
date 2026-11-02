@@ -50,6 +50,8 @@ public static class OpenApiDocument
         ("GET", "/v1/status"),
         ("POST", "/v1/status/observations"),
         ("GET", "/v1/progress"),
+        ("GET", "/v1/attention"),
+        ("POST", "/v1/attention/acknowledge"),
         ("GET", "/v1/handoff"),
         ("POST", "/v1/resume"),
         ("GET", "/v1/context/work/{key}"),
@@ -286,6 +288,10 @@ public static class OpenApiDocument
                 });
             }
 
+            if (method == "GET" && path == "/v1/attention")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false,
+                    ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The requesting principal; defaults to the device principal or local operator." });
+
             if (method == "POST" && path != "/v1/shutdown")
             {
                 operation["requestBody"] = new JsonObject
@@ -358,6 +364,12 @@ public static class OpenApiDocument
                 ["description"] = "A versioned read result with explicit unavailable, historical, current or different basis. Generation grants no authority or authored clearance.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
             };
+        }
+        else if (path is "/v1/attention" or "/v1/attention/acknowledge")
+        {
+            string schema = method == "GET" ? "AttentionResponse" : "AttentionAcknowledgeResponse";
+            responses["200"] = new JsonObject { ["description"] = "Principal-scoped presentation state only. Acknowledgment signs no record, never resolves or hides an item, and requires the current notice revision. A paired write is kept in the local-network ledger without requiring a presence-free signer.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
         }
         else if (path == "/v1/records/prepare")
         {
@@ -680,8 +692,25 @@ public static class OpenApiDocument
         progressClaim["properties"]!["statusText"] = ProgressSchemas.StatusText();
         JsonObject progressResponse = Object(("claim", "object"), ("written", "object"), ("problem", "object"), ("ok", "boolean"));
         progressResponse["properties"]!["claim"] = new JsonObject { ["$ref"] = "#/components/schemas/WorkProgressClaim" };
+        JsonObject attentionRequest = Object(("by", "string"), ("kind", "string"), ("subjectType", "string"), ("subjectId", "string"), ("expected", "string"));
+        attentionRequest["required"] = new JsonArray("by", "kind", "subjectType", "subjectId", "expected");
+        JsonObject attentionResponse = Object(("principal", "string"), ("asOf", "string"), ("items", "array"));
+        attentionResponse["properties"]!["items"]!["items"] = SchemaReference("AttentionNotice");
+        JsonObject acknowledgment = Object(("item", "object"), ("problem", "object"), ("ok", "boolean"));
+        acknowledgment["properties"]!["item"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("AttentionNotice")) };
+        acknowledgment["properties"]!["problem"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("Problem")) };
+        JsonObject attentionNotice = Object(("kind", "string"), ("subject", "string"), ("why", "string"), ("state", "string"), ("asOf", "string"), ("nextAction", "string"), ("subjectType", "string"), ("subjectId", "string"), ("revision", "string"), ("acknowledgedAt", "string"), ("key", "string"), ("attentionState", "string"), ("target", "object"));
+        attentionNotice["properties"]!["acknowledgedAt"]!["nullable"] = true;
+        JsonObject attentionTarget = Object(("type", "string"), ("id", "string"), ("hash", "string"));
+        attentionTarget["nullable"] = true;
+        attentionTarget["properties"]!["hash"]!["nullable"] = true;
+        attentionNotice["properties"]!["target"] = attentionTarget;
         return new JsonObject
         {
+            ["AttentionAcknowledgeRequest"] = attentionRequest,
+            ["AttentionResponse"] = attentionResponse,
+            ["AttentionAcknowledgeResponse"] = acknowledgment,
+            ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
             ["CompanionCompareRequest"] = Object(("selection", "string"), ("commit", "string"), ("audience", "string")),
             ["CompanionsResponse"] = Object(("version", "integer"), ("status", "string"), ("snapshot", "string"), ("manifestSnapshot", "string"), ("coverage", "array"), ("generators", "array"), ("destinations", "array"), ("reason", "string")),
@@ -871,6 +900,7 @@ public static class OpenApiDocument
         "/v1/writing-exceptions/{id}/remove" => "WritingExceptionRemoveRequest",
         "/v1/work/{key}/placement" => "WorkPlaceRequest",
 
+        "/v1/attention/acknowledge" => "AttentionAcknowledgeRequest",
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/prompts" => "PromptSaveRequest",
         "/v1/resources/read" => "ResourceRequest",
@@ -947,6 +977,8 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/attention") => "Observe the requesting principal's attention, including acknowledged items, with source freshness and independent presentation state.",
+        ("POST", "/v1/attention/acknowledge") => "Acknowledge the exact current notice for the requesting principal. Stores unsigned presentation state, never a record or a resolution; retained in the local-network write ledger.",
         ("GET", "/v1/operator/requests") => "Every open operator request, oldest first; at most three complete requests delivered with the recommendation first, and all remaining identities queued in order. Reading writes nothing.",
         ("POST", "/v1/operator/requests") => "Record an operator request or a superseding draft with exact content hashes, destination and work or release subject. Revisions require the expected predecessor hash. Nothing is dispatched.",
         ("POST", "/v1/operator/asks/{id}/carry") => "Carry one exact open ask into a request, preserving its wording, requester and hash. The original remains readable and its decision semantics are unchanged.",
