@@ -4,7 +4,7 @@ The 0.9.0 workflow builds self-contained distributables per platform: no separat
 
 The archives install `vericairn`. Introduced in published 0.7.1, the NuGet tool installs `dotnet-vc`, canonically invoked as `dotnet vc`; the two command lines take the same estate arguments. Workbench is installed by direct download only (section 3). The SDK is a separate NuGet package (section 9). Remote, the phone companion, has no distributable: it is a developer build made from source, as [Remote](remote.md#building-from-source) describes.
 
-Use the 0.9.0 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
+0.9.0 was published on November 2, 2026; use its archives from the release page. Its Trusted Publishing workflow published all eight NuGet packages at 0.9.0; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
 
 0.9.0 follows published 0.8.4 with Remote, the phone companion for iOS and Android, as a developer
 build: pairing, attention and work views, decisions and acceptances signed with the phone's presence key,
