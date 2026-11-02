@@ -63,7 +63,7 @@ public static class LivingDocuments
     /// <param name="Declaration">The current declaration.</param>
     /// <param name="Level">The highest level among the reasons; null when the document is current.</param>
     /// <param name="Reasons">Every trigger newer than the latest clearance.</param>
-    /// <param name="Clearance">The latest clearance: a revision of the estate file or a clearing review; null when there is none.</param>
+    /// <param name="Clearance">The latest clearance: a clearing review, or a revision of the estate file that its declaration admits as one; null when there is none.</param>
     /// <param name="Unavailable">The pack contributions it names that are not installed here.</param>
     /// <param name="Notes">What could not be evaluated here, and why.</param>
     public sealed record State(RecordEnvelope Declaration, string? Level, IReadOnlyList<Reason> Reasons, RecordEnvelope? Clearance, IReadOnlyList<string> Unavailable, IReadOnlyList<string> Notes)
@@ -259,9 +259,16 @@ public static class LivingDocuments
         List<RecordEnvelope> reviews = model.OfType("document-review")
             .Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") is "current" or "revised")
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
-        RecordEnvelope? revision = elsewhere ? null : model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-        RecordEnvelope? clearance = Newer(reviews.LastOrDefault(), revision);
+        RecordEnvelope? latestReview = reviews.LastOrDefault();
+
+        // A revision of an estate file newer than its latest clearing review clears it only as its declaration allows: its author meets
+        // clearedBy, as that author's own review of the pinned bytes would be judged, and the declared checks pass on those bytes. Any
+        // other revision stays recorded, and the document stays due with a reason that says who may clear it or which check failed.
+        List<RecordEnvelope> revisions = elsewhere ? [] : RevisionLines.History(model, path).Where(r => latestReview is null || Later(r, latestReview)).ToList();
+        RecordEnvelope? revision = revisions.LastOrDefault(r => RevisionClearer(model, declaration, r) is null);
+        RecordEnvelope? clearance = revision ?? latestReview;
+        string? withheld = revisions.Count > 0 && revisions[^1].Id != revision?.Id
+            ? $"its revision {revisions[^1].Id} by {revisions[^1].By} does not clear it: {RevisionClearer(model, declaration, revisions[^1])}" : null;
 
         var unavailable = new SortedSet<string>(StringComparer.Ordinal);
         foreach (string name in Named(declaration).Where(n => !IsAvailable(n)))
@@ -280,7 +287,14 @@ public static class LivingDocuments
             reviewedCommit != at && source!.IsAncestor(model, declaration, at, reviewedCommit))
             at = reviewedCommit;
 
-        ContentComparison? comparison = CompareContent(model, declaration, clearance, source, at);
+        ContentComparison? comparison = CompareContent(model, declaration, clearance, source, at, withheld);
+        if (clearance is { Type: "document-revision" } && comparison is { Reason: null }
+            && RevisionCheckFailure(model, declaration, clearance, latestReview, path, chain) is { } failure)
+        {
+            withheld = $"its revision {clearance.Id} by {clearance.By} does not clear it: {failure}";
+            clearance = latestReview;
+            comparison = CompareContent(model, declaration, clearance, source, at, withheld);
+        }
 
         // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
         // estate's own files are read from its working tree; another repository's at its selected commit when given, otherwise HEAD.
@@ -314,16 +328,7 @@ public static class LivingDocuments
                 continue;
             }
 
-            // A release of any revision of the product fires a trigger that names any revision of it.
-            string? named = product is null ? null : ProductIdentity(model, product);
-            RecordEnvelope? fired = on switch
-            {
-                "release" => Newest(model.OfType("release").Where(r => named is not null && r.Subject is not null && ProductIdentity(model, r.Subject.Id) == named && EstateModel.BodyString(r, "status") == "published")),
-                "upgrade" => Newest(model.OfType("migration")),
-                "decision" => Newest(model.Current("decision").Where(d => Documents(d).Any(name => name == path || chain.Contains(name)))),
-                "accepted" => Newest(model.OfType("acceptance").Where(a => a.Subject?.Type == "work-order" && model.ById.TryGetValue(a.Subject.Id, out RecordEnvelope? order) && values.Contains(EstateModel.BodyString(order, "key") ?? string.Empty))),
-                _ => null,
-            };
+            RecordEnvelope? fired = Newest(Firing(model, on, product, values, path, chain));
             if (fired is not null && (clearance is null || Later(fired, clearance)))
             {
                 reasons.Add(new Reason(on, level, Fired(on, fired), fired.Id));
@@ -343,19 +348,31 @@ public static class LivingDocuments
         return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes) { ComparisonCommit = at, Content = comparison };
     }
 
-    private static ContentComparison? CompareContent(EstateModel model, RecordEnvelope declaration, RecordEnvelope? clearance, IDocumentSource? source, string? commit)
+    private static ContentComparison? CompareContent(EstateModel model, RecordEnvelope declaration, RecordEnvelope? clearance, IDocumentSource? source, string? commit, string? withheld)
     {
         string path = EstateModel.BodyString(declaration, "path") ?? string.Empty;
         string? repository = EstateModel.BodyString(declaration, "repository");
-        // Estate revisions also clear the own-file pin. A declaration alone is not a content clearance.
-        if (repository is null && clearance is null) return null;
         string level = Triggers(declaration).Select(t => t.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() ?? "remind";
+        // Estate revisions also clear the own-file pin, as their declaration allows. A declaration alone is not a content clearance,
+        // and a recorded revision that its declaration does not admit leaves the content it pinned uncleared.
+        if (repository is null && clearance is null)
+        {
+            if (withheld is null) return null;
+            string uncleared = $"{path}: no clearance its declaration admits has cleared its content; {withheld}";
+            return new(true, new Reason("covers", level, uncleared, null), uncleared);
+        }
+
         JsonElement pin = clearance is { Type: "document-review" } && clearance.Body.TryGetProperty("content", out JsonElement content)
             ? content : clearance?.Body ?? default;
         string? clearedHash = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String ? hash.GetString() : null;
         string clearedAt = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("commit", out JsonElement at) && at.ValueKind == JsonValueKind.String ? at.GetString() ?? "?" : "?";
         bool available = repository is null || (commit is not null && source?.Resolve(model, declaration, commit) == commit);
-        ContentComparison Due(string summary) => new(available, new Reason("covers", level, summary, null), summary);
+        ContentComparison Due(string summary)
+        {
+            string text = withheld is null ? summary : $"{summary}; {withheld}";
+            return new(available, new Reason("covers", level, text, null), text);
+        }
+
         if (clearedHash is null) return Due($"{path}: no review has cleared its content");
         if (!available)
         {
@@ -393,6 +410,75 @@ public static class LivingDocuments
     }
 
     private static string Short(string commit) => commit[..Math.Min(12, commit.Length)];
+
+    /// <summary>
+    /// Why a revision does not clear its document under the declaration's clearedBy, or null when it may: any admits every author;
+    /// operator admits an author with the operator role; independent admits no revision, since its author wrote the content it pins,
+    /// and that author's own review of those bytes is judged self.
+    /// </summary>
+    private static string? RevisionClearer(EstateModel model, RecordEnvelope declaration, RecordEnvelope revision) =>
+        (EstateModel.BodyString(declaration, "clearedBy") ?? "any") switch
+        {
+            "independent" => "its clearedBy is independent, so a document review by a principal other than the one that wrote or revised its content clears it",
+            "operator" when !model.HasRole(revision.By, Roles.Operator) => "its clearedBy is operator, so a document review or revision by an operator-role principal clears it",
+            _ => null,
+        };
+
+    [ThreadStatic]
+    private static bool checkingRevision;
+
+    /// <summary>
+    /// Runs the declared checks on the bytes a revision pinned, which are the working tree's while its content comparison holds, and
+    /// says which failed, or null when none did. As for a review, they answer the newest record of each trigger since the latest
+    /// clearing review, here recorded before the revision. A check that cannot run refuses the clearance, as a failed one does.
+    /// </summary>
+    private static string? RevisionCheckFailure(EstateModel model, RecordEnvelope declaration, RecordEnvelope revision, RecordEnvelope? review, string path, IReadOnlyList<string> chain)
+    {
+        if (!declaration.Body.TryGetProperty("checks", out JsonElement declared) || declared.ValueKind != JsonValueKind.Array || declared.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        // A generator that reads document states while a check runs must not run the checks again.
+        if (checkingRevision)
+        {
+            return "its declared checks cannot run while another revision's checks are running";
+        }
+
+        List<RecordEnvelope> answered = Triggers(declaration).Select(t => Newest(Firing(model, t.On, t.Product, t.Values, path, chain).Where(r => !Later(r, revision))))
+            .OfType<RecordEnvelope>().Where(r => review is null || Later(r, review)).ToList();
+        checkingRevision = true;
+        try
+        {
+            string file = System.IO.Path.Combine(model.Root, path.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            string text = Encoding.UTF8.GetString(File.ReadAllBytes(file));
+            List<DocumentChecks.Outcome> failed = DocumentChecks.Run(model, declaration, text, path, model.Root, answered).Where(o => o.Result == "failed").ToList();
+            return failed.Count == 0 ? null
+                : $"its declared {(failed.Count == 1 ? "check" : "checks")} failed on the bytes it pinned ({string.Join(" ", failed.Select(o => $"{o.Name}: {o.Summary}"))})";
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return "its declared checks could not run on the bytes it pinned";
+        }
+        finally
+        {
+            checkingRevision = false;
+        }
+    }
+
+    /// <summary>The records that fire one of a declaration's record triggers; a release of any revision of the product fires a trigger that names any revision of it.</summary>
+    private static IEnumerable<RecordEnvelope> Firing(EstateModel model, string on, string? product, IReadOnlyList<string> values, string path, IReadOnlyList<string> chain)
+    {
+        string? named = product is null ? null : ProductIdentity(model, product);
+        return on switch
+        {
+            "release" => model.OfType("release").Where(r => named is not null && r.Subject is not null && ProductIdentity(model, r.Subject.Id) == named && EstateModel.BodyString(r, "status") == "published"),
+            "upgrade" => model.OfType("migration"),
+            "decision" => model.Current("decision").Where(d => Documents(d).Any(name => name == path || chain.Contains(name))),
+            "accepted" => model.OfType("acceptance").Where(a => a.Subject?.Type == "work-order" && model.ById.TryGetValue(a.Subject.Id, out RecordEnvelope? order) && values.Contains(EstateModel.BodyString(order, "key") ?? string.Empty)),
+            _ => [],
+        };
+    }
 
     private static string Fired(string on, RecordEnvelope record) => on switch
     {
@@ -445,8 +531,6 @@ public static class LivingDocuments
 
     private static RecordEnvelope? Newest(IEnumerable<RecordEnvelope> records) =>
         records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-
-    private static RecordEnvelope? Newer(RecordEnvelope? a, RecordEnvelope? b) => a is null ? b : b is null ? a : Later(a, b) ? a : b;
 
     /// <summary>Record order: by authoring time, and by identifier within the same second.</summary>
     private static bool Later(RecordEnvelope a, RecordEnvelope b)
