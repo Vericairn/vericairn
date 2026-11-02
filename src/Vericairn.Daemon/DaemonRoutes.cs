@@ -91,8 +91,12 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
         }
 
-        PairingPlan plan = host.Service.PairingPlan(pairing.Principal);
-        var challenge = new PairingChallenge(hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty);
+        // A presence device is offered only when the device asks for one, so an earlier client's exchange keeps its exact transcript.
+        PairingPlan plan = host.Service.PairingPlan(pairing.Principal, hello.Presence == true);
+        var challenge = new PairingChallenge(hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty)
+        {
+            PresenceRecord = plan.PresenceRecord,
+        };
         challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, hello, challenge) };
         if (host.Pairings.Open(pairing, hello, challenge, plan) is string closed)
         {
@@ -127,23 +131,35 @@ internal static class DaemonRoutes
         string? device = null;
         try
         {
-            if (DescriptiveRefusal(confirm.Device) is string descriptive)
+            if ((DescriptiveRefusal(confirm.Device) ?? (confirm.PresenceDevice is null ? null : DescriptiveRefusal(confirm.PresenceDevice))) is string descriptive)
             {
                 return Problem(StatusCodes.Status422UnprocessableEntity, "refused", descriptive);
             }
 
-            string note = $"Paired over the local network with a pairing code {pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
-            (WriteOutcome written, WriteOutcome? admitted) = host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.Issuer, note);
-            if (!written.Ok || admitted?.Written is null)
+            if ((confirm.PresenceDevice is not null || confirm.PresenceSignature is not null) && exchange.Challenge.PresenceRecord is null)
             {
-                Problem? refused = written.Problem ?? admitted?.Problem;
+                return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "This exchange offered no presence device; nothing was recorded.");
+            }
+
+            string note = $"Paired over the local network with a pairing code {pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
+            (WriteOutcome written, WriteOutcome? admitted, WriteOutcome? presence, WriteOutcome? presenceAdmitted) =
+                host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.Issuer, note, confirm.PresenceDevice, confirm.PresenceSignature);
+            bool withPresence = confirm.PresenceDevice is not null;
+            if (!written.Ok || admitted?.Written is null || withPresence && (presence?.Written is null || presenceAdmitted?.Written is null))
+            {
+                Problem? refused = written.Problem ?? admitted?.Problem ?? presence?.Problem ?? presenceAdmitted?.Problem;
                 return Results.Json(refused, ProtocolJson.Options, statusCode: refused?.Code == "denied" ? StatusCodes.Status401Unauthorized : StatusCodes.Status422UnprocessableEntity);
             }
 
             device = written.Written!.Id;
-            var completed = new PairingCompleted(device, admitted.Written.Id, written.Written.Hash, string.Empty);
+            var completed = new PairingCompleted(device, admitted.Written.Id, written.Written.Hash, string.Empty)
+            {
+                PresenceDevice = withPresence ? presence!.Written!.Id : null,
+                PresenceAdmission = withPresence ? presenceAdmitted!.Written!.Id : null,
+                PresenceHash = withPresence ? presence!.Written!.Hash : null,
+            };
             completed = completed with { Mac = PairingProtocol.CompletedMac(pairing.RuntimeKey, exchange.Hello, exchange.Challenge, confirm, completed) };
-            host.Log($"device {device} ({confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By}, pairing {pairing.Id}");
+            host.Log($"device {device} ({confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By}, pairing {pairing.Id}" + (withPresence ? $", with presence device {completed.PresenceDevice}" : ""));
             return Results.Json(completed, ProtocolJson.Options);
         }
         finally

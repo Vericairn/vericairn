@@ -10,7 +10,7 @@ using System.Text;
 
 namespace Vericairn.Protocol;
 
-/// <summary>Ask the runtime for a pairing code: an administrator's authority to pair one new device for a principal; from 0.6.0.</summary>
+/// <summary>Ask the runtime for a pairing code: an administrator's authority to pair one new device for a principal; from 0.6.0. From 0.9.0 the same exchange may also admit that device's presence device, a second key of the same phone for the same principal and profiles whose every signature needs its owner's presence.</summary>
 /// <param name="Principal">The principal the new device will act for.</param>
 /// <param name="By">The administrator: the operator, or a principal holding the 'administer' scope, whose admitted device on the runtime's machine signs the admission.</param>
 /// <param name="Profiles">The connectivity profiles the device is permitted; local-network when omitted.</param>
@@ -35,7 +35,14 @@ public sealed record PairingIssued(string Code, string Principal, string? Princi
 /// </summary>
 /// <param name="Nonce">32 random bytes, base64url.</param>
 /// <param name="Mac">HMAC-SHA256 with the device's key over the hello transcript, base64url.</param>
-public sealed record PairingHello(string Nonce, string Mac);
+public sealed record PairingHello(string Nonce, string Mac)
+{
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): true when the device will also present its presence device, a second key of the same phone whose every
+    /// signature needs its owner's presence. A runtime that offers one names its record in the challenge; an earlier runtime ignores it.
+    /// </summary>
+    public bool? Presence { get; init; }
+}
 
 /// <summary>
 /// The runtime's answer to a hello that proved the code: who it is, the certificate it presented on this connection, what it will
@@ -57,7 +64,14 @@ public sealed record PairingHello(string Nonce, string Mac);
 /// <param name="Format">The record format the device record is written in.</param>
 /// <param name="ExpiresAt">When the code stops working.</param>
 /// <param name="Mac">HMAC-SHA256 with the runtime's key over the challenge transcript, base64url.</param>
-public sealed record PairingChallenge(string DeviceNonce, string RuntimeNonce, string Estate, string? EstateName, string Identity, string Certificate, string Principal, string? PrincipalName, string PrincipalKind, IReadOnlyList<string> Profiles, string Record, string At, long Format, string ExpiresAt, string Mac);
+public sealed record PairingChallenge(string DeviceNonce, string RuntimeNonce, string Estate, string? EstateName, string Identity, string Certificate, string Principal, string? PrincipalName, string PrincipalKind, IReadOnlyList<string> Profiles, string Record, string At, long Format, string ExpiresAt, string Mac)
+{
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): the id the presence device's record will have, at the same time and in the same format, when the hello
+    /// asked for one and the runtime offers it: a person's device, from record format 2. Null otherwise; the MAC covers it when present.
+    /// </summary>
+    public string? PresenceRecord { get; init; }
+}
 
 /// <summary>The new device as it presents itself: its descriptive identity and its public key. The runtime cannot verify the custody, presence, platform or name a device states, and records them as the device's own statement.</summary>
 /// <param name="Name">Descriptive name, never a machine path.</param>
@@ -72,14 +86,34 @@ public sealed record PairingDevice(string Name, string Platform, string Custody,
 /// <param name="Device">The device as it presents itself.</param>
 /// <param name="Signature">The device key's signature of the device record's content hash, base64url.</param>
 /// <param name="Mac">HMAC-SHA256 with the device's key over the confirmation transcript, base64url.</param>
-public sealed record PairingConfirm(string RuntimeNonce, PairingDevice Device, string Signature, string Mac);
+public sealed record PairingConfirm(string RuntimeNonce, PairingDevice Device, string Signature, string Mac)
+{
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): the presence device as it presents itself, when the challenge named a record for it: another key of the
+    /// same phone, stating presence required, admitted with the paired device under the same code. Null pairs one device.
+    /// </summary>
+    public PairingDevice? PresenceDevice { get; init; }
+
+    /// <summary>The presence key's signature of the presence device record's content hash, base64url; made with its owner's presence.</summary>
+    public string? PresenceSignature { get; init; }
+}
 
 /// <summary>The runtime's last message: the records it wrote, with a MAC over the whole exchange.</summary>
 /// <param name="Device">The device record's id: the device's identity.</param>
 /// <param name="Admission">The admission's id.</param>
 /// <param name="Hash">The device record's content hash.</param>
 /// <param name="Mac">HMAC-SHA256 with the runtime's key over the completion transcript, base64url.</param>
-public sealed record PairingCompleted(string Device, string Admission, string Hash, string Mac);
+public sealed record PairingCompleted(string Device, string Admission, string Hash, string Mac)
+{
+    /// <summary>From 0.9.0 (REMOTE-11): the presence device record's id, when one was recorded with the paired device.</summary>
+    public string? PresenceDevice { get; init; }
+
+    /// <summary>The presence device's admission id.</summary>
+    public string? PresenceAdmission { get; init; }
+
+    /// <summary>The presence device record's content hash.</summary>
+    public string? PresenceHash { get; init; }
+}
 
 /// <summary>
 /// The pairing exchange, version 1: a code of 16 characters from Crockford's base32 alphabet, 80 secret bits and nothing else;
@@ -211,6 +245,15 @@ public static class PairingProtocol
         transcript.Add(completed.Device);
         transcript.Add(completed.Admission);
         transcript.Add(completed.Hash);
+        if (completed.PresenceDevice is not null || completed.PresenceAdmission is not null || completed.PresenceHash is not null)
+        {
+            // Appended only when present, so a pairing of one device keeps the exact transcript of earlier releases.
+            transcript.Add("presence");
+            transcript.Add(completed.PresenceDevice);
+            transcript.Add(completed.PresenceAdmission);
+            transcript.Add(completed.PresenceHash);
+        }
+
         return Mac(runtimeKey, transcript.ToArray());
     }
 
@@ -266,6 +309,13 @@ public static class PairingProtocol
         transcript.Add(challenge.At);
         transcript.Add(challenge.Format.ToString(CultureInfo.InvariantCulture));
         transcript.Add(challenge.ExpiresAt);
+        if (challenge.PresenceRecord is not null)
+        {
+            // Appended only when the runtime offers a presence device, so earlier clients see the transcript they know.
+            transcript.Add("presence");
+            transcript.Add(challenge.PresenceRecord);
+        }
+
         return transcript.ToArray();
     }
 
@@ -283,6 +333,18 @@ public static class PairingProtocol
         transcript.Add(confirm.Device.PublicKey);
         transcript.AddOptional(confirm.Device.Presence);
         transcript.Add(confirm.Signature);
+        if (confirm.PresenceDevice is not null || confirm.PresenceSignature is not null)
+        {
+            // Appended only when a presence device is presented; a confirmation of one device keeps the earlier transcript.
+            transcript.Add("presence");
+            transcript.Add(confirm.PresenceDevice?.Name);
+            transcript.Add(confirm.PresenceDevice?.Platform);
+            transcript.Add(confirm.PresenceDevice?.Custody);
+            transcript.Add(confirm.PresenceDevice?.PublicKey);
+            transcript.AddOptional(confirm.PresenceDevice?.Presence);
+            transcript.Add(confirm.PresenceSignature);
+        }
+
         return transcript.ToArray();
     }
 

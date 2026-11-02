@@ -28,6 +28,19 @@ public sealed record PairingOptions(string Name)
     /// <summary>A key store to make the device's key in instead of the custody's; for tests and unusual machines.</summary>
     public IDeviceKeyStore? KeyStore { get; init; }
 
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): a store in which to make a second key, the presence device, whose every signature needs its owner's
+    /// presence. A runtime that offers one records and admits it with the paired device under the same code, for the same principal
+    /// and profiles, stating presence required; it signs records, never requests. Its custody must enforce presence, or nothing is
+    /// made. Null pairs one device, as before; so does a runtime that does not offer one (an earlier release, an agent's or a
+    /// service's principal, or record format 1), and so does a presence key that cannot be made or whose prompt the person declines;
+    /// <see cref="PairedRuntime.PresenceDevice"/> then shows null.
+    /// </summary>
+    public IDeviceKeyStore? PresenceKeyStore { get; init; }
+
+    /// <summary>The kept connection a pairing adds its device to: the challenge must name the same estate, runtime identity and principal before any key is made.</summary>
+    internal RuntimeConnection? Joining { get; init; }
+
     /// <summary>How long to wait for the runtime.</summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
@@ -47,7 +60,20 @@ public sealed record PairingOptions(string Name)
 /// <param name="Profiles">The profiles the device is permitted.</param>
 /// <param name="Custody">How its key is held.</param>
 /// <param name="Presence">required or none from record format 2.</param>
-public sealed record PairedRuntime(string Address, string Estate, string? EstateName, string Identity, string Certificate, string Device, string DevicePublicKey, string Admission, string Principal, string? PrincipalName, IReadOnlyList<string> Profiles, string Custody, string? Presence);
+public sealed record PairedRuntime(string Address, string Estate, string? EstateName, string Identity, string Certificate, string Device, string DevicePublicKey, string Admission, string Principal, string? PrincipalName, IReadOnlyList<string> Profiles, string Custody, string? Presence)
+{
+    /// <summary>From 0.9.0 (REMOTE-11): the presence device's id, when one was recorded and admitted with the paired device; its key is held under this id in the presence store.</summary>
+    public string? PresenceDevice { get; init; }
+
+    /// <summary>The presence device's public key.</summary>
+    public string? PresenceDevicePublicKey { get; init; }
+
+    /// <summary>The presence device's admission id.</summary>
+    public string? PresenceAdmission { get; init; }
+
+    /// <summary>How the presence device's key is held.</summary>
+    public string? PresenceCustody { get; init; }
+}
 
 /// <summary>Why a pairing did not complete: the runtime refused (denied, refused), or nothing answered as the runtime (unavailable).</summary>
 public sealed class PairingException : Exception
@@ -182,7 +208,7 @@ public static class RuntimePairing
         {
             string certificate = RuntimeIdentityScheme.CertificateFingerprint(presented ?? []);
             string nonce = PairingProtocol.NewNonce();
-            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate));
+            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate)) { Presence = options.PresenceKeyStore is null ? null : true };
             PairingChallenge challenge = await SendAsync<PairingHello, PairingChallenge>(tls, address, "/v1/pairing/hello", hello, legacy, mayHaveEffect: false, cancellationToken).ConfigureAwait(false);
             if (!PairingProtocol.Matches(PairingProtocol.ChallengeMac(runtimeKey, hello, challenge), challenge.Mac) || challenge.DeviceNonce != nonce)
             {
@@ -199,8 +225,15 @@ public static class RuntimePairing
                 throw new PairingException("refused", "The runtime's answer names no time for the device record.");
             }
 
+            if (options.Joining is RuntimeConnection joining && (challenge.Estate != joining.Estate || challenge.Identity != joining.Identity || challenge.Principal != joining.Principal))
+            {
+                throw new PairingException("refused", "This code pairs a device for another estate, runtime identity or principal than the connection it would join. Nothing was made or recorded here.");
+            }
+
             (IDeviceKeyStore store, bool presence) = Custody(challenge, options);
+            IDeviceKeyStore? presenceStore = PresenceCustody(challenge, options);
             byte[] publicKey = store.Create(challenge.Record);
+            bool presenceMade = false;
             try
             {
                 var device = new PairingDevice(options.Name.Trim(), VericairnHome.Platform(), store.Kind, RecordSigning.EncodePublicKey(publicKey), challenge.Format >= 2 ? (presence ? "required" : "none") : null);
@@ -208,22 +241,57 @@ public static class RuntimePairing
                 string hash = DeviceRecords.Hash(DeviceRecords.Draft(challenge.Principal, challenge.Record, at, challenge.Format, body));
                 string signature = Base64Url.EncodeToString(store.Sign(challenge.Record, RecordSigning.Digest(hash)));
                 var confirm = new PairingConfirm(challenge.RuntimeNonce, device, signature, string.Empty);
+                string? presenceHash = null;
+                if (presenceStore is not null)
+                {
+                    // The presence key signs its own record, so its owner's presence is asked for once here, before anything is recorded.
+                    try
+                    {
+                        byte[] presenceKey = presenceStore.Create(challenge.PresenceRecord!);
+                        presenceMade = true;
+                        var second = new PairingDevice(options.Name.Trim() + " (presence key)", VericairnHome.Platform(), presenceStore.Kind, RecordSigning.EncodePublicKey(presenceKey), "required");
+                        JsonObject secondBody = DeviceRecords.Body(challenge.Principal, second.Name, second.Platform, second.Custody, second.PublicKey, challenge.Profiles, challenge.Format, second.Presence);
+                        presenceHash = DeviceRecords.Hash(DeviceRecords.Draft(challenge.Principal, challenge.PresenceRecord!, at, challenge.Format, secondBody));
+                        confirm = confirm with { PresenceDevice = second, PresenceSignature = Base64Url.EncodeToString(presenceStore.Sign(challenge.PresenceRecord!, RecordSigning.Digest(presenceHash))) };
+                    }
+                    catch (Exception exception) when (exception is not (OperationCanceledException or PairingException))
+                    {
+                        // Nothing has been sent. A presence key that cannot be made (a phone without a passcode) or a prompt the
+                        // person declines leaves the phone paired with its request device alone, which signs no decision; the
+                        // presence key is added later with a new code.
+                        if (presenceMade) presenceStore.Remove(challenge.PresenceRecord!);
+                        presenceMade = false;
+                        presenceStore = null;
+                        presenceHash = null;
+                        confirm = confirm with { PresenceDevice = null, PresenceSignature = null };
+                    }
+                }
+
                 confirm = confirm with { Mac = PairingProtocol.ConfirmMac(deviceKey, hello, challenge, confirm) };
                 if (!legacy) cancellationToken.ThrowIfCancellationRequested();
                 confirmationStarted?.Invoke();
                 PairingCompleted completed = await SendAsync<PairingConfirm, PairingCompleted>(tls, address, "/v1/pairing/confirm", confirm, legacy, mayHaveEffect: true, cancellationToken).ConfigureAwait(false);
-                if (!PairingProtocol.Matches(PairingProtocol.CompletedMac(runtimeKey, hello, challenge, confirm, completed), completed.Mac) || completed.Device != challenge.Record || completed.Hash != hash)
+                if (!PairingProtocol.Matches(PairingProtocol.CompletedMac(runtimeKey, hello, challenge, confirm, completed), completed.Mac) || completed.Device != challenge.Record || completed.Hash != hash
+                    || (presenceStore is null ? completed.PresenceDevice is not null || completed.PresenceAdmission is not null || completed.PresenceHash is not null
+                        : completed.PresenceDevice != challenge.PresenceRecord || completed.PresenceHash != presenceHash || string.IsNullOrEmpty(completed.PresenceAdmission)))
                 {
-                    var exception = new PairingException("unavailable", $"The runtime's confirmation does not match this exchange, so this device keeps nothing of it; an administrator revokes device {challenge.Record} if it was recorded.");
+                    var exception = new PairingException("unavailable", $"The runtime's confirmation does not match this exchange, so this device keeps nothing of it; an administrator revokes device {challenge.Record}{(presenceStore is null ? "" : " and presence device " + challenge.PresenceRecord)} if it was recorded.");
                     if (!legacy) throw new ClientUnavailableException(true, exception);
                     throw exception;
                 }
 
-                return new PairedRuntime(address, challenge.Estate, challenge.EstateName, challenge.Identity, challenge.Certificate, challenge.Record, device.PublicKey, completed.Admission, challenge.Principal, challenge.PrincipalName, challenge.Profiles, store.Kind, device.Presence);
+                return new PairedRuntime(address, challenge.Estate, challenge.EstateName, challenge.Identity, challenge.Certificate, challenge.Record, device.PublicKey, completed.Admission, challenge.Principal, challenge.PrincipalName, challenge.Profiles, store.Kind, device.Presence)
+                {
+                    PresenceDevice = presenceStore is null ? null : completed.PresenceDevice,
+                    PresenceDevicePublicKey = confirm.PresenceDevice?.PublicKey,
+                    PresenceAdmission = presenceStore is null ? null : completed.PresenceAdmission,
+                    PresenceCustody = presenceStore?.Kind,
+                };
             }
             catch
             {
                 store.Remove(challenge.Record);
+                if (presenceMade) presenceStore!.Remove(challenge.PresenceRecord!);
                 throw;
             }
         }
@@ -260,12 +328,41 @@ public static class RuntimePairing
             throw new PairingException("refused", "An agent's or a service's device signs unattended and never claims its owner's presence.");
         }
 
+        if (presence && DeviceKeyStores.PresenceKinds.IndexOf(store.Kind) < 0)
+        {
+            throw new PairingException("refused", $"{store.Kind} custody cannot enforce its owner's presence, and custody never claims presence it cannot enforce.");
+        }
+
         if (!formatTwo && (presence || store.Kind == SecureEnclaveCustody.Kind))
         {
             throw new PairingException("refused", "This estate writes record format 1, which names neither presence nor Secure Enclave custody; pair with another custody.");
         }
 
         return (store, presence);
+    }
+
+    /// <summary>
+    /// The store the presence device's key is made in, when the device asked for one and the runtime offered it; null otherwise. Its
+    /// custody must enforce presence, and only a person's device in an estate of record format 2 or later has one.
+    /// </summary>
+    private static IDeviceKeyStore? PresenceCustody(PairingChallenge challenge, PairingOptions options)
+    {
+        if (options.PresenceKeyStore is not IDeviceKeyStore store || challenge.PresenceRecord is null)
+        {
+            return null;
+        }
+
+        if (challenge.PrincipalKind != "human" || challenge.Format < 2 || challenge.PresenceRecord == challenge.Record || !Records.Identity.Ulid.IsValid(challenge.PresenceRecord))
+        {
+            throw new PairingException("refused", "The runtime offered a presence device that a person's device in a record format 2 estate alone has. Nothing was made or recorded here.");
+        }
+
+        if (DeviceKeyStores.PresenceKinds.IndexOf(store.Kind) < 0)
+        {
+            throw new PairingException("refused", $"{store.Kind} custody cannot enforce its owner's presence, so it cannot hold a presence device. Nothing was made or recorded here.");
+        }
+
+        return store;
     }
 
     private static SslClientAuthenticationOptions CreateAuthenticationOptions(RemoteCertificateValidationCallback validate) =>

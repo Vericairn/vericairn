@@ -24,6 +24,11 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     private readonly EstateService service = EstateService.Open(root);
     private readonly DirectoryInfo phoneHome = Directory.CreateTempSubdirectory("vericairn-test-phone-");
 
+    /// <summary>The estate basis the runtime supplies to the phone; null leaves the in-process service to answer.</summary>
+    public DecisionBasisResponse? Basis { get; set; } = new(true, new string('c', 40), new string('c', 40), []);
+
+    public int BasisReads { get; private set; }
+
     public List<RuntimeConnection> Kept { get; } = [];
 
     public Exception? PairFailure { get; set; }
@@ -31,6 +36,15 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public Queue<(string State, string Message)> Checks { get; } = new();
 
     public IReadOnlyList<RuntimeConnection> List() => Kept;
+
+    /// <summary>The phone's presence store: file keys recorded as the iPhone Secure Enclave custody, asking nobody.</summary>
+    public PresenceKeyStandIn PresenceKeys => presenceKeys ??= new(phoneHome.FullName);
+    private PresenceKeyStandIn? presenceKeys;
+
+    /// <summary>Pairs like a phone whose custody cannot require presence: only the request key is registered.</summary>
+    public bool WithoutPresenceKey { get; set; }
+
+    public int PresenceKeysAdded { get; private set; }
 
     public Task<RuntimeConnection> PairAsync(string address, string code, string deviceName, CancellationToken cancellationToken)
     {
@@ -48,9 +62,36 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
             RecordAuthor.Write(root, device);
             RecordAuthor.Write(root, RecordAuthor.Create(new("admission", connection.Principal,
                 JsonSerializer.SerializeToElement(new { principal = connection.Principal, status = "admitted", note = "Test phone is the fixture's first authority." }), device.Envelope.Reference, Format: 3), signer));
+            if (!WithoutPresenceKey) connection = WithPresenceDevice(connection);
         }
         Kept.Add(connection);
         return Task.FromResult(connection);
+    }
+
+    // The presence device as a pairing records it: a second key of the same principal, stating presence required in a phone custody,
+    // signed by its own key and admitted by the operator through the request device that is the fixture's authority.
+    private RuntimeConnection WithPresenceDevice(RuntimeConnection connection)
+    {
+        string id = Ulid.NewUlid().Value;
+        string publicKey = RecordSigning.EncodePublicKey(PresenceKeys.Create(id));
+        var body = DeviceRecords.Body(connection.Principal, "Test phone (presence key)", "ios", PresenceKeys.Kind, publicKey, ["local-network"], 3, "required");
+        AuthoredRecord device = RecordAuthor.Create(new("device", connection.Principal, JsonSerializer.SerializeToElement(body), Id: id, Format: 3), new StoreSigner(PresenceKeys, id));
+        RecordAuthor.Write(root, device);
+        RecordAuthor.Write(root, RecordAuthor.Create(new("admission", connection.Principal,
+            JsonSerializer.SerializeToElement(new { principal = connection.Principal, status = "admitted", note = "Test phone's presence key, admitted with it." }), device.Envelope.Reference, Format: 3),
+            new StoreSigner(new FileKeyStore(phoneHome.FullName), connection.Device)));
+        return connection with { PresenceDevice = id, PresenceDevicePublicKey = publicKey };
+    }
+
+    public bool HasPresenceKey(RuntimeConnection connection) => connection.PresenceDevice is string device && PresenceKeys.Has(device);
+
+    public Task<RuntimeConnection> AddPresenceKeyAsync(RuntimeConnection connection, string code, string deviceName, CancellationToken cancellationToken)
+    {
+        if (PairFailure is not null) throw PairFailure;
+        RuntimeConnection updated = WithPresenceDevice(Kept.Single(c => c.Id == connection.Id));
+        Kept[Kept.FindIndex(c => c.Id == connection.Id)] = updated;
+        PresenceKeysAdded++;
+        return Task.FromResult(updated);
     }
 
     public Task<ConnectionStatus> ProbeAsync(RuntimeConnection connection, CancellationToken cancellationToken)
@@ -89,6 +130,7 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         ((CountingApi)client).Inner = service;
         ((CountingApi)client).Called = () => ApiCalls++;
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
+        ((CountingApi)client).Basis = () => { BasisReads++; return Basis; };
         ((CountingApi)client).RecordRead = record =>
         {
             if (FailRecordRead) throw new HttpRequestException("The record read failed.");
@@ -104,9 +146,11 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         public Action Called { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
         public Func<RecordResponse?, RecordResponse?> RecordRead { get; set; } = null!;
+        public Func<DecisionBasisResponse?> Basis { get; set; } = null!;
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             Called();
+            if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);
             try
             {
                 object? result = targetMethod!.Invoke(Inner, args);
@@ -149,8 +193,11 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         }
     }
 
-    public async Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, CancellationToken cancellationToken = default)
+    public async Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, Func<RecordPrepared, bool> beforeSend,
+        CancellationToken cancellationToken = default)
     {
+        // As on the phone: without the presence key nothing is prepared, signed or sent; the request key never signs a decision.
+        if (!HasPresenceKey(connection)) return WriteOutcome.Fail(new("presence-required", "This phone holds no presence key for this connection.", []));
         PreparedCalls++;
         if (RefusePrepared) return WriteOutcome.Fail(new("refused", "The runtime refused preparation.", []));
         string[]? subject = request.Subject?.Split(':', 3);
@@ -164,7 +211,11 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         BeforeReview?.Invoke();
         if (ChangePrepared is not null) prepared = ChangePrepared(prepared);
         if (!review(prepared)) return WriteOutcome.Fail(new("declined", "Nothing was signed or written.", []));
-        AuthoredRecord written = RecordAuthor.Create(draft, new StoreSigner(new FileKeyStore(phoneHome.FullName), connection.Device));
+        RecordSignature signature;
+        try { signature = new StoreSigner(PresenceKeys, connection.PresenceDevice!).Sign(RecordSigning.Digest(prepared.Hash)); }
+        catch (InvalidOperationException exception) { return WriteOutcome.Fail(new("not-signed", $"The presence key did not sign: {exception.Message} Nothing was signed or sent.", [])); }
+        if (!beforeSend(prepared)) return WriteOutcome.Fail(new("declined", "The signature was discarded; nothing was sent or written.", []));
+        AuthoredRecord written = RecordAuthor.Create(draft, new PresignedStandIn(connection.PresenceDevice!, signature));
         SignedWrites++;
         RecordAuthor.Write(root, written);
         LastWritten = new(written.RelativePath, written.Envelope.Id, written.Envelope.ComputedHash);
@@ -178,5 +229,12 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     {
         service.Dispose();
         phoneHome.Delete(recursive: true);
+    }
+
+    // The signature the presence key made over the prepared hash, applied to exactly that record as the runtime applies it.
+    private sealed class PresignedStandIn(string device, RecordSignature signature) : IRecordSigner
+    {
+        public string DeviceId => device;
+        public RecordSignature Sign(ReadOnlySpan<byte> digest) => signature;
     }
 }

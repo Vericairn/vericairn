@@ -55,7 +55,11 @@ public sealed class RuntimeConnections
 
     private RuntimeConnection Keep(PairedRuntime paired)
     {
-        var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow))
+        {
+            PresenceDevice = paired.PresenceDevice,
+            PresenceDevicePublicKey = paired.PresenceDevicePublicKey,
+        };
         Save(connection);
         foreach (RuntimeConnection earlier in List().Where(c => c.Id != connection.Id && c.Estate == connection.Estate && (c.Identity != connection.Identity || c.Principal == connection.Principal)))
         {
@@ -64,6 +68,30 @@ public sealed class RuntimeConnections
 
         return connection;
     }
+
+    /// <summary>
+    /// Adds a presence device to a kept connection, from 0.9.0 (REMOTE-11): pairs one more device with a new code an administrator
+    /// issued for the same principal, its key made in <paramref name="presenceKeys"/> with presence required, and keeps it with the
+    /// connection. The runtime must prove the same identity and name the same estate and principal before any key is made; the
+    /// device is recorded and admitted under the code's authority, as any pairing is. Throws as pairing does when it does not complete.
+    /// </summary>
+    public async Task<RuntimeConnection> AddPresenceAsync(RuntimeConnection connection, string code, string name, IDeviceKeyStore presenceKeys, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(presenceKeys);
+        var options = new PairingOptions(name) { KeyStore = presenceKeys, Presence = true, Joining = connection, Timeout = PresencePairingTimeout };
+        PairedRuntime paired = await RuntimePairing.PairAsync(connection.Address, code, options, cancellationToken).ConfigureAwait(false);
+        RuntimeConnection updated = (Find(connection.Id) ?? connection) with { PresenceDevice = paired.Device, PresenceDevicePublicKey = paired.DevicePublicKey };
+        if (File.Exists(PathOf(connection.Id)))
+        {
+            Save(updated);
+        }
+
+        return updated;
+    }
+
+    /// <summary>How long a pairing that asks for its owner's presence waits for the whole exchange, prompt included.</summary>
+    public static TimeSpan PresencePairingTimeout { get; } = TimeSpan.FromMinutes(2);
 
     /// <summary>Every connection kept here, oldest first.</summary>
     public IReadOnlyList<RuntimeConnection> List()

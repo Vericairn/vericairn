@@ -25,6 +25,15 @@ namespace Vericairn.Sdk;
 /// <param name="LastCurrent">The latest check that found the connection current, which a cached state shows the freshness of.</param>
 public sealed record RuntimeConnection(string Id, string Address, string Estate, string? EstateName, string Identity, string Device, string DevicePublicKey, string Principal, string? PrincipalName, IReadOnlyList<string> Profiles, string PairedAt, ConnectionObservation? Observed = null, ConnectionObservation? LastCurrent = null)
 {
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): this machine's presence device for the connection, when it has one: a second admitted device of the same
+    /// principal whose every signature needs its owner's presence. It signs records the connection's device prepares, never requests.
+    /// </summary>
+    public string? PresenceDevice { get; init; }
+
+    /// <summary>The presence device's public key, base64url SubjectPublicKeyInfo.</summary>
+    public string? PresenceDevicePublicKey { get; init; }
+
     /// <summary>The host part of the address.</summary>
     [JsonIgnore]
     public string Host => TryParseAddress(Address, out string host, out _) ? host : Address;

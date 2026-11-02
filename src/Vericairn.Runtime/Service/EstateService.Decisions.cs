@@ -18,6 +18,63 @@ namespace Vericairn.Runtime.Service;
 public sealed partial class EstateService
 {
     /// <inheritdoc />
+    public DecisionBasisResponse DecisionBasis(string? baseCommit = null)
+    {
+        (DesignChangeSet? change, string? problem) = ObserveDecisionBasis(baseCommit);
+        return change is null
+            ? new(false, Problem: new Problem("unavailable", problem!, []))
+            : new(true, change.BaseCommit, change.Head, change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal).Select(d => new DecisionBasisDocument(d.Path, d.Hash)).ToArray());
+    }
+
+    /// <summary>
+    /// The design change set from a full local base commit, or from the head observed now when none is given: the basis an answer's
+    /// change set states. Reads only the estate's repository, never fetching or changing it; the reason when it is unavailable.
+    /// </summary>
+    private (DesignChangeSet? Change, string? Problem) ObserveDecisionBasis(string? baseCommit)
+    {
+        ISourceAdapter? source = Providers.Source("git");
+        if (source is null)
+            return (null, "The runtime has no repository source to observe the estate's basis. Decide where the estate's clone and its source adapter are.");
+        try
+        {
+            string start = string.IsNullOrEmpty(baseCommit) ? source.Inspect(Root).Commit : baseCommit;
+            DesignChangeSet? change = source.InspectDesignChanges(Root, start);
+            if (change is null)
+                return (null, "The complete design change set is unavailable: the base must be a full local commit of the estate repository, and conflicts, deletions, links or unreadable design files are resolved first.");
+            if (string.IsNullOrEmpty(baseCommit) && change.Head != start)
+                return (null, "The estate's head moved while its basis was read. Read the basis again.");
+            return (change, null);
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return (null, "The estate's repository could not be observed: " + exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Why a decision prepared for a device's signature states a change set the runtime does not observe now, or null when it states
+    /// none or the observation matches: the same head, no pins and no design document changed since its base. Pins are the desktop's.
+    /// </summary>
+    private string? DecisionBasisRefusal(RecordDraft draft)
+    {
+        if (draft.Type != "decision" || draft.Body.ValueKind != JsonValueKind.Object || !draft.Body.TryGetProperty("changeSet", out JsonElement changeSet)) return null;
+        if (changeSet.ValueKind != JsonValueKind.Object || !changeSet.TryGetProperty("baseCommit", out JsonElement start) || start.ValueKind != JsonValueKind.String
+            || !changeSet.TryGetProperty("head", out JsonElement head) || head.ValueKind != JsonValueKind.String
+            || !changeSet.TryGetProperty("pins", out JsonElement pins) || pins.ValueKind != JsonValueKind.Array)
+            return "A device-signed decision states its change set's base commit, head and pins.";
+        (DesignChangeSet? change, string? problem) = ObserveDecisionBasis(start.GetString());
+        if (change is null) return problem + " A device-signed decision is prepared only on an observed basis.";
+        int changed = change.Documents.Count;
+        return pins.GetArrayLength() > 0
+            ? "A device-signed decision changes no design documents. An answer that pins documents is recorded on the desktop, which pins them with it."
+            : change.Head != head.GetString()
+            ? $"The decision's change set names head {head.GetString()}, but the estate's head is {change.Head} now. Read the basis again and review the answer."
+            : changed > 0
+            ? $"{changed} design documents changed since the decision's base commit, which pins none. Read the basis again; an answer with document changes is recorded on the desktop."
+            : null;
+    }
+
+    /// <inheritdoc />
     public DecisionNewResponse DecisionFromAsk(DecisionNewRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -49,8 +106,17 @@ public sealed partial class EstateService
                 return Failed("Supply the complete document list without duplicate or empty paths.");
 
             ISourceAdapter? source = Providers.Source("git");
+            // An empty base commit takes the head observed now, the basis GET /v1/decisions/basis reads.
+            string baseCommit = request.BaseCommit;
+            if (string.IsNullOrEmpty(baseCommit))
+            {
+                (DesignChangeSet? basis, string? unavailable) = ObserveDecisionBasis(null);
+                if (basis is null) return Failed(unavailable!);
+                baseCommit = basis.BaseCommit;
+            }
+
             DesignChangeSet? change;
-            try { change = source?.InspectDesignChanges(Root, request.BaseCommit); }
+            try { change = source?.InspectDesignChanges(Root, baseCommit); }
             catch (ProviderRefusedException) { change = null; }
             if (change is null)
                 return Failed("The complete design change set is unavailable. Supply a full local base commit in the estate repository; resolve conflicts, deletions or unavailable files first.");
@@ -115,7 +181,7 @@ public sealed partial class EstateService
 
             // Signing can require operator presence. Re-observe membership, bytes and the ask after that wait.
             DesignChangeSet? current;
-            try { current = source!.InspectDesignChanges(Root, request.BaseCommit); }
+            try { current = source!.InspectDesignChanges(Root, baseCommit); }
             catch (ProviderRefusedException) { current = null; }
             EstateModel refreshed = session.Load();
             RecordEnvelope currentAsk = refreshed.Latest(ask);
