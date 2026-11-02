@@ -1473,8 +1473,10 @@ previous treatment. Input redirection is a read. Heredoc bodies (`<<`, `<<-`) an
 filesystem operands; interpreter bodies are scanned as code. Redirections beside them remain checked.
 
 The audit also permits the temporary directory actually supplied in the harness's launch environment: `TMPDIR`
-on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. The shipped launchers preserve these admitted variables;
-they do not create another temporary directory. The audit uses the same captured environment as the launched process,
+on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. From 0.9.0 each run gets its own temporary directory
+inside its run directory, passed to the harness as `TMPDIR` (`TEMP` and `TMP` on Windows). Codex's sandbox can write
+only the workspace, its `.git` and that directory; the user's shared temporary directory and `/tmp` are excluded.
+Vericairn's MCP server, outside the sandbox, keeps the user's temporary directory. The audit uses the same captured environment as the launched process,
 recognizes those variables in path operands, and checks traversal against the resulting boundary. It does not infer
 a system temporary directory or take a boundary from tool-event input; system `/tmp` is permitted only when the
 run's supplied temporary variable names it.
