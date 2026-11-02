@@ -39,6 +39,42 @@ public sealed class AttentionAcknowledgmentTests
     }
 
     [Fact]
+    public void AnUnrelatedRecordKeepsAPolicyNoticeAcknowledgedButAChangedConditionRenewsIt()
+    {
+        using var fixture = new PolicyFixture();
+        RecordEnvelope policy = fixture.Policy();
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 12, 0, 0, TimeSpan.Zero));
+        fixture.Add("decision", fixture.DecisionBody());
+        AttentionNotice notice;
+        using (EstateService service = EstateService.Open(fixture.Estate.Root))
+        {
+            notice = Assert.Single(service.AttentionGet(fixture.Estate.OperatorId).Items, n => n.Policy?.Finding.Policy.Id == policy.Id);
+            Assert.Equal("due-within-grace", notice.State);
+            Assert.True(service.AttentionAcknowledge(Request(fixture.Estate.OperatorId, notice)).Ok);
+        }
+        // A later record moves the basis and its time, but the condition is the same occurrence still within grace.
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero));
+        fixture.Add("decision", fixture.DecisionBody());
+        using (EstateService service = EstateService.Open(fixture.Estate.Root))
+        {
+            AttentionNotice same = Assert.Single(service.AttentionGet(fixture.Estate.OperatorId).Items, n => n.Key == notice.Key);
+            Assert.NotEqual(notice.Policy!.Finding.Basis, same.Policy!.Finding.Basis);
+            Assert.Equal(notice.Revision, same.Revision);
+            Assert.Equal("acknowledged", same.AttentionState);
+        }
+        // Past the deadline the occurrence is missed: a changed condition, so the notice returns.
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 10, 17, 12, 0, 0, TimeSpan.Zero));
+        fixture.Add("decision", fixture.DecisionBody());
+        using (EstateService service = EstateService.Open(fixture.Estate.Root))
+        {
+            AttentionNotice missed = Assert.Single(service.AttentionGet(fixture.Estate.OperatorId).Items, n => n.SubjectId == notice.SubjectId);
+            Assert.True(missed.Policy!.Finding.Duty!.Missed);
+            Assert.NotEqual(notice.Revision, missed.Revision);
+            Assert.Equal("unacknowledged", missed.AttentionState);
+        }
+    }
+
+    [Fact]
     public void AdvancingTheAgeDoesNotUndoAcknowledgmentButANewClaimDoes()
     {
         using var fixture = new ProgressFixture();

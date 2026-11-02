@@ -173,6 +173,7 @@ public sealed partial class LocalNetworkConnections : IRemoteConnections
     private static bool Complete(RemoteObservation observation) =>
         observation.Attention.Items.All(n => n is { Kind: not null, Subject: not null, Why: not null, State: not null, AsOf: not null, NextAction: not null, SubjectType: not null, SubjectId: not null, Revision: not null }) &&
         observation.Products.All(p => p is { Name: not null, Id: not null }) &&
+        observation.PolicyDetails is not null && observation.PolicyDetails.Values.All(d => d is { AsOf: not null, Notice.Policy: not null }) &&
         observation.Details.Values.All(d => d is { Id: not null, AsOf: not null, Work.Json.ValueKind: JsonValueKind.Object, Runs: not null, Progress: not null } &&
             d.Runs.All(r => r is not null) && d.Progress.All(p => p is { AsOf: not null }));
     private static string Binding(RuntimeConnection connection) => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(

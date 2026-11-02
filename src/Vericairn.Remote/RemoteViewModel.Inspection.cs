@@ -91,10 +91,16 @@ public sealed partial class RemoteViewModel
         OpenAssignmentCommand?.NotifyCanExecuteChanged();
         BackToWorkCommand?.NotifyCanExecuteChanged();
         NotifyDecisionCommands();
+        NotifyPolicyCommands();
     }
 
     private async Task OpenAttentionAsync()
     {
+        if (SelectedAttention?.Notice is { Policy: not null } policy)
+        {
+            await OpenPolicyAsync(policy).ConfigureAwait(true);
+            return;
+        }
         if (SelectedAttention is not { SubjectId: { } id } item) return;
         RemoteEstate? estate = Selected;
         if (item.SubjectType is not ("ask" or "release")) await OpenDetailAsync(id, item.SubjectType).ConfigureAwait(true);
@@ -115,6 +121,7 @@ public sealed partial class RemoteViewModel
     private void RaiseDetailFreshness()
     {
         Raise(nameof(DetailFreshness)); Raise(nameof(RunObservations)); Raise(nameof(ProgressClaims));
+        NotifyPolicy();
     }
 
     private static string StopObservation(RunStop stop) => $"Stop {stop.State}: requested {stop.RequestedAt} by {stop.RequestedBy}; {stop.Reason ?? "no reason recorded"}"

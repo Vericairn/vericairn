@@ -30,7 +30,7 @@ public sealed partial class RemoteViewModel
     /// <summary>Whether the decision review replaces the home areas.</summary>
     public bool HasDecisionReview => ShowHome && decision is not null;
     /// <summary>The five home areas remain available behind the review.</summary>
-    public bool ShowAreas => ShowHome && !HasDecisionReview;
+    public bool ShowAreas => ShowHome && !HasDecisionReview && !HasPolicyDetail;
     /// <summary>Drafts and original submissions retained for this exact connection.</summary>
     public IReadOnlyList<RemoteDecisionDraft> DecisionDrafts { get => decisionDrafts; private set => Set(ref decisionDrafts, value); }
     /// <summary>The stored draft to reopen. Selecting never submits it.</summary>

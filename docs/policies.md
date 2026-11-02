@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 11, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, which authored text the writing scan checks, parallel results, settled review waits and prospective work-state consistency, and locate reference coverage in the selected release's documentation set with its build binding.
+Revision 12, November 2, 2026. Describe Remote's policy and recurring-duty attention, exact history, desktop review context and aged offline observations in 0.9.0.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -19,6 +19,17 @@ For preparation, authoring and review steps, see [Adopting and operating estate 
 Each SDK method has an `Async` counterpart with cancellation and a response deadline. The CLI uses the same operations through the embedded runtime or daemon; hashing runs the shared calculation directly on the supplied file without opening an estate. `--json` returns the complete typed response. Evaluation views name their basis; hashing prints just the definition hash. A policy key or any revision id selects its current declaration. Exception records and writing removals remain visible as history.
 
 The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate`, `access` and `hash` remain distinct from the named collection operations.
+
+In 0.9.0, [Remote](remote.md#policy-conditions-and-recurring-duties) shows these same conditions in Attention, including due
+within grace, missed, discharged late, excepted and unavailable duties. Each notice carries the policy, rule, exact subject,
+level, owner, next action and recorded-time basis. Opening it preserves that selection beside the observed policy and complete
+exception and completion history, with exact occurrence and proof references and operator preparation. Work within grace
+remains incomplete; an exception or acknowledgment clears no debt. Missing sources remain unavailable.
+
+Remote refreshes authority and the policy basis before preparing context through the existing handoff read, and checks them
+again afterward. The exact original subject and occurrence remain explicit when a newer revision is observed. Full review and
+any action continue on the desktop with its own refreshed authority; this flow approves and writes no record from the phone.
+Cached conditions, histories and context packages keep their observation time and age. Offline taps send and queue nothing.
 
 `policies hash`, added in 0.8.2, accepts a prepared policy or recurring-duty body with `basis` either absent or an array. It returns SHA-256 over the canonical body with only top-level `basis` omitted, exactly the `definitionHash` checked during approval. The [CLI reference](cli.md) lists its options. The API takes `PolicyHashRequest` (`{"body":{...}}`) and returns `PolicyHashResponse` (`{"definitionHash":"sha256:...","problem":null}`); the SDK exposes `PolicyHash` and `PolicyHashAsync`. This POST reads only its supplied body, needs no write authority and writes no records or write ledger. Normal transport authentication still applies. Invalid JSON returns HTTP 400; a non-policy body or a value outside the canonical format returns HTTP 422 with an `invalid` problem and a null hash. Hashing grants no approval and does not validate estate references or installed rule parameters.
 

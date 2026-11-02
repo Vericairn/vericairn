@@ -114,6 +114,7 @@ public sealed partial class EstateService
                 item.RecordType ?? "attention", item.Record ?? item.Command ?? item.Kind, item.Hash, item.AsOf, item.Target, basis);
         }
 
+        notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.
         var current = notices.GroupBy(n => n.Key, StringComparer.Ordinal).Select(group =>
