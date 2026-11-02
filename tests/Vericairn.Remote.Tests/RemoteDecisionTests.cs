@@ -46,8 +46,9 @@ public sealed class RemoteDecisionTests(HeadlessFixture fixture)
             Assert.Equal(ask.Id, answer.Body.GetProperty("answer").GetProperty("ask").GetString());
             Assert.Equal(ask.ComputedHash, answer.Body.GetProperty("answer").GetProperty("hash").GetString());
             Assert.Equal(answer.Body.GetProperty("decidedAt").GetString(), answer.Body.GetProperty("answer").GetProperty("at").GetString());
-            Assert.Equal(model.Selected!.Connection.Device, Assert.Single(answer.Signatures).Device);
-            Assert.True(RecordSigning.Verify(model.Selected.Connection.DevicePublicKey, RecordSigning.Digest(answer.ComputedHash), answer.Signatures[0].Signature));
+            Assert.Equal(model.Selected!.Connection.PresenceDevice, Assert.Single(answer.Signatures).Device);
+            Assert.True(RecordSigning.Verify(model.Selected.Connection.PresenceDevicePublicKey!, RecordSigning.Digest(answer.ComputedHash), answer.Signatures[0].Signature));
+            Assert.Equal(connections.Basis!.Head, answer.Body.GetProperty("changeSet").GetProperty("head").GetString());
             Assert.Equal("completed", model.Decision!.State);
             Assert.Contains("no publication", model.DecisionMessage, StringComparison.Ordinal);
             Assert.False(model.SubmitDecisionCommand.CanExecute(null));
@@ -193,7 +194,7 @@ public sealed class RemoteDecisionTests(HeadlessFixture fixture)
             Assert.Equal(result.Reference, accepted.Subject);
             Assert.Equal(review.Id, Assert.Single(accepted.Body.GetProperty("basis").EnumerateArray()).GetString());
             Assert.False(accepted.Body.GetProperty("self").GetBoolean());
-            Assert.Equal(model.Selected!.Connection.Device, Assert.Single(accepted.Signatures).Device);
+            Assert.Equal(model.Selected!.Connection.PresenceDevice, Assert.Single(accepted.Signatures).Device);
             Assert.Equal("completed", model.Decision!.State);
             Assert.Contains("no publication", model.DecisionMessage, StringComparison.Ordinal);
             Assert.Equal(0, estate.Load().Findings.Errors);
@@ -418,12 +419,7 @@ internal static class RemoteDecisionSeed
     internal static void Ready(RemoteViewModel model, string statement)
     {
         model.DecisionStatement = statement;
-        if (model.IsAsk)
-        {
-            model.DecisionStake = "low";
-            model.DecisionBaseCommit = new string('a', 40);
-            model.DecisionHasNoDocumentChanges = true;
-        }
+        if (model.IsAsk) model.DecisionStake = "low";
         model.MaterialReviewed = true;
     }
 }

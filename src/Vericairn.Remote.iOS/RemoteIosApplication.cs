@@ -17,7 +17,7 @@ public partial class RemoteIosApplication : AvaloniaAppDelegate<RemoteApp>
     /// <inheritdoc />
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
-        RemoteApp.Connections = () => new LocalNetworkConnections(Home(), Keys());
+        RemoteApp.Connections = () => new LocalNetworkConnections(Home(), Keys(), PresenceKeys());
         // Dynamic Type: the body text style's size against its default of 17 points.
         RemoteApp.TextScale = (UIFont.GetPreferredFontForTextStyle(UIFontTextStyle.Body)?.PointSize ?? 17) / 17;
         return base.CustomizeAppBuilder(builder);
@@ -28,6 +28,12 @@ public partial class RemoteIosApplication : AvaloniaAppDelegate<RemoteApp>
     /// storage and records exactly that custody.
     /// </summary>
     private static IDeviceKeyStore Keys() => Runtime.Arch == Arch.SIMULATOR ? new FileKeyStore(Home()) : new SecureEnclaveDeviceKeyStore();
+
+    /// <summary>
+    /// The presence key's store: the Secure Enclave with user presence on a device. The simulator's owner-only file cannot require
+    /// presence, so a simulator build has no presence key, claims no presence and signs no decision.
+    /// </summary>
+    private static SecureEnclaveDeviceKeyStore? PresenceKeys() => Runtime.Arch == Arch.SIMULATOR ? null : new SecureEnclaveDeviceKeyStore(presence: true);
 
     // Connections and any simulator key live in the app's own Application Support, excluded from backups: a replacement phone pairs
     // afresh rather than inheriting access from a backup.

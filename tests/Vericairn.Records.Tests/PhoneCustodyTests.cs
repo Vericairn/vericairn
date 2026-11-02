@@ -8,7 +8,11 @@ using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Tests;
 
-/// <summary>A phone's device key, held by its Secure Enclave or Android Keystore, is recorded as such and claims no presence it does not enforce.</summary>
+/// <summary>
+/// A phone's device key, held by its Secure Enclave or Android Keystore, is recorded as such. Its request key states presence none;
+/// from 0.9.0 (REMOTE-11) its presence key, made in the same custody with user presence or per-use authentication, states presence
+/// required, which only a person's device may.
+/// </summary>
 public sealed class PhoneCustodyTests : IDisposable
 {
     private readonly string home = Directory.CreateTempSubdirectory("vericairn-phone-custody-").FullName;
@@ -16,14 +20,18 @@ public sealed class PhoneCustodyTests : IDisposable
     [Theory]
     [InlineData("ios", DeviceKeyStores.IosSecureEnclaveKind)]
     [InlineData("android", DeviceKeyStores.AndroidKeystoreKind)]
-    public void APhoneDeviceRecordsItsKeystoreAndNeverClaimsPresence(string platform, string custody)
+    public void APhoneDeviceRecordsItsKeystoreAndClaimsPresenceOnlyForAPersonsPresenceKey(string platform, string custody)
     {
         using var estate = new TestEstate(recordFormat: 2);
         RecordEnvelope phone = Device(estate, platform, custody, "none");
-        RecordEnvelope claims = Device(estate, platform, custody, "required");
+        RecordEnvelope presence = Device(estate, platform, custody, "required");
+        RecordEnvelope agent = Device(estate, platform, custody, "required", estate.BuilderId);
         List<Finding> findings = estate.Load().Findings.ToList();
         Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(phone.ExpectedPath, StringComparison.Ordinal));
-        Assert.Contains(findings, f => f.Code == "device.presence" && f.Location == claims.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(presence.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "device.presence" && f.Location == agent.ExpectedPath);
+        Assert.Contains(custody, DeviceKeyStores.PresenceKinds);
+        Assert.DoesNotContain("file-owner-only", DeviceKeyStores.PresenceKinds);
 
         // Format 1 knows neither.
         using var early = new TestEstate();
@@ -54,12 +62,13 @@ public sealed class PhoneCustodyTests : IDisposable
 
     public void Dispose() => Directory.Delete(home, recursive: true);
 
-    private RecordEnvelope Device(TestEstate estate, string platform, string custody, string? presence)
+    private RecordEnvelope Device(TestEstate estate, string platform, string custody, string? presence, string? principal = null)
     {
         var store = new FileKeyStore(home);
         string id = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
         string publicKey = RecordSigning.EncodePublicKey(store.Create(id));
         string extra = presence is null ? "" : $$""","presence":"{{presence}}","purpose":"signing" """;
-        return estate.Add("device", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","name":"Phone","platform":"{{platform}}","custody":"{{custody}}","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["local-network"]{{extra}}}""", id: id, signer: new StoreSigner(store, id));
+        string owner = principal ?? estate.OperatorId;
+        return estate.Add("device", estate.OperatorId, $$"""{"principal":"{{owner}}","name":"Phone","platform":"{{platform}}","custody":"{{custody}}","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["local-network"]{{extra}}}""", id: id, signer: new StoreSigner(store, id));
     }
 }

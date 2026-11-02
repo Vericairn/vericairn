@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Remote;
 
@@ -23,6 +24,7 @@ internal sealed class RemoteDecisionReader(IEstateApi api)
 
     internal async Task<RemoteDecisionReview> ReadAsync(string id, string principal, string asOf)
     {
+        string? head = null;
         RecordResponse original = await RequiredAsync(id).ConfigureAwait(false);
         RecordResponse subject = await LatestAsync(original).ConfigureAwait(false);
         string root = await RootAsync(subject).ConfigureAwait(false);
@@ -40,6 +42,7 @@ internal sealed class RemoteDecisionReader(IEstateApi api)
                 .SelectMany(p => Rows(p, "delivered")).Any(a => Text(a, "revision") == subject.Id && Text(a, "hash") == subject.Hash);
             if (!waiting || Text(Body(subject), "to") != principal)
                 reasons.Add("This exact ask is not in your current delivery. Refresh Attention; an answered, withdrawn or differently addressed ask cannot be answered here.");
+            head = await BasisAsync().ConfigureAwait(false);
         }
         else if (subject.Type is "result" or "release")
         {
@@ -61,7 +64,32 @@ internal sealed class RemoteDecisionReader(IEstateApi api)
         foreach (RecordResponse verification in (await CurrentAsync("verification").ConfigureAwait(false)).Where(r => Pins(r, subject)))
             await AddAsync(verification).ConfigureAwait(false);
         return new(root, subject, asOf, records.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToArray(),
-            evidence.Values.OrderBy(e => e.Hash, StringComparer.Ordinal).ToArray(), basis.Order(StringComparer.Ordinal).ToArray(), reasons.Order(StringComparer.Ordinal).ToArray());
+            evidence.Values.OrderBy(e => e.Hash, StringComparer.Ordinal).ToArray(), basis.Order(StringComparer.Ordinal).ToArray(), reasons.Order(StringComparer.Ordinal).ToArray())
+        { Head = head };
+    }
+
+    // The runtime supplies the estate's basis: the phone cannot observe the repository, and never infers a commit from the software's pin.
+    private async Task<string?> BasisAsync()
+    {
+        DecisionBasisResponse basis;
+        try { basis = await api.DecisionBasisAsync().ConfigureAwait(false); }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null || exception is NotSupportedException or JsonException)
+        {
+            reasons.Add("This runtime did not supply the estate's current basis, which an answer needs. Update the runtime, or answer on the desktop.");
+            return null;
+        }
+        if (!basis.Ok || basis.Head is not string head || !Patterns.Commit.IsMatch(head) || basis.BaseCommit != head || basis.Documents is null)
+        {
+            reasons.Add("The estate's current basis is unavailable" + (basis.Problem is null ? "." : ": " + basis.Problem.Message) + " An answer needs it; answer on the desktop.");
+            return null;
+        }
+        if (basis.DocumentsChanged)
+        {
+            reasons.Add("Design documents changed since the estate's head " + head + ": " + string.Join(", ", basis.Documents.Select(d => d.Path)) +
+                ". An answer with document changes is recorded on the desktop, which pins them.");
+            return null;
+        }
+        return head;
     }
 
     private async Task AddAsync(RecordResponse record)
@@ -191,7 +219,7 @@ internal sealed class RemoteDecisionReader(IEstateApi api)
         first.Root == second.Root && first.Subject.Id == second.Subject.Id && first.Subject.Hash == second.Subject.Hash &&
         first.Material.Select(r => (r.Id, r.Hash, r.Current)).SequenceEqual(second.Material.Select(r => (r.Id, r.Hash, r.Current))) &&
         first.Evidence.Select(e => e.Hash).SequenceEqual(second.Evidence.Select(e => e.Hash)) &&
-        first.Basis.SequenceEqual(second.Basis) && first.Reasons.SequenceEqual(second.Reasons);
+        first.Basis.SequenceEqual(second.Basis) && first.Reasons.SequenceEqual(second.Reasons) && first.Head == second.Head;
 
     internal static string Describe(RemoteDecisionReview review) => string.Join("\n\n", review.Material.Select(r =>
         r.Type + " " + r.Id + "\n" + r.Hash + (r.Current ? "\nCurrent at observation" : "\nHistorical revision") + "\n" + Describe(r.Envelope))) +

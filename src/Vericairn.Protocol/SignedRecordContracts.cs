@@ -24,7 +24,15 @@ public sealed record RecordPrepared(string Plan, string Id, string At, string Ha
 /// <param name="Problem">Why there is none.</param>
 public sealed record RecordPrepareResponse(bool Ok, RecordPrepared? Prepared = null, Problem? Problem = null);
 
-/// <summary>The requesting device's signature of a record the runtime prepared for it.</summary>
+/// <summary>The signature of a record the runtime prepared for the requesting device.</summary>
 /// <param name="Plan">The plan the runtime returned.</param>
-/// <param name="Signature">The device's signature of the record's digest, encoded as record signatures are.</param>
-public sealed record SignedRecordRequest(string Plan, string Signature);
+/// <param name="Signature">The signing device's signature of the record's digest, encoded as record signatures are.</param>
+public sealed record SignedRecordRequest(string Plan, string Signature)
+{
+    /// <summary>
+    /// From 0.9.0 (REMOTE-11): the device whose key made the signature. The requesting device when omitted; otherwise another device of
+    /// the same principal, admitted now, whose every signature needs its owner's presence, such as a phone's presence device. The record
+    /// carries that device's signature; the request is still the requesting device's, which alone may send its plan.
+    /// </summary>
+    public string? Device { get; init; }
+}

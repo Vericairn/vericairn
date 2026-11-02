@@ -8,6 +8,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
+using Vericairn.Sdk;
 
 namespace Vericairn.Remote;
 
@@ -21,6 +22,8 @@ public sealed partial class RemoteViewModel
     private bool decisionCurrent;
     private bool materialReviewed;
     private int decisionEpoch;
+    private string presenceCode = string.Empty;
+    private string presenceMessage = string.Empty;
 
     /// <summary>The open review and its retained original draft or submission.</summary>
     public RemoteDecisionDraft? Decision => decision;
@@ -36,9 +39,21 @@ public sealed partial class RemoteViewModel
     public string DecisionMessage { get => decisionMessage; private set => Set(ref decisionMessage, value); }
     /// <summary>A storage problem blocks signing because an original submission could otherwise be lost.</summary>
     public string DecisionStorageProblem { get => decisionStorageProblem; private set { if (Set(ref decisionStorageProblem, value)) NotifyDecisionCommands(); } }
-    /// <summary>The selected estate, runtime and person stay explicit throughout review.</summary>
+    /// <summary>The selected estate, runtime and person stay explicit throughout review, with the presence key that alone signs here.</summary>
     public string DecisionTarget => Selected is null ? "" : Selected.Name + "\nRuntime " + RuntimeIdentityScheme.Fingerprint(Selected.Connection.Identity) +
-        "\nActing as " + Selected.Connection.Principal + "\nPhone device " + Selected.Connection.Device;
+        "\nActing as " + Selected.Connection.Principal + "\nPhone device " + Selected.Connection.Device +
+        (HasPresenceKey ? "\nPresence key " + Selected.Connection.PresenceDevice + ", which asks for your presence when it signs" : "\nNo presence key on this phone for this estate");
+    /// <summary>Whether this phone holds the selected connection's presence key, the only key that signs a decision here.</summary>
+    public bool HasPresenceKey => Selected is { } estate && connections.HasPresenceKey(estate.Connection);
+    /// <summary>A phone without a presence key is told how to add one beside the review.</summary>
+    public bool NeedsPresenceKey => decision is { Attempted: false } && Selected is not null && !HasPresenceKey;
+    /// <summary>A new pairing code for the same principal, which adds this phone's presence key to the connection.</summary>
+    public string PresenceCode { get => presenceCode; set { if (Set(ref presenceCode, value)) AddPresenceKeyCommand?.NotifyCanExecuteChanged(); } }
+    /// <summary>What adding a presence key observed.</summary>
+    public string PresenceMessage { get => presenceMessage; private set => Set(ref presenceMessage, value); }
+    /// <summary>How to add a presence key: the administrator issues a code for the same person, as for pairing.</summary>
+    public static string PresenceHelp => "Decisions are signed only by this phone's presence key, which asks for Face ID, Touch ID, a fingerprint or the device passcode at every signature. " +
+        "To add one, an administrator runs vericairn devices pair for you on the runtime's machine; enter that code here. The runtime records and admits the presence key as another device of yours.";
     /// <summary>The exact target and observation time.</summary>
     public string DecisionIdentity => decision is null ? "" : decision.Review.Subject.Type + " " + decision.Review.Subject.Id + "\n" + decision.Review.Subject.Hash +
         "\n" + (decisionCurrent && Selected?.Current == true ? "Observed " : "Cached ") + decision.Review.AsOf;
@@ -64,10 +79,10 @@ public sealed partial class RemoteViewModel
     public string? DecisionStake { get => decision?.Stake; set { if (decision is { Attempted: false } draft && value != draft.Stake) EditDecision(draft with { Stake = value }); } }
     /// <summary>The record format's decision stakes.</summary>
     public static IReadOnlyList<string> DecisionStakes => DecisionType.Stakes;
-    /// <summary>The exact estate commit supplied for a decision with no document changes. Never inferred from the software's pin.</summary>
-    public string DecisionBaseCommit { get => decision?.BaseCommit ?? ""; set { if (decision is { Attempted: false } draft && value != draft.BaseCommit) EditDecision(draft with { BaseCommit = value }); } }
-    /// <summary>Explicitly confines the change set to no document changes; decisions changing documents need the desktop.</summary>
-    public bool DecisionHasNoDocumentChanges { get => decision?.NoDocumentChanges == true; set { if (decision is { Attempted: false } draft && value != draft.NoDocumentChanges) EditDecision(draft with { NoDocumentChanges = value }); } }
+    /// <summary>The estate basis the runtime supplied for an answer: its head commit, with no design document changed since. Never typed or inferred here.</summary>
+    public string DecisionBasis => decision is null || !IsAsk ? "" : decision.Review.Head is string head
+        ? "Estate head " + head + "\nNo design document changed since it, as the runtime observed at " + decision.Review.AsOf + ". The answer's change set uses this commit as its base and head and pins no documents; the runtime checks that basis again before it writes."
+        : "The runtime supplied no basis for an answer without document changes. The reasons above say why; answer on the desktop.";
     /// <summary>A fresh deliberate confirmation after every change of material or input. Never restored from storage.</summary>
     public bool MaterialReviewed
     {
@@ -78,11 +93,12 @@ public sealed partial class RemoteViewModel
     public string DecisionEligibility => decision is null ? "" : !decision.Review.Eligible ? string.Join("\n", decision.Review.Reasons) + "\nDecide on the desktop in Workbench; your draft stays here." :
         decision.Attempted ? "This original has already been attempted. Read its records to reconcile; it will not be sent again." :
         !decisionCurrent || Selected?.Current != true ? "Offline or cached: draft only. Reconnect, refresh this review and review the current material before signing." :
-        IsAsk && (!Patterns.Commit.IsMatch(DecisionBaseCommit) || !DecisionHasNoDocumentChanges) ? "The answer needs the exact estate commit and confirmation that no design documents change. If that basis is unavailable or documents change, decide on the desktop." :
+        !HasPresenceKey ? "This phone holds no presence key for this estate, so it cannot sign a decision: its request key never does. Add the presence key below with a new pairing code, or decide on the desktop. Your draft stays here." :
+        IsAsk && !Patterns.Commit.IsMatch(decision.Review.Head ?? "") ? "The answer needs the estate basis the runtime supplies. Refresh the review, or decide on the desktop." :
         IsAsk && !DecisionStakes.Contains(DecisionStake, StringComparer.Ordinal) ? "Choose the decision's stake." :
         string.IsNullOrWhiteSpace(DecisionStatement) ? "Enter your own answer or acceptance statement; choosing an option copies its exact words." :
         DecisionStatement.Length > (IsAsk ? 2000 : 8000) ? "The complete statement exceeds this phone flow's record fields. Preserve it as a draft and decide on the desktop." :
-        !MaterialReviewed ? "Review the complete material and proposed record below, then confirm it before signing." : "Eligible for phone review. The runtime rechecks the record and current device authority before writing.";
+        !MaterialReviewed ? "Review the complete material and proposed record below, then confirm it before signing." : "Eligible for phone review. Signing asks for your presence; the runtime rechecks the record, its basis and the presence key's authority before writing.";
     /// <summary>Exact proposed fields, before the runtime assigns a record id and authoring time.</summary>
     public string DecisionPreview => decision is null ? "" : CanonicalJson.SerializePretty(CreateDecisionRequest(decision, "<answer time at submission>").Body);
     /// <summary>The prepared identity and any observed receipt, retained even if a later read contradicts it.</summary>
@@ -91,8 +107,10 @@ public sealed partial class RemoteViewModel
         (decision.Receipt is { } receipt ? "Runtime receipt: " + receipt.Id + " at " + receipt.Hash : "No write receipt observed.");
     /// <summary>Refreshes material only, never sending a draft.</summary>
     public AsyncCommand RefreshDecisionCommand { get; private set; } = null!;
-    /// <summary>Signs the reviewed record with this phone's key, once.</summary>
+    /// <summary>Signs the reviewed record with this phone's presence key, once, after the owner confirms their presence.</summary>
     public AsyncCommand SubmitDecisionCommand { get; private set; } = null!;
+    /// <summary>Adds this phone's presence key to the selected connection with a new pairing code; signs nothing else.</summary>
+    public AsyncCommand AddPresenceKeyCommand { get; private set; } = null!;
     /// <summary>Reads the original prepared record to reconcile its outcome; never resends.</summary>
     public AsyncCommand ReconcileDecisionCommand { get; private set; } = null!;
     /// <summary>Restores an existing local draft or pending submission.</summary>
@@ -123,24 +141,26 @@ public sealed partial class RemoteViewModel
             DecisionMessage = "Request changes on the desktop in Workbench. This phone flow has no suitable change-request record; your words remain a draft and nothing was sent.";
             return Task.CompletedTask;
         }, () => !Busy && decision is { Attempted: false });
+        AddPresenceKeyCommand = new(AddPresenceKeyAsync, () => !Busy && Selected?.Current == true && !HasPresenceKey && PresenceCode.Trim().Length > 0);
     }
 
-    private bool CanSubmitDecision() => !Busy && Selected?.Current == true && decisionCurrent && MaterialReviewed && DecisionStorageProblem.Length == 0 &&
+    private bool CanSubmitDecision() => !Busy && Selected?.Current == true && decisionCurrent && MaterialReviewed && DecisionStorageProblem.Length == 0 && HasPresenceKey &&
         decision is { Attempted: false, Review.Eligible: true } && !string.IsNullOrWhiteSpace(DecisionStatement) && DecisionStatement.Length <= (IsAsk ? 2000 : 8000) &&
-        (!IsAsk || DecisionStakes.Contains(DecisionStake, StringComparer.Ordinal) && Patterns.Commit.IsMatch(DecisionBaseCommit) && DecisionHasNoDocumentChanges);
+        (!IsAsk || DecisionStakes.Contains(DecisionStake, StringComparer.Ordinal) && Patterns.Commit.IsMatch(decision.Review.Head ?? ""));
 
     private void NotifyDecisionCommands()
     {
         RefreshDecisionCommand?.NotifyCanExecuteChanged(); SubmitDecisionCommand?.NotifyCanExecuteChanged(); ReconcileDecisionCommand?.NotifyCanExecuteChanged();
         OpenDraftCommand?.NotifyCanExecuteChanged(); CloseDecisionCommand?.NotifyCanExecuteChanged(); DeferDecisionCommand?.NotifyCanExecuteChanged();
-        RequestDecisionChangesCommand?.NotifyCanExecuteChanged(); Raise(nameof(DecisionEligibility)); Raise(nameof(CanEditDecision));
+        RequestDecisionChangesCommand?.NotifyCanExecuteChanged(); AddPresenceKeyCommand?.NotifyCanExecuteChanged();
+        Raise(nameof(DecisionEligibility)); Raise(nameof(CanEditDecision)); Raise(nameof(HasPresenceKey)); Raise(nameof(NeedsPresenceKey));
     }
 
     private void NotifyDecision()
     {
         foreach (string property in new[] { nameof(Decision), nameof(HasDecisionReview), nameof(ShowAreas), nameof(DecisionTarget), nameof(DecisionIdentity),
             nameof(DecisionQuestion), nameof(DecisionOptions), nameof(SelectedDecisionOption), nameof(DecisionMaterial), nameof(OriginalDecisionMaterial), nameof(IsAsk),
-            nameof(DecisionStatement), nameof(DecisionStake), nameof(DecisionBaseCommit), nameof(DecisionHasNoDocumentChanges), nameof(MaterialReviewed), nameof(DecisionPreview), nameof(DecisionReceipt) }) Raise(property);
+            nameof(DecisionStatement), nameof(DecisionStake), nameof(DecisionBasis), nameof(MaterialReviewed), nameof(DecisionPreview), nameof(DecisionReceipt) }) Raise(property);
         NotifyDecisionCommands();
     }
 
@@ -242,6 +262,31 @@ public sealed partial class RemoteViewModel
         finally { Busy = false; }
     }
 
+    private async Task AddPresenceKeyAsync()
+    {
+        if (Selected is not { Current: true } estate || HasPresenceKey) return;
+        Busy = true;
+        PresenceMessage = "Adding the presence key. The phone asks for your presence once, to sign its own device record.";
+        try
+        {
+            RuntimeConnection updated = await connections.AddPresenceKeyAsync(estate.Connection, PresenceCode.Trim(), DeviceName.Trim().Length > 0 ? DeviceName.Trim() : "Remote", CancellationToken.None).ConfigureAwait(true);
+            estate.Connection = updated;
+            PresenceCode = string.Empty;
+            PresenceMessage = connections.HasPresenceKey(updated)
+                ? "Presence key " + updated.PresenceDevice + " added and admitted. Decisions from this phone are signed only with it, after you confirm your presence. Review the material again before signing."
+                : "The runtime recorded no presence key this phone holds. Nothing will be signed; decide on the desktop.";
+        }
+        catch (PairingException exception) { PresenceMessage = $"No presence key added ({exception.Code}): {exception.Message}"; }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is ClientFailure failure) { PresenceMessage = $"No presence key added ({failure.Code}): {failure.Message}"; }
+        catch (Exception exception) when (exception is NotSupportedException or ArgumentException or InvalidOperationException) { PresenceMessage = "No presence key added: " + exception.Message; }
+        finally
+        {
+            Busy = false;
+            materialReviewed = false;
+            NotifyDecision();
+        }
+    }
+
     private NewRecordRequest CreateDecisionRequest(RemoteDecisionDraft draft, string at)
     {
         string principal = Selected!.Connection.Principal;
@@ -259,7 +304,7 @@ public sealed partial class RemoteViewModel
             effects = new[] { draft.Statement }, affects, decidedBy = principal, decidedAt = at, stake = draft.Stake,
             notAuthorized = Array.Empty<string>(), answers = new[] { subject.Id },
             answer = new { ask = subject.Id, hash = subject.Hash, at },
-            changeSet = new { baseCommit = draft.BaseCommit, head = draft.BaseCommit, pins = Array.Empty<object>() },
+            changeSet = new { baseCommit = draft.Review.Head ?? "", head = draft.Review.Head ?? "", pins = Array.Empty<object>() },
         }));
     }
 
@@ -279,16 +324,22 @@ public sealed partial class RemoteViewModel
             retained = original with { Request = request };
             if (!KeepDecision(estate, retained)) return;
 
-            // The SDK's review callback is synchronous. Run it away from the UI so it can re-read all material immediately
-            // before allowing the key to sign, and durably reserve the exact original id before the signed write can leave.
-            WriteOutcome outcome = await Task.Run(async () => await connections.WriteSignedAsync(estate.Connection, request, prepared =>
+            // The SDK's callbacks are synchronous. Run them away from the UI: the material and basis are read again immediately before
+            // the presence key asks for the person's presence, and again once it has signed, since the prompt can take a while. The
+            // exact original id is durably reserved after the signature exists and before it can leave, so a declined or failed
+            // presence prompt leaves only a draft, never an original to reconcile.
+            bool StillCurrent(RecordPrepared prepared)
             {
                 if (epoch != Volatile.Read(ref decisionEpoch)) return false;
                 if (!PreparedMatches(prepared, request)) throw new InvalidDataException("The prepared record differs from the reviewed request.");
                 RemoteDecisionReview checkedAgain = new RemoteDecisionReader(api).ReadAsync(original.Review.Subject.Id, estate.Connection.Principal, Now).GetAwaiter().GetResult();
                 if (!RemoteDecisionReader.Same(original.Review, checkedAgain) || !checkedAgain.Eligible)
                 { changed = checkedAgain; return false; }
-                if (epoch != Volatile.Read(ref decisionEpoch)) return false;
+                return epoch == Volatile.Read(ref decisionEpoch);
+            }
+            WriteOutcome outcome = await Task.Run(async () => await connections.WriteSignedAsync(estate.Connection, request, StillCurrent, prepared =>
+            {
+                if (!StillCurrent(prepared)) return false;
                 RemoteDecisionDraft pending = retained with { Prepared = prepared, State = "uncertain", Message = "Submission may be in flight. Reconcile the original record; never send it again." };
                 connections.SaveDecision(estate.Connection, pending);
                 retained = pending;
@@ -301,6 +352,8 @@ public sealed partial class RemoteViewModel
                 retained = retained with { Receipt = receipt, Problem = outcome.Problem, State = outcome.Problem is null ? "accepted for processing" : "uncertain",
                     Message = outcome.Problem is null ? "The runtime returned a write receipt. Read the exact record to observe completion; no downstream effect is implied."
                         : "The runtime returned a write receipt with a recovery problem: " + outcome.Problem.Message + " Reconcile the original; never resubmit." };
+            else if (changed is null && !retained.Attempted && outcome.Problem is { Code: "not-signed" or "presence-required" } unsigned)
+                retained = retained with { State = "draft", Message = "Nothing was signed or sent: " + unsigned.Message + " Your words remain a draft; review them again before signing." };
             else if (changed is null && outcome.Problem is { } refusal)
                 retained = retained with { State = "rejected", Problem = refusal, Message = "Rejected: " + refusal.Message +
                     string.Concat(refusal.Findings.Select(f => "\n" + f.Code + ": " + f.Message)) };
@@ -354,16 +407,18 @@ public sealed partial class RemoteViewModel
         {
             RecordResponse? record = await api.RecordAsync(draft.Prepared!.Id).ConfigureAwait(true);
             if (record is not null) RemoteDecisionReader.Validate(record);
+            // Completion is the exact record carrying this phone's presence key's signature; the request key never signs a decision.
             bool verified = record is not null && record.Id == draft.Prepared.Id && record.Hash == draft.Prepared.Hash &&
                 RemoteDecisionReader.Text(record.Envelope, "by") == estate.Connection.Principal &&
-                RemoteDecisionReader.Rows(record.Envelope, "signatures").Any(s => RemoteDecisionReader.Text(s, "device") == estate.Connection.Device &&
+                estate.Connection is { PresenceDevice: string presenceDevice, PresenceDevicePublicKey: string presenceKey } &&
+                RemoteDecisionReader.Rows(record.Envelope, "signatures").Any(s => RemoteDecisionReader.Text(s, "device") == presenceDevice &&
                     RemoteDecisionReader.Text(s, "algorithm") == RecordSigning.Algorithm &&
-                    RecordSigning.Verify(estate.Connection.DevicePublicKey, RecordSigning.Digest(record.Hash), RemoteDecisionReader.Text(s, "signature") ?? ""));
+                    RecordSigning.Verify(presenceKey, RecordSigning.Digest(record.Hash), RemoteDecisionReader.Text(s, "signature") ?? ""));
             bool receiptMatches = draft.Receipt is null || draft.Receipt.Id == draft.Prepared.Id && draft.Receipt.Hash == draft.Prepared.Hash;
             observed = verified && receiptMatches ? draft with { State = draft.Problem is null ? "completed" : "uncertain", Message = draft.Problem is null
-                ? "Completed: the exact record and this phone's signature were observed. This confirms the recorded answer or acceptance only; no publication or other downstream effect is established."
+                ? "Completed: the exact record and this phone's presence-key signature were observed. This confirms the recorded answer or acceptance only; no publication or other downstream effect is established."
                 : "The exact phone-signed record was observed, but the runtime's recovery problem remains: " + draft.Problem.Message + " Reconcile on the desktop; never resubmit." }
-                : draft with { State = "uncertain", Message = draft.Receipt is null ? "Uncertain: the exact phone-signed record was not observed. Keep the original identity and reconcile on the desktop; do not resend."
+                : draft with { State = "uncertain", Message = draft.Receipt is null ? "Uncertain: the exact record signed by this phone's presence key was not observed. Keep the original identity and reconcile on the desktop; do not resend."
                     : "Uncertain: the record read contradicts the retained receipt. Keep both observations and reconcile on the desktop; do not resend." };
         }
         catch (Exception exception) when (DecisionFailure(exception))

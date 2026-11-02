@@ -37,7 +37,7 @@ public sealed class RemoteReleaseDecisionTests(HeadlessFixture fixture)
             Assert.Equal(candidate.Reference, acceptance.Subject);
             Assert.True(acceptance.Body.GetProperty("self").GetBoolean());
             Assert.Equal(review.Id, Assert.Single(acceptance.Body.GetProperty("basis").EnumerateArray()).GetString());
-            Assert.Equal(model.Selected!.Connection.Device, Assert.Single(acceptance.Signatures).Device);
+            Assert.Equal(model.Selected!.Connection.PresenceDevice, Assert.Single(acceptance.Signatures).Device);
             Assert.Equal("completed", model.Decision!.State);
             Assert.Equal("candidate", Assert.Single(estate.Load().Current("release")).Body.GetProperty("status").GetString());
             Assert.Equal(0, estate.Load().Findings.Errors);

@@ -67,6 +67,7 @@ public static class OpenApiDocument
         ("POST", "/v1/records/signed"),
         ("POST", "/v1/decisions/new"),
         ("GET", "/v1/decisions"),
+        ("GET", "/v1/decisions/basis"),
         ("GET", "/v1/decisions/{id}"),
         ("GET", "/v1/work/{key}/brief"),
         ("GET", "/v1/work/{key}"),
@@ -288,6 +289,10 @@ public static class OpenApiDocument
                 });
             }
 
+            if (method == "GET" && path == "/v1/decisions/basis")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "base", ["in"] = "query", ["required"] = false,
+                    ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A full local commit of the estate repository to compare with; the head observed now when omitted." });
+
             if (method == "GET" && path == "/v1/attention")
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false,
                     ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The requesting principal; defaults to the device principal or local operator." });
@@ -370,6 +375,14 @@ public static class OpenApiDocument
             string schema = method == "GET" ? "AttentionResponse" : "AttentionAcknowledgeResponse";
             responses["200"] = new JsonObject { ["description"] = "Principal-scoped presentation state only. Acknowledgment signs no record, never resolves or hides an item, and requires the current notice revision. A paired write is kept in the local-network ledger without requiring a presence-free signer.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } } };
+        }
+        else if (path == "/v1/decisions/basis")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "DecisionBasisResponse: the base, the head and every design document changed since the base with its content hash, or an unavailable problem. Reading writes nothing; a device-signed answer must state the basis the runtime observes when it is prepared and written.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("DecisionBasisResponse") } },
+            };
         }
         else if (path == "/v1/records/prepare")
         {
@@ -740,7 +753,7 @@ public static class OpenApiDocument
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["RecordPrepareResponse"] = Object(("ok", "boolean"), ("prepared", "object"), ("problem", "object")),
             ["RecordPrepared"] = Object(("plan", "string"), ("id", "string"), ("at", "string"), ("hash", "string"), ("expiresAt", "string"), ("record", "object")),
-            ["SignedRecordRequest"] = Object(("plan", "string"), ("signature", "string")),
+            ["SignedRecordRequest"] = Object(("plan", "string"), ("signature", "string"), ("device", "string")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["WorkNewRequest"] = workNewRequest,
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string"), ("prompt", "object")),
@@ -760,6 +773,8 @@ public static class OpenApiDocument
             ["DocumentReviewRequest"] = Object(("by", "string"), ("outcome", "string"), ("summary", "string"), ("findings", "array"), ("commit", "string"), ("independence", "string"), ("sections", "array")),
             ["DecisionNewRequest"] = decisionNew,
             ["DecisionNewResponse"] = Object(("written", "object"), ("pins", "array"), ("problem", "object"), ("ok", "boolean")),
+            ["DecisionBasisResponse"] = Object(("ok", "boolean"), ("baseCommit", "string"), ("head", "string"), ("documents", "array"), ("problem", "object")),
+            ["DecisionBasisDocument"] = Object(("path", "string"), ("hash", "string")),
             ["DocumentNewRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string")),
             ["DocumentNewResponse"] = Object(("declaration", "object"), ("path", "string"), ("contentHash", "string"), ("problem", "object"), ("ok", "boolean")),
             ["DocumentAdoptRequest"] = Object(("by", "string"), ("template", "object"), ("path", "string"), ("expectedContentHash", "string"), ("expectedDeclaration", "string"), ("title", "string"), ("options", "object"), ("scope", "object"), ("overrides", "array"), ("level", "string"), ("preview", "boolean"), ("includeRegions", "boolean")),
@@ -877,8 +892,8 @@ public static class OpenApiDocument
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean"), ("from", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
-            ["PairingHello"] = Object(("handle", "string"), ("nonce", "string")),
-            ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string")),
+            ["PairingHello"] = Object(("handle", "string"), ("nonce", "string"), ("presence", "boolean")),
+            ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
             ["WriteOutcome"] = Object(("written", "object"), ("problem", "object")),
@@ -1029,9 +1044,10 @@ public static class OpenApiDocument
         ("GET", "/v1/records") => "The current records of one type, oldest first.",
         ("POST", "/v1/records") => "Author a record; signed with the author's admitted device on the runtime's machine; rejected with findings when the estate would be invalid.",
         ("POST", "/v1/records/prepare") => "Prepare a record the requesting device will sign with its own key: the runtime fixes its id, time and form for that device; writes nothing.",
-        ("POST", "/v1/records/signed") => "Write a prepared record with the requesting device's signature, verified against that admitted device; nothing on the runtime's machine signs it.",
+        ("POST", "/v1/records/signed") => "Write a prepared record with the requesting device's signature, or from 0.9.0 the signature of the device it names: another admitted device of its principal whose every signature needs its owner's presence. Verified against that device; nothing on the runtime's machine signs it.",
         ("POST", "/v1/decisions/new") => "Record an operator answer with its words, answer time and exact changed design document pins.",
         ("GET", "/v1/decisions") => "Current decisions.",
+        ("GET", "/v1/decisions/basis") => "The estate's current basis for an answer: the repository's head commit and the design documents changed since a base commit, or since the head. Reads the repository only; writes nothing.",
         ("GET", "/v1/decisions/{id}") => "One decision by the id of any of its revisions.",
         ("GET", "/v1/work/{key}/brief") => "The brief of a work order: everything a contributor needs, from the records alone.",
         ("GET", "/v1/work/{key}") => "What an observer sees of a work order.",
@@ -1107,7 +1123,7 @@ public static class OpenApiDocument
         ("POST", "/v1/shutdown") => "Ask the daemon to stop; closing a client never stops it.",
         ("POST", "/v1/pairings") => "Issue a pairing code under an administrator's authority (the operator, or a principal with the administer scope whose admitted device here signs the admission) for a principal and the connectivity profiles its device will be permitted: 16 characters, 80 secret bits, for ten minutes, five attempts and one device. On the runtime's own machine only.",
         ("POST", "/v1/pairing/hello") => "Start a pairing over the local network with a code's handle and a nonce: the runtime answers with its identity, the certificate on this connection, the device record it will write, and its MAC with the code's runtime key.",
-        ("POST", "/v1/pairing/confirm") => "Complete a pairing: the device's key, descriptive identity and signature of its record, with its MAC with the code's device key; the runtime records the device and its admission, and answers with its MAC over the whole exchange.",
+        ("POST", "/v1/pairing/confirm") => "Complete a pairing: the device's key, descriptive identity and signature of its record, with its MAC with the code's device key; the runtime records the device and its admission, and answers with its MAC over the whole exchange. From 0.9.0 a confirmation may also carry the presence device the challenge offered, which is recorded and admitted with it under the same code, or neither is.",
         ("GET", "/v1/runtime/identity") => "The runtime identity's proof for a nonce: its signature over the estate, the certificate this connection presented and the nonce, which a paired device checks before any other request.",
         ("POST", "/v1/runtime/certificate") => "Replace the runtime certificate now: paired devices keep working, since the runtime identity signs the new one; for a compromise every other open connection is closed too, and identity replaces the runtime identity as well, after which every device pairs again. On the runtime's own machine only.",
         _ => string.Empty,
