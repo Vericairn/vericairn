@@ -3,7 +3,7 @@
 Remote is Vericairn's phone companion for iOS and Android: a client of an estate's runtime on your local network, never a host
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
-This guide describes Remote's pairing, attention, work and decision views (REMOTE-01 to REMOTE-03, 0.9.0). It is a **developer build**:
+This guide describes Remote's pairing, attention, work, decision and policy views (REMOTE-01 to REMOTE-03 and POLICY-05, 0.9.0). It is a **developer build**:
 it is not in an app store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -14,13 +14,15 @@ it is not in an app store, and no real-device qualification is recorded for it.
 - **Home**, for the selected estate, with its connection state (connecting, current, cached, partial, denied or unavailable) and
   how fresh the content is:
   - **Attention:** what waits on the signed-in principal, from status and required communication attention, most urgent first.
-    Each notice shows its subject, reason, work state, attention state, freshness and next action.
+    Each notice shows its subject, reason, work state, attention state, freshness and next action. Policy conditions and recurring
+    duties retain their policy, rule, subject, level, owner and evaluation basis; each duty occurrence remains separate.
   - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
     the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.
   - **Products:** the estate's products.
   - **Nodes:** the runtime this phone reaches: its identity, address, who the phone acts as, the phone's device and the last
     time a check was current. A healthy connection here says nothing about workers running on other machines.
-  - **Handoffs:** not in Remote yet; prepare and open them in Workbench.
+  - **Handoffs:** policy and duty context can be prepared from their Attention detail. Desktop task delivery and opening remain
+    in Workbench; preparing a package does not establish that a desktop opened it.
 
 Every area, input and command has a screen-reader name; states are words, never colour alone; long text wraps rather
 than truncating; and text follows the phone's text-size setting (Dynamic Type on iOS, font size on Android) as Remote
@@ -80,8 +82,8 @@ as a draft beside the new revision; another review is required. Device authentic
 follow-up; this shared flow makes no Face ID, fingerprint or presence claim.
 
 **Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
-the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing desktop handoffs
-remains a later step; the draft stays on this phone.
+the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing handoffs for these
+decision drafts remains a later step; the draft stays on this phone.
 
 ## Drafts and observed outcomes
 
@@ -105,22 +107,56 @@ remain in the retained list. A new revision still needs its own words and comple
 Draft and submission storage is separate from cached observations. Clearing observations does not delete drafts, change estate
 records or cancel any remote effect. Preserve uncertain originals for reconciliation, including when app storage needs recovery.
 
+## Policy conditions and recurring duties
+
+Policy attention uses the runtime's existing evaluation: failed checks, information and release blocks, including due duties
+within grace, missed occurrences, late completions, exceptions and unavailable sources. **Due within grace** says the work is
+incomplete even though the policy has not yet been breached. An exception retains the underlying unmet verdict and missed
+history. A late completion retains the deadline it missed. Unavailable inputs remain unavailable, including an incomplete
+evaluation; an empty count is never substituted for missing evidence.
+
+Each condition names its basis digest and **as of recorded time**. This time can precede the phone's observation time and today's
+deadline. Opening or refreshing the view neither advances that evaluation clock nor creates a record. The phone shows the
+observation's age separately.
+
+Choose **Open subject** to inspect the exact original condition beside a freshly read policy, declarations and exception
+history. The detail retains occurrence identity, due and grace deadlines, completed and missed flags, exact result and proof
+references, and every completion interval, including a withdrawn qualification. Operator preparation and linked asks remain
+with their original finding, owner and basis. Acknowledgment neither completes the work nor removes its debt or release hold.
+
+Policy inspection offers **Refresh policy** and **Prepare desktop handoff**. Both recheck the connection and read current policy
+authority and basis. The handoff reads the existing complete context package, then checks the policy basis and authority again;
+if either changed during preparation, that package is discarded and another refresh is needed. The original subject, hash,
+rule and occurrence stay explicit beside any newer history. The desktop route identifies the estate and runtime, exact policy
+and subject, intended review, and why the full sources and proofs need desktop readers. Its package includes the runtime's
+original material and reports any refusal.
+
+This policy flow offers no phone approval, policy change, duty completion or record submission. Continue on the desktop and
+refresh its authority and basis before reviewing or acting. Preparing context transfers no grant, records no acceptance and
+does not claim a desktop opening or downstream effect. General decision flows described above retain their existing scope.
+Use an updated runtime with POLICY-05 to receive the typed policy attention; older attention responses do not establish that
+there are no policy conditions.
+
 ## Cached observations
 
 The app keeps the last successful home observation and each work detail you opened in its own storage, separately for each
 connection, estate, runtime identity, principal and device. The cache includes attention, work, products and communication
-settings. It contains no pairing code or signing key. Clearing the app's cached observations removes those local copies;
-it changes no record, acknowledgment or running work on the runtime.
+settings, policy attention, opened policy histories and prepared policy context. It contains no pairing code or signing key.
+Clearing the app's cached observations removes those local copies; it changes no record, acknowledgment or running work on the runtime.
 
 When the runtime cannot be reached, the retained view is labeled **cached**, with its observation time and age. Its age continues
 to advance without sending requests. A detail that was never opened says it was not cached. Restored observations start cached;
-opening the app checks the selected estate again. A refreshed home does not renew a previously opened work detail's timestamp.
+opening the app checks the selected estate again. A refreshed home does not renew a previously opened work or policy detail's timestamp.
 If app storage cannot retain an observation, Remote keeps that limitation visible; restarting cannot restore unsaved content.
 
 Acknowledgment is disabled while offline and is never queued. Opening a cached detail and advancing its displayed age send
 nothing. **Refresh** explicitly checks whether the runtime can be reached again. If an acknowledgment loses its response,
 Remote says it was not confirmed and asks you to refresh its state; it never silently resends it. An unavailable observation says
 nothing about whether work or attention exists.
+
+Offline policy inspection retains the original basis, exact subjects, history and age. A policy history that was never opened
+says it was not observed. Policy refresh and handoff preparation are disabled offline; no request or approval is queued. A cached
+package and cached action list convey no current authority.
 
 ## Pairing a phone
 
