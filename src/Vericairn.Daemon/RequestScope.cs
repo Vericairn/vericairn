@@ -205,6 +205,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/records/signed"] = typeof(SignedRecordRequest),
         ["POST /v1/decisions/new"] = typeof(DecisionNewRequest),
         ["GET /v1/decisions"] = null,
+        ["GET /v1/decisions/basis"] = null,
         ["GET /v1/decisions/{id}"] = null,
         ["GET /v1/work/{key}/brief"] = null,
         ["GET /v1/work/{key}"] = null,
@@ -336,8 +337,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
-        // Its plan was prepared for one device, which alone may sign it: the service holds the request to that device.
-        [typeof(SignedRecordRequest)] = (_, _, _) => null,
+        // Its plan was prepared for one device, which alone may send it: the service holds the request to that device, and a signing
+        // device it names (a phone's presence device) to an admitted device of the same principal that needs its owner's presence.
+        [typeof(SignedRecordRequest)] = (scope, r, d) => scope.OwnDevice(((SignedRecordRequest)r).Device, d),
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
         [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
         [typeof(OperatorRequestWriteRequest)] = (_, r, d) => Acting(((OperatorRequestWriteRequest)r).By, d),

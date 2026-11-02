@@ -130,11 +130,8 @@
         <StackPanel IsVisible="{Binding IsAsk}" Spacing="6" IsEnabled="{Binding CanEditDecision}">
           <TextBlock Text="How much rides on this decision" />
           <ComboBox ItemsSource="{x:Static vm:RemoteViewModel.DecisionStakes}" SelectedItem="{Binding DecisionStake}" AutomationProperties.Name="Decision stake" />
-          <TextBlock Text="Exact estate commit for this answer's document basis. If documents change or the basis is unavailable, decide on the desktop." />
-          <TextBox Text="{Binding DecisionBaseCommit}" AutomationProperties.Name="Exact estate commit for an answer with no document changes" />
-          <CheckBox IsChecked="{Binding DecisionHasNoDocumentChanges}" AutomationProperties.Name="Confirm this answer changes no design documents">
-            <TextBlock Text="This answer changes no design documents; the supplied estate commit is both the base and head." />
-          </CheckBox>
+          <TextBlock Text="Estate basis, as the runtime supplied it" />
+          <TextBlock x:Name="DecisionBasis" Text="{Binding DecisionBasis}" AutomationProperties.Name="The estate head commit and design document changes the runtime supplied for this answer" />
         </StackPanel>
         <TextBlock FontWeight="SemiBold" Text="Proposed record" />
         <TextBlock Text="Your words are recorded verbatim. An answer's summary, synthesis and effect use those same words. The runtime supplies its record identity and authoring time. No external action is dispatched." />
@@ -143,9 +140,16 @@
           <TextBlock Text="I reviewed this exact revision, all material above and the proposed record." />
         </CheckBox>
         <TextBlock x:Name="DecisionEligibility" Text="{Binding DecisionEligibility}" />
+        <StackPanel x:Name="PresenceKeyPanel" IsVisible="{Binding NeedsPresenceKey}" Spacing="6">
+          <TextBlock FontWeight="SemiBold" Text="Add this phone's presence key" />
+          <TextBlock Classes="muted" Text="{x:Static vm:RemoteViewModel.PresenceHelp}" />
+          <TextBox x:Name="PresenceCodeBox" Text="{Binding PresenceCode}" PlaceholderText="One-time code for this person" AutomationProperties.Name="Pairing code that adds this phone's presence key" />
+          <Button x:Name="AddPresenceKey" Content="Add presence key" Command="{Binding AddPresenceKeyCommand}" AutomationProperties.Name="Add a presence key to this connection; it asks for your presence once" />
+          <TextBlock Text="{Binding PresenceMessage}" AutomationProperties.Name="What adding the presence key observed" />
+        </StackPanel>
         <WrapPanel Orientation="Horizontal">
           <Button Content="Refresh review" Command="{Binding RefreshDecisionCommand}" AutomationProperties.Name="Read current decision material without submitting" />
-          <Button x:Name="SignDecision" Content="Sign and submit" Command="{Binding SubmitDecisionCommand}" AutomationProperties.Name="Sign the reviewed answer or acceptance once with this phone's device key" />
+          <Button x:Name="SignDecision" Content="Sign and submit" Command="{Binding SubmitDecisionCommand}" AutomationProperties.Name="Sign the reviewed answer or acceptance once with this phone's presence key, which asks for your presence" />
           <Button Content="Reconcile" Command="{Binding ReconcileDecisionCommand}" AutomationProperties.Name="Read the original submitted record without resending" />
           <Button Content="Defer" Command="{Binding DeferDecisionCommand}" AutomationProperties.Name="Defer by acknowledging this notice only" />
           <Button Content="Request changes" Command="{Binding RequestDecisionChangesCommand}" AutomationProperties.Name="Show the desktop route for requesting changes" />

@@ -12,39 +12,40 @@ namespace Vericairn.Remote.Tests;
 public sealed class RemoteDecisionEligibilityTests(HeadlessFixture fixture)
 {
     [Fact]
-    public async Task AnAskNeedsAnExplicitEstateCommitAndNoDocumentChangesBeforeAFreshConfirmation()
+    public async Task AnAnswerUsesTheBasisTheRuntimeSuppliesAndChangedDocumentsLeadToTheDesktop()
     {
         using TestEstate estate = RemoteFixtures.Seeded(3);
         RecordEnvelope ask = RemoteDecisionSeed.Ask(estate);
-        using var connections = new FakeConnections(estate.Root) { EnableSignedWrites = true };
+        string head = new('d', 40);
+        using var connections = new FakeConnections(estate.Root)
+        {
+            EnableSignedWrites = true, Basis = new(true, head, head, [new("design/guide.md", "sha256:" + new string('e', 64))]),
+        };
         await fixture.UiAsync(async () =>
         {
             RemoteViewModel model = await RemoteInspectionSeed.Pair(connections, new InspectionClock());
             await RemoteDecisionSeed.Open(model, ask);
-            model.DecisionStatement = "Keep the limit.";
-            model.DecisionStake = "low";
-            model.MaterialReviewed = true;
-            Assert.Equal("", model.DecisionBaseCommit);
+            Assert.Null(model.Decision!.Review.Head);
+            Assert.Contains("design/guide.md", model.DecisionEligibility, StringComparison.Ordinal);
             Assert.Contains("desktop", model.DecisionEligibility, StringComparison.Ordinal);
+            RemoteDecisionSeed.Ready(model, "Keep the limit.");
+            Assert.False(model.MaterialReviewed);
             await model.SubmitDecisionCommand.ExecuteAsync();
             Assert.Equal(0, connections.PreparedCalls);
 
-            string commit = new('d', 40);
-            model.DecisionBaseCommit = commit;
-            Assert.False(model.MaterialReviewed);
-            model.MaterialReviewed = true;
-            await model.SubmitDecisionCommand.ExecuteAsync();
-            Assert.Equal(0, connections.PreparedCalls);
-
-            model.DecisionHasNoDocumentChanges = true;
-            Assert.False(model.MaterialReviewed);
-            Assert.False(model.SubmitDecisionCommand.CanExecute(null));
-            model.MaterialReviewed = true;
+            // Once the runtime observes no document change since its head, that head is the answer's base and head; nothing is typed.
+            connections.Basis = new(true, head, head, []);
+            await model.RefreshDecisionCommand.ExecuteAsync();
+            Assert.Equal(head, model.Decision!.Review.Head);
+            Assert.Contains(head, model.DecisionBasis, StringComparison.Ordinal);
+            Assert.Contains(head, model.DecisionPreview, StringComparison.Ordinal);
+            RemoteDecisionSeed.Ready(model, "Keep the limit.");
+            Assert.True(model.SubmitDecisionCommand.CanExecute(null), model.DecisionEligibility);
             await model.SubmitDecisionCommand.ExecuteAsync();
             RecordEnvelope answer = Assert.Single(estate.Load().Current("decision"));
             JsonElement change = answer.Body.GetProperty("changeSet");
-            Assert.Equal(commit, change.GetProperty("baseCommit").GetString());
-            Assert.Equal(commit, change.GetProperty("head").GetString());
+            Assert.Equal(head, change.GetProperty("baseCommit").GetString());
+            Assert.Equal(head, change.GetProperty("head").GetString());
             Assert.Empty(change.GetProperty("pins").EnumerateArray());
             Assert.Equal(1, connections.SignedWrites);
             return true;

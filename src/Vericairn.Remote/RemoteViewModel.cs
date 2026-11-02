@@ -106,7 +106,7 @@ public sealed partial class RemoteViewModel : Observable
     public static string Companion => "Remote is the phone companion of an estate you already run: it shows what needs you, what is happening and where, and lets you decide when the complete material can be reviewed here. Your estate stays on its own runtime; nothing is copied to a cloud.";
 
     /// <summary>How to pair, shown beside the form.</summary>
-    public static string PairingHelp => "On a machine running the estate's runtime with its local-network profile, an administrator runs vericairn devices pair for you; enter the address and the one-time code it prints. This phone keeps its own key and connection.";
+    public static string PairingHelp => "On a machine running the estate's runtime with its local-network profile, an administrator runs vericairn devices pair for you; enter the address and the one-time code it prints. This phone keeps its own keys and connection: a request key that signs its requests without asking, and, where the phone can require your presence, a presence key that asks for Face ID, Touch ID, a fingerprint or the passcode and alone signs your decisions. Pairing asks for your presence once.";
 
     /// <summary>Estates this phone is paired with.</summary>
     public ObservableCollection<RemoteEstate> Estates { get; } = [];
@@ -259,7 +259,9 @@ public sealed partial class RemoteViewModel : Observable
             Estates.Clear();
             foreach (RuntimeConnection kept in connections.List()) Estates.Add(Restore(kept));
             Code = string.Empty;
-            PairingMessage = $"Paired with {connection.EstateName ?? connection.Estate} as {connection.PrincipalName ?? connection.Principal}.";
+            PairingMessage = $"Paired with {connection.EstateName ?? connection.Estate} as {connection.PrincipalName ?? connection.Principal}." +
+                (connections.HasPresenceKey(connection) ? " Its presence key signs your decisions after you confirm your presence."
+                    : " This phone holds no presence key for it, so it signs no decision; a decision review offers to add one with a new code.");
             Pairing = false;
             Selected = Estates.FirstOrDefault(e => e.Connection.Id == connection.Id) ?? Estates.LastOrDefault();
         }

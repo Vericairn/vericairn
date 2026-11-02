@@ -73,7 +73,7 @@ public sealed partial class LocalNetworkConnections
     private string DecisionPath(RuntimeConnection connection) => Path.Combine(Path.GetDirectoryName(observations)!, "remote-decisions", Binding(connection) + ".json");
     private static string ImmutableSubmission(RemoteDecisionDraft draft) => CanonicalJson.Serialize(JsonSerializer.SerializeToElement(new
     {
-        draft.Key, draft.Original, draft.Review, draft.Statement, draft.Stake, draft.BaseCommit, draft.NoDocumentChanges, draft.Request, draft.Prepared,
+        draft.Key, draft.Original, draft.Review, draft.Statement, draft.Stake, draft.Request, draft.Prepared,
     }, ProtocolJson.Options));
     private sealed record DecisionStorage(int Version, string Binding, IReadOnlyList<RemoteDecisionDraft> Drafts);
 }

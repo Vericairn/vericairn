@@ -78,6 +78,8 @@ public static class ApiRoutes
             return Results.Json(response, ProtocolJson.Options, statusCode: response.Ok || response.Written is not null || response.Pins.Count > 0 ? 200 : 422);
         });
         app.MapGet($"{v}/decisions", () => Results.Json(service.Decisions(), ProtocolJson.Options));
+        // A read of the repository the estate lives in: its head and the design documents changed since a base. Writes nothing.
+        app.MapGet($"{v}/decisions/basis", (string? @base) => Results.Json(service.DecisionBasis(@base), ProtocolJson.Options));
         app.MapGet($"{v}/decisions/{{id}}", (string id) => service.Decision(id) is DecisionResponse decision ? Results.Json(decision, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/work/{{key}}/brief", (string key, string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) => service.BriefFor(key, recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)) is BriefResponse brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/work/{{key}}", (string key) => service.Observe(key) is ObserveResponse observe ? Results.Json(observe, ProtocolJson.Options) : Results.NotFound());

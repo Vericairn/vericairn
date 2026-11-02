@@ -42,6 +42,8 @@ public sealed class RemoteDecisionJourneyTests
         Assert.Equal(words, answer.Body.GetProperty("statement").GetString());
         Assert.Equal(journey.Person, answer.By);
         Assert.Equal(remote.Decision.Prepared!.Hash, answer.ComputedHash);
+        Assert.Equal(journey.Head, answer.Body.GetProperty("changeSet").GetProperty("baseCommit").GetString());
+        Assert.Equal(journey.Head, answer.Body.GetProperty("changeSet").GetProperty("head").GetString());
         VerifyPhone(answer, remote.Selected.Connection);
         await remote.SubmitDecisionCommand.ExecuteAsync();
 
@@ -64,7 +66,9 @@ public sealed class RemoteDecisionJourneyTests
         LocalNetworkWrite[] writes = LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(journey.Harness.Estate.Root))!)
             .Where(w => w.Operation == "POST /v1/records/signed").ToArray();
         Assert.Equal(2, writes.Length);
+        // The request device sent both writes; only the presence key signed the records, once each after its pairing signature.
         Assert.All(writes, w => Assert.Equal(remote.Selected.Connection.Device, w.Device));
+        Assert.Equal(3, journey.Presence.Signatures);
         Assert.Equal(0, journey.Harness.Socket.Check().Errors);
     }
 
@@ -130,26 +134,25 @@ public sealed class RemoteDecisionJourneyTests
     private static void VerifyPhone(RecordEnvelope record, RuntimeConnection phone)
     {
         RecordSignature signature = Assert.Single(record.Signatures);
-        Assert.Equal(phone.Device, signature.Device);
-        Assert.True(RecordSigning.Verify(phone.DevicePublicKey, RecordSigning.Digest(record.ComputedHash), signature.Signature));
+        Assert.NotEqual(phone.Device, signature.Device);
+        Assert.Equal(phone.PresenceDevice, signature.Device);
+        Assert.True(RecordSigning.Verify(phone.PresenceDevicePublicKey!, RecordSigning.Digest(record.ComputedHash), signature.Signature));
     }
 
     private static void Ready(RemoteViewModel remote, string statement)
     {
         remote.DecisionStatement = statement;
-        if (remote.IsAsk)
-        {
-            remote.DecisionStake = "low";
-            remote.DecisionBaseCommit = new string('a', 40);
-            remote.DecisionHasNoDocumentChanges = true;
-        }
+        if (remote.IsAsk) remote.DecisionStake = "low";
         remote.MaterialReviewed = true;
     }
 
-    private sealed class PhoneJourney(LocalNetworkHarness harness, FileKeyStore runtimeKeys, string presenceDevice, string person,
-        RecordEnvelope order, RecordEnvelope ask, RecordEnvelope result, RecordEnvelope review, JourneyConnections connections, RemoteViewModel remote) : IAsyncDisposable
+    internal sealed class PhoneJourney(LocalNetworkHarness harness, FileKeyStore runtimeKeys, string presenceDevice, string person,
+        RecordEnvelope order, RecordEnvelope ask, RecordEnvelope result, RecordEnvelope review, JourneyConnections connections, RemoteViewModel remote,
+        PresenceKeyStandIn presence, string head) : IAsyncDisposable
     {
         internal LocalNetworkHarness Harness { get; } = harness;
+        internal PresenceKeyStandIn Presence { get; } = presence;
+        internal string Head { get; } = head;
         internal string Person { get; } = person;
         internal RecordEnvelope Order { get; } = order;
         internal RecordEnvelope Ask { get; } = ask;
@@ -186,11 +189,15 @@ public sealed class RemoteDecisionJourneyTests
                     """{"outcome":"completed","summary":"The exact result was inspected.","outputs":[],"evidence":EVIDENCE,"checks":[{"name":"phone","outcome":"passed","summary":"The fixture behaved as expected."}],"limitations":["No publication is claimed."],"unresolvedEffects":[],"nextStep":"Review this exact result."}""".Replace("EVIDENCE", evidence, StringComparison.Ordinal), attempt.Reference);
                 RecordEnvelope review = harness.Estate.Add("review", harness.Estate.OperatorId,
                     """{"independence":"operator","outcome":"pass","summary":"Read the exact result and evidence.","findings":[]}""", result.Reference);
-                var connections = new JourneyConnections(new(harness.DeviceHome, harness.DeviceKeys));
+                // The estate's clone is a repository the runtime observes: the basis an answer states is its head.
+                string head = EstateGit.Init(harness.Estate.Root, harness.Host.Service);
+                var presence = new PresenceKeyStandIn(harness.DeviceHome);
+                var connections = new JourneyConnections(new(harness.DeviceHome, harness.DeviceKeys, presence));
                 var remote = new RemoteViewModel(connections) { Address = harness.Address, Code = harness.Issue(person).Code };
                 await remote.PairCommand.ExecuteAsync();
                 Assert.Equal(ConnectionStates.Current, remote.ConnectionState);
-                return new(harness, runtimeKeys, device, person, order, ask, result, review, connections, remote);
+                Assert.NotNull(remote.Selected!.Connection.PresenceDevice);
+                return new(harness, runtimeKeys, device, person, order, ask, result, review, connections, remote, presence, head);
             }
             catch
             {
@@ -214,7 +221,7 @@ public sealed class RemoteDecisionJourneyTests
         }
     }
 
-    private sealed class JourneyConnections(LocalNetworkConnections inner) : IRemoteConnections
+    internal sealed class JourneyConnections(LocalNetworkConnections inner) : IRemoteConnections
     {
         internal Action? BeforeReview { get; set; }
         internal bool Offline { get; set; }
@@ -228,10 +235,14 @@ public sealed class RemoteDecisionJourneyTests
         public void SaveObservation(RuntimeConnection connection, RemoteObservation observation) => inner.SaveObservation(connection, observation);
         public IReadOnlyList<RemoteDecisionDraft> LoadDecisions(RuntimeConnection connection) => inner.LoadDecisions(connection);
         public void SaveDecision(RuntimeConnection connection, RemoteDecisionDraft draft) => inner.SaveDecision(connection, draft);
-        public Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, CancellationToken cancellationToken = default)
+        public bool HasPresenceKey(RuntimeConnection connection) => inner.HasPresenceKey(connection);
+        public Task<RuntimeConnection> AddPresenceKeyAsync(RuntimeConnection connection, string code, string deviceName, CancellationToken cancellationToken) =>
+            inner.AddPresenceKeyAsync(connection, code, deviceName, cancellationToken);
+        public Task<WriteOutcome> WriteSignedAsync(RuntimeConnection connection, NewRecordRequest request, Func<RecordPrepared, bool> review, Func<RecordPrepared, bool> beforeSend,
+            CancellationToken cancellationToken = default)
         {
             SignedRequests++;
-            return inner.WriteSignedAsync(connection, request, prepared => { BeforeReview?.Invoke(); return review(prepared); }, cancellationToken);
+            return inner.WriteSignedAsync(connection, request, prepared => { BeforeReview?.Invoke(); return review(prepared); }, beforeSend, cancellationToken);
         }
     }
 }

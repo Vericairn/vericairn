@@ -59,8 +59,12 @@ public static class DeviceKeyStores
     /// <summary>The longest a store waits for its owner's presence at one signature; clients observe writes for longer (ClientOperation.EffectDeadline).</summary>
     internal static readonly TimeSpan PresenceWait = TimeSpan.FromMinutes(5);
 
-    /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
-    public static readonly ImmutableArray<string> PresenceKinds = [SecureEnclaveCustody.Kind];
+    /// <summary>
+    /// Custody kinds that can enforce their owner's presence at every signature: the macOS Secure Enclave and, from 0.9.0, a phone key
+    /// made in an iPhone's Secure Enclave with user presence or in Android Keystore with per-use authentication (Remote's presence key).
+    /// A phone's request key in the same custody is made without presence and records presence none.
+    /// </summary>
+    public static readonly ImmutableArray<string> PresenceKinds = [SecureEnclaveCustody.Kind, IosSecureEnclaveKind, AndroidKeystoreKind];
 
     /// <summary>Whether a new device needs its owner's presence when nobody says: a person's does wherever its custody enforces it; an agent's or a service's never does.</summary>
     public static bool PresenceByDefault(bool person, string custodyKind) => person && PresenceKinds.IndexOf(custodyKind) >= 0;

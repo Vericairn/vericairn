@@ -609,6 +609,25 @@ write in `local-network-writes.jsonl` like any other. A plan belongs to the devi
 they keep their expected-hash rules on the runtime's machine. `DeviceSignedRecords.WriteAsync` in the SDK prepares,
 lets the caller review the exact record, signs and writes.
 WATCH-01 and HANDOFF-01 do not implement or qualify Remote's signing, transport or run observation.
+
+### Records signed with presence (REMOTE-11)
+
+From 0.9.0 a phone signs its decisions with its **presence device**, a second admitted device of the same principal whose every
+signature needs its owner's presence, while its request device keeps signing requests unattended. The request device prepares
+the record as above; the presence key signs its digest; and the request device sends `POST /v1/records/signed` naming the
+presence device in `device`. The runtime accepts another signing device only when it is admitted now, belongs to the requesting
+device's principal and states presence `required`; it verifies the signature with that device's current key and writes the
+record with that device's signature. Naming a device of another principal is refused as `denied` before the service reads the
+request; naming an unattended device, or a signature that does not verify, refuses the write and spends the plan. The write
+ledger names the requesting device, and the record names the signing device. `DeviceSignedRecords.WriteWithPresenceAsync` in
+the SDK prepares, lets the caller review the exact record, signs with the presence key, calls the caller once more after the
+signature exists and before it leaves, and sends; a presence key that does not sign returns a `not-signed` problem with nothing
+sent.
+
+A device-signed `decision` with a change set states a basis the device cannot observe, so the runtime observes it: when the
+record is prepared and again when it is written, the change set's head must be the repository's head, it must pin no documents,
+and no design document may have changed since its base, or the write is refused with nothing written. An answer that changes
+design documents is recorded with `POST /v1/decisions/new`, which pins them.
 Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
@@ -624,8 +643,8 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    profiles (`local-network` unless others are named), the administrator's authority and that the admission
    can be signed here, and issues 16 characters of Crockford's base32 alphabet, shown in four groups of four,
    all of them secret: 80 bits from the system's cryptographic random generator, and nothing else, so no part
-   of a code names it. A code works for ten minutes, pairs one device and is exhausted after five confirmations that do
-   not match it; at most sixteen wait at once. The daemon keeps only the keys derived from a code, in memory,
+   of a code names it. A code works for ten minutes, pairs one device (with, from 0.9.0, that device's presence device, step 5) and is
+   exhausted after five confirmations that do not match it; at most sixteen wait at once. The daemon keeps only the keys derived from a code, in memory,
    so a restart forgets every code. From 0.6.1 it also keeps the issuing device, that device's admission revision,
    and the operator-role revision or `administer` grant used to issue it. On loopback the issuer is the requesting
    device; on the local socket it is the admitted device selected to sign admissions for the administrator.
@@ -641,7 +660,8 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    `vericairn-pairing/1 runtime`) and 32 for the device (`vericairn-pairing/1 device`). The code itself never
    crosses the network.
 3. The device sends `POST /v1/pairing/hello` with a 32-byte nonce and an HMAC-SHA256 under the device's key
-   over the nonce and the fingerprint of the certificate its own handshake showed.
+   over the nonce and the fingerprint of the certificate its own handshake showed. From 0.9.0 it sets `presence` true when it
+   will also present a presence device.
 4. The runtime tries every code it holds against that MAC, with the certificate it presented on this
    connection; its MAC is exactly 32 bytes, refused unread otherwise, and a pairing message's body is read only
    as far as 16 KiB for parsing (`413` beyond), for hello and confirm alike. A MAC of the wrong length in
@@ -655,7 +675,9 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    `PairingChallenge`: both nonces, the estate with its name, the runtime identity's public key, the
    fingerprint of the certificate it presented on this connection, the principal with its name and kind, the
    profiles, and the id, time and record format of the device record it will write, with an HMAC-SHA256 under
-   the runtime's key over the hello and all of it. None of it reaches anyone who has not proved the code. A
+   the runtime's key over the hello and all of it. When the hello asked for a presence device and the principal is a person
+   in an estate of record format 2 or later, the challenge also names `presenceRecord`, the id that device's record will
+   have. None of it reaches anyone who has not proved the code. A
    hello uses none of the code's attempts; at most four exchanges of a code are open at once, and a further
    hello closes the oldest.
 5. The device verifies that MAC and that the certificate named is the one its own handshake showed; only
@@ -663,7 +685,11 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    record's id. It builds the device record exactly as the runtime will write it (the principal, its name and
    platform, its custody and presence, its public key, the profiles), signs the record's content hash with
    the new key, and sends `POST /v1/pairing/confirm` with its key, its descriptive identity and that signature,
-   with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields.
+   with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields. When the challenge
+   named a presence record and the device has a presence store, whose custody must enforce presence, it also makes that key,
+   builds its record with the same principal and profiles and presence `required`, signs it with the presence key (the owner
+   confirms their presence once) and adds `presenceDevice` and `presenceSignature` to the confirmation. A presence key that
+   cannot be made, or a prompt the owner declines, is removed and the device pairs alone.
 6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used, lost its
    issuing device or authority, or has no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
    code's five attempts; the last one closes every exchange of the code still open. It refuses a device name
@@ -672,12 +698,20 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    device record with that signature, the device's own, and then the admission by the administrator, signed
    by the administrator's admitted device; when the admission is refused the device record is removed again.
    The issuer's admission and recorded authority are rechecked under the estate write lock before either record
-   is written, so revocation after confirmation validation still refuses both records with `401`.
+   is written, so revocation after confirmation validation still refuses both records with `401`. With a presence device,
+   both keys' signatures are verified first; the runtime refuses one that repeats the paired device's key or does not state
+   presence `required`, and judges the four records (both devices, and both admissions by the same administrator, the
+   presence device's admission note naming the device it pairs with) together before storing them as one batch, so a
+   refused presence device records neither device.
    The device's name, platform, custody and presence are its own statement, which the runtime cannot verify,
    and the admission's note says so and names the issuing device and authority. The code is used up. It answers `PairingCompleted`, the device and
-   admission ids and the record's hash, with an HMAC-SHA256 under the runtime's key over the whole exchange.
+   admission ids and the record's hash, with the presence device's id, admission and hash when one was recorded, and an
+   HMAC-SHA256 under the runtime's key over the whole exchange.
 7. The device verifies that MAC and keeps the connection: the address, the estate, the runtime identity's
-   public key, and its device's id and public key. A failure on the device removes the key it made, and a
+   public key, its device's id and public key, and any presence device's id and public key. A kept connection without a
+   presence device adds one with a new code for the same principal (`RuntimeConnections.AddPresenceAsync`): an ordinary
+   exchange of one device stating presence `required`, refused before any key is made when the challenge names another
+   estate, runtime identity or principal than the connection's. A failure on the device removes the keys it made, and a
    failed or lost final confirmation does not prove that the runtime recorded nothing: it may already hold the
    device and admission. Inspect `devices list` on the runtime and revoke an unwanted admission before pairing again.
    Pairing again replaces this machine's earlier connections to the same
@@ -686,7 +720,9 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
 
 Each transcript is unambiguous: the scheme and a label (`hello`, `challenge`, `confirm` or `completed`), then
 each field as a 4-byte big-endian length and its UTF-8 bytes, a list preceded by its count and an optional field
-by a byte saying whether it is present; each later transcript contains the earlier one and its MAC. MACs are
+by a byte saying whether it is present; each later transcript contains the earlier one and its MAC. The presence device's
+fields follow a `presence` label at the end of the challenge, confirmation and completion transcripts only when present, so
+an exchange of one device keeps the transcript of earlier releases. MACs are
 compared in constant time, and a hello is tried against every code, so how long a refusal takes says nothing of
 which code, if any, came close. Every primitive is a standard one in the platform's implementation: HKDF-SHA256,
 HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
@@ -761,9 +797,10 @@ Remote support beyond what the Remote guide describes, and local-network pairing
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
 | `POST /v1/records/prepare` | Prepare a record the requesting device will sign with its own key (`NewRecordRequest`, the device's own principal, no `at` or `id`); answers `RecordPrepareResponse` and writes nothing. |
-| `POST /v1/records/signed` | Write a prepared record with the requesting device's signature (`SignedRecordRequest`), verified against that admitted device; nothing on the runtime's machine signs it. |
+| `POST /v1/records/signed` | Write a prepared record with the requesting device's signature (`SignedRecordRequest`), verified against that admitted device; nothing on the runtime's machine signs it. From 0.9.0 its `device` may name the signing device instead: another device of the requesting device's principal, admitted now, whose every signature needs its owner's presence (a phone's presence device). See [records signed with presence](#records-signed-with-presence-remote-11). |
 | `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), unsigned authoring is available only where the record type permits it. Admissions from format 2 and the format-3 policy, duty and generated-declaration actions retain their mandatory signature rules. The proposed estate is validated before publication; refusal publishes no invalid record. |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
+| `GET /v1/decisions/basis[?base=<commit>]` | From 0.9.0 (REMOTE-11): the estate's current basis for an answer (`DecisionBasisResponse`): the repository's head commit, the base (the full local commit given, or the head), and every design document changed since the base, committed, staged, unstaged or untracked, with its current content hash; or an `unavailable` problem when the runtime has no repository source, the base is not a full local commit, or a design file is conflicted, deleted or unreadable. It reads the repository only and writes nothing; any admitted device may read it. `POST /v1/decisions/new` takes an empty `baseCommit` as this head. |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
 | `POST /v1/work/progress` | Publish the contributor's latest claim on its own attempt (`WorkProgressRequest` / `WorkProgressResponse`); active notes stay local and a completed phase is recorded once. See [agent progress claims](#agent-progress-claims-070-additive). |

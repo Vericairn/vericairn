@@ -3,8 +3,9 @@
 Remote is Vericairn's phone companion for iOS and Android: a client of an estate's runtime on your local network, never a host
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
-This guide describes Remote's pairing, attention, work, decision and policy views (REMOTE-01 to REMOTE-03 and POLICY-05, 0.9.0). It is a **developer build**:
-it is not in an app store, and no real-device qualification is recorded for it.
+This guide describes Remote's pairing, attention, work, decision and policy views (REMOTE-01 to REMOTE-03 and POLICY-05, 0.9.0)
+and the presence key that alone signs a decision on the phone (REMOTE-11). It is a **developer build**: it is not in an app
+store, and no real-device qualification is recorded for it.
 
 ## What this build does
 
@@ -59,10 +60,13 @@ you can also write your own answer. The statement stays verbatim. The proposed r
 including the answer's summary, synthesis and effect, which use those same words without adding an interpretation.
 
 Record format 3 pairs an exact ask answer with a document change set. This phone flow supports answers with **no design
-document changes**: supply the exact estate commit as both base and head, choose the stake and confirm that no documents
-change. The phone cannot discover or verify that repository commit through the current API; it never substitutes the
-Vericairn software pin for it. If you cannot supply that basis, or the decision changes documents, keep the draft and
-decide on the desktop. The answer pins the exact ask id, hash and answer time.
+document changes**, on the basis the runtime supplies: it reads the estate repository's head commit and the design documents
+changed since it (`GET /v1/decisions/basis`), and the review shows that head under **Estate basis**. The answer's change set
+uses that head as its base and head and pins no documents; you type no commit, and the phone never substitutes the Vericairn
+software pin for it. When the runtime cannot supply the basis (no repository it can observe, or an earlier runtime), or design
+documents changed since the head, the review says so and the answer is decided on the desktop, which pins the documents. The
+runtime checks the stated basis again when it prepares the record and when it writes it, so an answer prepared before the
+head moved is refused rather than recorded on a stale basis. The answer pins the exact ask id, hash and answer time.
 
 A result or candidate review includes its complete recorded fields, reviews of that exact subject, verification records
 and evidence summaries. Acceptance pins that subject's exact revision and hash; its basis names the displayed reviews of
@@ -75,11 +79,18 @@ missing evidence, binary material, desktop document readers and material exceedi
 desktop. Nothing is truncated to make a decision eligible. The runtime still judges every write and the device's current
 authority.
 
-Confirm review of the material and proposed record, then choose **Sign and submit**. Remote reads the subject and material
-again, asks the runtime to prepare the exact record, checks that it matches what you reviewed, and rechecks current material
-immediately before allowing the phone's own device key to sign its digest. A change leaves your words and original material
-as a draft beside the new revision; another review is required. Device authentication before record signing is a platform
-follow-up; this shared flow makes no Face ID, fingerprint or presence claim.
+Confirm review of the material and proposed record, then choose **Sign and submit**. Remote reads the subject, material and
+basis again, asks the runtime to prepare the exact record, checks that it matches what you reviewed, and rechecks the current
+material immediately before the phone's **presence key** signs its digest. The presence key asks for Face ID, Touch ID, a
+fingerprint or the device passcode at that signature; the phone reads the material once more after you confirm, keeps the
+record's identity, and only then sends the signature. A change at either check leaves your words and original material as a
+draft beside the new revision; another review is required. A declined or failed presence prompt signs and sends nothing, and
+your words stay a draft for another review.
+
+Only the presence key signs a decision or an acceptance. The phone's request key, which signs every request without asking,
+never does. A phone without a presence key for the estate cannot sign a decision: the review says so and offers **Add presence
+key**, described under [Pairing a phone](#pairing-a-phone). The runtime records the presence key's signature, and its local-network
+write ledger names the request device that sent it.
 
 **Defer** acknowledges only the original notice's attention state. It answers or accepts nothing. **Request changes** explains
 the desktop route; this phone flow has no suitable change-request record and sends no substitute. Preparing handoffs for these
@@ -96,7 +107,7 @@ after restart or a target switch. A storage failure remains visible and blocks s
 Before signing, Remote durably retains the prepared record's original id, hash, request and reviewed material. Repeated taps
 cannot create another submission, and an attempted original stays blocked from resubmission across app restarts. A receipt
 is retained before any follow-up read. **Accepted for processing** means a receipt was returned; **completed** means the exact
-record and this phone's signature were read back. **Rejected** reports a runtime refusal. A lost response, a contradictory
+record and this phone's presence-key signature were read back. **Rejected** reports a runtime refusal. A lost response, a contradictory
 read or a runtime recovery problem remains **uncertain**. **Reconcile** reads the original record, never sends it again;
 an absent record is not permission to retry. These outcomes concern the recorded answer or acceptance only.
 
@@ -176,26 +187,48 @@ On the machine running the estate's runtime:
    vericairn devices pair --principal <principal> --by <administrator>
    ```
 
-   The code has 16 characters, is valid for ten minutes, and admits one device in at most five attempts.
+   The code has 16 characters, is valid for ten minutes, and admits one phone in at most five attempts: its request device and,
+   where the phone can require presence, its presence device.
 
 On the phone, enter the runtime's address, the code and a name for the phone, then choose **Pair**. iOS asks once whether
-Remote may use the local network. The runtime proves its identity and its knowledge of the code; the phone creates its own
-key and presents it; the runtime records the device and admits it. The connection pins the runtime's identity.
+Remote may use the local network. The runtime proves its identity and its knowledge of the code; the phone creates its request
+key and, where its custody can require presence, its presence key, and the phone asks for your presence once, so the presence
+key can sign its own device record. The runtime records both devices for the same person and profiles, and admits both under
+the authority of the administrator who issued the code; the presence device's record states presence required, and its admission
+names the request device it pairs with. If the runtime refuses either device, it records neither. If the phone cannot make the
+presence key (an iPhone without a passcode, an Android phone without a secure lock screen) or you decline the prompt, the phone
+pairs with its request key alone and can add the presence key later. The connection pins the runtime's identity.
+
+A phone paired before it had a presence key, or one whose runtime did not offer one, adds it later: open a decision, and under
+**Add presence key** enter a new code the administrator issued for the same person with the same command. The runtime must
+prove the same identity and name the same estate and person before the phone makes the key; it then records and admits the
+presence key as one more device of yours, under that code's authority. A code for anyone else is refused, and nothing is
+recorded.
 
 ## Keys and custody
 
-The phone's device key never leaves the phone, and its device record says how the key is held:
+A paired phone holds two keys, each recorded as its own device of the same person. Neither leaves the phone, and each device
+record says how its key is held and whether it needs its owner's presence:
 
-| Where | Custody | What it means |
+| Where | Request key | Presence key |
 | --- | --- | --- |
-| iPhone or iPad | `ios-secure-enclave` | Generated in the Secure Enclave; usable only on that device while it is unlocked; never exported or backed up. |
-| Android | `android-keystore` | Generated in Android Keystore; never exported; hardware-backed where the device provides it. |
-| iOS simulator | `file-owner-only` | The simulator has no Secure Enclave, so the key is an owner-only file in the app's storage. |
+| iPhone or iPad | `ios-secure-enclave`, presence `none`: generated in the Secure Enclave, usable only on that device while it is unlocked, never exported or backed up. | `ios-secure-enclave`, presence `required`: generated in the Secure Enclave with user presence, so every signature needs Face ID, Touch ID or the device passcode; it exists only while the device has a passcode. |
+| Android 11 or later | `android-keystore`, presence `none`: generated in Android Keystore, never exported, hardware-backed where the device provides it. | `android-keystore`, presence `required`: generated with per-use authentication, so every signature needs a strong biometric or the device credential; it exists only while the device has a secure lock screen. |
+| Android 8 to 10 | As above. | None: per-use authentication with the device credential needs Android 11, so the phone signs no decision. |
+| iOS simulator | `file-owner-only`, presence `none`: the simulator has no Secure Enclave, so the key is an owner-only file in the app's storage. | None: an owner-only file cannot require presence, so a simulator build claims none and signs no decision. |
 
-The key signs every request to the runtime without asking for Face ID, Touch ID or a passcode, so the phone's device does
-not claim presence. Remote's connections are excluded from backups: a replacement phone pairs again instead of inheriting
-access. To retire a lost phone, revoke its device with `vericairn devices revoke <device>`. That erases no estate history.
-Rotating a phone's key is not built yet; pair the phone again and revoke the old device.
+The request key signs every request to the runtime, and its connection certificates, without asking for anything. The presence
+key signs only records, and only after you confirm your presence; the phone's keystore enforces that, not Remote. Exactly the
+presence keys of iPhones and iPads and of Android 11 or later phones enforce presence; the request keys, the simulator and older
+Android phones do not, and their records say so. A presence key's device record is the phone's own statement, which the runtime
+cannot verify: presence on a real iPhone or Android phone is recorded as qualified only when a platform qualification observes
+it on a device. Simulator and CI builds observe no prompt.
+
+Remote's connections are excluded from backups: a replacement phone pairs again instead of inheriting access. To retire a lost
+phone, revoke both of its devices with `vericairn devices revoke <device>`. That erases no estate history. Enrolling a new
+fingerprint or face on Android can invalidate the presence key, after which it signs nothing and the review keeps your words as
+a draft; pair the phone again and revoke its old devices. Rotating a phone's key is not built yet; pair the phone again and
+revoke the old devices.
 
 ## Building from source
 
@@ -211,6 +244,7 @@ your own Apple signing; Remote is not distributed through the App Store or Googl
 
 ## Limits
 
-- No real-device qualification is recorded; simulator and CI builds prove neither.
+- No real-device qualification is recorded; simulator and CI builds prove neither, including the presence prompt on iPhone and
+  Android.
 - Remote reaches a runtime only on the same local network; the relay that would reach it from elsewhere is a design.
 - The shared libraries are not trim-safe yet, so the phone apps trim only the platform's own assemblies.
