@@ -11,6 +11,32 @@ namespace Vericairn.Cli.Tests;
 public sealed class AttentionStateJourneyTests
 {
     [Fact]
+    public void PolicyAttentionKeepsItsBasisAndIncompleteWorkAfterAcknowledgmentAtEveryDepth()
+    {
+        using var fixture = new PolicyFixture();
+        var policy = fixture.Policy();
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 12, 0, 0, TimeSpan.Zero));
+        fixture.Add("decision", fixture.DecisionBody());
+        using EstateService api = EstateService.Open(fixture.Estate.Root);
+        AttentionNotice notice = Assert.Single(api.AttentionGet(fixture.Estate.OperatorId).Items, n => n.Policy?.Finding.Policy.Id == policy.Id);
+        string canonical = CliHarness.Ok("--estate", fixture.Estate.Root, "--json", "status").Out;
+        int records = fixture.Estate.Load().Records.Count;
+        Assert.True(api.AttentionAcknowledge(new(fixture.Estate.OperatorId, notice.Kind, notice.SubjectType, notice.SubjectId, notice.Revision)).Ok);
+        foreach (string depth in new[] { "short", "standard", "comprehensive" })
+        {
+            string human = CliHarness.Ok("--estate", fixture.Estate.Root, "--depth", depth, "status").Out;
+            Assert.Contains("due-within-grace", human, StringComparison.Ordinal);
+            Assert.Contains("work incomplete", human, StringComparison.Ordinal);
+            Assert.Contains(notice.Policy!.Basis.Digest, human, StringComparison.Ordinal);
+            Assert.Contains(notice.Policy.Basis.AsOf!, human, StringComparison.Ordinal);
+            Assert.Contains("acknowledged at ", human, StringComparison.Ordinal);
+        }
+        Assert.Equal(canonical, CliHarness.Ok("--estate", fixture.Estate.Root, "--json", "status").Out);
+        Assert.False(Assert.Single(api.Policies().Findings, f => f.Disposition == "due-within-grace").Duty!.Completed);
+        Assert.Equal(records, fixture.Estate.Load().Records.Count);
+    }
+
+    [Fact]
     public void HumanStatusShowsAcknowledgmentWhileCanonicalStatusAndItsSubjectStayUnchanged()
     {
         using var estate = new TestEstate(3);

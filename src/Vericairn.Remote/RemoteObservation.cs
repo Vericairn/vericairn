@@ -12,7 +12,11 @@ namespace Vericairn.Remote;
 
 /// <summary>The last successful home observation, and independently dated work details. Restoring this grants no current access.</summary>
 public sealed record RemoteObservation(StatusResponse Status, string AsOf, IReadOnlyList<ProductItem> Products,
-    AttentionResponse Attention, CommunicationProfile Communication, IReadOnlyDictionary<string, RemoteWorkDetail> Details);
+    AttentionResponse Attention, CommunicationProfile Communication, IReadOnlyDictionary<string, RemoteWorkDetail> Details)
+{
+    /// <summary>Independently dated policy inspections and desktop packages; restoring them grants no authority.</summary>
+    public IReadOnlyDictionary<string, RemotePolicyDetail> PolicyDetails { get; init; } = new Dictionary<string, RemotePolicyDetail>();
+}
 
 /// <summary>A complete observed work detail. The worker's observations remain separate from the contributor's claims.</summary>
 public sealed record RemoteWorkDetail(string Id, string? Assignment, string AsOf, ObserveResponse Work,

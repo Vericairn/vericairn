@@ -85,6 +85,7 @@ public sealed partial class RemoteViewModel : Observable
         CancelPairingCommand = new AsyncCommand(() => { Pairing = false; return Task.CompletedTask; }, () => !Busy && Estates.Count > 0);
         InitializeDecisionCommands();
         InitializeInspectionCommands();
+        InitializePolicyCommands();
         foreach (RuntimeConnection connection in connections.List())
         {
             Estates.Add(Restore(connection));
@@ -118,6 +119,7 @@ public sealed partial class RemoteViewModel : Observable
         {
             if (!Set(ref selected, value)) return;
             SetDecision(null);
+            SetPolicyDetail(null);
             RestoreDecisions();
             DecisionMessage = string.Empty;
             detailCurrent = false;
@@ -134,7 +136,7 @@ public sealed partial class RemoteViewModel : Observable
     public bool Pairing
     {
         get => pairing;
-        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ShowAreas)); Raise(nameof(HasDecisionReview)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
+        set { if (Set(ref pairing, value)) { Raise(nameof(ShowHome)); Raise(nameof(ShowAreas)); Raise(nameof(HasDecisionReview)); Raise(nameof(HasPolicyDetail)); Raise(nameof(ObservationUnavailable)); CancelPairingCommand.NotifyCanExecuteChanged(); } }
     }
 
     /// <summary>Whether the home is shown.</summary>
@@ -226,8 +228,8 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>What Nodes means, and does not.</summary>
     public static string NodesNote => "This is the runtime this phone reaches. A healthy connection here says nothing about workers running on other machines.";
 
-    /// <summary>Handoffs are not built in Remote yet.</summary>
-    public static string HandoffsLater => "Handoffs to the desktop are not in Remote yet; prepare and open them in Workbench. A prepared task stays in the estate's records either way.";
+    /// <summary>Where to prepare the supported policy context and other desktop tasks.</summary>
+    public static string HandoffsLater => "Desktop task delivery and opening are not in Remote yet. Open a policy or duty subject in Attention to prepare its exact desktop context, then continue in Workbench. A context package grants no authority and opening it completes no work.";
 
     /// <summary>Pairs with a runtime.</summary>
     public AsyncCommand PairCommand { get; }
@@ -283,6 +285,8 @@ public sealed partial class RemoteViewModel : Observable
         Busy = true;
         estate.Current = false;
         detailCurrent = false;
+        policyCurrent = false;
+        NotifyPolicy();
         decisionCurrent = false;
         MaterialReviewed = false;
         NotifyDecision();
@@ -300,7 +304,8 @@ public sealed partial class RemoteViewModel : Observable
                 IReadOnlyList<ProductItem> observedProducts = await ProductsAsync(estate.Client).ConfigureAwait(true);
                 AttentionResponse observedAttention = await estate.Client.AttentionGetAsync(estate.Connection.Principal, CancellationToken.None).ConfigureAwait(true);
                 CommunicationProfile profile = await estate.Client.CommunicationAsync(estate.Connection.Principal, cancellationToken: CancellationToken.None).ConfigureAwait(true);
-                estate.Observation = new(response, observedAt, observedProducts, observedAttention, profile, estate.Observation?.Details ?? new Dictionary<string, RemoteWorkDetail>());
+                estate.Observation = new(response, observedAt, observedProducts, observedAttention, profile, estate.Observation?.Details ?? new Dictionary<string, RemoteWorkDetail>())
+                { PolicyDetails = estate.Observation?.PolicyDetails ?? new Dictionary<string, RemotePolicyDetail>() };
                 estate.Current = true;
                 Keep(estate);
             }

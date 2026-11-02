@@ -705,6 +705,10 @@ public static class OpenApiDocument
         attentionTarget["nullable"] = true;
         attentionTarget["properties"]!["hash"]!["nullable"] = true;
         attentionNotice["properties"]!["target"] = attentionTarget;
+        JsonObject policyAttention = Object(("finding", "object"), ("basis", "object"), ("operator", "array"));
+        policyAttention["nullable"] = true;
+        policyAttention["description"] = "Optional exact PolicyFindingDto and PolicyBasisDto, with OperatorDutyDto preparation and linked asks for this principal. Missing on older runtimes; no approval or completion is inferred from a notice.";
+        attentionNotice["properties"]!["policy"] = policyAttention;
         return new JsonObject
         {
             ["AttentionAcknowledgeRequest"] = attentionRequest,
