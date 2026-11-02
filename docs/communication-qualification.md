@@ -37,7 +37,7 @@ not-applicable portions of the same design case are separate rows.
 | D08-E: interrupted execution and inventory changes | Passed | Stand-in dispatch is interrupted both before and after its dispatch record is saved. A successor retains the original identity, context and reservation, records uncertainty, refuses retries on both branches, and reconciles that operation before admitting a fresh run. Both native launchers refuse an inventory changed after admission, preserve the failed intent and require fresh admission. Reported model mismatches stay critical at every depth, with requested and observed values separate. |
 | D08-E: compaction and tokenizer/model semantics | Deferred | Follow-up COMMS-02 harness qualification must exercise actual compaction and provider-conversation recovery. The efficiency adapter reports bytes only and makes no tokenizer or model-fit claim. Stand-ins report model facts but perform no inference, compaction or tokenization; exact model revision, token counts and model fit stay unknown or unclaimed. |
 | D08-F: concise reviews and artifacts | Passed | Short work observations and Workbench reviews retain every finding and every unperformed check, including their explanations. CLI/MCP exports and API/SDK reads preserve canonical original records and decision words. Commits describe the behavior and validation without requiring the chat; independent assessment of their meaning remains outstanding. |
-| D08-F: template protection and old instances | Deferred | TPL-COMMS-01, 0.8.4: generated and quoted fields, locked sections, versioned instances and no silent upgrade. No template check is reported passed. |
+| D08-F: template protection and old instances | Built; not qualified here | TPL-COMMS-01 shipped in 0.8.4 ([presentation templates](presentation-templates.md) and [templates](templates.md)). These communication fixtures exercised no generated or quoted field, locked section, versioned instance or silent-upgrade protection, and no template check is reported passed. |
 | HANDOFF-01 unchanged | Passed | All 12 combinations of three depths and four frequencies retain hand-over refusal, no overwrite, mandatory overflow, invalid-package rejection and resume changes. Reads create no observations, operations or acceptances. |
 | WATCH-01 unchanged | Passed | All 12 combinations retain worker-observed repetition counts, warning/critical signals, attention asks, containment and original operation records across reopening. Only the test stand-in is launched. Workbench summaries retain worker signals and pending-attention limits at every combination while optional claims may be quiet. |
 
@@ -250,9 +250,10 @@ extracted for reuse.
    claim no mobile profile synchronization, phone full-evidence display or phone
    hand-off. Requalify through COMMS-02 with [Remote](remote.md) and return this
    exclusion to the operator.
-4. **Templates — TPL-COMMS-01, 0.8.4.** Generated/quoted fields, locked
-   sections, versioned instances and protection against silent migration remain
-   deferred; no template check is counted as passed.
+4. **Templates — TPL-COMMS-01, shipped in 0.8.4, not qualified here.**
+   Generated/quoted fields, locked sections, versioned instances and protection
+   against silent migration are not exercised by these fixtures; no template
+   check is counted as passed.
 5. **Workbench context controls — not applicable while absent.** There is no
    context-allocation editor or pinned-original retrieval control. Future
    CONTEXT-01 follow-up controls need COMMS-02 qualification. Existing refusal

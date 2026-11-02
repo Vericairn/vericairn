@@ -270,7 +270,7 @@ All return `PackagesResponse`; the API binds `by` to the authenticated acting de
 record-writing operations. `GET /v1/providers` and `release providers` list the `nuget-org` package
 registry provider and its limits. There is no API-key option or registry mutation method.
 
-## Template documents in 0.8.4 development
+## Template documents (0.8.4)
 
 `vericairn templates list` lists available exact versions; `templates show <id>`
 prints their contracts and accepts `--version`. Create an instance with:
