@@ -152,23 +152,25 @@ public static class CatalogWorkspace
     {
         Local(root);
         if (!GuideGenerator.SafePath(relative)) throw new IOException("A portable relative path is required.");
-        string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
-        Local(path);
-        return path;
+        string current = Path.GetFullPath(root);
+        foreach (string part in relative.Split('/')) { current = Path.Combine(current, part); NoLink(current); }
+        return current;
     }
 
+    // The chosen path itself and everything below it must be link-free, as GUIDE-01's preview requires. Its ancestors are the
+    // person's own environment and may be aliases, such as macOS's /tmp and /var, so they are not refused.
     private static void Local(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || path.StartsWith("//", StringComparison.Ordinal) || path.StartsWith("\\\\", StringComparison.Ordinal) || path.Contains("://", StringComparison.Ordinal))
             throw new IOException("An explicit local path is required.");
-        string? current = Path.GetFullPath(path);
-        while (current is not null)
-        {
-            if (new FileInfo(current).LinkTarget is not null || new DirectoryInfo(current).LinkTarget is not null ||
-                (File.Exists(current) || Directory.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new IOException("Linked inputs and destinations are not admitted.");
-            current = Path.GetDirectoryName(current);
-        }
+        NoLink(Path.GetFullPath(path));
+    }
+
+    private static void NoLink(string path)
+    {
+        if (new FileInfo(path).LinkTarget is not null || new DirectoryInfo(path).LinkTarget is not null ||
+            (File.Exists(path) || Directory.Exists(path)) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Linked inputs and destinations are not admitted.");
     }
 
     private static void CreateDirectory(string path)

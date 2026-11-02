@@ -197,7 +197,9 @@ exact proposal and compares it with an existing local directory or destination
 checkout, reporting `add`, `change` and `remove` without modifying it. Exit 0 means
 the comparison completed without findings; inspect its changes even when it exits
 0. Linked inputs or destinations, incomplete comparisons and disappearing guide
-addresses are findings. Checkout Git metadata is neither read nor exported.
+addresses are findings: a chosen file or directory, and everything below it, must
+not be a symbolic link, while links above it, such as macOS's `/tmp`, are admitted.
+Checkout Git metadata is neither read nor exported.
 
 The bundle contains:
 

@@ -151,6 +151,27 @@ public sealed class CatalogWorkspaceTests
         Assert.Single(Directory.GetFiles(contracts));
     }
 
+    [Fact]
+    public void AnAliasAboveTheChosenDirectoryIsAdmittedButTheDirectoryItselfMustNotBeALink()
+    {
+        using var local = new Workspace();
+        string real = Path.Combine(local.Root, "real"), alias = Path.Combine(local.Root, "alias");
+        Directory.CreateDirectory(real);
+        try { Directory.CreateSymbolicLink(alias, real); }
+        catch (Exception error) when (OperatingSystem.IsWindows() && error is IOException or UnauthorizedAccessException)
+        { Assert.Skip("Creating Windows symbolic links requires Developer Mode or the symlink privilege."); }
+        CatalogBundle bundle = local.Fixture.Generate();
+        // An alias above the chosen directory, like macOS's /tmp, belongs to the person's environment.
+        string chosen = Path.Combine(alias, "bundle");
+        Assert.Empty(CatalogWorkspace.Write(bundle, chosen));
+        CatalogComparison same = CatalogWorkspace.Compare(bundle, chosen);
+        Assert.Empty(same.Changes);
+        Assert.Empty(same.Findings);
+        // The chosen directory itself stays link-free.
+        Assert.NotEmpty(CatalogWorkspace.Write(bundle, alias));
+        Assert.NotEmpty(CatalogWorkspace.Compare(bundle, alias).Findings);
+    }
+
     private sealed class Workspace : IDisposable
     {
         public string Root { get; } = CatalogFixture.CreateTemporaryDirectory("catalog-workspace-");
