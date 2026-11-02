@@ -22,7 +22,8 @@ The build generates the complete CLI reference from its command tree, including 
 ## `vericairn guides`
 
 The 0.9.0 development build prepares community build guides from explicit local
-Markdown sources and a reviewed source index. It creates private previews only.
+Markdown sources and a reviewed source index. It creates private previews and local
+catalog proposals.
 It does not open an estate, create records or contact a publication destination.
 
 ```sh
@@ -49,6 +50,22 @@ arguments also return a nonzero exit code.
 Missing sources and incomplete coverage produce findings and failure manifests,
 with no partial guide set. See [Community build guides](community-build-guides.md)
 for the input contract, output files and review workflow.
+
+`guides export` prepares the proposed catalog repository as a clean local bundle.
+It requires the same explicit source roots and index, plus a private reviewed
+`--plan` and a new or empty `--out`. Optional `--issues` supplies the public issue
+map. `guides publication-check` regenerates the proposal and reports additions,
+changes and removals against an existing local `--destination`, writing nothing.
+Both accept `--json`; neither creates a repository or publishes.
+
+`guides request-validate --inventory <file> --request <file>` validates shared
+request fields against the public inventory. `guides requests-reconcile
+--inventory <file> --observations <file>` reconciles supplied provider revisions to
+one canonical issue and one vote per hosting account and entry. Both read JSON
+files and return JSON without provider writes. Reconciliation output is private.
+The importer, publication operation and request activation remain planned; the
+[catalog preparation workflow](community-build-guides.md#prepare-the-proposed-catalog-repository)
+describes their separate decisions and the retained-page retirement bridge.
 
 ## `vericairn operator close`
 

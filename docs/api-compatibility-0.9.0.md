@@ -329,6 +329,22 @@ format changes. Existing implementers have no new obligations. The versioned
 source-index and manifest contracts are described in
 [Community build guides](community-build-guides.md).
 
+## Local catalog preparation and requests (GUIDE-02)
+
+`Vericairn.Runtime.Guides` adds `CatalogExportPlan`, public rendition and inventory
+types, `CatalogExporter.Generate`, `CatalogDisclosure.Check`, and the explicit
+local file operations in `CatalogWorkspace`. `CatalogRequests` exposes the shared
+form, parser and inventory validator. `CatalogRequestReconciler.Reconcile` accepts
+complete supplied provider observations and returns private canonical-issue,
+account-entry vote and total projections. These operations perform no provider
+write, repository creation or publication. The publication command only compares
+a regenerated proposal with a local destination.
+
+These additions introduce no interface members, API routes, SDK methods or record
+format changes. Existing implementers have no new obligations. The export-plan,
+public inventory and observation contracts are described in
+[Community build guides](community-build-guides.md).
+
 
 ## Principal attention presentation state (REMOTE-02)
 
