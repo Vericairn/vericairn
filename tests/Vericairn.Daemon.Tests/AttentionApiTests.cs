@@ -80,6 +80,22 @@ public sealed class AttentionApiTests
     }
 
     [Fact]
+    public void PolicyAttentionIsOptionalForExistingClientsAndDescribesNoWrite()
+    {
+        var ordinary = new AttentionNotice("information", "Subject", "Inspect it.", "open", "2026-11-01T12:00:00Z",
+            "Open the subject.", "work-order", "subject", "revision");
+        string legacy = JsonSerializer.Serialize(ordinary, ProtocolJson.Options);
+        using JsonDocument notice = JsonDocument.Parse(legacy);
+        Assert.False(notice.RootElement.TryGetProperty("policy", out _));
+        Assert.Null(JsonSerializer.Deserialize<AttentionNotice>(legacy, ProtocolJson.Options)!.Policy);
+        using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
+        JsonElement property = api.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("AttentionNotice").GetProperty("properties").GetProperty("policy");
+        Assert.True(property.GetProperty("nullable").GetBoolean());
+        Assert.Equal("object", property.GetProperty("properties").GetProperty("finding").GetProperty("type").GetString());
+        Assert.Contains("no approval", property.GetProperty("description").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RealRoutesAndBothSdkBridgesKeepTheSameUnsignedState()
     {
         using var estate = new TestEstate(3);

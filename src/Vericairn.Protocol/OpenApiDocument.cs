@@ -718,6 +718,10 @@ public static class OpenApiDocument
         attentionTarget["nullable"] = true;
         attentionTarget["properties"]!["hash"]!["nullable"] = true;
         attentionNotice["properties"]!["target"] = attentionTarget;
+        JsonObject policyAttention = Object(("finding", "object"), ("origin", "string"), ("operator", "array"));
+        policyAttention["nullable"] = true;
+        policyAttention["description"] = "Optional exact PolicyFindingDto, including its basis digest and time, with the time origin and OperatorDutyDto preparation and linked asks for this principal. The policy read carries the full basis inventory. Missing on older runtimes; no approval or completion is inferred from a notice.";
+        attentionNotice["properties"]!["policy"] = policyAttention;
         return new JsonObject
         {
             ["AttentionAcknowledgeRequest"] = attentionRequest,

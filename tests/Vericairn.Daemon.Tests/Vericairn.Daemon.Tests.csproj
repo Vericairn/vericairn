@@ -30,6 +30,7 @@
     <Compile Include="../TestSupport/RecordedNuGetHandler.cs" Link="TestSupport/RecordedNuGetHandler.cs" />
     <None Include="../TestSupport/NuGetFixtures/*.json" Link="NuGetFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../TestSupport/CompanionWriteFixture.cs" Link="TestSupport/CompanionWriteFixture.cs" />
+    <Compile Include="../TestSupport/RemotePolicySeed.cs" Link="TestSupport/RemotePolicySeed.cs" />
   </ItemGroup>
 
   <ItemGroup>

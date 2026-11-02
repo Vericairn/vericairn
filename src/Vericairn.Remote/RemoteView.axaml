@@ -84,6 +84,30 @@
       </StackPanel>
     </ScrollViewer>
 
+    <ScrollViewer Grid.Row="1" x:Name="PolicyScroll" IsVisible="{Binding HasPolicyDetail}">
+      <StackPanel Margin="12" Spacing="10">
+        <Button Content="Back to attention" Command="{Binding ClosePolicyCommand}" AutomationProperties.Name="Leave policy inspection without sending a request" />
+        <TextBlock Classes="heading" Text="Policy condition and duty history" />
+        <TextBlock Text="{Binding PolicyDestination}" AutomationProperties.Name="Policy estate, runtime and principal" />
+        <TextBlock Text="{Binding PolicyFreshness}" AutomationProperties.Name="Policy observation time and age" />
+        <TextBlock Text="{Binding PolicyMessage}" />
+        <TextBlock x:Name="PolicyMaterial" Text="{Binding PolicyDetail.Material}" AutomationProperties.Name="Exact condition, occurrences, completion proofs and exception history" />
+        <Expander Header="Evaluation basis" AutomationProperties.Name="Complete observed policy evaluation inputs">
+          <TextBlock Text="{Binding PolicyDetail.EvaluationBasis}" />
+        </Expander>
+        <TextBlock Text="{Binding PolicyAuthority}" />
+        <TextBlock Text="{Binding PolicyDetail.DesktopRoute}" AutomationProperties.Name="Exact subject and desktop review route" />
+        <TextBlock Text="This inspection grants no approval or effect. Acknowledgment does not discharge a duty. Review and any action require the desktop's current material and authority." />
+        <WrapPanel Orientation="Horizontal">
+          <Button Content="Refresh policy" Command="{Binding RefreshPolicyCommand}" AutomationProperties.Name="Refresh the policy basis and authority without writing" />
+          <Button Content="Prepare desktop handoff" Command="{Binding PolicyHandoffCommand}" AutomationProperties.Name="Read desktop context for the exact original subject without approving or writing" />
+        </WrapPanel>
+        <Expander Header="Desktop context and original material" AutomationProperties.Name="Complete desktop handoff or refusal">
+          <TextBlock Text="{Binding PolicyHandoff}" />
+        </Expander>
+      </StackPanel>
+    </ScrollViewer>
+
     <ScrollViewer Grid.Row="1" x:Name="DecisionScroll" IsVisible="{Binding HasDecisionReview}">
       <StackPanel Margin="12" Spacing="10">
         <Button Content="Back to home" Command="{Binding CloseDecisionCommand}" AutomationProperties.Name="Leave this review and retain the draft or original submission" />

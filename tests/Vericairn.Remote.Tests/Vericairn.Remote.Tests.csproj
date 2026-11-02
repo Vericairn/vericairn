@@ -18,6 +18,8 @@
     <Using Include="Xunit" />
     <Using Include="Vericairn.TestSupport" />
     <Compile Include="../Vericairn.Records.Tests/TestEstate.cs" Link="Fixtures/TestEstate.cs" />
+    <Compile Include="../Vericairn.Records.Tests/PolicyFixture.cs" Link="Fixtures/PolicyFixture.cs" />
+    <Compile Include="../TestSupport/RemotePolicySeed.cs" Link="Fixtures/RemotePolicySeed.cs" />
     <Compile Include="../TestSupport/PresenceKeyStandIn.cs" Link="TestSupport/PresenceKeyStandIn.cs" />
   </ItemGroup>
 

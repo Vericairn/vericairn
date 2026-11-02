@@ -118,6 +118,7 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     public bool RefusePrepared { get; set; }
     public Action? BeforeReview { get; set; }
     public Action? AfterWrite { get; set; }
+    public Action<string>? BeforeApiCall { get; set; }
     public Func<Task>? WaitBeforeReview { get; set; }
     public Func<RecordPrepared, RecordPrepared>? ChangePrepared { get; set; }
     public int PreparedCalls { get; private set; }
@@ -129,6 +130,7 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
         IEstateApi client = DispatchProxy.Create<IEstateApi, CountingApi>();
         ((CountingApi)client).Inner = service;
         ((CountingApi)client).Called = () => ApiCalls++;
+        ((CountingApi)client).BeforeCall = name => BeforeApiCall?.Invoke(name);
         ((CountingApi)client).LoseAcknowledgmentResponse = () => LoseAcknowledgmentResponse;
         ((CountingApi)client).Basis = () => { BasisReads++; return Basis; };
         ((CountingApi)client).RecordRead = record =>
@@ -144,12 +146,14 @@ internal sealed class FakeConnections(string root) : IRemoteConnections, IDispos
     {
         public IEstateApi Inner { get; set; } = null!;
         public Action Called { get; set; } = null!;
+        public Action<string> BeforeCall { get; set; } = null!;
         public Func<bool> LoseAcknowledgmentResponse { get; set; } = null!;
         public Func<RecordResponse?, RecordResponse?> RecordRead { get; set; } = null!;
         public Func<DecisionBasisResponse?> Basis { get; set; } = null!;
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             Called();
+            BeforeCall(targetMethod!.Name);
             if (targetMethod!.Name == nameof(IEstateApi.DecisionBasisAsync) && Basis() is DecisionBasisResponse basis) return Task.FromResult(basis);
             try
             {

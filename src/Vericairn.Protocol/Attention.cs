@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json.Serialization;
+
 namespace Vericairn.Protocol;
 
 /// <summary>A notice and its independent presentation state. Revision identifies the observed item, never an approval.</summary>
@@ -15,7 +17,14 @@ public sealed record AttentionNotice(string Kind, string Subject, string Why, st
 
     /// <summary>The exact subject to open when the source notice concerns another record.</summary>
     public AttentionReference? Target { get; init; }
+
+    /// <summary>The exact evaluated condition behind a policy notice; absent on other notices and older runtimes.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PolicyAttention? Policy { get; init; }
 }
+
+/// <summary>An exact condition with its basis digest, time and origin, plus operator preparation. The policy read carries the full basis inventory.</summary>
+public sealed record PolicyAttention(PolicyFindingDto Finding, string Origin, IReadOnlyList<OperatorDutyDto> Operator);
 
 /// <summary>One principal's complete current attention, including acknowledged items.</summary>
 public sealed record AttentionResponse(string Principal, string AsOf, IReadOnlyList<AttentionNotice> Items);
