@@ -1,6 +1,6 @@
 # Saved prompts
 
-The 0.8.4 development build adds a shared prompt library to record format 3.
+0.8.4 added a shared prompt library to record format 3.
 Find prompts by category across the estate, the foundation and installed packs.
 Each offer shows its source, exact revision or version, and definition hash.
 Reading or showing a definition records no use. Using it records the selection

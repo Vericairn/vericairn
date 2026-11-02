@@ -1,6 +1,6 @@
 # Record format 3
 
-The 0.8.4 development build adds signed `saved-prompt` and `prompt-preference`
+0.8.4 added signed `saved-prompt` and `prompt-preference`
 records, plus optional `promptUse` on assignments, agent-run operations and
 ask-answer decisions. These additions stay within format 3; older records and
 their original bytes remain valid. See [Saved prompts](prompts.md) and the
@@ -304,7 +304,7 @@ adoption requires repository custody, while on-demand rendering needs no file.
 
 ## Template instances and section evidence
 
-TPL-01 in the 0.8.4 development build adds optional fields and one type within
+TPL-01 in 0.8.4 added optional fields and one type within
 format 3. Estates with no template continue using their existing declarations,
 reviews and result outputs. No migration rewrites older records, and no template
 field is admitted in formats 1 or 2. The contract and workflows are described in

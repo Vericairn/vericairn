@@ -1,6 +1,6 @@
 # The MCP server
 
-The 0.8.4 development build offers estate briefs, records, pinned documents and
+From 0.8.4, the server offers estate briefs, records, pinned documents and
 context packages as read-only MCP resources, alongside standard `prompts/list`
 and `prompts/get` and the prompt library tools. Prompt offers carry categories
 and arguments and are filtered for the connected principal. Hidden,
@@ -79,7 +79,7 @@ current result without a continuation cursor; an unknown cursor is refused.
 Clients refresh a listing when needed. Reads and listings support request
 cancellation through the existing transport.
 
-## Resources (0.8.4 development)
+## Resources (0.8.4)
 
 `resources/list` returns current records of every type, work briefs, assignment
 briefs, pinned estate documents and work context packages. It lists metadata
@@ -409,7 +409,7 @@ preparation and handshake diagnostics apply when MCP reaches a daemon through TL
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not qualified by these features.
 
-## Template sections in 0.8.4 development
+## Template sections (0.8.4)
 
 `document_sections` reads a template instance's sections by `document` declaration
 id or estate path, optionally at an exact repository `commit`. `section_brief`

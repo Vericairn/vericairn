@@ -116,7 +116,7 @@ in release mode and pins that observation by hash. It creates no product or prod
 `--release`; omit `--release` to retain ordinary offline source initialization. `--from <download-directory>` supplies downloaded
 publication evidence and archive bytes for offline verification; see [offline inputs](install.md#offline-inputs).
 
-In 0.8.4, successful `estate init --release` also prints the observation's receipt after the operator,
+From 0.8.4, successful `estate init --release` also prints the observation's receipt after the operator,
 estate and manifest lines:
 
 ```text
@@ -227,7 +227,7 @@ A question for a person is an `ask` record: whom it is put to, the question, the
 
 ### Record an answered ask with its design changes
 
-In the 0.8.4 development build, `decisions new` records an answer the operator has already supplied in conversation. Supply their exact words and the time they answered. The ask identifies the deciding operator; `--by` identifies the recorder. The command neither chooses an answer nor treats waiting as consent. Recording the decision makes the ask's derived state answered.
+From 0.8.4, `decisions new` records an answer the operator has already supplied in conversation. Supply their exact words and the time they answered. The ask identifies the deciding operator; `--by` identifies the recorder. The command neither chooses an answer nor treats waiting as consent. Recording the decision makes the ask's derived state answered.
 
 ```sh
 vericairn decisions new --by <recorder id> --ask <ask id> \
@@ -335,7 +335,7 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
 
-### Closing finished steps in the 0.8.4 development build
+### Closing finished steps (0.8.4)
 
 The per-release closing scripts are retired. `vericairn operator close` lists every latest
 completed, reviewed and unaccepted result, showing its exact hash, passing reviews and their
@@ -1549,7 +1549,7 @@ describe deadlines, refusal and uncertain outcomes across transports.
 
 ## 30. Durable operator requests
 
-The 0.8.4 request commands keep the actions a builder or agent asks the operator
+From 0.8.4, the request commands keep the actions a builder or agent asks the operator
 to perform. `vericairn operator list`, status and Workbench attention deliver the
 oldest three open requests with their recommendation first and identify the rest
 in order. `operator done <request-revision> --by <operator-id>` records completion;

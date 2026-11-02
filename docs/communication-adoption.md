@@ -1,6 +1,6 @@
 # Adopting the operator's existing communication choice
 
-In 0.8.4 development, [presentation templates](presentation-templates.md) have a
+From 0.8.4, [presentation templates](presentation-templates.md) have a
 separate explicit adoption. Choosing the five communication values below does
 not adopt a template. Without that separate record, communication and context
 renderings retain their existing behavior.

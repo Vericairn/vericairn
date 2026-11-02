@@ -181,7 +181,7 @@ JSON output and API/SDK counterparts, and [limitations](limitations-and-platform
 
 ## Close finished steps in one action
 
-The 0.8.4 development build adds `vericairn operator close`. The per-release closing scripts
+0.8.4 added `vericairn operator close`. The per-release closing scripts
 are retired. Run this command on your own admitted operator device:
 
 ```sh

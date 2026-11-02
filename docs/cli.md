@@ -1,6 +1,6 @@
 # CLI reference additions
 
-The 0.8.4 development build adds `prompt list`, `show`, `add`, `revise`, `retire`,
+0.8.4 added `prompt list`, `show`, `add`, `revise`, `retire`,
 `favor`, `hide`, `disable`, `copy` and `use`. See [Saved prompts](prompts.md) for
 category discovery, reversible preferences and recorded uses with new work.
 
@@ -10,8 +10,10 @@ named optional originals are withheld without a byte allocation.
 `--max-bytes <positive-integer>` implies `--agent-context` and admits optional
 originals only when they fit; required overflow refuses. These options preserve
 recipient and assignment presentation settings. Without either option, the
-ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084-development)
+ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
+
+Revision 5, November 2, 2026. Describe 0.8.4's and 0.9.0's command additions as released commands rather than development builds.
 
 Revision 4, October 23, 2026. Point to the operator's guide for 0.8.3's command additions.
 
@@ -21,7 +23,7 @@ The build generates the complete CLI reference from its command tree, including 
 
 ## `vericairn guides`
 
-The 0.9.0 development build prepares community build guides from explicit local
+From 0.9.0, `vericairn guides` prepares community build guides from explicit local
 Markdown sources and a reviewed source index. It creates private previews and local
 catalog proposals.
 It does not open an estate, create records or contact a publication destination.
@@ -69,7 +71,7 @@ describes their separate decisions and the retained-page retirement bridge.
 
 ## `vericairn operator close`
 
-The 0.8.4 development build replaces per-release closing scripts with an operator command.
+From 0.8.4, an operator command replaces per-release closing scripts.
 Without options it lists exactly the latest completed, reviewed and unaccepted results with their
 exit questions, result summaries, passing-review summaries and independence, and exact hashes.
 
@@ -92,7 +94,7 @@ listings, API/SDK counterparts and recovery after interrupted storage.
 
 ## `vericairn decisions new`
 
-The 0.8.4 development build records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).
+From 0.8.4, `decisions new` records a supplied operator answer with its exact design document pins. See the [operator workflow](operator-guide.md#record-an-answered-ask-with-its-design-changes).
 
 | Option | Meaning |
 |---|---|
