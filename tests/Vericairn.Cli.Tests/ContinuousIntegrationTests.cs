@@ -483,7 +483,7 @@ public class ContinuousIntegrationTests
     }
 
     [Theory]
-    [InlineData("remote-ios:", "macos-latest", "src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj", "ios")]
+    [InlineData("remote-ios:", "xcode-27", "src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj", "ios")]
     [InlineData("remote-android:", "ubuntu-latest", "src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj", "android")]
     public void EveryMobileHeadBuildsInItsPlatformsJob(string job, string runner, string project, string workload)
     {
