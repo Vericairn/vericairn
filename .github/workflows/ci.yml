@@ -32,8 +32,10 @@ jobs:
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
   # developer builds: neither job signs, installs on or qualifies a real device.
   remote-ios:
-    # The pinned iOS workload needs Xcode 27.1, which the Xcode 27 image (a public preview) carries and macos-latest does not.
-    runs-on: xcode-27
+    # iOS alone is pinned to workload set 10.0.401 (iOS 26.5, Xcode 26.6): Avalonia.iOS does not build against the iOS 27.1
+    # bindings of the band's later sets yet. The phone head is a developer build, not a release artifact: that set's Mono
+    # runtime (10.0.12) ships in no release, and the distributables embed the SDK's own runtime.
+    runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,12 +47,12 @@ jobs:
           global-json-file: global.json
       - name: Install the iOS workload
         timeout-minutes: 10
-        run: dotnet workload install ios --version 10.0.403
+        run: dotnet workload install ios --version 10.0.401
       - name: Select Xcode
-        # The pinned iOS workload (27.1) requires Xcode 27.1, and its build finds tools through the macOS SDK.
+        # The pinned iOS workload (26.5) requires Xcode 26.6, and its build finds tools through the macOS SDK.
         run: |
           set -eu
-          sudo xcode-select -s /Applications/Xcode_27.1.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
           ls "$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs" "$(xcode-select -p)/Platforms/iPhoneSimulator.platform/Developer/SDKs"
           xcrun --sdk macosx --show-sdk-path
