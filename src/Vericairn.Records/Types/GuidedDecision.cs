@@ -8,7 +8,7 @@ namespace Vericairn.Records.Types;
 
 internal static class GuidedDecision
 {
-    internal static void Validate(ValidationContext context, IReadOnlyList<string>? answers, IReadOnlyList<string>? documents)
+    internal static void Validate(ValidationContext context, IReadOnlyList<string>? answers, IReadOnlyList<string>? documents, bool decisionAfterRecord)
     {
         BodyReader body = context.Body;
         BodyReader? answer = body.Since(2, "answer") ? body.Nested("answer", false) : null;
@@ -26,7 +26,9 @@ internal static class GuidedDecision
             if (source is not null && (source.ComputedHash != hash || answers is not { Count: 1 } || answers[0] != ask))
                 context.Error("decision.answer", "The answer pins exactly the ask revision named in answers.");
             string? decided = EstateModel.BodyString(context.Record, "decidedAt");
-            if (at is not null && (string.CompareOrdinal(at, context.Record.At) > 0
+            // A decision after its record already has the shared chronology finding. Do not turn that historical warning
+            // into an error through the guided ordering checks; admission promotes the shared finding for a new decision.
+            if (!decisionAfterRecord && at is not null && (string.CompareOrdinal(at, context.Record.At) > 0
                 || RecordParser.IsTimestamp(decided) && string.CompareOrdinal(decided, at) > 0))
                 context.Error("decision.time", "The decision time cannot follow the answer, and the answer cannot follow its recording.");
             if (source is not null && at is not null && string.CompareOrdinal(at, context.Model.ById[context.Model.Chain(source)[0]].At) < 0)
