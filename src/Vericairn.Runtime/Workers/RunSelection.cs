@@ -255,7 +255,8 @@ public static class RunSelection
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         ArgumentNullException.ThrowIfNull(assignment);
-        string role = WorkView.OrderOfAssignment(model, assignment) is RecordEnvelope order ? Routing.RoleOf(model.Latest(order)) : Routing.DefaultRole;
+        // A run's step is carried in the role its flow gives it, whose restrictions stay binding.
+        string role = Routing.RoleOf(model, assignment) ?? throw new ProviderRefusedException("The assignment names a step of a run whose flow does not resolve here; nothing of it runs on this machine.");
         var sources = new List<RunPolicySource>();
         Add(RunWatchSettings.Roster(model, goal), "roster", true);
         Add(goal, "goal", true);

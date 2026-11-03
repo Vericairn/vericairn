@@ -463,10 +463,13 @@ internal sealed class RunAdmissionService(
     private static string? AssignmentRefusal(EstateModel model, RecordEnvelope assignment, string key)
     {
         RecordEnvelope current = model.Latest(assignment);
+        FlowRuns.StepRef? step = FlowRuns.StepOf(current);
         IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
-            ? Routing.Assignments(model, model.Latest(order)) : [];
-        return holders.Count > 0 && holders[^1].Id != current.Id
-            ? $"Work order {key} is held by assignment {holders[^1].Id}; its step goes on from that assignment."
+            ? Routing.Assignments(model, model.Latest(order), step) : [];
+        // A later assignment of the step holds it; routing's own pending assignment, not yet stored with its intent, is the latest.
+        RecordEnvelope? later = holders.LastOrDefault(h => h.Id != current.Id && GoalRules.Before(current, h));
+        return later is not null
+            ? $"{(step is null ? string.Empty : $"Step {step} of ")}{(step is null ? "Work order" : "work order")} {key} is held by assignment {later.Id}; its step goes on from that assignment."
             : null;
     }
 
@@ -486,6 +489,18 @@ internal sealed class RunAdmissionService(
         }
 
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
+        if (FlowRuns.StepOf(assignment) is not null && Routing.RoleOf(model, assignment) is null)
+        {
+            return (null, $"Assignment {assignment.Id} names a step of a run whose flow does not resolve on this machine; nothing of the run is run here.", null);
+        }
+
+        // A run's reserved step is never carried by an agent's run, however it was assigned.
+        if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef reservedStep && FlowRuns.RunOf(model, order) is RecordEnvelope run
+            && FlowRuns.Resolve(model, run).Flow?.Step(reservedStep.Key) is { Reserved: string act })
+        {
+            return (null, $"Step {reservedStep} of work order {key} is a reserved act, {act}: no agent's run carries it, and the operator acts on it.", null);
+        }
+
         if (AssignmentRefusal(model, assignment, key) is string assignmentRefusal)
         {
             return (null, assignmentRefusal, null);
@@ -587,7 +602,10 @@ internal sealed class RunAdmissionService(
         string repository = resource.Body.TryGetProperty("location", out JsonElement location) && location.ValueKind == JsonValueKind.Object && location.TryGetProperty("github", out JsonElement github) && github.ValueKind == JsonValueKind.String
             ? github.GetString()!
             : EstateModel.BodyString(resource, "name") ?? resource.Id;
-        string branch = string.IsNullOrWhiteSpace(request.Branch) ? "work/" + Slug(key).ToLowerInvariant() : request.Branch.Trim();
+        // A run's steps each work on their own branch by default: the work order's key, the step and its item.
+        string branch = string.IsNullOrWhiteSpace(request.Branch)
+            ? "work/" + Slug(FlowRuns.StepOf(assignment) is FlowRuns.StepRef named ? $"{key}-{named.Key}{(named.Item is null ? string.Empty : "-" + named.Item)}" : key).ToLowerInvariant()
+            : request.Branch.Trim();
         if (AgentRuns.All(model).FirstOrDefault(r => r.InFlight && r.Target("repository") is string other && model.Chain(resource).Contains(other) && r.Target("branch") == branch) is { } busy)
         {
             return (null, $"Run {busy.Id} works on branch {branch} of {repository} and is in flight; one run works in a workspace at a time, so name another branch or wait for it to settle.", null);
@@ -604,7 +622,7 @@ internal sealed class RunAdmissionService(
         try
         {
             selection = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, assignment), request.Execution, Element(cap));
-            selection["role"] = Routing.RoleOf(order);
+            selection["role"] = Routing.RoleOf(model, assignment);
             selection["allocation"] = RunExecutionObservation.Allocation(request.Allocation, Element(cap), out maxBytes);
             if (request.ContextPackage is not null && !ContentHash.IsValid(request.ContextPackage))
             {
@@ -668,7 +686,7 @@ internal sealed class RunAdmissionService(
             RunConfiguration? latest = Configuration(launcher, request.Configuration);
             if (latest is null || latest.Launcher != configuration.Launcher || latest.Name != configuration.Name) return false;
             JsonObject current = RunSelection.Resolve(latest, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, model.Latest(plan.Assignment)), request.Execution, Element(plan.Cap));
-            string role = WorkView.OrderOfAssignment(model, model.Latest(plan.Assignment)) is RecordEnvelope order ? Routing.RoleOf(model.Latest(order)) : Routing.DefaultRole;
+            string role = Routing.RoleOf(model, model.Latest(plan.Assignment)) ?? Routing.DefaultRole;
             return JsonNode.DeepEquals(current["requested"], plan.Selection["requested"])
                 && role == plan.Selection["role"]!.GetValue<string>()
                 && JsonNode.DeepEquals(current["provenance"], plan.Selection["provenance"])
@@ -749,7 +767,10 @@ internal sealed class RunAdmissionService(
         List<string> checks = Strings(brief, "reviewCriteria");
         List<string> constraints = Strings(brief, "prohibitedEffects").Concat(Strings(goal.Body, "constraints")).Distinct(StringComparer.Ordinal).ToList();
         var text = new StringBuilder();
-        text.Append(EstateModel.BodyString(order, "exitQuestion") ?? "Is the work order's outcome reached?");
+        // A run's step has its own end: the outcome its brief states, rather than the run's work order's exit question.
+        text.Append(FlowRuns.StepOf(assignment) is FlowRuns.StepRef step
+            ? $"Is step {step} of the run done as its brief states: {(brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty("outcome", out JsonElement outcome) && outcome.ValueKind == JsonValueKind.String ? outcome.GetString() : "its outcome")}?"
+            : EstateModel.BodyString(order, "exitQuestion") ?? "Is the work order's outcome reached?");
         text.Append(" Checks: ");
         foreach (string check in checks)
         {

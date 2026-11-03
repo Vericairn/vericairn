@@ -36,11 +36,31 @@ public sealed partial class EstateService
                 return null;
             }
 
+            // A run's steps are its flow's, routed by each step's role (design/flow.md § 6).
+            if (FlowRuns.IsRun(current))
+            {
+                NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
+                using JsonDocument run = JsonDocument.Parse(NextEligible.RenderJson(model, flow));
+                return new NextResponse(NextEligible.RenderText(model, flow), run.RootElement.Clone());
+            }
+
             NextEligible.GoalRoutes routes = NextEligible.Routes(model, current, Machine(model));
             using JsonDocument json = JsonDocument.Parse(NextEligible.RenderJson(model, routes));
             return new NextResponse(NextEligible.RenderText(model, routes), json.RootElement.Clone());
         }
     }
+
+    /// <summary>
+    /// The step the one-step operation takes: a work order of the goal's work, or a step of its run's flow, which is an assignment of
+    /// the run's one work order naming the step (design/flow.md § 6).
+    /// </summary>
+    /// <param name="Order">The work order its assignment delegates.</param>
+    /// <param name="Key">The step in words: the work order's key, or the flow step and item.</param>
+    /// <param name="Title">Its title.</param>
+    /// <param name="Route">Its route from this machine.</param>
+    /// <param name="Flow">For a run, the run's position.</param>
+    /// <param name="Step">For a run, the step instance.</param>
+    private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.Instance? Step = null);
 
     /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request)
@@ -79,20 +99,42 @@ public sealed partial class EstateService
                 return StepProblem(goalId, "refused", $"Goal {goalId} is {status}: a step is taken only for an active goal, and nothing was recorded.");
             }
 
-            NextEligible.GoalRoutes routes = NextEligible.Routes(model, current, Machine(model));
-            if (routes.Next is not NextEligible.GoalStep next)
+            Taken taken;
+            if (FlowRuns.IsRun(current))
             {
-                List<string> held = routes.Eligible.Select(s => $"{EstateModel.BodyString(s.Order, "key")} is {s.Route!.State}: {s.Route.Reason}").ToList();
-                return new GoalStepResponse(goalId, "none", held.Count == 0
-                    ? $"Nothing to dispatch: goal {goalId} has no eligible step; what holds its planned steps is in vericairn goal next."
-                    : $"Nothing to dispatch: every eligible step of goal {goalId} is held. {string.Join(" ", held)}", true);
+                NextEligible.FlowRunRoutes flow = NextEligible.FlowRoutes(model, current, Machine(model));
+                if (flow.Position.Flow is null || flow.Position.Work is null)
+                {
+                    return StepProblem(goalId, "refused", $"Goal {goalId} is a run whose {flow.Position.Unavailable ?? "work order is missing"}: it is shown, and none of its steps is taken on this machine. Nothing was recorded.");
+                }
+
+                if (flow.Next is not NextEligible.FlowStepRoute step)
+                {
+                    return new GoalStepResponse(goalId, "none", NothingToTake(goalId, flow), true);
+                }
+
+                taken = new Taken(flow.Position.Work, step.Step.Name, step.Step.Step.Title, step.Route!, flow.Position, step.Step);
+            }
+            else
+            {
+                NextEligible.GoalRoutes routes = NextEligible.Routes(model, current, Machine(model));
+                if (routes.Next is not NextEligible.GoalStep next)
+                {
+                    List<string> held = routes.Eligible.Select(s => $"{EstateModel.BodyString(s.Order, "key")} is {s.Route!.State}: {s.Route.Reason}").ToList();
+                    return new GoalStepResponse(goalId, "none", held.Count == 0
+                        ? $"Nothing to dispatch: goal {goalId} has no eligible step; what holds its planned steps is in vericairn goal next."
+                        : $"Nothing to dispatch: every eligible step of goal {goalId} is held. {string.Join(" ", held)}", true);
+                }
+
+                string orderKey = EstateModel.BodyString(next.Order, "key") ?? next.Order.Id;
+                taken = new Taken(next.Order, orderKey, EstateModel.BodyString(next.Order, "title") ?? orderKey, next.Route!);
             }
 
-            route = next.Route!;
-            key = EstateModel.BodyString(next.Order, "key") ?? next.Order.Id;
+            route = taken.Route;
+            key = taken.Key;
             if (route.State != "agent")
             {
-                return Ask(model, current, next, key, route, request);
+                return Ask(model, current, taken, request);
             }
 
             // An agent's step: refused before anything is recorded when the run could not start here.
@@ -120,7 +162,7 @@ public sealed partial class EstateService
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, current, next.Order, route, where, "run")), next.Order.Reference), model);
+                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference), model);
                 if (routed is null)
                 {
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -171,13 +213,15 @@ public sealed partial class EstateService
             string? agent = EstateModel.BodyString(held, "contributor");
             string agentKind = model.CurrentPrincipal(agent) is RecordEnvelope a ? EstateModel.BodyString(a, "kind") ?? "?" : "missing";
             RecordEnvelope? order = WorkView.OrderOfAssignment(model, held) is RecordEnvelope pinned ? model.Latest(pinned) : null;
-            IReadOnlyList<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order);
+            // A run's assignments hold its steps one by one: a hand-over takes over one step, from the assignment that holds that step.
+            FlowRuns.StepRef? step = FlowRuns.StepOf(held);
+            IReadOnlyList<RecordEnvelope> assignments = order is null ? [] : Routing.Assignments(model, order, step);
             string orderStatus = order is null ? "?" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
             personName = PrincipalName(model, person);
             string? refusal = agentKind is not ("agent" or "service") ? $"Assignment {held.Id} is {PrincipalName(model, agent)}'s, not an agent's: a hand-over takes a step over from an agent."
                 : order is null ? $"Assignment {held.Id} delegates no work order of this estate."
                 : orderStatus is "accepted" or "retired" ? $"Work order {EstateModel.BodyString(order, "key")} is {orderStatus}: no step of it is left to take over."
-                : assignments.Count == 0 || assignments[^1].Id != held.Id ? $"Assignment {held.Id} no longer holds work order {EstateModel.BodyString(order, "key")}: assignment {(assignments.Count == 0 ? "none" : assignments[^1].Id)} does."
+                : assignments.Count == 0 || assignments[^1].Id != held.Id ? $"Assignment {held.Id} no longer holds {(step is null ? string.Empty : $"step {step} of ")}work order {EstateModel.BodyString(order, "key")}: assignment {(assignments.Count == 0 ? "none" : assignments[^1].Id)} does."
                 : !GoalRules.IsPerson(model, person) ? $"{personName} ({person}) is not a person: a step an agent holds is taken over by a person."
                 : !Routing.MayHandOver(model, request.By, person, order) ? $"{PrincipalName(model, request.By)} ({request.By}) does not record this hand-over: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent."
                 : null;
@@ -193,6 +237,12 @@ public sealed partial class EstateService
             brief["sources"] = sources;
             string note = string.IsNullOrWhiteSpace(request.Note) ? $"Takes the step over from {PrincipalName(model, agent)}'s assignment {held.Id}: the hand-over to {personName}." : request.Note.Trim();
             var body = new JsonObject { ["contributor"] = person, ["brief"] = brief, ["note"] = note.Length > 4000 ? note[..3999] + "…" : note };
+            if (step is not null)
+            {
+                // The person carries the same step from the same inputs the agent's brief pinned.
+                body["step"] = JsonNode.Parse(held.Body.GetProperty("step").GetRawText());
+            }
+
             WriteOutcome outcome = WriteLocked(new RecordDraft("assignment", request.By, Element(body), order!.Reference), model);
             if (!outcome.Ok)
             {
@@ -211,9 +261,11 @@ public sealed partial class EstateService
     }
 
     /// <summary>Records what a step routed to a person, or to no one, asks: the person's assignment and ask, or the sponsor's ask.</summary>
-    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, NextEligible.GoalStep step, string key, NextEligible.Route route, GoalStepRequest request)
+    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
     {
-        string title = EstateModel.BodyString(step.Order, "title") ?? key;
+        string key = step.Key;
+        NextEligible.Route route = step.Route;
+        string title = step.Title;
         string goalTitle = EstateModel.BodyString(goal, "title") ?? goal.Id;
         if (route.Principal is null)
         {
@@ -227,7 +279,7 @@ public sealed partial class EstateService
         {
             // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
             // together, or neither is.
-            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, goal, step.Order, route, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference), model);
+            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference), model);
             if (assignment is null)
             {
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -237,9 +289,10 @@ public sealed partial class EstateService
             question = route.State == "reserved"
                 ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {id})."
                 : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {id}).";
+            string from = step.Step is null ? $"vericairn work brief {key}" : $"assignment {id}'s brief, which pins the step's inputs, with vericairn work brief {EstateModel.BodyString(step.Order, "key") ?? step.Order.Id}";
             recommendation = route.State == "reserved"
-                ? $"Carry it yourself, from vericairn work brief {key}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
-                : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; vericairn work brief {key} is everything it needs.";
+                ? $"Carry it yourself, from {from}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
+                : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; {from} is everything it needs.";
             consequence = route.State == "reserved"
                 ? $"{key} waits until you act, and nothing reserved is done for you; the goal's other steps go on."
                 : $"{key} waits with you, and no other contributor is given it; the goal's other steps go on.";
@@ -298,7 +351,7 @@ public sealed partial class EstateService
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
             }
 
-            (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored], $"routing's assignment of work order {key} to {PrincipalName(model, route.Principal)} and the ask that gives it to them", step.Order.Id);
+            (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored], $"routing's assignment of {(step.Step is null ? "work order" : "step")} {key} to {PrincipalName(model, route.Principal)} and the ask that gives it to them", step.Order.Id);
             if (problem is not null)
             {
                 assigned = stored.Count > 0 ? stored[0] : null;
