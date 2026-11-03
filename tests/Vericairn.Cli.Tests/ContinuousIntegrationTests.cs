@@ -232,16 +232,17 @@ public class ContinuousIntegrationTests
         int step = package.IndexOf("- name: Software bill of materials", StringComparison.Ordinal);
         Assert.True(step > 0, "The package job writes the software bill of materials.");
         string sbom = package[step..package.IndexOf("- name: Documentation set", step, StringComparison.Ordinal)];
-        Assert.Matches(@"dotnet tool install --global CycloneDX --version \d+\.\d+\.\d+\n", sbom);
+        Assert.Contains("dotnet tool install --global CycloneDX --version 6.3.1\n", sbom, StringComparison.Ordinal);
         Assert.Contains(" --spec-version 1.6 --disable-package-restore\n", sbom, StringComparison.Ordinal);
         // Until 0.8.1 the bill described the solution's locked portable graph while the bundles were resolved live and discarded.
         Assert.True(package.IndexOf("- name: Restore the distributables (locked)", StringComparison.Ordinal) < step);
         Assert.Contains("python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json", sbom, StringComparison.Ordinal);
-        int packs = sbom.IndexOf("python3 .github/scripts/runtime-packs.py sbom/bom.json artifacts/runtime-packs", StringComparison.Ordinal);
+        int packs = sbom.IndexOf("python3 .github/scripts/runtime-packs.py sbom/bom.json artifacts/runtime-packs --version \"$VERSION\"\n", StringComparison.Ordinal);
         int verify = sbom.IndexOf("python3 .github/scripts/verify-sbom.py", StringComparison.Ordinal);
         int copy = sbom.IndexOf("cp sbom/bom.json", StringComparison.Ordinal);
         Assert.True(packs > 0 && verify > packs && copy > verify);
-        Assert.Contains("--runtime-packs artifacts/runtime-packs\n", sbom, StringComparison.Ordinal);
+        Assert.Contains("--runtime-packs artifacts/runtime-packs --version \"$VERSION\"\n", sbom, StringComparison.Ordinal);
+        Assert.Contains("cp sbom/bom.json \"dist/vericairn-$VERSION-sbom.cdx.json\"\n", sbom, StringComparison.Ordinal);
         string targets = Read(Path.Combine(RepositoryRoot(), "src", "Directory.Build.targets"));
         Assert.Contains("../tools/BundledPacks.targets", targets, StringComparison.Ordinal);
         Assert.Contains("'$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench'", targets, StringComparison.Ordinal);

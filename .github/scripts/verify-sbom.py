@@ -17,9 +17,12 @@ def packages(lock):
     return found
 
 
-def verify(bom, locks, runtime_packs=None):
-    """A bill of materials describes what ships only when it names each package the distributables' lock files hold."""
+def verify(bom, locks, version, runtime_packs=None):
+    """Require the packaged release's identity and each package the distributables' lock files hold."""
     document = json.loads(Path(bom).read_text(encoding="utf-8"))
+    component = document.get("metadata", {}).get("component", {})
+    if component.get("name") != "Vericairn" or component.get("version") != version:
+        raise SystemExit(f"The bill of materials metadata component must name Vericairn {version}.")
     named = {(component["name"].lower(), component["version"]) for component in document.get("components", [])}
     expected = set().union(*(packages(lock) for lock in locks)) if locks else set()
     if not expected:
@@ -37,6 +40,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bom")
     parser.add_argument("locks", nargs="+")
+    parser.add_argument("--version", required=True)
     parser.add_argument("--runtime-packs", required=True)
     args = parser.parse_args()
-    verify(args.bom, args.locks, args.runtime_packs)
+    verify(args.bom, args.locks, args.version, args.runtime_packs)
