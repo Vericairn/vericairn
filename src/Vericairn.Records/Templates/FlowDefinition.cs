@@ -20,16 +20,51 @@ public sealed record FlowRole(string Id, string Holder, string Brief);
 /// <param name="Output">For a step input, the producing step's output name.</param>
 public sealed record FlowInput(string Name, string From, string? Field, string? Step, string? Output);
 
-/// <summary>A named, typed output of a step: its part of the hand-off contract (design/flow.md § 5).</summary>
-/// <param name="Name">The output's name.</param>
-/// <param name="Type">file, record, decision or review.</param>
+/// <summary>A review an item takes before its step closes: its independence and, when named, the role whose principal reviews it.</summary>
+/// <param name="Independence">none, self, independent, other-harness or person.</param>
+/// <param name="Role">The flow role the reviewer is named in, or null for any principal the independence admits.</param>
+public sealed record FlowReview(string Independence, string? Role);
+
+/// <summary>
+/// Who or what must produce an item: a holder kind, a role or a principal; the step inputs it comes from, by hash; and the provider,
+/// tool or settings its producing result or operation records.
+/// </summary>
+/// <param name="Holder">person, agent or either; null for any.</param>
+/// <param name="Role">The flow role the producer is named in; null for any.</param>
+/// <param name="Principal">The one principal that must produce it; null for any.</param>
+/// <param name="Inputs">The step's inputs it comes from, each pinned by hash.</param>
+/// <param name="Provider">The provider its producer used; null for any.</param>
+/// <param name="Tool">The tool, such as a launcher, its producer used; null for any.</param>
+/// <param name="Settings">The settings its producer used, by name; undefined for any.</param>
+public sealed record FlowProvenance(string? Holder, string? Role, string? Principal, IReadOnlyList<string> Inputs, string? Provider, string? Tool, JsonElement Settings);
+
+/// <summary>A named verification an item needs, passing at the item's exact hash.</summary>
+/// <param name="Name">The evidence's name within the item.</param>
+/// <param name="Method">The verification's method, such as a command or a named tool.</param>
+/// <param name="Command">The command it ran, when named.</param>
+/// <param name="Role">The verification's role (self, independent-agent, operator or automation), when named.</param>
+public sealed record FlowEvidence(string Name, string Method, string? Command, string? Role);
+
+/// <summary>
+/// One item a step produces or collects before it closes, declared in its outputs (design/flow.md § 5): its name and kind, required or
+/// optional with a default, and its completion requirements: its provenance, its evidence and its review.
+/// </summary>
+/// <param name="Name">The item's name, by which a later step's inputs name it.</param>
+/// <param name="Kind">file, record, observation, verification, decision or attestation.</param>
 /// <param name="MediaType">For a file, its declared media type.</param>
-/// <param name="RecordType">For a record output, its record type.</param>
-/// <param name="Kind">For a record output, the value of the record's kind field it must have.</param>
-public sealed record FlowOutput(string Name, string Type, string? MediaType, string? RecordType, string? Kind)
+/// <param name="RecordType">For a record or an attestation, its record type.</param>
+/// <param name="RecordKind">For a record, an observation or an attestation, the value of the record's kind field it must have.</param>
+/// <param name="Required">Whether it always counts; an optional item counts by its configured value.</param>
+/// <param name="DefaultOn">For an optional item, whether it counts when nothing configures it.</param>
+/// <param name="Provenance">Who or what must produce it; null for any.</param>
+/// <param name="Evidence">The verifications it needs.</param>
+/// <param name="Review">Its own review; null when the step's review applies.</param>
+/// <param name="Element">The item's declared content.</param>
+public sealed record FlowOutput(string Name, string Kind, string? MediaType, string? RecordType, string? RecordKind, bool Required, bool DefaultOn,
+    FlowProvenance? Provenance, IReadOnlyList<FlowEvidence> Evidence, FlowReview? Review, JsonElement Element)
 {
-    /// <summary>The record type a record or decision output is counted from by the step's done predicates; null for a file or a review.</summary>
-    public string? Counts => Type == "decision" ? "decision" : Type == "record" ? RecordType : null;
+    /// <summary>The record types the step's done predicates count it from, separated by |; null for a file.</summary>
+    public string? Counts => FlowContract.Counted(Kind, RecordType);
 }
 
 /// <summary>A check a step runs before its action, named and explained: here, record predicates that must hold.</summary>
@@ -61,20 +96,27 @@ public sealed record FlowBranch(string Name, IReadOnlyList<JsonElement> When, IR
 /// <param name="Traps">The checks it runs before its action.</param>
 /// <param name="Inputs">Its inputs, which its brief pins.</param>
 /// <param name="Outputs">Its outputs, the hand-off contract.</param>
-/// <param name="Review">The review its output takes before hand-off, as declared; null when the flow's review option decides.</param>
-/// <param name="Each">The subject list field it runs over, one instance per item; null for one instance.</param>
+/// <param name="Review">The review its items take before it closes, as declared, the default for items that declare none; null when the flow's review option decides for a work step.</param>
+/// <param name="Each">The subject list field it runs over, one instance per name; null for one instance.</param>
 /// <param name="When">Its timing, a due time or a watch; undefined without one.</param>
 /// <param name="Element">The step's declared content.</param>
 /// <param name="DeclaredIn">The flow version that declares it.</param>
 public sealed record FlowStep(string Key, string Title, string Kind, string Role, bool Required, bool DefaultOn, string? Reserved, IReadOnlyList<string> After,
     IReadOnlyList<JsonElement> Requires, IReadOnlyList<JsonElement> Done, string? Action, string Recovery, IReadOnlyList<FlowTrap> Traps,
-    IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, string? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn)
+    IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn)
 {
     /// <summary>True for the kinds the conductor routes as an assignment of the run's work order: work and review.</summary>
     public bool IsRouted => FlowContract.Routed.IndexOf(Kind) >= 0;
 
     /// <summary>The option that configures an optional step: step.&lt;key&gt;.</summary>
     public string Option => FlowContract.StepOption + Key;
+
+    /// <summary>The option that configures one of its optional items: item.&lt;key&gt;.&lt;name&gt;.</summary>
+    public string ItemOption(FlowOutput output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        return FlowContract.ItemOption + Key + "." + output.Name;
+    }
 }
 
 /// <summary>
@@ -91,7 +133,8 @@ public sealed class FlowDefinition
     private readonly Dictionary<string, FlowStep> byKey;
 
     private FlowDefinition(TemplateDefinition definition, IReadOnlyList<TemplatePin> chain, JsonElement subject, IReadOnlyList<FlowRole> roles, IReadOnlyList<FlowStep> steps,
-        IReadOnlyList<FlowBranch> branches, IReadOnlyList<string> never, IReadOnlyList<JsonElement> triggers, IReadOnlyDictionary<string, TemplatePin> turnedOff, IReadOnlyDictionary<string, JsonElement> options)
+        IReadOnlyList<FlowBranch> branches, IReadOnlyList<string> never, IReadOnlyList<JsonElement> triggers, IReadOnlyDictionary<string, TemplatePin> turnedOff,
+        IReadOnlyDictionary<string, TemplatePin> turnedOffItems, IReadOnlyDictionary<string, JsonElement> options)
     {
         Definition = definition;
         Chain = chain;
@@ -102,6 +145,7 @@ public sealed class FlowDefinition
         Never = never;
         Triggers = triggers;
         TurnedOff = turnedOff;
+        TurnedOffItems = turnedOffItems;
         Options = options;
         byKey = steps.ToDictionary(s => s.Key, StringComparer.Ordinal);
         SubjectFields = TJson.Array(subject, "fields").ToDictionary(f => TJson.Text(f, "name")!, f => TJson.Text(f, "type")!, StringComparer.Ordinal);
@@ -139,6 +183,9 @@ public sealed class FlowDefinition
 
     /// <summary>The optional base steps an extension turns off, each with the extension that does.</summary>
     public IReadOnlyDictionary<string, TemplatePin> TurnedOff { get; }
+
+    /// <summary>The optional items an extension turns off, by step.item, each with the extension that does.</summary>
+    public IReadOnlyDictionary<string, TemplatePin> TurnedOffItems { get; }
 
     /// <summary>
     /// The options a configuration sets, by name, each with its allowed values and default: the flows' own options, and step.&lt;key&gt;
@@ -198,6 +245,7 @@ public sealed class FlowDefinition
         var triggers = new List<JsonElement>();
         var options = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         var turnedOff = new Dictionary<string, TemplatePin>(StringComparer.Ordinal);
+        var turnedOffItems = new Dictionary<string, TemplatePin>(StringComparer.Ordinal);
         foreach (TemplateDefinition flow in chain)
         {
             var pin = new TemplatePin(flow.Id, flow.Version, flow.Hash);
@@ -235,7 +283,25 @@ public sealed class FlowDefinition
                 triggers.Add(trigger);
             }
 
-            foreach (string key in TJson.Strings(flow.Content, "off"))
+            foreach (string key in TJson.Strings(flow.Content, "off").Where(k => k.Contains('.', StringComparison.Ordinal)))
+            {
+                string[] parts = key.Split('.');
+                FlowOutput? output = steps.FirstOrDefault(s => s.Key == parts[0])?.Outputs.FirstOrDefault(o => o.Name == parts[1]);
+                if (output is null)
+                {
+                    errors.Add($"{where} turns off item '{key}', which no base declares.");
+                }
+                else if (output.Required)
+                {
+                    errors.Add($"{where} turns off item '{key}', a required item: an extension turns off only an item its base declares optional.");
+                }
+                else if (!turnedOffItems.TryAdd(key, pin))
+                {
+                    errors.Add($"{where} turns off item '{key}', which a base already turned off.");
+                }
+            }
+
+            foreach (string key in TJson.Strings(flow.Content, "off").Where(k => !k.Contains('.', StringComparison.Ordinal)))
             {
                 FlowStep? step = steps.FirstOrDefault(s => s.Key == key);
                 if (step is null)
@@ -261,7 +327,7 @@ public sealed class FlowDefinition
                 string key = TJson.Text(content, "key")!;
                 if (steps.Any(s => s.Key == key))
                 {
-                    errors.Add($"{where} declares step '{key}' again: an extension adds steps, and never redeclares a base step, its presence or its reserved marking.");
+                    errors.Add($"{where} declares step '{key}' again: an extension adds steps, and never redeclares a base step, its marking required or optional, or its reserved marking.");
                     continue;
                 }
 
@@ -287,9 +353,12 @@ public sealed class FlowDefinition
                     errors.AddRange(Extension(where, step, earlier, steps, fields));
                 }
 
-                if (roles.All(r => r.Id != step.Role))
+                foreach (string role in new[] { step.Role, step.Review?.Role }.Concat(step.Outputs.SelectMany(o => new[] { o.Provenance?.Role, o.Review?.Role })).OfType<string>().Distinct(StringComparer.Ordinal))
                 {
-                    errors.Add($"{where}: step '{key}' names role '{step.Role}', which the flow does not declare.");
+                    if (roles.All(r => r.Id != role))
+                    {
+                        errors.Add($"{where}: step '{key}' names role '{role}', which the flow does not declare.");
+                    }
                 }
 
                 steps.Insert(index, step);
@@ -339,12 +408,12 @@ public sealed class FlowDefinition
             }
         }
 
-        // A required step never loses an input to a step that is turned off.
+        // A required step never loses an input to a step or an item that is turned off.
         foreach (FlowStep step in steps.Where(s => s.Required))
         {
-            foreach (FlowInput input in step.Inputs.Where(i => i.Step is not null && turnedOff.ContainsKey(i.Step)))
+            foreach (FlowInput input in step.Inputs.Where(i => i.Step is not null && (turnedOff.ContainsKey(i.Step) || turnedOffItems.ContainsKey(i.Step + "." + i.Output))))
             {
-                errors.Add($"Turning off '{input.Step}' leaves required step '{step.Key}' without its input '{input.Name}'.");
+                errors.Add($"Turning off '{(turnedOff.ContainsKey(input.Step!) ? input.Step : input.Step + "." + input.Output)}' leaves required step '{step.Key}' without its input '{input.Name}'.");
             }
         }
 
@@ -353,14 +422,27 @@ public sealed class FlowDefinition
             throw new InvalidOperationException("The flow does not resolve: " + string.Join(" ", errors));
         }
 
-        // An optional step a base declares and no extension turned off is configured by its own option.
+        // An optional step a base declares and no extension turned off is configured by its own option, and so is each optional item.
         foreach (FlowStep step in steps.Where(s => !s.Required && !turnedOff.ContainsKey(s.Key)))
         {
-            using JsonDocument option = JsonDocument.Parse($$"""{"id":"{{step.Option}}","values":["on","off"],"default":"{{(step.DefaultOn ? "on" : "off")}}"}""");
-            options[step.Option] = option.RootElement.Clone();
+            options[step.Option] = OnOff(step.Option, step.DefaultOn);
         }
 
-        return new FlowDefinition(definition, chain.Select(d => new TemplatePin(d.Id, d.Version, d.Hash)).ToList(), subject, roles, steps, branches, never, triggers, turnedOff, options);
+        foreach (FlowStep step in steps.Where(s => !turnedOff.ContainsKey(s.Key)))
+        {
+            foreach (FlowOutput output in step.Outputs.Where(o => !o.Required && !turnedOffItems.ContainsKey(step.Key + "." + o.Name)))
+            {
+                options[step.ItemOption(output)] = OnOff(step.ItemOption(output), output.DefaultOn);
+            }
+        }
+
+        return new FlowDefinition(definition, chain.Select(d => new TemplatePin(d.Id, d.Version, d.Hash)).ToList(), subject, roles, steps, branches, never, triggers, turnedOff, turnedOffItems, options);
+    }
+
+    private static JsonElement OnOff(string id, bool on)
+    {
+        using JsonDocument option = JsonDocument.Parse($$"""{"id":"{{id}}","values":["on","off"],"default":"{{(on ? "on" : "off")}}"}""");
+        return option.RootElement.Clone();
     }
 
     /// <summary>What an extension's step may not do: reach a step it is not placed after, or bind a subject field its base does not have.</summary>
@@ -433,10 +515,23 @@ public sealed class FlowDefinition
         List<string> after = TJson.Object(content, "after").ValueKind == JsonValueKind.Array ? TJson.Strings(content, "after").ToList() : previous is null ? [] : [previous];
         List<FlowTrap> traps = TJson.Array(content, "traps").Select(t => new FlowTrap(TJson.Text(t, "name")!, TJson.Text(t, "summary")!, TJson.Array(t, "holds").ToList())).ToList();
         List<FlowInput> inputs = TJson.Array(content, "inputs").Select(i => new FlowInput(TJson.Text(i, "name")!, TJson.Text(i, "from")!, TJson.Text(i, "field"), TJson.Text(i, "step"), TJson.Text(i, "output"))).ToList();
-        List<FlowOutput> outputs = TJson.Array(content, "outputs").Select(o => new FlowOutput(TJson.Text(o, "name")!, TJson.Text(o, "type")!, TJson.Text(o, "mediaType"), TJson.Text(o, "recordType"), TJson.Text(o, "kind"))).ToList();
+        List<FlowOutput> outputs = TJson.Array(content, "outputs").Select(o => new FlowOutput(TJson.Text(o, "name")!, TJson.Text(o, "kind")!, TJson.Text(o, "mediaType"), TJson.Text(o, "recordType"), TJson.Text(o, "recordKind"),
+            !TJson.Flag(o, "optional"), TJson.Text(o, "default") != "off",
+            TJson.Object(o, "provenance") is { ValueKind: JsonValueKind.Object } p
+                ? new FlowProvenance(TJson.Text(p, "holder"), TJson.Text(p, "role"), TJson.Text(p, "principal"), TJson.Strings(p, "inputs").ToList(), TJson.Text(p, "provider"), TJson.Text(p, "tool"), TJson.Object(p, "settings") is { ValueKind: JsonValueKind.Object } settings ? settings.Clone() : default)
+                : null,
+            TJson.Array(o, "evidence").Select(e => new FlowEvidence(TJson.Text(e, "name")!, TJson.Text(e, "method")!, TJson.Text(e, "command"), TJson.Text(e, "role"))).ToList(),
+            ReviewOf(TJson.Object(o, "review")), o.Clone())).ToList();
         return new FlowStep(TJson.Text(content, "key")!, TJson.Text(content, "title")!, TJson.Text(content, "kind")!, TJson.Text(content, "role")!,
-            TJson.Text(content, "presence") == "required", TJson.Text(content, "default") != "off", TJson.Text(content, "reserved"), after,
+            !TJson.Flag(content, "optional"), TJson.Text(content, "default") != "off", TJson.Text(content, "reserved"), after,
             TJson.Array(content, "requires").ToList(), TJson.Array(content, "done").ToList(), TJson.Text(content, "action"), TJson.Text(content, "recovery")!,
-            traps, inputs, outputs, TJson.Text(content, "review"), TJson.Text(content, "each"), TJson.Object(content, "when"), content.Clone(), pin);
+            traps, inputs, outputs, ReviewOf(TJson.Object(content, "review")), TJson.Text(content, "each"), TJson.Object(content, "when"), content.Clone(), pin);
     }
+
+    private static FlowReview? ReviewOf(JsonElement review) => review.ValueKind switch
+    {
+        JsonValueKind.String => new FlowReview(review.GetString()!, null),
+        JsonValueKind.Object => new FlowReview(TJson.Text(review, "independence")!, TJson.Text(review, "role")),
+        _ => null,
+    };
 }

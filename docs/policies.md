@@ -157,19 +157,22 @@ never repeats the term, since findings are themselves rendered into generated do
 
 ## Required flow steps (0.9.1)
 
-An estate can require steps of a [flow](templates.md#flows-091) that a venture's configuration would otherwise turn off, such as
-the review of each output that leaves the estate. Declare them in an estate policy that applies to the estate or to one product,
-with a rule of kind `vericairn.estate/flow-steps`, version 1, whose parameters name the flow and one or more distinct step keys.
+An estate can require steps and items of a [flow](templates.md#flows-091) that a venture's configuration would otherwise turn
+off, such as the review of each output that leaves the estate. Declare them in an estate policy that applies to the estate or to
+one product, with a rule of kind `vericairn.estate/flow-steps`, version 1, whose parameters name the flow and at least one
+distinct step key in `steps` or item in `items`, as `step.item`.
 
 ```json
-{ "key": "reviews", "kind": "vericairn.estate/flow-steps", "version": 1, "parameters": { "flow": "example/song", "steps": ["review-lyrics"] } }
+{ "key": "reviews", "kind": "vericairn.estate/flow-steps", "version": 1, "parameters": { "flow": "example/song", "steps": ["review-lyrics"], "items": ["master.notes"] } }
 ```
 
-While the policy is active, a goal whose `plan.flow` turns a named step off, a goal whose `until` ends the run before one, and a
-`template-defaults` record for the flow that turns one off are refused, for runs of any version of the flow in the policy's scope.
+While the policy is active, a run whose configuration leaves a named step or item off, by the goal's own options, a wider
+`template-defaults` record, the flow's default or an extension, a run whose `until` ends it before one, and a `template-defaults`
+record for the flow that turns one off are refused, for runs of any version of the flow in the policy's scope; a run turns an
+optional step or item on in its own options to carry it.
 A required step, a reserved marking and an authority rule need no policy: no configuration turns them off.
 
-Evaluating the rule reports, for each current run of the flow in scope and each named step, whether the run carries the step. A
+Evaluating the rule reports, for each current run of the flow in scope and each named step or item, whether the run carries it. A
 run recorded before the policy may leave one out; it goes on without the step until its sponsor revises it, and the finding says
 so. The evaluation resolves the run's flow from the template content the basis retains from the estate's `docs/templates`
 and from the flows the build installs; a run whose flow does not resolve from them is unavailable, never an empty pass.

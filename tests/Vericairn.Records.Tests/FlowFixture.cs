@@ -57,7 +57,14 @@ public sealed class FlowFixture : IDisposable
     {
         var run = new FlowFixture();
         RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", Hash('a'), "text/markdown"));
-        run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(PinOf(lyrics, "lyrics")));
+        RecordEnvelope mastering = run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(PinOf(lyrics, "lyrics")));
+        run.ResultWith(mastering, new JsonObject { ["inputs"] = new JsonArray(PinOf(lyrics, "lyrics")), ["tool"] = "example-tool", ["settings"] = new JsonObject { ["effort"] = "high" } }, "completed", ("master", Hash('b'), null));
+        run.Add("operation", new JsonObject
+        {
+            ["provider"] = "example-provider", ["action"] = "publish-clip", ["identity"] = "example-provider:clip-1", ["intent"] = "Publish the clip.",
+            ["target"] = new JsonObject { ["repository"] = "Example/song" }, ["status"] = "not-started", ["evidence"] = new JsonArray(),
+            ["provenance"] = new JsonObject { ["provider"] = "example-provider", ["settings"] = new JsonObject { ["region"] = "north" } },
+        });
         return run;
     }
 
@@ -82,10 +89,10 @@ public sealed class FlowFixture : IDisposable
         ["options"] = new JsonArray(new JsonObject { ["id"] = "review", ["values"] = new JsonArray("independent", "person", "none"), ["default"] = "none" }),
         ["never"] = new JsonArray("never publish without the operator"),
         ["steps"] = new JsonArray(
-            Step("draft", "work", "writer", outputs: new JsonArray(new JsonObject { ["name"] = "lyrics", ["type"] = "file", ["mediaType"] = "text/markdown" })),
-            Step("review-lyrics", "review", "reviewer", optional: "on", inputs: new JsonArray(Input("lyrics", "draft", "lyrics")), outputs: new JsonArray(new JsonObject { ["name"] = "verdict", ["type"] = "review" })),
-            Step("master", "work", "writer", inputs: new JsonArray(Input("lyrics", "draft", "lyrics")), outputs: new JsonArray(new JsonObject { ["name"] = "master", ["type"] = "file" })),
-            Step("shorts", "work", "writer", optional: "on", each: "tracks", inputs: new JsonArray(Input("master", "master", "master")), outputs: new JsonArray(new JsonObject { ["name"] = "clip", ["type"] = "file" })),
+            Step("draft", "work", "writer", outputs: new JsonArray(FileItem("lyrics", "text/markdown"))),
+            Step("review-lyrics", "review", "reviewer", optional: "on", inputs: new JsonArray(Input("lyrics", "draft", "lyrics")), outputs: new JsonArray(new JsonObject { ["name"] = "verdict", ["kind"] = "record", ["recordType"] = "review", ["required"] = true })),
+            Step("master", "work", "writer", inputs: new JsonArray(Input("lyrics", "draft", "lyrics")), outputs: new JsonArray(FileItem("master"))),
+            Step("shorts", "work", "writer", optional: "on", each: "tracks", inputs: new JsonArray(Input("master", "master", "master")), outputs: new JsonArray(FileItem("clip"))),
             Step("listen", "review", "listener", inputs: new JsonArray(Input("master", "master", "master"))),
             Step("accept", "decision", "decider", reserved: "accept-release", done: new JsonArray(Marker("ACCEPTED"))),
             Step("publish", "operation", "decider", optional: "on", reserved: "publish", done: new JsonArray(Marker("PUBLISHED")))),
@@ -95,15 +102,24 @@ public sealed class FlowFixture : IDisposable
     {
         var step = new JsonObject
         {
-            ["key"] = key, ["title"] = "Step " + key, ["kind"] = kind, ["role"] = role, ["presence"] = optional is null ? "required" : "optional", ["recovery"] = "Carry " + key + " again from its pinned inputs.",
+            ["key"] = key, ["title"] = "Step " + key, ["kind"] = kind, ["role"] = role, ["recovery"] = "Carry " + key + " again from its pinned inputs.",
         };
-        if (optional is not null) step["default"] = optional;
+        if (optional is null) step["required"] = true;
+        else { step["optional"] = true; step["default"] = optional; }
         if (reserved is not null) step["reserved"] = reserved;
         if (each is not null) step["each"] = each;
         if (inputs is not null) step["inputs"] = inputs;
         if (outputs is not null) step["outputs"] = outputs;
         if (done is not null) step["done"] = done;
         return step;
+    }
+
+    /// <summary>A required file item, by name and hash and, when given, media type.</summary>
+    public static JsonObject FileItem(string name, string? mediaType = null)
+    {
+        var item = new JsonObject { ["name"] = name, ["kind"] = "file", ["required"] = true };
+        if (mediaType is not null) item["mediaType"] = mediaType;
+        return item;
     }
 
     public static JsonObject Input(string name, string step, string output) => new() { ["name"] = name, ["from"] = "step", ["step"] = step, ["output"] = output };
@@ -140,10 +156,10 @@ public sealed class FlowFixture : IDisposable
         Policies.Add(type, body, builder: builder, subject: subject, supersedes: supersedes);
 
     /// <summary>The operator's assignment of a step to a contributor, pinning the inputs given.</summary>
-    public RecordEnvelope Assign(string step, string contributor, string? item = null, JsonArray? inputs = null)
+    public RecordEnvelope Assign(string step, string contributor, string? instance = null, JsonArray? inputs = null)
     {
         var named = new JsonObject { ["key"] = step };
-        if (item is not null) named["item"] = item;
+        if (instance is not null) named["instance"] = instance;
         if (inputs is not null) named["inputs"] = inputs;
         return Add("assignment", new JsonObject
         {
@@ -158,7 +174,11 @@ public sealed class FlowFixture : IDisposable
     }
 
     /// <summary>The contributor's attempt and completed result on an assignment, naming outputs by name and hash.</summary>
-    public RecordEnvelope Result(RecordEnvelope assignment, string outcome = "completed", params (string Name, string Hash, string? MediaType)[] outputs)
+    public RecordEnvelope Result(RecordEnvelope assignment, string outcome = "completed", params (string Name, string Hash, string? MediaType)[] outputs) =>
+        ResultWith(assignment, null, outcome, outputs);
+
+    /// <summary>The contributor's attempt and result on an assignment, with the provenance the result records.</summary>
+    public RecordEnvelope ResultWith(RecordEnvelope assignment, JsonObject? provenance, string outcome = "completed", params (string Name, string Hash, string? MediaType)[] outputs)
     {
         bool builder = EstateModel.BodyString(assignment, "contributor") == Estate.BuilderId;
         RecordEnvelope attempt = Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(Estate.Clock), ["workspace"] = "song repository, a work branch", ["note"] = "Carry the step." }, builder: builder, subject: assignment.Reference);
@@ -170,11 +190,13 @@ public sealed class FlowFixture : IDisposable
             named.Add(output);
         }
 
-        return Add("result", new JsonObject
+        var body = new JsonObject
         {
             ["outcome"] = outcome, ["summary"] = "Carried the step.", ["outputs"] = named, ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
             ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Review it.",
-        }, builder: builder, subject: attempt.Reference);
+        };
+        if (provenance is not null) body["provenance"] = provenance;
+        return Add("result", body, builder: builder, subject: attempt.Reference);
     }
 
     /// <summary>The operator's review of a result.</summary>
@@ -191,7 +213,7 @@ public sealed class FlowFixture : IDisposable
 
     public FlowPosition.Position Position(DateTimeOffset? at = null) => FlowPosition.Derive(Estate.Load(), Goal, at ?? Estate.Clock);
 
-    public FlowPosition.Instance Step(string name, DateTimeOffset? at = null) => Assert.Single(Position(at).Steps, s => s.Name == name);
+    public FlowPosition.StepInstance Step(string name, DateTimeOffset? at = null) => Assert.Single(Position(at).Steps, s => s.Name == name);
 
     public static JsonObject PinOf(RecordEnvelope record, string name) => new() { ["name"] = name, ["type"] = record.Type, ["id"] = record.Id, ["hash"] = record.ComputedHash };
 

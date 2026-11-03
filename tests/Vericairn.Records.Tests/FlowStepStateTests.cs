@@ -24,7 +24,7 @@ public class FlowStepStateTests
         Assert.Equal(
             ["draft next", "review-lyrics blocked", "master blocked", "shorts[intro] blocked", "shorts[outro] blocked", "listen blocked", "accept blocked", "publish blocked"],
             States(run.Position()));
-        FlowPosition.Instance draft = run.Step("draft");
+        FlowPosition.StepInstance draft = run.Step("draft");
         Assert.Equal(run.Estate.BuilderId, draft.Principal);
         Assert.StartsWith("routed by the writer role to Test Builder", draft.Reasons[0], StringComparison.Ordinal);
         Assert.Equal("it waits on draft, which is next", run.Step("review-lyrics").Reasons[0]);
@@ -36,10 +36,10 @@ public class FlowStepStateTests
         draft = run.Step("draft");
         Assert.Equal("done", draft.State);
         FlowPosition.Output output = Assert.Single(draft.Outputs);
-        Assert.Equal(("lyrics", "file", lyrics.Id, FlowFixture.Hash('a')), (output.Name, output.Type, output.Carrier.Id, output.Hash));
+        Assert.Equal(("lyrics", "file", lyrics.Id, FlowFixture.Hash('a')), (output.Name, output.Kind, output.Carrier.Id, output.Hash));
 
         // The review of the lyrics is the reviewer's, a person in the roster: it stops for them until they review the exact result.
-        FlowPosition.Instance review = run.Step("review-lyrics");
+        FlowPosition.StepInstance review = run.Step("review-lyrics");
         Assert.Equal("stopped", review.State);
         Assert.StartsWith("a person holds the reviewer role: Test Operator", review.Reasons[0], StringComparison.Ordinal);
         RecordEnvelope verdict = run.Review(lyrics);
@@ -89,7 +89,7 @@ public class FlowStepStateTests
 
         // Changed lyrics: the master used the old ones, so it is stale and reruns under its recovery; what used the master waits.
         RecordEnvelope changed = run.Result(drafting, "completed", ("lyrics", FlowFixture.Hash('c'), "text/markdown"));
-        FlowPosition.Instance stale = run.Step("master");
+        FlowPosition.StepInstance stale = run.Step("master");
         Assert.Equal("stale", stale.State);
         Assert.Contains($"its input lyrics changed after use: its brief pinned result {first.Id} at {FlowFixture.Hash('a')}, and draft output lyrics is now {FlowFixture.Hash('c')} in result {changed.Id}", stale.Reasons[0], StringComparison.Ordinal);
         Assert.Equal("it reruns under its recovery: Carry master again from its pinned inputs.", stale.Reasons[^1]);
@@ -104,6 +104,22 @@ public class FlowStepStateTests
         Assert.Equal("done", run.Step("master").State);
         Assert.Equal("next", run.Step("shorts[intro]").State);
         _ = (master, same);
+    }
+
+    [Fact]
+    public void AnAssignmentMadeWithoutPinsIsStaleWhenItsInputIsRecordedAfterIt()
+    {
+        using var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off" });
+        RecordEnvelope drafting = run.Assign("draft", run.Estate.BuilderId);
+        RecordEnvelope lyrics = run.Result(drafting, "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope unpinned = run.Assign("master", run.Estate.BuilderId);
+        run.Result(unpinned, "completed", ("master", FlowFixture.Hash('b'), null));
+        Assert.Equal("done", run.Step("master").State);
+        RecordEnvelope later = run.Result(drafting, "completed", ("lyrics", FlowFixture.Hash('c'), "text/markdown"));
+        FlowPosition.StepInstance stale = run.Step("master");
+        Assert.Equal("stale", stale.State);
+        Assert.Contains($"after assignment {unpinned.Id}, which pins no input lyrics, was made", stale.Reasons[0], StringComparison.Ordinal);
+        _ = (lyrics, later);
     }
 
     [Fact]
@@ -124,7 +140,7 @@ public class FlowStepStateTests
 
         // A new master after the archive was recorded: the archive used the older one.
         RecordEnvelope remastered = run.Result(mastering, "completed", ("master", FlowFixture.Hash('e'), null));
-        FlowPosition.Instance archive = run.Step("archive");
+        FlowPosition.StepInstance archive = run.Step("archive");
         Assert.Equal("stale", archive.State);
         Assert.Contains($"master output master is now result {remastered.Id}", archive.Reasons[0], StringComparison.Ordinal);
     }
@@ -145,7 +161,7 @@ public class FlowStepStateTests
         RecordEnvelope hold = run.Marked("HOLD");
         RecordEnvelope accepted = run.Marked("ACCEPTED");
 
-        FlowPosition.Instance blocked = run.Step("publish");
+        FlowPosition.StepInstance blocked = run.Step("publish");
         Assert.Equal("blocked", blocked.State);
         Assert.Equal(3, blocked.Reasons.Count);
         Assert.StartsWith("a precondition fails: not-met: work-order records with key CLEARED", blocked.Reasons[0], StringComparison.Ordinal);
@@ -170,7 +186,7 @@ public class FlowStepStateTests
         RecordEnvelope drafting = run.Assign("draft", run.Estate.BuilderId);
         RecordEnvelope lyrics = run.Result(drafting, "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
         run.Review(lyrics, "findings");
-        FlowPosition.Instance draft = run.Step("draft");
+        FlowPosition.StepInstance draft = run.Step("draft");
         Assert.Equal("next", draft.State);
         Assert.StartsWith($"review ", draft.Reasons[0], StringComparison.Ordinal);
         Assert.Contains($"found what to change in result {lyrics.Id}: Test Builder goes on with another attempt", draft.Reasons[0], StringComparison.Ordinal);
@@ -189,9 +205,9 @@ public class FlowStepStateTests
         using var run = new FlowFixture(options: new JsonObject { ["review"] = "independent" });
         RecordEnvelope drafting = run.Assign("draft", run.Estate.BuilderId);
         RecordEnvelope lyrics = run.Result(drafting, "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
-        FlowPosition.Instance draft = run.Step("draft");
+        FlowPosition.StepInstance draft = run.Step("draft");
         Assert.Equal("in-review", draft.State);
-        Assert.StartsWith("its output awaits an independent review before it is handed on", draft.Reasons[0], StringComparison.Ordinal);
+        Assert.StartsWith("item lyrics is in-review: it awaits an independent review at its exact hash", draft.Reasons[0], StringComparison.Ordinal);
 
         // A review by the result's own author does not count; the operator's does.
         run.Add("review", new JsonObject { ["independence"] = "self", ["outcome"] = "pass", ["summary"] = "My own.", ["findings"] = new JsonArray() }, builder: true, subject: lyrics.Reference);
@@ -237,7 +253,7 @@ public class FlowStepStateTests
         observe["when"] = new JsonObject { ["watch"] = new JsonObject { ["every"] = "PT6H", ["limit"] = "P2D" } };
         flow["steps"]!.AsArray().Add(observe);
         using var run = new FlowFixture(flow);
-        FlowPosition.Instance watched = run.Step("observe");
+        FlowPosition.StepInstance watched = run.Step("observe");
         Assert.Equal("next", watched.State);
         Assert.StartsWith("watched every PT6H until its done predicates hold (work-order records with key DELIVERED", watched.Reasons[0], StringComparison.Ordinal);
         Assert.Equal("stopped", run.Step("observe", run.Estate.Clock.AddDays(3)).State);

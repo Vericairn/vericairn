@@ -133,6 +133,15 @@
       "in-review",
       "stopped",
       "off"
+    ],
+    "flow-item": [
+      "satisfied",
+      "missing",
+      "unproven",
+      "unverified",
+      "in-review",
+      "stale",
+      "off"
     ]
   }
 }

@@ -41,6 +41,7 @@ public class PresentationTests
         Assert.Equal(Vericairn.Records.Estate.NextEligible.RouteStates, StateLanguage.Vocabularies.Single(v => v.Subject == "step-route").States.Select(s => s.Value));
         Assert.Equal(Vericairn.Records.Estate.FlowPosition.States, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-step").States.Select(s => s.Value));
         Assert.True(StateLanguage.NeedsPerson("flow-step", "stopped"));
+        Assert.Equal(Vericairn.Records.Estate.FlowPosition.ItemStates, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-item").States.Select(s => s.Value));
         Assert.True(StateLanguage.NeedsPerson("step-route", "unavailable"));
         Assert.False(StateLanguage.NeedsPerson("step-route", "running"));
         Assert.False(StateLanguage.NeedsPerson("ask", "answered"));

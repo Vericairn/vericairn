@@ -31,16 +31,26 @@ public static partial class FlowContract
     /// <summary>The reserved acts a step may be (design/release-procedure.md § 4).</summary>
     public static readonly ImmutableArray<string> ReservedActs = ["accept-release", "publish", "spend", "use-credential", "security-review"];
 
-    /// <summary>The review a step's output takes before it is handed on (design/flow.md § 6).</summary>
-    public static readonly ImmutableArray<string> Reviews = ["independent", "person", "none"];
+    /// <summary>
+    /// The independence of an item's review before its step closes (design/flow.md §§ 5 and 6): none, self (the author's own check,
+    /// labeled as such), independent (a principal other than its producer), other-harness (independent, by an agent on another harness
+    /// than the producer's) or person (a person other than its producer).
+    /// </summary>
+    public static readonly ImmutableArray<string> Reviews = ["none", "self", "independent", "other-harness", "person"];
 
-    /// <summary>The kinds of a step's outputs: a file by hash, a record by type, a decision record, a review record.</summary>
-    public static readonly ImmutableArray<string> OutputTypes = ["file", "record", "decision", "review"];
+    /// <summary>
+    /// The kind of an item a step produces or collects (design/flow.md § 5): a file by hash and media type, a record by record type, an
+    /// observation (an operation's observed outcome), a verification (a check's result), or a person's decision or attestation.
+    /// </summary>
+    public static readonly ImmutableArray<string> ItemKinds = ["file", "record", "observation", "verification", "decision", "attestation"];
+
+    /// <summary>The prefix of the option an optional item is configured by: item.&lt;step&gt;.&lt;name&gt;, on or off.</summary>
+    public const string ItemOption = "item.";
 
     /// <summary>The routes an outside effect or an exchange travels by (design/flow.md § 9).</summary>
     public static readonly ImmutableArray<string> Routes = ["api", "person", "browser"];
 
-    /// <summary>The kinds of a subject field: a record reference, a text value, or a list of item names an <c>each</c> step runs over.</summary>
+    /// <summary>The kinds of a subject field: a record reference, a text value, or a list of instance names an <c>each</c> step runs over.</summary>
     public static readonly ImmutableArray<string> SubjectTypes = ["record", "text", "list"];
 
     /// <summary>The kinds whose steps the conductor routes to their role's principal as an assignment of the run's work order.</summary>
@@ -56,7 +66,7 @@ public static partial class FlowContract
     public static bool IsFlow(JsonElement content) => TJson.Text(content, "kind") == Kind;
 
     /// <summary>
-    /// Checks one flow's content: every field of design/flow.md § 5, each step's kind, presence and default, its role among the
+    /// Checks one flow's content: every field of design/flow.md § 5, each step's kind, its marking required or optional with a default, its role among the
     /// declared roles, its preconditions as record predicates over the run's subject, its hand-off contract and the steps it waits on,
     /// all of which name earlier steps only, so a flow has no cycle. An extension's relation to its base is checked on resolution.
     /// </summary>
@@ -109,10 +119,10 @@ public static partial class FlowContract
         }
 
         body.StringArray("never", false, allowEmpty: false, maxItemLength: 2000);
-        IReadOnlyList<string>? off = body.StringArray("off", false, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
+        IReadOnlyList<string>? off = body.StringArray("off", false, allowEmpty: false, maxItemLength: 200, itemPattern: OffPattern(), patternHint: "a step key, or step.item");
         if (off is not null && !extension)
         {
-            body.Error("flow.off", "off", "Only an extension turns off a step, one its base declares optional.");
+            body.Error("flow.off", "off", "Only an extension turns off a step or an item, one its base declares optional.");
         }
 
         if (off is not null && off.Distinct(StringComparer.Ordinal).Count() != off.Count)
@@ -124,7 +134,7 @@ public static partial class FlowContract
         var declared = new List<StepShape>();
         foreach (BodyReader step in steps)
         {
-            declared.Add(Step(step, subject, extension, declared));
+            declared.Add(Step(step, subject, extension, declared, roles));
         }
 
         // Within one content the references are checked against the steps declared so far; an extension's references to its base's
@@ -145,7 +155,7 @@ public static partial class FlowContract
             branch.Text("name", true, 100, Patterns.Slug, "a branch name");
             foreach (BodyReader predicate in branch.NestedArray("when", true, allowEmpty: false) ?? [])
             {
-                Predicate(predicate, subject, extension, item: false);
+                Predicate(predicate, subject, extension, instance: false);
             }
 
             branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
@@ -194,7 +204,7 @@ public static partial class FlowContract
 
     private sealed record StepShape(BodyReader Body, string? Key, string? Kind, string? Role, IReadOnlyDictionary<string, string> Outputs, string? Each);
 
-    private static StepShape Step(BodyReader step, Dictionary<string, string> subject, bool extension, List<StepShape> earlier)
+    private static StepShape Step(BodyReader step, Dictionary<string, string> subject, bool extension, List<StepShape> earlier, Dictionary<string, string> roles)
     {
         string? key = step.Text("key", true, 100, Patterns.Slug, "a step key");
         if (key is not null && earlier.Any(e => e.Key == key))
@@ -205,12 +215,7 @@ public static partial class FlowContract
         step.Text("title", true, 300);
         string? kind = step.Enum("kind", true, StepKinds);
         string? role = step.Text("role", true, 60, Patterns.Slug, "a role of the flow");
-        string? presence = step.Enum("presence", true, "required", "optional");
-        step.Enum("default", presence == "optional", OnOff);
-        if (presence == "required" && step.Has("default"))
-        {
-            step.Error("flow.presence", "default", "A required step always runs; only an optional step has a default, on or off.");
-        }
+        Marking(step, "step");
 
         step.Enum("reserved", false, ReservedActs);
         string? following = step.Text("following", false, 100, Patterns.Slug, "a step key");
@@ -222,7 +227,7 @@ public static partial class FlowContract
         string? each = step.Text("each", false, 60, Patterns.Slug, "a list field of the subject");
         if (each is not null && !extension && subject.GetValueOrDefault(each) != "list")
         {
-            step.Error("flow.each", "each", $"'{each}' is not a list field of the flow's subject, which an each step runs over, one instance per item.");
+            step.Error("flow.each", "each", $"'{each}' is not a list field of the flow's subject, which an each step runs over, one instance per name.");
         }
 
         IReadOnlyList<string>? after = step.StringArray("after", false, allowEmpty: true, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
@@ -318,58 +323,21 @@ public static partial class FlowContract
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (BodyReader output in step.NestedArray("outputs", false, allowEmpty: false) ?? [])
         {
-            string? name = output.Text("name", true, 60, Patterns.Slug, "an output name");
-            string? type = output.Enum("type", true, OutputTypes);
-            output.Text("mediaType", false, 100);
-            string? recordType = output.Text("recordType", type == "record", 100, Patterns.Slug, "a record type");
-            output.Text("kind", false, 100);
-            output.NoOtherKeys();
-            if (type != "file" && output.Has("mediaType"))
+            string? itemKind = Item(output, kind, done, inputs, extension, roles);
+            string? name = TJson.Text(output.Element, "name");
+            if (name is not null && itemKind is not null && !outputs.TryAdd(name, itemKind))
             {
-                output.Error("flow.output", "mediaType", "Only a file output names a media type.");
-            }
-
-            if (type != "record" && (output.Has("recordType") || output.Has("kind")))
-            {
-                output.Error("flow.output", "recordType", "Only a record output names a record type and kind.");
-            }
-
-            if (recordType is not null && RecordTypeRegistry.Find(recordType) is null)
-            {
-                output.Error("flow.output", "recordType", $"'{recordType}' is not a record type this build reads.");
-            }
-
-            if (type == "file" && kind != "work")
-            {
-                output.Error("flow.output", "type", "A file output is carried by a work step's result, by name and hash.");
-            }
-
-            if (type == "review" && kind != "review")
-            {
-                output.Error("flow.output", "type", "A review output is a review step's review record.");
-            }
-
-            if (kind == "review" && type != "review")
-            {
-                output.Error("flow.output", "type", "A review step's output is the review it records.");
-            }
-
-            string? counted = type == "decision" ? "decision" : type == "record" ? recordType : null;
-            if (counted is not null && !done.Any(p => TJson.Text(p.Element, "type") == counted))
-            {
-                output.Error("flow.output", "type", $"A {type} output is the newest {counted} record the step's done predicates count; declare a done predicate of type {counted}.");
-            }
-
-            if (name is not null && type is not null && !outputs.TryAdd(name, type))
-            {
-                output.Error("flow.duplicate", "name", "Each output of a step is named once.");
+                output.Error("flow.duplicate", "name", "Each item of a step is named once.");
             }
         }
 
-        string? review = step.Enum("review", false, Reviews);
-        if (review is not null && kind != "work")
+        if (step.Has("review"))
         {
-            step.Error("flow.review", "review", "Review before hand-off applies to a work step's output; a review step is the review.");
+            Review(step, "review", extension, roles);
+            if (kind == "review")
+            {
+                step.Error("flow.review", "review", "A review step is the review; its own review is not reviewed again.");
+            }
         }
 
         BodyReader? when = step.Nested("when", false);
@@ -418,6 +386,180 @@ public static partial class FlowContract
 
         step.NoOtherKeys();
         return new StepShape(step, key, kind, role, outputs, each);
+    }
+
+    /// <summary>
+    /// One item a step produces or collects before it closes (design/flow.md § 5): its name and kind, required or optional with a
+    /// default, and its completion requirements: its provenance (who must produce it, by role, principal or holder; from which of the
+    /// step's inputs, by hash; with which provider, tool or settings), its evidence (named verifications passing at its exact hash) and
+    /// its review, the step's when it declares none. A review step's one item is the review it records: a record of type review.
+    /// Returns the item's kind.
+    /// </summary>
+    private static string? Item(BodyReader output, string? kind, IReadOnlyList<BodyReader> done, HashSet<string> inputs, bool extension, Dictionary<string, string> roles)
+    {
+        output.Text("name", true, 60, Patterns.Slug, "an item name");
+        string? itemKind = output.Enum("kind", true, ItemKinds);
+        output.Text("mediaType", false, 100);
+        string? recordType = output.Text("recordType", itemKind is "record" or "attestation", 100, Patterns.Slug, "a record type");
+        output.Text("recordKind", false, 100);
+        Marking(output, "item");
+        BodyReader? provenance = output.Nested("provenance", false);
+        if (provenance is not null)
+        {
+            provenance.Enum("holder", false, Holders);
+            string? role = provenance.Text("role", false, 60, Patterns.Slug, "a role of the flow");
+            if (role is not null && !extension && !roles.ContainsKey(role))
+            {
+                provenance.Error("flow.role", "role", $"'{role}' is not one of the flow's roles.");
+            }
+
+            provenance.Ulid("principal", false);
+            foreach (string named in provenance.StringArray("inputs", false, allowEmpty: false, maxItemLength: 60, itemPattern: Patterns.Slug, patternHint: "an input name") ?? [])
+            {
+                if (!inputs.Contains(named))
+                {
+                    provenance.Error("flow.provenance", "inputs", $"'{named}' is not an input of the step; an item comes from the step's inputs, each pinned by hash.");
+                }
+            }
+
+            provenance.Text("provider", false, 200);
+            provenance.Text("tool", false, 200);
+            BodyReader? settings = provenance.Nested("settings", false);
+            if (settings is not null)
+            {
+                foreach (JsonProperty setting in settings.Element.EnumerateObject())
+                {
+                    settings.Text(setting.Name, true, 200);
+                }
+
+                if (!settings.Element.EnumerateObject().Any())
+                {
+                    settings.Error("flow.provenance", "settings", "A settings requirement names at least one setting.");
+                }
+            }
+
+            provenance.NoOtherKeys();
+            if (itemKind is not ("file" or "record" or "observation") && (provenance.Has("inputs") || provenance.Has("provider") || provenance.Has("tool") || provenance.Has("settings")))
+            {
+                provenance.Error("flow.provenance", "inputs", "Inputs, a provider, a tool and settings are the provenance of an item a result or an operation produces: a file, a record or an observation.");
+            }
+        }
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (BodyReader evidence in output.NestedArray("evidence", false, allowEmpty: false) ?? [])
+        {
+            string? name = evidence.Text("name", true, 100, Patterns.Slug, "an evidence name");
+            evidence.Text("method", true, 200);
+            evidence.Text("command", false, 4000);
+            evidence.Enum("role", false, VerificationType.Roles);
+            evidence.NoOtherKeys();
+            if (name is not null && !names.Add(name))
+            {
+                evidence.Error("flow.duplicate", "name", "Each piece of evidence of an item is named once.");
+            }
+        }
+
+        bool reviews = kind == "review";
+        if (output.Has("review"))
+        {
+            Review(output, "review", extension, roles);
+            if (reviews)
+            {
+                output.Error("flow.review", "review", "A review step's review is not reviewed again.");
+            }
+        }
+
+        output.NoOtherKeys();
+        if (itemKind != "file" && output.Has("mediaType"))
+        {
+            output.Error("flow.output", "mediaType", "Only a file names a media type.");
+        }
+
+        if (itemKind is not ("record" or "attestation") && output.Has("recordType"))
+        {
+            output.Error("flow.output", "recordType", "Only a record or an attestation names its record type; the other kinds are their own types.");
+        }
+
+        if (itemKind is not ("record" or "observation" or "attestation") && output.Has("recordKind"))
+        {
+            output.Error("flow.output", "recordKind", "Only a record, an observation or an attestation names the kind its record has.");
+        }
+
+        if (recordType is not null && RecordTypeRegistry.Find(recordType) is null)
+        {
+            output.Error("flow.output", "recordType", $"'{recordType}' is not a record type this build reads.");
+        }
+
+        if (itemKind == "file" && kind != "work")
+        {
+            output.Error("flow.output", "kind", "A file is carried by a work step's result, by name and hash.");
+        }
+
+        if (reviews != (itemKind == "record" && recordType == "review"))
+        {
+            output.Error("flow.output", "kind", reviews ? "A review step's item is the review it records: a record of type review." : "A review is a review step's item.");
+        }
+
+        if (!reviews && Counted(itemKind, recordType) is string counted && !done.Any(p => counted.Split('|').Contains(TJson.Text(p.Element, "type"), StringComparer.Ordinal)))
+        {
+            output.Error("flow.output", "kind", $"A{(itemKind is "observation" or "attestation" ? "n" : string.Empty)} {itemKind} is the newest {counted.Replace("|", " or ", StringComparison.Ordinal)} record the step's done predicates count; declare a done predicate of that type.");
+        }
+
+        return itemKind;
+    }
+
+    /// <summary>
+    /// The record types an item is counted from by its step's done predicates: a record's or an attestation's declared type, an
+    /// observation's operation or observation record, a verification, a decision; null for a file.
+    /// </summary>
+    public static string? Counted(string? kind, string? recordType) => kind switch
+    {
+        "record" or "attestation" => recordType,
+        "observation" => "operation|observation",
+        "verification" or "decision" => kind,
+        _ => null,
+    };
+
+    /// <summary>Whether a step or an item is required or optional: exactly one of required: true or optional: true, an optional one with its default.</summary>
+    private static void Marking(BodyReader body, string what)
+    {
+        bool? required = body.Flag("required", false);
+        bool? optional = body.Flag("optional", false);
+        if (required == false || optional == false || (required == true) == (optional == true))
+        {
+            body.Error("flow.marking", "required", $"Each {what} is marked either required: true or optional: true.");
+        }
+
+        body.Enum("default", optional == true, OnOff);
+        if (optional != true && body.Has("default"))
+        {
+            body.Error("flow.marking", "default", $"A required {what} always counts; only an optional {what} has a default, on or off.");
+        }
+    }
+
+    /// <summary>A review requirement: its independence, as a word or as an object with the reviewer's role.</summary>
+    private static void Review(BodyReader owner, string name, bool extension, Dictionary<string, string> roles)
+    {
+        JsonElement value = TJson.Object(owner.Element, name);
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            owner.Enum(name, false, Reviews);
+            return;
+        }
+
+        BodyReader? review = owner.Nested(name, false);
+        if (review is null)
+        {
+            return;
+        }
+
+        review.Enum("independence", true, Reviews);
+        string? role = review.Text("role", false, 60, Patterns.Slug, "a role of the flow");
+        review.NoOtherKeys();
+        if (role is not null && !extension && !roles.ContainsKey(role))
+        {
+            review.Error("flow.role", "role", $"'{role}' is not one of the flow's roles.");
+        }
     }
 
     /// <summary>An exchange (design/flow.md §§ 5 and 9): the package exported, by input, with its question, format and expiry, and the routes.</summary>
@@ -514,9 +656,9 @@ public static partial class FlowContract
 
     /// <summary>
     /// A record predicate over the run (the goal completion language of design/goals.md § 5), whose string values may name the run's
-    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {item} in an each step, {goal} and {work}.
+    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {instance} in an each step, {goal} and {work}.
     /// </summary>
-    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool item)
+    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool instance)
     {
         string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
         if (type is not null && RecordTypeRegistry.Find(type) is null)
@@ -525,13 +667,13 @@ public static partial class FlowContract
         }
 
         string? named = predicate.Text("subject", false, 100);
-        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, item, record: true))
+        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, instance, record: true))
         {
             predicate.Error("flow.binding", "subject", "A predicate's subject is a record id or a record binding of the run: {subject.<record field>}, {goal} or {work}.");
         }
 
         string? product = predicate.Text("product", false, 100);
-        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, item, record: true))
+        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, instance, record: true))
         {
             predicate.Error("flow.binding", "product", "A predicate's product is a product id or a record binding of the run.");
         }
@@ -551,9 +693,9 @@ public static partial class FlowContract
                 {
                     fields.Error("body.type", field.Name, "A predicate compares a body field with a string value.");
                 }
-                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, item, record: false))
+                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, instance, record: false))
                 {
-                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {item} in an each step, {goal} or {work}.");
+                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {instance} in an each step, {goal} or {work}.");
                 }
             }
         }
@@ -581,7 +723,7 @@ public static partial class FlowContract
         predicate.NoOtherKeys();
     }
 
-    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool item, bool record)
+    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool instance, bool record)
     {
         Match match = Binding().Match(value);
         if (!match.Success)
@@ -595,9 +737,9 @@ public static partial class FlowContract
             return true;
         }
 
-        if (name == "item")
+        if (name == "instance")
         {
-            return item && !record;
+            return instance && !record;
         }
 
         string field = name["subject.".Length..];
@@ -627,9 +769,13 @@ public static partial class FlowContract
         }
     }
 
-    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {item}, {goal} or {work}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|item|goal|work)\}$")]
+    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal} or {work}.</summary>
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work)\}$")]
     internal static partial Regex Binding();
+
+    /// <summary>A step key, or a step key and an item name joined by a dot.</summary>
+    [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)?$")]
+    private static partial Regex OffPattern();
 
     [GeneratedRegex(@"^P(?:(?<d>\d{1,5})D)?(?:T(?:(?<h>\d{1,6})H)?(?:(?<m>\d{1,8})M)?(?:(?<s>\d{1,10})S)?)?$")]
     private static partial Regex DurationPattern();

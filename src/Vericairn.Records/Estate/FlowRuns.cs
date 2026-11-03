@@ -21,6 +21,8 @@ public static class FlowRuns
     /// <summary>The policy rule kind by which an estate policy requires named steps of a flow (design/flow.md § 5).</summary>
     public const string PolicyKind = "vericairn.estate/flow-steps";
 
+    private static readonly string[] OnOffValues = ["on", "off"];
+
     /// <summary>A setting of a run's configuration: its value and where it comes from.</summary>
     /// <param name="Option">The option: a flow option, or step.&lt;key&gt;.</param>
     /// <param name="Value">The effective value.</param>
@@ -28,11 +30,12 @@ public static class FlowRuns
     /// <param name="Record">The template-defaults record or goal it comes from; null for the flow's default.</param>
     public sealed record Setting(string Option, string Value, string Source, RecordEnvelope? Record);
 
-    /// <summary>A run's configuration: every option's effective value, and each step that is off with why.</summary>
+    /// <summary>A run's configuration: every option's effective value, and each step and item that is off with why.</summary>
     /// <param name="Values">Every option, by name.</param>
     /// <param name="Off">The steps that are not part of the run, by key, each with the reason.</param>
+    /// <param name="ItemsOff">The optional items that are off, by step.item, each with the reason.</param>
     /// <param name="Until">The step the run ends at, when the plan names one.</param>
-    public sealed record Configuration(IReadOnlyDictionary<string, Setting> Values, IReadOnlyDictionary<string, string> Off, string? Until)
+    public sealed record Configuration(IReadOnlyDictionary<string, Setting> Values, IReadOnlyDictionary<string, string> Off, IReadOnlyDictionary<string, string> ItemsOff, string? Until)
     {
         /// <summary>The value of a flow option, or null when the flow has none by that name.</summary>
         public string? Value(string option) => Values.TryGetValue(option, out Setting? setting) ? setting.Value : null;
@@ -126,8 +129,9 @@ public static class FlowRuns
     }
 
     /// <summary>
-    /// The steps an estate policy requires of a flow, by key, each with the policy: the active policies in force before a record when
-    /// one is given (otherwise now), applying to the estate or to the run's product, whose rule of kind <see cref="PolicyKind"/> names the flow.
+    /// The steps and items an estate policy requires of a flow, by step key or step.item, each with the policy: the active policies in
+    /// force before a record when one is given (otherwise now), applying to the estate or to the run's product, whose rule of kind
+    /// <see cref="PolicyKind"/> names the flow.
     /// </summary>
     public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, string flowId, string? product, RecordEnvelope? before = null)
     {
@@ -156,7 +160,7 @@ public static class FlowRuns
                     continue;
                 }
 
-                foreach (string step in TJson.Strings(parameters, "steps"))
+                foreach (string step in TJson.Strings(parameters, "steps").Concat(TJson.Strings(parameters, "items")))
                 {
                     required.TryAdd(step, policy);
                 }
@@ -188,7 +192,7 @@ public static class FlowRuns
                 continue;
             }
 
-            RecordEnvelope? defaults = model.Current("template-defaults").Where(r => before is null || GoalRules.Before(r, before)).Where(r =>
+            RecordEnvelope? defaults = model.OfType("template-defaults").Where(r => CurrentBefore(model, r, before)).Where(r =>
                 TJson.Text(TJson.Object(r.Body, "template"), "id") == flow.Pin.Id && TJson.Text(TJson.Object(r.Body, "template"), "version") == flow.Pin.Version
                 && TJson.Text(TJson.Object(r.Body, "template"), "hash") == flow.Pin.Hash && TJson.Text(TJson.Object(r.Body, "scope"), "kind") == kind
                 && (target is null || ScopeTarget(model, kind, TJson.Text(TJson.Object(r.Body, "scope"), "target")) == target))
@@ -224,16 +228,35 @@ public static class FlowRuns
             }
         }
 
-        // An optional step fed by a step that is off is off too, in the flow's order; a required one stays and waits, refused at validation.
-        foreach (FlowStep step in flow.Steps.Where(s => !s.Required && !off.ContainsKey(s.Key)))
+        // An optional item turned off by an extension or configured off counts for nothing; only an optional item has an option.
+        var itemsOff = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string key, TemplatePin by) in flow.TurnedOffItems)
         {
-            if (step.Inputs.FirstOrDefault(i => i.Step is not null && off.ContainsKey(i.Step)) is FlowInput fed)
+            itemsOff[key] = $"turned off by the flow's extension {by.Id} {by.Version}";
+        }
+
+        foreach (FlowStep step in flow.Steps)
+        {
+            foreach (FlowOutput output in step.Outputs.Where(o => !o.Required))
             {
-                off[step.Key] = $"its input {fed.Name} comes from {fed.Step}, which is off";
+                if (!itemsOff.ContainsKey(step.Key + "." + output.Name) && values.TryGetValue(step.ItemOption(output), out Setting? setting) && setting.Value == "off")
+                {
+                    itemsOff[step.Key + "." + output.Name] = setting.Record is null ? "off by the flow's default" : $"configured off by {setting.Source}";
+                }
             }
         }
 
-        return new Configuration(values, off, until);
+        // An optional step fed by a step or an item that is off is off too, in the flow's order; a required one stays and waits,
+        // refused at validation.
+        foreach (FlowStep step in flow.Steps.Where(s => !s.Required && !off.ContainsKey(s.Key)))
+        {
+            if (step.Inputs.FirstOrDefault(i => i.Step is not null && (off.ContainsKey(i.Step) || itemsOff.ContainsKey(i.Step + "." + i.Output))) is FlowInput fed)
+            {
+                off[step.Key] = off.ContainsKey(fed.Step!) ? $"its input {fed.Name} comes from {fed.Step}, which is off" : $"its input {fed.Name} is item {fed.Output} of {fed.Step}, which is off";
+            }
+        }
+
+        return new Configuration(values, off, itemsOff, until);
 
         void Apply(JsonElement choices, string source, RecordEnvelope record)
         {
@@ -270,9 +293,39 @@ public static class FlowRuns
 
         IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(model, flow.Pin.Id, product, before);
         var turnedOff = new List<string>();
+        var itemsOff = new List<string>();
         foreach (JsonProperty choice in choices.EnumerateObject())
         {
             string? value = choice.Value.ValueKind == JsonValueKind.String ? choice.Value.GetString() : null;
+            if (choice.Name.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))
+            {
+                string[] parts = choice.Name[FlowContract.ItemOption.Length..].Split('.');
+                FlowStep? owner = parts.Length == 2 ? flow.Step(parts[0]) : null;
+                FlowOutput? item = owner?.Outputs.FirstOrDefault(o => o.Name == parts[1]);
+                if (item is { Required: true })
+                {
+                    refusals.Add(("flow.required", $"Item {item.Name} of step {owner!.Key} is required: configuration turns off only an optional item."));
+                }
+                else if (item is not null && flow.TurnedOffItems.ContainsKey(owner!.Key + "." + item.Name))
+                {
+                    refusals.Add(("flow.option", $"Item {item.Name} of step {owner.Key} is turned off by the flow's extension, which configuration does not change."));
+                }
+                else if (item is null || value is null || !flow.Options.ContainsKey(choice.Name) || !OnOffValues.Contains(value))
+                {
+                    refusals.Add(("flow.option", $"'{choice.Name}' is not an option of flow {flow.Pin.Id} with that value; its options are {string.Join(", ", flow.Options.Keys.Order(StringComparer.Ordinal))}."));
+                }
+                else if (value == "off" && required.TryGetValue(owner!.Key + "." + item.Name, out RecordEnvelope? requiring))
+                {
+                    refusals.Add(("flow.policy", $"Item {item.Name} of step {owner.Key} is required by estate policy {EstateModel.BodyString(requiring, "key") ?? requiring.Id} ({requiring.Id}); no configuration turns it off."));
+                }
+                else if (value == "off")
+                {
+                    itemsOff.Add(owner!.Key + "." + item.Name);
+                }
+
+                continue;
+            }
+
             FlowStep? step = choice.Name.StartsWith(FlowContract.StepOption, StringComparison.Ordinal) ? flow.Step(choice.Name[FlowContract.StepOption.Length..]) : null;
             if (step is { Required: true })
             {
@@ -301,9 +354,10 @@ public static class FlowRuns
 
         foreach (FlowStep fed in flow.Steps.Where(s => s.Required || required.ContainsKey(s.Key)))
         {
-            foreach (FlowInput input in fed.Inputs.Where(i => i.Step is not null && turnedOff.Contains(i.Step)))
+            foreach (FlowInput input in fed.Inputs.Where(i => i.Step is not null && (turnedOff.Contains(i.Step) || itemsOff.Contains(i.Step + "." + i.Output))))
             {
-                refusals.Add(("flow.required", $"Turning off {input.Step} leaves {(fed.Required ? "required" : "policy-required")} step {fed.Key} without its input {input.Name}."));
+                string what = turnedOff.Contains(input.Step!) ? input.Step! : $"item {input.Output} of {input.Step}";
+                refusals.Add(("flow.required", $"Turning off {what} leaves {(fed.Required ? "required" : "policy-required")} step {fed.Key} without its input {input.Name}."));
             }
         }
 
@@ -382,6 +436,20 @@ public static class FlowRuns
 
         IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(context.Model, resolved.Pin.Id, product, context.Record);
         Configuration configuration = Configure(context.Model, context.Record, resolved, context.Record);
+
+        // The run's effective configuration, not only the goal's own options, carries every step a policy requires: a wider default,
+        // the flow's own default or an extension that leaves one off needs the goal to turn it on, or another flow.
+        foreach ((string key, RecordEnvelope requiring) in required)
+        {
+            bool item = key.Contains('.', StringComparison.Ordinal);
+            string option = (item ? FlowContract.ItemOption : FlowContract.StepOption) + key;
+            if ((item ? configuration.ItemsOff : configuration.Off).TryGetValue(key, out string? why) && !why.StartsWith("after ", StringComparison.Ordinal)
+                && !(options?.Element is { ValueKind: JsonValueKind.Object } own && own.TryGetProperty(option, out JsonElement chosen) && chosen.ValueKind == JsonValueKind.String && chosen.GetString() == "off"))
+            {
+                context.Error("flow.policy", $"{(item ? "Item" : "Step")} {key} is required by estate policy {EstateModel.BodyString(requiring, "key") ?? requiring.Id} ({requiring.Id}), and this run leaves it off: {why}. "
+                    + (why.StartsWith("turned off by", StringComparison.Ordinal) ? "A run of a flow that carries the step is needed." : "The goal's options turn it on."));
+            }
+        }
         if (until is not null)
         {
             if (resolved.Step(until) is null)
@@ -394,9 +462,13 @@ public static class FlowRuns
             }
             else
             {
-                foreach (FlowStep after in resolved.Steps.Skip(resolved.IndexOf(until) + 1).Where(s => required.ContainsKey(s.Key)))
+                foreach (FlowStep after in resolved.Steps.Skip(resolved.IndexOf(until) + 1))
                 {
-                    context.Error("flow.policy", $"Ending the run at {until} leaves out {after.Key}, which estate policy {EstateModel.BodyString(required[after.Key], "key") ?? required[after.Key].Id} requires.");
+                    string? key = required.ContainsKey(after.Key) ? after.Key : required.Keys.FirstOrDefault(k => k.StartsWith(after.Key + ".", StringComparison.Ordinal));
+                    if (key is not null)
+                    {
+                        context.Error("flow.policy", $"Ending the run at {until} leaves out {after.Key}, whose {(key == after.Key ? "step" : "item " + key[(after.Key.Length + 1)..])} estate policy {EstateModel.BodyString(required[key], "key") ?? required[key].Id} requires.");
+                    }
                 }
             }
         }
@@ -413,7 +485,7 @@ public static class FlowRuns
         }
     }
 
-    /// <summary>Validates one subject binding against the field the flow declares: a record reference of its type, a text value, or a list of item names.</summary>
+    /// <summary>Validates one subject binding against the field the flow declares: a record reference of its type, a text value, or a list of instance names.</summary>
     private static void Bind(ValidationContext context, BodyReader subject, string name, string type, string? recordType)
     {
         if (!subject.Has(name))
@@ -449,17 +521,17 @@ public static class FlowRuns
         }
         else
         {
-            IReadOnlyList<string>? items = subject.StringArray(name, true, allowEmpty: true, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "an item name");
-            if (items is not null && items.Distinct(StringComparer.Ordinal).Count() != items.Count)
+            IReadOnlyList<string>? names = subject.StringArray(name, true, allowEmpty: true, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "an instance name");
+            if (names is not null && names.Distinct(StringComparer.Ordinal).Count() != names.Count)
             {
-                subject.Error("flow.subject", name, "Each item of a list field is named once.");
+                subject.Error("flow.subject", name, "Each instance of a list field is named once.");
             }
         }
     }
 
     /// <summary>
     /// The values a run binds: the subject's record fields by their ids, its text fields, and the goal and its work order; an each
-    /// step's instance adds its item.
+    /// step's instance adds its instance name.
     /// </summary>
     internal static IReadOnlyDictionary<string, string> Bindings(EstateModel model, RecordEnvelope goal, FlowDefinition flow, string? item)
     {
@@ -473,7 +545,7 @@ public static class FlowRuns
 
         if (item is not null)
         {
-            bindings["item"] = item;
+            bindings["instance"] = item;
         }
 
         JsonElement subject = TJson.Object(Plan(goal), "subject");
@@ -490,7 +562,7 @@ public static class FlowRuns
         return bindings;
     }
 
-    /// <summary>The items a run's subject list field names, in order.</summary>
+    /// <summary>The instances a run's subject list field names, in order.</summary>
     internal static IReadOnlyList<string> Items(RecordEnvelope goal, string field) =>
         TJson.Strings(TJson.Object(Plan(goal), "subject"), field).ToList();
 
@@ -524,13 +596,13 @@ public static class FlowRuns
             FlowContract.Binding().Match(text) is { Success: true } match ? bindings.GetValueOrDefault(match.Groups["name"].Value) ?? "{unbound " + match.Groups["name"].Value + "}" : text;
     }
 
-    /// <summary>A step instance an assignment names: the step's key, and its item for a step that runs over a list.</summary>
+    /// <summary>A step instance an assignment names: the step's key, and its instance for a step that runs over a list.</summary>
     /// <param name="Key">The step's key.</param>
-    /// <param name="Item">The item, or null.</param>
-    public sealed record StepRef(string Key, string? Item)
+    /// <param name="Instance">The instance under each, or null.</param>
+    public sealed record StepRef(string Key, string? Instance)
     {
-        /// <summary>The instance in words: key, or key[item].</summary>
-        public override string ToString() => Item is null ? Key : $"{Key}[{Item}]";
+        /// <summary>The step instance in words: key, or key[instance].</summary>
+        public override string ToString() => Instance is null ? Key : $"{Key}[{Instance}]";
     }
 
     /// <summary>The step an assignment names, or null for an assignment of ordinary work.</summary>
@@ -538,7 +610,7 @@ public static class FlowRuns
     {
         ArgumentNullException.ThrowIfNull(assignment);
         JsonElement step = TJson.Object(assignment.Body, "step");
-        return TJson.Text(step, "key") is string key ? new StepRef(key, TJson.Text(step, "item")) : null;
+        return TJson.Text(step, "key") is string key ? new StepRef(key, TJson.Text(step, "instance")) : null;
     }
 
     /// <summary>The run a work order is the work of, as of a record when one is given; null when it is the work of none.</summary>
@@ -551,7 +623,7 @@ public static class FlowRuns
 
     /// <summary>
     /// Validates the step an assignment names (design/flow.md § 6): every assignment of a run's work order names a work or review step
-    /// of the run's flow, with its item when the step runs over a list, and pins only inputs the step declares; no other assignment
+    /// of the run's flow, with its instance when the step runs over a list, and pins only inputs the step declares; no other assignment
     /// names a step.
     /// </summary>
     internal static void ValidateStep(ValidationContext context, RecordEnvelope order, BodyReader? step)
@@ -582,7 +654,7 @@ public static class FlowRuns
         }
 
         string? named = TJson.Text(step.Element, "key");
-        string? item = TJson.Text(step.Element, "item");
+        string? item = TJson.Text(step.Element, "instance");
         FlowStep? declared = flow.Step(named);
         if (declared is null)
         {
@@ -612,11 +684,11 @@ public static class FlowRuns
 
         if (declared.Each is not null && (item is null || !Items(run, declared.Each).Contains(item, StringComparer.Ordinal)))
         {
-            context.Error("assignment.step", $"Step {declared.Key} runs once for each of the run's {declared.Each}; the assignment names one of them as its item.");
+            context.Error("assignment.step", $"Step {declared.Key} runs once for each of the run's {declared.Each}; the assignment names one of them as its instance.");
         }
         else if (declared.Each is null && item is not null)
         {
-            context.Error("assignment.step", $"Step {declared.Key} runs once; its assignment names no item.");
+            context.Error("assignment.step", $"Step {declared.Key} runs once; its assignment names no instance.");
         }
 
         foreach (JsonElement input in TJson.Array(step.Element, "inputs"))
@@ -627,6 +699,11 @@ public static class FlowRuns
             }
         }
     }
+
+    /// <summary>Whether a record is current: now, or as the records stood when a later record was written.</summary>
+    private static bool CurrentBefore(EstateModel model, RecordEnvelope record, RecordEnvelope? before) =>
+        before is null ? model.IsCurrent(record)
+            : GoalRules.Before(record, before) && !(model.SupersededBy.TryGetValue(record.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && GoalRules.Before(successor, before));
 
     private static string? ScopeTarget(EstateModel model, string kind, string? target) =>
         kind == "product" && target is not null ? LivingDocuments.ProductIdentity(model, target) : target;

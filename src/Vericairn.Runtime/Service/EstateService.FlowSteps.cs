@@ -28,7 +28,7 @@ public sealed partial class EstateService
     /// </summary>
     private static JsonObject RoutedFlowAssignment(EstateModel model, RecordEnvelope goal, Taken taken, string workspace, string routedWith)
     {
-        FlowPosition.Instance instance = taken.Step!;
+        FlowPosition.StepInstance instance = taken.Step!;
         FlowDefinition flow = taken.Flow!.Flow!;
         FlowStep step = instance.Step;
         NextEligible.Route route = taken.Route;
@@ -59,12 +59,8 @@ public sealed partial class EstateService
         }
 
         string role = flow.Role(step.Role)?.Brief is string brief ? $" The {step.Role} role's brief: {brief}" : string.Empty;
-        List<string> outputs = step.Outputs.Select(o => o.Type switch
-        {
-            "file" => $"{o.Name}: a file named {o.Name} among the result's outputs, by hash{(o.MediaType is null ? string.Empty : ", " + o.MediaType)}",
-            "review" => $"{o.Name}: the review recorded of the reviewed result",
-            _ => $"{o.Name}: the newest {o.Counts} record{(o.Kind is null ? string.Empty : $" of kind {o.Kind}")} the step's done predicates count",
-        }).ToList();
+        // Each item the step closes on, with what it must show: its kind, its provenance, its evidence and its review.
+        List<string> outputs = instance.Items.Where(i => i.State != "off").Select(i => Clip(Describe(step, i.Declared), 2000)).ToList();
         if (outputs.Count == 0)
         {
             outputs.AddRange(Strings(order.Body, "deliverables"));
@@ -74,18 +70,18 @@ public sealed partial class EstateService
         if (step.Kind == "review")
         {
             FlowInput reviewed = step.Inputs.First(i => i.Step is not null);
-            FlowPosition.Instance? producer = taken.Flow.Find(new FlowRuns.StepRef(reviewed.Step!, flow.Step(reviewed.Step)?.Each is null ? null : instance.Item));
+            FlowPosition.StepInstance? producer = taken.Flow.Find(new FlowRuns.StepRef(reviewed.Step!, flow.Step(reviewed.Step)?.Each is null ? null : instance.Instance));
             criteria.Add(producer?.Result is RecordEnvelope result
                 ? $"Review result {result.Id} at {result.ComputedHash}, of step {producer.Name}: record a review of it with outcome pass, findings or fail; a review by its author does not count."
                 : $"Review the result of step {reviewed.Step}: record a review of it with outcome pass, findings or fail; a review by its author does not count.");
         }
         else
         {
-            criteria.Add(step.Outputs.Count == 0 ? $"The step is complete: {step.Title}." : $"Each declared output exists at an exact hash: {string.Join(", ", step.Outputs.Select(o => o.Name))}.");
+            criteria.Add(instance.Items.All(i => i.State == "off") ? $"The step is complete: {step.Title}." : "The step closes only when every required item holds its provenance, evidence and review at its exact hash.");
             criteria.AddRange(instance.Done.Select(d => "Its done predicate holds: " + GoalPredicates.DescribePredicate(d.Predicate) + "."));
-            if (step.Review is not null and not "none")
+            if (step.Outputs.Count == 0 && step.Review is { Independence: not "none" } review)
             {
-                criteria.Add($"Its output is handed on only after {(step.Review == "person" ? "a person's" : "an independent")} review by a principal other than its author.");
+                criteria.Add($"Its result is handed on only after a review ({review.Independence}{(review.Role is null ? string.Empty : ", in the " + review.Role + " role")}) by a principal other than its author.");
             }
         }
 
@@ -103,9 +99,9 @@ public sealed partial class EstateService
             ["recovery"] = Clip($"{step.Recovery} Record an attempt when the work starts and a result when it stops; whoever continues starts from this assignment's brief and vericairn work brief {orderKey}, never from a conversation.", 4000),
         };
         var named = new JsonObject { ["key"] = step.Key };
-        if (instance.Item is not null)
+        if (instance.Instance is not null)
         {
-            named["item"] = instance.Item;
+            named["instance"] = instance.Instance;
         }
 
         if (pins.Count > 0)
@@ -121,6 +117,42 @@ public sealed partial class EstateService
             ["step"] = named,
             ["routedWith"] = routedWith,
         };
+    }
+
+    /// <summary>One item of a step in words, with every requirement it declares and the review it takes, its step's when it declares none.</summary>
+    private static string Describe(FlowStep step, FlowOutput output)
+    {
+        var text = new System.Text.StringBuilder();
+        text.Append(output.Name).Append(output.Required ? string.Empty : " (optional)").Append(": ").Append(output.Kind switch
+        {
+            "file" => $"a file named {output.Name} among the result's outputs, by hash{(output.MediaType is null ? string.Empty : ", " + output.MediaType)}",
+            _ when step.Kind == "review" => "the review recorded of the reviewed result",
+            _ => $"a{(output.Kind is "observation" or "attestation" ? "n" : string.Empty)} {output.Kind}: the newest {output.Counts?.Replace("|", " or ", StringComparison.Ordinal)} record{(output.RecordKind is null ? string.Empty : $" of kind {output.RecordKind}")} the step's done predicates count",
+        });
+        if (output.Provenance is FlowProvenance provenance)
+        {
+            var from = new List<string>();
+            if (provenance.Principal is not null) from.Add("by principal " + provenance.Principal);
+            if (provenance.Holder is not null) from.Add("by " + (provenance.Holder == "either" ? "a person or an agent" : "a " + provenance.Holder));
+            if (provenance.Role is not null) from.Add("in the " + provenance.Role + " role");
+            if (provenance.Inputs.Count > 0) from.Add("from the pinned inputs " + string.Join(", ", provenance.Inputs));
+            if (provenance.Provider is not null) from.Add("with provider " + provenance.Provider);
+            if (provenance.Tool is not null) from.Add("with tool " + provenance.Tool);
+            if (provenance.Settings.ValueKind == JsonValueKind.Object) from.Add("with " + string.Join(", ", provenance.Settings.EnumerateObject().Select(t => $"{t.Name} {t.Value.GetString()}")));
+            text.Append("; produced ").Append(string.Join(", ", from));
+        }
+
+        foreach (FlowEvidence evidence in output.Evidence)
+        {
+            text.Append("; evidence ").Append(evidence.Name).Append(": a passing verification by ").Append(evidence.Method).Append(evidence.Command is null ? string.Empty : " running " + evidence.Command).Append(" at its exact hash");
+        }
+
+        if (step.Kind != "review" && (output.Review ?? step.Review) is FlowReview review && review.Independence != "none")
+        {
+            text.Append("; reviewed (").Append(review.Independence).Append(review.Role is null ? string.Empty : ", in the " + review.Role + " role").Append(") at its exact hash before the step closes");
+        }
+
+        return text.ToString();
     }
 
     /// <summary>Why the one-step operation takes no step of a run now: each step that is part of it and not done, with its state and why.</summary>

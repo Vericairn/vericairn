@@ -84,17 +84,26 @@ public class FlowConfigurationTests
             ["key"] = "reviews", ["kind"] = FlowRuns.PolicyKind, ["version"] = 1,
             ["parameters"] = new JsonObject { ["flow"] = "example/song", ["steps"] = new JsonArray("review-lyrics", "shorts") },
         });
-        RecordEnvelope before = run.Add("goal", run.GoalBody(new JsonObject { ["step.shorts"] = "off" }));
+        RecordEnvelope early = Defaults(run, "estate", null, new JsonObject { ["step.shorts"] = "off" });
+        RecordEnvelope before = run.Add("goal", run.GoalBody());
         RecordEnvelope policy = run.Policies.Policy(body);
-        RecordEnvelope configured = run.Add("goal", run.GoalBody(new JsonObject { ["step.review-lyrics"] = "off" }));
-        RecordEnvelope ended = run.Add("goal", run.GoalBody(until: "draft"));
-        RecordEnvelope defaults = Defaults(run, "estate", null, new JsonObject { ["step.shorts"] = "off" });
+        RecordEnvelope configured = run.Add("goal", run.GoalBody(new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "on" }));
+        RecordEnvelope ended = run.Add("goal", run.GoalBody(new JsonObject { ["step.shorts"] = "on" }, until: "draft"));
+        RecordEnvelope widened = run.Add("goal", run.GoalBody());
+        RecordEnvelope turnedOn = run.Add("goal", run.GoalBody(new JsonObject { ["step.shorts"] = "on" }));
+        RecordEnvelope revised = run.Add("template-defaults", new JsonObject
+        {
+            ["template"] = FlowFixture.Pin(run.Flow), ["scope"] = new JsonObject { ["kind"] = "estate" }, ["options"] = new JsonObject { ["step.review-lyrics"] = "off" }, ["reason"] = "Skip the reviews.",
+        }, supersedes: early.Id);
         EstateModel model = run.Estate.Load();
         Assert.Empty(model.Findings.Where(f => f.Location == policy.ExpectedPath && f.Severity == Severity.Error).Select(f => f.ToString()));
+        Assert.Empty(Errors(model, early));
+        Assert.Empty(Errors(model, before));
         Assert.Contains(Errors(model, configured), f => f.Code == "flow.policy" && f.Message.StartsWith("Step review-lyrics is required by estate policy song-reviews", StringComparison.Ordinal));
         Assert.Contains(Errors(model, ended), f => f.Code == "flow.policy" && f.Message.StartsWith("Ending the run at draft leaves out review-lyrics", StringComparison.Ordinal));
-        Assert.Contains(Errors(model, defaults), f => f.Code == "flow.policy");
-        Assert.Empty(Errors(model, before));
+        Assert.Contains(Errors(model, widened), f => f.Code == "flow.policy" && f.Message.Contains("and this run leaves it off: configured off by the estate defaults", StringComparison.Ordinal));
+        Assert.Empty(Errors(model, turnedOn));
+        Assert.Contains(Errors(model, revised), f => f.Code == "flow.policy");
         Assert.Equal(["review-lyrics", "shorts"], FlowRuns.PolicyRequired(model, "example/song", null).Keys.Order(StringComparer.Ordinal));
         Assert.Empty(FlowRuns.PolicyRequired(model, "example/song", null, before));
     }
@@ -137,7 +146,7 @@ public class FlowConfigurationTests
             rostered.Result(rostered.Assign("shorts", rostered.Estate.BuilderId, track, new JsonArray(FlowFixture.PinOf(master, "master"))), "completed", ("clip", FlowFixture.Hash('c'), null));
         }
 
-        FlowPosition.Instance listen = rostered.Step("listen");
+        FlowPosition.StepInstance listen = rostered.Step("listen");
         Assert.Equal(("stopped", rostered.Estate.OperatorId), (listen.State, listen.Principal));
     }
 
@@ -197,7 +206,7 @@ public class FlowConfigurationTests
         Assert.Contains(Errors(model, unknown), f => f.Message == "Flow example/song has no step 'mixdown'.");
         Assert.Contains(Errors(model, itemless), f => f.Message.StartsWith("Step shorts runs once for each of the run's tracks", StringComparison.Ordinal));
         Assert.Contains(Errors(model, stray), f => f.Message.StartsWith("Step shorts runs once for each of the run's tracks", StringComparison.Ordinal));
-        Assert.Contains(Errors(model, once), f => f.Message == "Step draft runs once; its assignment names no item.");
+        Assert.Contains(Errors(model, once), f => f.Message == "Step draft runs once; its assignment names no instance.");
         Assert.Contains(Errors(model, pinned), f => f.Message == "Step draft declares no input 'brief'.");
         Assert.Contains(Errors(model, outside), f => f.Message.StartsWith("A step names a step of a run's flow, and work order OTHER is the work of no run.", StringComparison.Ordinal));
     }

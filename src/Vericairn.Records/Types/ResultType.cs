@@ -42,6 +42,7 @@ public sealed class ResultType : IRecordType
         new("limitations", "string[]", true, "What the result does not establish; may be empty."),
         new("unresolvedEffects", "string[]", true, "External effects whose outcome is not known and must be reconciled before any retry; may be empty."),
         new("nextStep", "string", true, "The next permitted step for whoever continues, or 'none'."),
+        new("provenance", "object", false, ProducedBy.Description, 3),
         new("progressClaim", "object", false, "The last agent claim retained as context: phase, note, at, optional typed progress and statusText. Never evidence of completion or acceptance.", 3),
         new("duties", "object[]", false, "Exact originating policy, rule, tagged occurrence, examined subject, scope, coverage and supporting proof bindings. This is a signed claim, not acceptance.", 3),
     ];
@@ -97,6 +98,7 @@ public sealed class ResultType : IRecordType
             ProgressReporting.Claim(claim);
             claim.NoOtherKeys();
         }
+        ProducedBy.Read(context, body);
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {

@@ -364,26 +364,33 @@ rewrites a record. A flow is template content of kind `flow`
 
 | Record | Additive contract |
 | --- | --- |
-| `goal` | Optional `plan.flow: {pin, subject, options?, until?}`. `pin` is the exact `{id, version, hash}` of a flow; `subject` binds every field of the flow's subject: a record as `{type, id, hash?}` of the declared type, a text, or a list of distinct item names; `options` maps flow options and `step.<key>` to allowed values; `until` names the step the run ends at. A run's plan is `given`, with exactly one ordinary work order. |
-| `assignment` | Optional `step: {key, item?, inputs?}` names the flow step the assignment carries, its item for a step that runs over a list, and each input its brief pins as `{name, type, id, hash}`. Every assignment of a run's work order names a work or review step of the run's flow, and no other assignment names one. |
-| `template-defaults` | Unchanged fields; for a flow's exact pin, `options` configure the flow's options and its optional steps' `step.<key>` (`on` or `off`) at the estate, domain or product scope. |
-| `estate-policy` | A rule of the foundation kind `vericairn.estate/flow-steps`, version 1, with parameters `{flow, steps}`, requires the named steps of the flow ([policies](policies.md#required-flow-steps-091)). |
+| `goal` | Optional `plan.flow: {pin, subject, options?, until?}`. `pin` is the exact `{id, version, hash}` of a flow; `subject` binds every field of the flow's subject: a record as `{type, id, hash?}` of the declared type, a text, or a list of distinct instance names; `options` maps flow options, `step.<key>` and `item.<step>.<item>` to allowed values; `until` names the step the run ends at. A run's plan is `given`, with exactly one ordinary work order. |
+| `assignment` | Optional `step: {key, instance?, inputs?}` names the flow step the assignment carries, its instance for a step that runs over a list under `each`, and each input its brief pins as `{name, type, id, hash}`. Every assignment of a run's work order names a work or review step of the run's flow, and no other assignment names one. A reserved step, or a step of a role the flow marks person, is never assigned to an agent. |
+| `result`, `operation` | Optional `provenance: {inputs?, provider?, tool?, settings?}`: what produced it, where a flow item's provenance requires it and its other fields do not show it. `inputs` are `{name?, type, id, hash}` of exact records; `settings` are string values by name. A reader lacking the field shows the record and leaves an item that requires it unsatisfied. |
+| `template-defaults` | Unchanged fields; for a flow's exact pin, `options` configure the flow's options, its optional steps' `step.<key>` and its optional items' `item.<step>.<item>` (`on` or `off`) at the estate, domain or product scope. |
+| `estate-policy` | A rule of the foundation kind `vericairn.estate/flow-steps`, version 1, with parameters `{flow, steps?, items?}`, requires the named steps and items (`step.item`) of the flow ([policies](policies.md#required-flow-steps-091)). |
 
 Validation refuses a configuration, in a goal's plan or in `template-defaults`,
 that names an option the flow does not declare or a value it does not allow,
-turns off a required step (whose reserved marking it can therefore never remove),
-turns off a step an active estate policy requires or one an extension turned
-off, or leaves a required or policy-required step without its input; an `until`
+turns off a required step or item (whose reserved marking it can therefore never
+remove), turns off a step or item an active estate policy requires or one an
+extension turned off, or leaves a required or policy-required step without its input; a run whose
+effective configuration leaves a policy-required step off; an `until`
 that names no step, a step that is off, or ends the run before a policy-required
 step; and a goal that names an agent in a role the flow marks `person`. An
 assignment of a run's work order that names no step, a step that is not a work
-or review step, an item the run's list does not hold, or an undeclared input is
-refused. A goal's `plan.flow` in an earlier format is refused as a later
+or review step, an instance the run's list does not hold, or an undeclared input
+is refused, and so is an agent's assignment to a reserved step or a step of a
+role the flow marks `person`. A goal's `plan.flow` in an earlier format is refused as a later
 format's field.
 
 A reader that cannot resolve the pinned flow, with every base it extends, keeps
 the records valid and warns `flow.unavailable`: it shows the goal, and neither
-`goal step` nor a worker run takes any of its steps there. A step's state is derived from
-the records whenever it is read and never stored; see the
-[operator guide](operator-guide.md#runs-of-a-flow-091). `records describe goal`
-and `records describe assignment` include these contracts.
+`goal step` nor a worker run takes any of its steps there. A step's state, and each of its
+items' state, is derived from the records whenever it is read and never stored:
+an item's value from the step's result or the record it names at an exact hash,
+its provenance from that record, its evidence from `verification` records and
+its review from `review` records of that exact hash; see the
+[operator guide](operator-guide.md#runs-of-a-flow-091). `records describe goal`,
+`records describe assignment`, `records describe result` and `records describe
+operation` include these contracts.

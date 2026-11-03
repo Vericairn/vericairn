@@ -26,7 +26,7 @@ public static partial class NextEligible
     /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step.</summary>
     /// <param name="Step">The step instance and its derived state.</param>
     /// <param name="Route">Its route, or null for a step that is not routed now.</param>
-    public sealed record FlowStepRoute(FlowPosition.Instance Step, Route? Route)
+    public sealed record FlowStepRoute(FlowPosition.StepInstance Step, Route? Route)
     {
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Route is not null && FlowDispatching.IndexOf(Route.State) >= 0;
@@ -60,7 +60,7 @@ public static partial class NextEligible
         List<AgentRuns.Run> runs = AgentRuns.All(model).Where(r => r.InFlight).ToList();
         IReadOnlyList<string> goals = model.Chain(current);
         var steps = new List<FlowStepRoute>();
-        foreach (FlowPosition.Instance instance in position.Steps)
+        foreach (FlowPosition.StepInstance instance in position.Steps)
         {
             if (position.Work is null || position.Flow is null || !instance.Step.IsRouted || instance.Step.Reserved is not null || instance.Waiting
                 || instance.State is not ("next" or "stopped" or "stale" or "in-review"))
@@ -189,7 +189,7 @@ public static partial class NextEligible
         return new JsonObject
         {
             ["key"] = step.Step.Step.Key,
-            ["item"] = step.Step.Item,
+            ["instance"] = step.Step.Instance,
             ["title"] = step.Step.Step.Title,
             ["kind"] = step.Step.Step.Kind,
             ["status"] = step.Step.State,

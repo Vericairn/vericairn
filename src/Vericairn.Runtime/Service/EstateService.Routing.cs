@@ -60,7 +60,7 @@ public sealed partial class EstateService
     /// <param name="Route">Its route from this machine.</param>
     /// <param name="Flow">For a run, the run's position.</param>
     /// <param name="Step">For a run, the step instance.</param>
-    private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.Instance? Step = null);
+    private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.StepInstance? Step = null);
 
     /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request)

@@ -110,12 +110,14 @@ internal static partial class FoundationPolicyKinds
     // without the step until its sponsor revises it. A run whose flow does not resolve here is unavailable, never an empty pass.
     private static IEnumerable<PolicyFinding> RequiredSteps(PolicyRuleContext context, bool parametersOnly = false)
     {
-        Shape(context.Parameters, ["flow", "steps"]);
+        Shape(context.Parameters, ["flow"], "steps", "items");
         string flow = String(context.Parameters, "flow");
         if (!Patterns.Contribution.IsMatch(flow)) throw new PolicyParameterException("The flow is named namespace/name.");
-        string[] steps = Strings(context.Parameters, "steps");
-        if (steps.Length == 0 || steps.Any(s => !Patterns.Slug.IsMatch(s)) || steps.Distinct(StringComparer.Ordinal).Count() != steps.Length)
-            throw new PolicyParameterException("The required steps are distinct step keys, at least one.");
+        string[] steps = Get(context.Parameters, "steps").ValueKind == JsonValueKind.Undefined ? [] : Strings(context.Parameters, "steps");
+        string[] items = Get(context.Parameters, "items").ValueKind == JsonValueKind.Undefined ? [] : Strings(context.Parameters, "items");
+        if (steps.Length + items.Length == 0 || steps.Any(s => !Patterns.Slug.IsMatch(s)) || items.Any(i => i.Split('.') is not [string step, string name] || !Patterns.Slug.IsMatch(step) || !Patterns.Slug.IsMatch(name))
+            || steps.Concat(items).Distinct(StringComparer.Ordinal).Count() != steps.Length + items.Length)
+            throw new PolicyParameterException("The required steps are distinct step keys and the required items distinct step.item names, at least one of them.");
         if (parametersOnly) yield break;
         JsonElement selection = Get(context.Policy.Body, "appliesTo");
         string? product = Text(selection, "kind") == "product" ? LivingDocuments.ProductIdentity(context.Model, String(selection, "product")) : null;
@@ -137,14 +139,17 @@ internal static partial class FoundationPolicyKinds
 
             if (resolved is not null && product is not null && FlowRuns.Product(context.Model, goal, resolved) != product) continue;
             FlowRuns.Configuration? configuration = resolved is null ? null : FlowRuns.Configure(context.Model, goal, resolved);
-            foreach (string step in steps)
+            foreach (string step in steps.Concat(items))
             {
+                string[] parts = step.Split('.');
+                bool item = parts.Length == 2;
                 (string verdict, string actual) = resolved is null ? ("unavailable", $"The run's {unavailable}.")
-                    : resolved.Step(step) is null ? ("unmet", $"Flow {resolved.Pin.Id} {resolved.Pin.Version} has no step {step}.")
-                    : configuration!.Off.TryGetValue(step, out string? why) ? ("unmet", $"The run leaves out {step}: {why}.")
-                    : ("satisfied", $"The run carries {step}.");
-                yield return context.Finding(PolicyWork.Target(context.Model, goal), step, verdict, actual, $"Every run of flow {flow} in scope carries step {step}.",
-                    "Revise the run's plan so that it carries the step, or retire the run; configuration never turns a required step off.", goal);
+                    : resolved.Step(parts[0]) is not { } declared || item && declared.Outputs.All(o => o.Name != parts[1]) ? ("unmet", $"Flow {resolved.Pin.Id} {resolved.Pin.Version} has no {(item ? "item" : "step")} {step}.")
+                    : configuration!.Off.TryGetValue(parts[0], out string? why) ? ("unmet", $"The run leaves out {parts[0]}: {why}.")
+                    : item && configuration.ItemsOff.TryGetValue(step, out string? itemWhy) ? ("unmet", $"The run leaves out item {step}: {itemWhy}.")
+                    : ("satisfied", $"The run carries {(item ? "item " : string.Empty)}{step}.");
+                yield return context.Finding(PolicyWork.Target(context.Model, goal), step, verdict, actual, $"Every run of flow {flow} in scope carries {(item ? "item" : "step")} {step}.",
+                    "Revise the run's plan so that it carries it, or retire the run; configuration never turns off what a policy requires.", goal);
             }
         }
     }

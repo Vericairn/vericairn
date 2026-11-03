@@ -30,7 +30,7 @@ public sealed class AssignmentType : IRecordType
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests."),
         new("note", "string", false, "Free text."),
-        new("step", "object", false, "For an assignment of a run's work order (design/flow.md § 6), the flow step it carries: key, item for a step that runs over a list, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do.", 3),
+        new("step", "object", false, "For an assignment of a run's work order (design/flow.md § 6), the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do.", 3),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
 
@@ -80,7 +80,7 @@ public sealed class AssignmentType : IRecordType
         if (step is not null)
         {
             step.Text("key", true, 100, Patterns.Slug, "a step key");
-            step.Text("item", false, 100, Patterns.Slug, "an item name");
+            step.Text("instance", false, 100, Patterns.Slug, "an instance name");
             var names = new HashSet<string>(StringComparer.Ordinal);
             foreach (BodyReader input in step.NestedArray("inputs", false, allowEmpty: false) ?? [])
             {

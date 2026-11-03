@@ -311,8 +311,9 @@ transferring a hand-maintained table to records.
 `vericairn templates list` includes flows, templates of kind `flow`. `goal propose --flow <id>@<version>` proposes a run of
 one: its plan names the flow's exact pin, read from the templates the runtime offers, and gives exactly one `--work-order`.
 `--subject name=value` binds each field of the flow's subject by its kind: a record field by its id or `type:id`, a list field
-as comma-separated item names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a flow
-option or `step.<key>=on|off` for an optional step, and `--until <step>` names the step the run ends at.
+as comma-separated instance names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a
+flow option, `step.<key>=on|off` for an optional step or `item.<step>.<item>=on|off` for an optional item, and
+`--until <step>` names the step the run ends at.
 
 ```sh
 vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \

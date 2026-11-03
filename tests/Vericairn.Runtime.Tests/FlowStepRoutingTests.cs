@@ -113,7 +113,7 @@ public class FlowStepRoutingTests
         GoalStepResponse outro = Step(run, goal, "outro");
         Assert.True(outro.Ok, outro.Message);
         Assert.Equal(("shorts[intro]", "shorts[outro]"), (intro.Step, outro.Step));
-        Assert.Equal("outro", run.Estate.Load().ById[outro.Assignment!.Id].Body.GetProperty("step").GetProperty("item").GetString());
+        Assert.Equal("outro", run.Estate.Load().ById[outro.Assignment!.Id].Body.GetProperty("step").GetProperty("instance").GetString());
         run.Settled(intro.Run!.Run);
         run.Settled(outro.Run!.Run);
         Done(run, intro.Assignment!.Id, ("clip", FlowFixture.Hash('1'), null));
@@ -130,6 +130,28 @@ public class FlowStepRoutingTests
         Assert.Contains("accept is stopped: a reserved act, accept-release", reserved.Message, StringComparison.Ordinal);
         Assert.Null(reserved.Assignment);
         Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnItemsToolIsTheLauncherOfTheRunThatProducedIt()
+    {
+        foreach ((string tool, string state) in new[] { ("claude-code", "satisfied"), ("codex", "unproven") })
+        {
+            using var run = new RunEstate(recordFormat: 3);
+            JsonObject song = FlowFixture.Song();
+            song["steps"]![0]!["outputs"]![0]!["provenance"] = new JsonObject { ["holder"] = "agent", ["tool"] = tool };
+            string goal = Run(run, song);
+            GoalStepResponse first = Step(run, goal, "draft-" + tool);
+            Assert.True(first.Ok, first.Message);
+            run.Settled(first.Run!.Run);
+            Done(run, first.Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+            JsonElement item = Step(run.Service.Goal(goal)!, "draft").GetProperty("items")[0];
+            Assert.Equal(state, item.GetProperty("state").GetString());
+            if (state != "satisfied")
+            {
+                Assert.Equal("it is to be produced with tool codex, and the record that produced it shows claude-code", item.GetProperty("reasons")[0].GetString());
+            }
+        }
     }
 
     [Fact]
@@ -226,10 +248,10 @@ public class FlowStepRoutingTests
         new(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
 
     private static JsonElement Step(GoalResponse goal, string key) =>
-        Assert.Single(goal.Json.GetProperty("flow").GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key && s.GetProperty("item").ValueKind == JsonValueKind.Null);
+        Assert.Single(goal.Json.GetProperty("flow").GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key && s.GetProperty("instance").ValueKind == JsonValueKind.Null);
 
     private static JsonElement Route(NextResponse next, string key) =>
-        Assert.Single(next.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key && s.GetProperty("item").ValueKind == JsonValueKind.Null).GetProperty("route");
+        Assert.Single(next.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key && s.GetProperty("instance").ValueKind == JsonValueKind.Null).GetProperty("route");
 
     /// <summary>An attempt and a completed result on an assignment, by its contributor, naming outputs by name and hash.</summary>
     internal static RecordWritten Done(RunEstate run, string assignment, (string Name, string Hash, string? MediaType) output, string? by = null)

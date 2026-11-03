@@ -1190,10 +1190,13 @@ vericairn goal show <goal>
 ```
 
 `goal show`, the API's goal read, the SDK and the MCP `goal_get` and `goal_progress` tools give the run's position from the
-records alone: each step, once or once per item, with its state and why. A step is `done` when its done predicates hold and
-each declared output exists at an exact hash, reviewed where it declares a review; `stale` when an input it used changed after
-use, so it reruns under its recovery once what it waits on is done; `blocked` while an earlier step it waits on is not done,
-naming every failing precondition, trap and due time; `in-review` while its output awaits a review, or its result awaits one
+records alone: each step, once or once per instance under `each`, with its state and why, and each item it declares with
+its own state: `satisfied`, `missing`, `unproven` (its producing record does not show the declared provenance), `unverified`
+(a named verification does not pass at its exact hash), `in-review`, `stale` (it changed after its review) or `off`. A step is
+`done`, and closes, when its done predicates hold and every required item, and each optional item its configuration leaves on,
+is satisfied; an item that changes after its review reopens it. A step is `stale` when an input it used changed after use, so
+it reruns under its recovery once what it waits on is done; `blocked` while an earlier step it waits on is not done,
+naming every failing precondition, trap and due time; `in-review` while an item awaits its review, or a result awaits one
 before another attempt; `stopped` while a person holds its role or its assignment, it is a reserved act, or a watch passed
 its limit; `next` when an agent carries it; and `off` when the run's configuration, its `until` step or an unentered branch
 leaves it out. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
@@ -1204,12 +1207,15 @@ a machine that cannot resolve the flow shows the goal, says so, and takes none o
 `goal next` routes each ready work or review step by its role through the goal's roles, its roster or the estate's, exactly
 as a work order's step is routed, from the assignments and asks of that step alone. `goal step` then takes one step per
 command: the first, in the flow's order, whose route acts. An agent's step is an assignment of the run's work order naming
-the step and item, stored with its run's intent after the worker's preflight, on the branch `work/<work order>-<step>` by
-default; a person's is an assignment and an ask. The assignment's brief pins each input the step takes by type, id and hash,
-carries the step's role brief, outputs, review criteria and recovery, and prohibits what the goal's constraints, the reserved
-effects and the flow's `never` lines prohibit. A person can take over a step an agent holds with `work takeover`, which
-carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
-is a `review` record of the exact result by a principal other than its author: in this build, an operator or an agent.
+the step and its instance (`step: {key, instance}`), stored with its run's intent after the worker's preflight, on the branch
+`work/<work order>-<step>` by default; a person's is an assignment and an ask. The assignment's brief pins each input the
+step takes by type, id and hash, lists each item with its provenance, evidence and review, carries the step's role brief and
+recovery, and prohibits what the goal's constraints, the reserved effects and the flow's `never` lines prohibit. A result or
+an operation may record its own `provenance` (its inputs by hash, provider, tool and settings) where an item requires it. A
+person can take over a step an agent holds with `work takeover`, which carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
+is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal of the item's reviewer
+role with its independence and other than its author: in this build, an operator or an agent. A verification an item names
+is a `verification` record of that exact subject that passed.
 
 `goal step` never dispatches a reserved step; it stops, waiting on the operator, and no grant in this build lets an agent
 carry it. Nor does it dispatch an `operation`, `decision`, `effect`, `exchange` or `flow` step: each counts once its done

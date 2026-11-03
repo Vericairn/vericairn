@@ -17,6 +17,7 @@ namespace Vericairn.Runtime.Tests;
 public class FlowPolicyEvaluationTests
 {
     private static readonly string[] Review = ["review"];
+    private static readonly string[] Lyrics = ["draft.lyrics"];
 
     [Fact]
     public void ARunRecordedBeforeThePolicyThatLeavesOutARequiredStepIsUnmet()
@@ -50,13 +51,15 @@ public class FlowPolicyEvaluationTests
     [Fact]
     public void TheRulesParametersNameAFlowAndDistinctSteps()
     {
-        foreach (object parameters in new object[] { new { flow = "song", steps = new[] { "a" } }, new { flow = "example/song", steps = Array.Empty<string>() }, new { flow = "example/song", steps = new[] { "a", "a" } }, new { flow = "example/song" } })
+        foreach (object parameters in new object[] { new { flow = "song", steps = new[] { "a" } }, new { flow = "example/song", steps = Array.Empty<string>() }, new { flow = "example/song", steps = new[] { "a", "a" } }, new { flow = "example/song" },
+            new { flow = "example/song", items = new[] { "draft" } }, new { flow = "example/song", steps = new[] { "draft" }, items = new[] { "draft.lyrics", "draft.lyrics" } } })
         {
             PolicyEvaluation result = FoundationPolicyTests.Run(FoundationPolicyKinds.FlowSteps, parameters, []);
             Assert.Equal("unavailable", Assert.Single(result.Findings).Verdict);
         }
 
         Assert.Equal("satisfied", Assert.Single(FoundationPolicyTests.Run(FoundationPolicyKinds.FlowSteps, new { flow = "example/song", steps = Review }, []).Findings).Verdict);
+        Assert.Equal("satisfied", Assert.Single(FoundationPolicyTests.Run(FoundationPolicyKinds.FlowSteps, new { flow = "example/song", items = Lyrics }, []).Findings).Verdict);
     }
 
     private static List<PolicyFinding> Evaluate(EstateModel model, PolicyRepository[] repositories)

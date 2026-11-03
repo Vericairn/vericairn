@@ -604,7 +604,7 @@ internal sealed class RunAdmissionService(
             : EstateModel.BodyString(resource, "name") ?? resource.Id;
         // A run's steps each work on their own branch by default: the work order's key, the step and its item.
         string branch = string.IsNullOrWhiteSpace(request.Branch)
-            ? "work/" + Slug(FlowRuns.StepOf(assignment) is FlowRuns.StepRef named ? $"{key}-{named.Key}{(named.Item is null ? string.Empty : "-" + named.Item)}" : key).ToLowerInvariant()
+            ? "work/" + Slug(FlowRuns.StepOf(assignment) is FlowRuns.StepRef named ? $"{key}-{named.Key}{(named.Instance is null ? string.Empty : "-" + named.Instance)}" : key).ToLowerInvariant()
             : request.Branch.Trim();
         if (AgentRuns.All(model).FirstOrDefault(r => r.InFlight && r.Target("repository") is string other && model.Chain(resource).Contains(other) && r.Target("branch") == branch) is { } busy)
         {
