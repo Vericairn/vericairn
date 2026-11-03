@@ -57,8 +57,10 @@ public sealed class PolicySourceTests
             Assert.Equal(commit, Assert.Single(evidence.Basis.Repositories, r => r.Evidence && r.Identity == repository.Id).Revision);
             Assert.DoesNotContain(api.WritingExceptions().Warnings, w => w.Location.Identity == repository.Id);
             string basis = evidence.Basis.Digest;
+            // Only the exact commit is an input: a repository named only by duty evidence contributes no working-tree inventory.
+            Assert.DoesNotContain(evidence.Basis.Repositories, r => !r.Evidence && r.Identity == repository.Id);
             File.WriteAllText(file, "Another current revision.\n");
-            Assert.NotEqual(basis, api.Policy("maintenance")!.Basis.Digest);
+            Assert.Equal(basis, api.Policy("maintenance")!.Basis.Digest);
             Assert.True(Assert.Single(api.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!.Completed);
             // Missing exact history is unavailable, never inferred from today's bytes.
             Directory.Move(clone, clone + "-unavailable");
