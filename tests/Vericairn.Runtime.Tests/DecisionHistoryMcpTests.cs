@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
@@ -14,6 +16,88 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class DecisionHistoryMcpTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PromptAnswersReturnTheSharedRefusalWithBothTimes(bool standardPrompt)
+    {
+        using var writer = new PromptWriter();
+        PromptRow row = writer.Add();
+        RecordEnvelope ask = writer.Fixture.Add("ask", new JsonObject
+        {
+            ["to"] = writer.Operator, ["question"] = "Which evidence?", ["recommendation"] = "Use the assigned evidence.",
+            ["consequence"] = "Work waits.", ["state"] = "open",
+        }, builder: true);
+        var registry = new ToolRegistry(writer.Api, writer.Operator);
+        var arguments = new JsonObject
+        {
+            ["body"] = new JsonObject
+            {
+                ["ask"] = ask.Id,
+                ["selection"] = JsonSerializer.SerializeToNode(new PromptSelection(row.Identity, row.Hash,
+                    new Dictionary<string, string> { ["topic"] = "the assigned evidence" }), ProtocolJson.Options),
+            },
+        };
+        int before = writer.Model.Records.Count;
+        string? at = null, decidedAt = null;
+        writer.Api.BeforeValidatingRecords = records =>
+        {
+            // Prompt answers supply their own times. Inject the ordering a clock rollback could produce at the real
+            // admission boundary, retaining valid signatures so chronology is the only reason for refusal.
+            AuthoredRecord proposed = Assert.Single(records);
+            RecordEnvelope candidate = proposed.Envelope;
+            Assert.Equal("decision", candidate.Type);
+            at = candidate.At;
+            decidedAt = RecordParser.FormatTimestamp(candidate.AtTime.AddSeconds(1));
+            JsonObject body = PolicyFixture.Body(candidate);
+            body["decidedAt"] = decidedAt;
+            AuthoredRecord later = RecordAuthor.Create(new RecordDraft(candidate.Type, candidate.By,
+                PolicyFixture.Element(body), candidate.Subject, candidate.Supersedes, candidate.AtTime, candidate.Id, candidate.Format), writer.Fixture.OperatorSigner);
+            Assert.Equal(proposed.Bytes.Length, later.Bytes.Length);
+            later.Bytes.CopyTo(proposed.Bytes, 0);
+        };
+
+        string diagnostic;
+        if (standardPrompt)
+        {
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.PromptGetAsync(row.Identity, new JsonObject
+            {
+                ["topic"] = "the assigned evidence", ["_expected"] = row.Hash,
+                ["_target"] = new JsonObject { ["ask"] = ask.Id }.ToJsonString(),
+            }, TestContext.Current.CancellationToken));
+            diagnostic = error.Message;
+        }
+        else
+        {
+            ToolCallResult refused = await registry.CallAsync("prompt_use", arguments, TestContext.Current.CancellationToken);
+            Assert.False(refused.Unknown);
+            Assert.True(refused.IsError);
+            PromptUseResponse result = JsonSerializer.Deserialize<PromptUseResponse>(refused.Text, ProtocolJson.Options)!;
+            Assert.False(result.Ok);
+            Assert.Null(result.Written);
+            Assert.Null(result.Text);
+            FindingDto finding = Assert.Single(result.Problem!.Findings);
+            Assert.Equal("error", finding.Severity);
+            Assert.Equal("decision.record-time", finding.Code);
+            diagnostic = refused.Text;
+        }
+        Assert.NotNull(at);
+        Assert.NotNull(decidedAt);
+        Assert.Contains("decision.record-time", diagnostic, StringComparison.Ordinal);
+        Assert.Contains(at, diagnostic, StringComparison.Ordinal);
+        Assert.Contains(decidedAt, diagnostic, StringComparison.Ordinal);
+        Assert.Equal(before, writer.Model.Records.Count);
+        Assert.Equal("open", Asks.State(writer.Model, ask).State);
+
+        writer.Api.BeforeValidatingRecords = null;
+        ToolCallResult accepted = await registry.CallAsync("prompt_use", arguments, TestContext.Current.CancellationToken);
+        Assert.False(accepted.IsError, accepted.Text);
+        PromptUseResponse written = JsonSerializer.Deserialize<PromptUseResponse>(accepted.Text, ProtocolJson.Options)!;
+        RecordEnvelope answer = writer.Model.ById[written.Written!.Id];
+        Assert.True(string.CompareOrdinal(EstateModel.BodyString(answer, "decidedAt"), answer.At) <= 0);
+        Assert.Equal("answered", Asks.State(writer.Model, ask).State);
+    }
+
     [Fact]
     public async Task ExistingDecisionRemainsReadableAndEstateCheckReportsAWarning()
     {
