@@ -45,3 +45,8 @@ beside its Markdown, so its digest differs from an earlier build's for an estate
 `vericairn.estate/flow-steps` is added. Record format remains 3; its additions, a goal's `plan.flow`, an assignment's
 `step`, and an optional `provenance` on results and operations, are in
 [record format 3](record-format-v3.md#runs-of-a-flow-091).
+
+The generic record reader advances its implementation identity to `vericairn.records/readers/6`: the declared `provenance`
+field of results and operations and an assignment's `step` change their schema explanations. Its hash changes;
+declarations pinned to an earlier implementation require the ordinary explicit generator update before regeneration, and
+earlier golden fixtures remain retained. The generator id and contract version 1 are unchanged.
