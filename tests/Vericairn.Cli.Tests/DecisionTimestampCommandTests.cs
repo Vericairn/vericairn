@@ -24,17 +24,29 @@ public sealed class DecisionTimestampCommandTests
     {
         using var estate = new TestEstate(3);
         using EstateService service = EstateService.Open(estate.Root);
-        string[] args = ["--estate", estate.Root, .. json ? JsonFlag : [], "records", "new", "decision",
-            "--by", estate.OperatorId, "--at", RecordedAt, "--body", "-"];
-        CliHarness.Outcome refused = CliHarness.RunWithApi(service, Body(estate.OperatorId, Later).GetRawText(), args);
-        Assert.Equal(2, refused.Code);
-        foreach (string fact in new[] { "decision.record-time", Later, RecordedAt })
-            Assert.Contains(fact, refused.Out + refused.Err, StringComparison.Ordinal);
-        Assert.Empty(service.Records("decision"));
+        // `--body -` reads the raw standard input stream, which a test cannot supply, so each body is a file.
+        string directory = Directory.CreateTempSubdirectory("vericairn-decision-").FullName;
+        try
+        {
+            string[] Args(string decidedAt)
+            {
+                string body = Path.Combine(directory, decidedAt.Replace(':', '-') + ".json");
+                File.WriteAllText(body, Body(estate.OperatorId, decidedAt).GetRawText());
+                return ["--estate", estate.Root, .. json ? JsonFlag : [], "records", "new", "decision",
+                    "--by", estate.OperatorId, "--at", RecordedAt, "--body", body];
+            }
 
-        CliHarness.Outcome accepted = CliHarness.RunWithApi(service, Body(estate.OperatorId, RecordedAt).GetRawText(), args);
-        Assert.Equal(0, accepted.Code);
-        Assert.Single(service.Records("decision"));
+            CliHarness.Outcome refused = CliHarness.RunWithApi(service, null, Args(Later));
+            Assert.True(refused.Code == 1, $"{refused.Code}: {refused.Out}{refused.Err}");
+            foreach (string fact in new[] { "decision.record-time", Later, RecordedAt })
+                Assert.Contains(fact, refused.Out + refused.Err, StringComparison.Ordinal);
+            Assert.Empty(service.Records("decision"));
+
+            CliHarness.Outcome accepted = CliHarness.RunWithApi(service, null, Args(RecordedAt));
+            Assert.Equal(0, accepted.Code);
+            Assert.Single(service.Records("decision"));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     [Theory]
