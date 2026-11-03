@@ -200,6 +200,34 @@ public class FlowStepStateTests
     }
 
     [Fact]
+    public void AReviewStepClosesOnlyOnAReviewByAPrincipalOfItsRoleOrItsOwnAssignee()
+    {
+        using var run = new FlowFixture();
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope outsider = run.Add("principal", new JsonObject { ["kind"] = "agent", ["name"] = "Outside Reviewer", ["roles"] = new JsonArray("contributor"), ["agent"] = new JsonObject { ["vendor"] = "Another", ["product"] = "Another Agent" } });
+
+        // A pass by a principal who is not the lyrics' author, but whom neither the reviewer role nor the step's assignments name, closes nothing.
+        RecordEnvelope passed = run.Estate.Add("review", outsider.Id, new JsonObject { ["independence"] = "independent-agent", ["outcome"] = "pass", ["summary"] = "Read the lyrics.", ["findings"] = new JsonArray() }.ToJsonString(), lyrics.Reference);
+        FlowPosition.StepInstance review = run.Step("review-lyrics");
+        Assert.NotEqual("done", review.State);
+        Assert.Null(review.Review);
+        Assert.Equal("no review of the exact result it reviews passes, by a principal of the reviewer role other than its author", Assert.Single(review.Items).Reasons[0]);
+        Assert.Equal("blocked", run.Step("master").State);
+
+        // Assigned the review step, the same principal carries it: its pass now closes the step.
+        run.Assign("review-lyrics", outsider.Id, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics")));
+        review = run.Step("review-lyrics");
+        Assert.Equal("done", review.State);
+        Assert.Equal(passed.Id, review.Review!.Id);
+
+        // A principal the reviewer role names closes it as well: the operator, through the roster.
+        using var named = new FlowFixture();
+        RecordEnvelope theirs = named.Result(named.Assign("draft", named.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope verdict = named.Review(theirs);
+        Assert.Equal(("done", verdict.Id), (named.Step("review-lyrics").State, named.Step("review-lyrics").Review!.Id));
+    }
+
+    [Fact]
     public void AStepTheFlowsReviewOptionCoversIsInReviewUntilAnIndependentReviewPassesIt()
     {
         using var run = new FlowFixture(options: new JsonObject { ["review"] = "independent" });

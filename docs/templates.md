@@ -506,7 +506,10 @@ record that produced it shows the declared provenance (a result's or an
 operation's recorded `provenance`, else the assignment's pinned inputs and the
 run that carried it), each named verification passes at that hash, and a review
 passes that hash by a principal of the reviewer role with the declared
-independence. A file reviewed or verified in an earlier result at the same hash
+independence, other than its producer and the step's own holders. A review step
+closes on a review by a principal of its role or by its own assignee. Evidence is
+any passing verification of the exact subject by the declared method, whoever
+recorded it; independence is what the item's review requires. A file reviewed or verified in an earlier result at the same hash
 stays covered; one that changed after its review is stale. A step closes when its
 done predicates hold and every required item, and each optional item its
 configuration leaves on, is satisfied; this is derived from the records and never

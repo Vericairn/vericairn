@@ -321,7 +321,7 @@ public static class FlowPosition
             {
                 StepInstance? reviewed = step.Inputs.Where(i => i.Step is not null).Select(i => Producer(i, item)).FirstOrDefault();
                 RecordEnvelope? subject = reviewed?.Result;
-                stepReview = subject is null ? null : Passing(subject, Authors(held.GetValueOrDefault(reviewed!.Ref) ?? []), flow.Role(step.Role)?.Holder == "person");
+                stepReview = subject is null ? null : Passing(subject, Authors(held.GetValueOrDefault(reviewed!.Ref) ?? []), flow.Role(step.Role)?.Holder == "person", Reviewers(step, assignments));
             }
             else if (step.Kind == "work" && result is not null)
             {
@@ -380,7 +380,7 @@ public static class FlowPosition
             if (step.Kind == "review")
             {
                 (value, missing) = stepReview is null
-                    ? (null, "no review of the exact result it reviews passes, by a principal other than its author")
+                    ? (null, $"no review of the exact result it reviews passes, by a principal of the {step.Role} role other than its author")
                     : (new Output(output.Name, output.Kind, stepReview, stepReview.ComputedHash, null), (string?)null);
             }
             else
@@ -433,7 +433,7 @@ public static class FlowPosition
                 FlowReview required = ReviewOf(step, output);
                 if (required.Independence != "none")
                 {
-                    IReadOnlySet<string> producers = output.Kind == "file" ? authors : new HashSet<string>(StringComparer.Ordinal) { producer };
+                    var producers = new HashSet<string>(authors, StringComparer.Ordinal) { producer };
                     List<(RecordEnvelope Subject, string Hash)> earlier = output.Kind == "file"
                         ? Results(assignments).Where(r => FileHash(r, output.Name) is string hash && hash != value.Hash).Select(r => (r, r.ComputedHash)).ToList()
                         : model.Chain(value.Carrier).Where(id => id != value.Carrier.Id && model.ById.ContainsKey(id)).Select(id => (model.ById[id], model.ById[id].ComputedHash)).ToList();
@@ -471,9 +471,16 @@ public static class FlowPosition
                 return reasons;
             }
 
-            if (provenance.Principal is string principal && model.CurrentPrincipal(principal) is RecordEnvelope named && model.Chain(named)[0] != producer && named.Id != producer && principal != producer)
+            if (provenance.Principal is string principal)
             {
-                reasons.Add($"it is to be produced by {Routing.NameOf(model, principal)}, and {Routing.NameOf(model, producer)} produced it");
+                if (model.CurrentPrincipal(principal) is not RecordEnvelope named)
+                {
+                    reasons.Add($"it is to be produced by {principal}, which is not a principal of this estate");
+                }
+                else if (model.Chain(named)[0] != producer && named.Id != producer && principal != producer)
+                {
+                    reasons.Add($"it is to be produced by {Routing.NameOf(model, principal)}, and {Routing.NameOf(model, producer)} produced it");
+                }
             }
 
             if (provenance.Holder is "person" && !person || provenance.Holder is "agent" && (model.CurrentPrincipal(producer) is not RecordEnvelope who || EstateModel.BodyString(who, "kind") != "agent"))
@@ -761,18 +768,36 @@ public static class FlowPosition
         private FlowReview ReviewOf(FlowStep step, FlowOutput? output) =>
             output?.Review ?? step.Review ?? (step.Kind == "work" && configuration.Value("review") is string option && FlowContract.Reviews.Contains(option) ? new FlowReview(option, null) : new FlowReview("none", null));
 
-        /// <summary>The latest current review of a result by a principal other than its authors, at any revision of it; null when there is none.</summary>
-        private RecordEnvelope? LatestReview(RecordEnvelope result, IReadOnlySet<string> authors)
+        /// <summary>
+        /// The latest current review of a result by a principal other than its authors, at any revision of it, among the admitted reviewers
+        /// when they are given; null when there is none.
+        /// </summary>
+        private RecordEnvelope? LatestReview(RecordEnvelope result, IReadOnlySet<string> authors, IReadOnlySet<string>? admitted = null)
         {
             IReadOnlyList<string> chain = model.Chain(model.Latest(result));
-            return model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && !authors.Contains(r.By) && r.By != result.By)
+            return model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && !authors.Contains(r.By) && r.By != result.By
+                    && (admitted is null || admitted.Contains(r.By)))
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         }
 
-        /// <summary>The latest independent review of a result when it passes the result's exact hash, by a person when one is required; else null.</summary>
-        private RecordEnvelope? Passing(RecordEnvelope result, IReadOnlySet<string> authors, bool person)
+        /// <summary>
+        /// Who may carry a review step's review: a principal its role names, through the goal's roles or the roster, or a contributor of
+        /// the review step's own assignments.
+        /// </summary>
+        private HashSet<string> Reviewers(FlowStep step, List<RecordEnvelope> assignments)
         {
-            RecordEnvelope? latest = LatestReview(result, authors);
+            var reviewers = Routing.Principals(model, goal, step.Role).Principals.ToHashSet(StringComparer.Ordinal);
+            reviewers.UnionWith(assignments.Select(a => EstateModel.BodyString(a, "contributor")).OfType<string>());
+            return reviewers;
+        }
+
+        /// <summary>
+        /// The latest independent review of a result by an admitted reviewer when it passes the result's exact hash, by a person when one
+        /// is required; else null.
+        /// </summary>
+        private RecordEnvelope? Passing(RecordEnvelope result, IReadOnlySet<string> authors, bool person, IReadOnlySet<string> admitted)
+        {
+            RecordEnvelope? latest = LatestReview(result, authors, admitted);
             return latest is not null && EstateModel.BodyString(latest, "outcome") == "pass" && latest.Subject?.Id == result.Id && latest.Subject.Hash == result.ComputedHash
                 && (!person || GoalRules.IsPerson(model, latest.By)) ? latest : null;
         }

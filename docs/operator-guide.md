@@ -1215,9 +1215,13 @@ step takes by type, id and hash, lists each item with its provenance, evidence a
 recovery, and prohibits what the goal's constraints, the reserved effects and the flow's `never` lines prohibit. A result or
 an operation may record its own `provenance` (its inputs by hash, provider, tool and settings) where an item requires it. A
 person can take over a step an agent holds with `work takeover`, which carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
-is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal of the item's reviewer
-role with its independence and other than its author: in this build, an operator or an agent. A verification an item names
-is a `verification` record of that exact subject that passed.
+is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal other than its author
+and the step's own holders, of the item's reviewer role with its independence: in this build, an operator or an agent. A
+review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
+contributor of its own assignment. A verification an item names is a `verification` record of that exact subject that
+passed. Evidence is any passing verification of the exact subject by the declared method, whoever recorded it, the item's
+producer included; independence is what an item's review requires, not its evidence. A provenance that names a principal
+holds only for a principal of this estate.
 
 `goal step` never dispatches a reserved step; it stops, waiting on the operator, and no grant in this build lets an agent
 carry it. Nor does it dispatch an `operation`, `decision`, `effect`, `exchange` or `flow` step: each counts once its done

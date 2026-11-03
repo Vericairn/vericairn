@@ -116,6 +116,51 @@ public class FlowItemTests
     }
 
     [Fact]
+    public void AProvenancePrincipalThatIsNoPrincipalOfTheEstateLeavesTheItemUnproven()
+    {
+        JsonObject flow = Flow();
+        JsonObject lyrics = flow["steps"]![0]!["outputs"]![0]!.AsObject();
+        lyrics.Remove("evidence");
+        lyrics["review"] = "none";
+        string unknown = "01" + new string('Z', 24);
+        lyrics["provenance"] = new JsonObject { ["principal"] = unknown };
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" });
+        run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        FlowPosition.ItemState item = Item(run.Step("draft"), "lyrics");
+        Assert.Equal("unproven", item.State);
+        Assert.Equal($"it is to be produced by {unknown}, which is not a principal of this estate", item.Reasons[0]);
+        Assert.NotEqual("done", run.Step("draft").State);
+    }
+
+    [Fact]
+    public void ARecordItemsIndependentReviewExcludesTheStepsOwnHolders()
+    {
+        // The master step also closes on a record item, the work order its done predicate counts, which the operator records; the builder
+        // holds the step.
+        JsonObject flow = Flow();
+        flow["steps"]![0]!["outputs"]![0]!.AsObject().Remove("evidence");
+        flow["steps"]![0]!["outputs"]![0]!["review"] = "none";
+        JsonObject master = flow["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "master");
+        master["done"] = new JsonArray(FlowFixture.Marker("MIXED"));
+        master["outputs"]!.AsArray().Add(new JsonObject { ["name"] = "mix", ["kind"] = "record", ["recordType"] = "work-order", ["required"] = true, ["review"] = "independent" });
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"), ("notes", FlowFixture.Hash('e'), null));
+        Assert.Equal("done", run.Step("draft").State);
+        run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics"))), "completed", ("master", FlowFixture.Hash('b'), null));
+        RecordEnvelope mixed = run.Marked("MIXED");
+        Assert.Equal(("in-review", run.Estate.OperatorId), (Item(run.Step("master"), "mix").State, Item(run.Step("master"), "mix").Producer));
+
+        // The builder did not record the work order, but holds the step: its pass is not independent of the step's own work.
+        RecordEnvelope outsider = run.Add("principal", new JsonObject { ["kind"] = "agent", ["name"] = "Outside Reviewer", ["roles"] = new JsonArray("reviewer"), ["agent"] = new JsonObject { ["vendor"] = "Another", ["product"] = "Another Agent" } });
+        AgentReview(run, mixed, run.Estate.BuilderId);
+        Assert.Equal("in-review", Item(run.Step("master"), "mix").State);
+        Assert.NotEqual("done", run.Step("master").State);
+        AgentReview(run, mixed, outsider.Id);
+        Assert.Equal("satisfied", Item(run.Step("master"), "mix").State);
+        Assert.Equal("done", run.Step("master").State);
+    }
+
+    [Fact]
     public void AnItemsOwnReviewOverridesTheStepsAndAnotherHarnessIsAnotherAgentProduct()
     {
         JsonObject flow = Flow();
