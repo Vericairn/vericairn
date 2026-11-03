@@ -63,6 +63,12 @@ def complete(bom, directory, release_version):
     component = document.setdefault("metadata", {}).setdefault("component", {"type": "application"})
     component["name"] = "Vericairn"
     component["version"] = release_version
+    # The generator's reference reads Vericairn@0.0.0; the release's reference and every dependency entry naming it move together.
+    reference, component["bom-ref"] = component.get("bom-ref"), f"Vericairn@{release_version}"
+    for dependency in document.get("dependencies", []):
+        if dependency.get("ref") == reference:
+            dependency["ref"] = component["bom-ref"]
+        dependency["dependsOn"] = [component["bom-ref"] if ref == reference else ref for ref in dependency.get("dependsOn", [])]
     components = document.setdefault("components", [])
     for (name, version), bundles in sorted(packs(directory).items()):
         matching = [component for component in components if (component["name"].lower(), component["version"]) == (name, version)]

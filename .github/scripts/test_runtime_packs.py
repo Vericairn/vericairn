@@ -48,13 +48,15 @@ class RuntimePackTests(unittest.TestCase):
                 expected = json.loads(json.dumps(self.generated))
                 expected["metadata"]["component"]["name"] = "Vericairn"
                 expected["metadata"]["component"]["version"] = self.version
+                expected["metadata"]["component"]["bom-ref"] = f"Vericairn@{self.version}"
+                expected["dependencies"][0]["ref"] = f"Vericairn@{self.version}"
                 document["components"] = [self.original]
                 self.assertEqual(expected, document)
 
     def test_completion_adds_the_application_when_metadata_is_absent(self):
         del self.generated["metadata"]
         self.bom.write_text(json.dumps(self.generated))
-        self.assertEqual({"type": "application", "name": "Vericairn", "version": self.version},
+        self.assertEqual({"type": "application", "name": "Vericairn", "version": self.version, "bom-ref": f"Vericairn@{self.version}"},
                          self.completed()["metadata"]["component"])
 
     def test_packaging_commands_require_the_version_and_reject_a_different_release(self):
