@@ -144,7 +144,7 @@ public sealed class DecisionNewApiTests
     }
 
     // Exercise the real API binding and response delegates without a host, file watchers or sockets.
-    private sealed class PinRouteHandler : HttpMessageHandler
+    internal sealed class PinRouteHandler : HttpMessageHandler
     {
         private readonly ServiceProvider services = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
         private readonly RouteEndpoint[] endpoints;

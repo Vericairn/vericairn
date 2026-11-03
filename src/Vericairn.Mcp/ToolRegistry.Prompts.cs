@@ -53,6 +53,8 @@ public sealed partial class ToolRegistry
         if (!used.Ok)
         {
             string message = used.Problem?.Message ?? used.Run?.Message ?? "The prompt use did not complete.";
+            if (used.Problem?.Findings is { Count: > 0 } findings)
+                message += " " + string.Join(" ", findings.Select(f => f.Code + ": " + f.Message));
             if (used.Written is { } written)
                 message = $"Use {written.Id} at {written.Hash} is recorded. Inspect that target before retrying. " + message;
             throw new InvalidOperationException(message);

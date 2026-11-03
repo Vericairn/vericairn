@@ -10,6 +10,8 @@ namespace Vericairn.Records.Types;
 /// <summary>An operator decision, with the operator's words preserved verbatim.</summary>
 public sealed class DecisionType : IRecordType
 {
+    internal const string RecordTimeCode = "decision.record-time";
+
     /// <summary>How much rides on a decision, from record format 2.</summary>
     public static readonly ImmutableArray<string> Stakes = ["low", "medium", "high", "critical"];
 
@@ -69,7 +71,13 @@ public sealed class DecisionType : IRecordType
         body.StringArray("effects", true, allowEmpty: false, maxItemLength: 2000);
         IReadOnlyList<string>? affects = body.StringArray("affects", true, allowEmpty: true, maxItemLength: Identity.Ulid.Length);
         string? decidedBy = body.Ulid("decidedBy", true);
-        body.Timestamp("decidedAt", true);
+        string? decidedAt = body.Timestamp("decidedAt", true);
+        Finding? time = RecordTimeFinding(decidedAt, context.Record.At, context.Location);
+        if (time is not null)
+        {
+            // Existing records remain readable. The write boundary promotes this finding only for proposed records.
+            context.Findings.Add(time);
+        }
         if (body.Since(2, "stake"))
         {
             body.Enum("stake", true, Stakes);
@@ -83,7 +91,7 @@ public sealed class DecisionType : IRecordType
         IReadOnlyList<string>? answers = body.Since(2, "answers") ? body.StringArray("answers", false, allowEmpty: false, maxItemLength: Identity.Ulid.Length) : null;
         IReadOnlyList<BodyReader>? obligations = body.Since(2, "obligations") ? body.NestedArray("obligations", false, allowEmpty: false) : null;
         IReadOnlyList<string>? documents = body.Since(2, "documents") ? body.StringArray("documents", false, allowEmpty: false, maxItemLength: 500) : null;
-        GuidedDecision.Validate(context, answers, documents);
+        GuidedDecision.Validate(context, answers, documents, decisionAfterRecord: time is not null);
         SavedPrompts.ValidateUse(context);
         body.NoOtherKeys();
         var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -157,4 +165,10 @@ public sealed class DecisionType : IRecordType
             context.Error("decision.author", $"Recording principal {context.Record.By} has no principal record.");
         }
     }
+
+    internal static Finding? RecordTimeFinding(string? decidedAt, string at, string location) =>
+        RecordParser.IsTimestamp(decidedAt) && string.CompareOrdinal(decidedAt, at) > 0
+            ? new(Severity.Warning, RecordTimeCode, location + "#body.decidedAt",
+                $"Decision decidedAt {decidedAt} cannot be later than its record's at {at}.")
+            : null;
 }

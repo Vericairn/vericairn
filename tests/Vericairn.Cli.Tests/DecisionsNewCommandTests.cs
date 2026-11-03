@@ -71,7 +71,13 @@ public sealed class DecisionsNewCommandTests
         Assert.False(response.Ok);
         Assert.Null(response.Written);
         Assert.Empty(response.Pins);
-        Assert.Contains(fault == "time" ? "later than now" : "equal exactly", response.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains(fault == "time" ? "cannot be later than its record's at" : "equal exactly", response.Problem!.Message, StringComparison.Ordinal);
+        if (fault == "time")
+        {
+            FindingDto finding = Assert.Single(response.Problem.Findings, f => f.Code == "decision.record-time");
+            Assert.Contains(request.DecidedAt!, finding.Message, StringComparison.Ordinal);
+            Assert.Matches("record's at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", finding.Message);
+        }
         Assert.Equal(before, fixture.Records());
     }
 
