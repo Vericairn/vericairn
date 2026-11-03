@@ -46,6 +46,7 @@ public sealed partial class EstateService
                     || previous.Body.TryGetProperty("pathPattern", out _) || TemplateCatalog.Pin(previous) is not null))
                     return AdoptionRefused("Adoption attaches an untemplated authored estate document; existing instances use explicit template upgrades.");
                 TemplateDefinition definition = TemplateCatalog.Resolve(model, new(request.Template.Id, request.Template.Version, request.Template.Hash));
+                if (definition.IsFlow) return AdoptionRefused("A flow is a role process a goal runs, not a document's sections; a document adopts a document template.");
                 if (!TemplateCatalog.All(model).Any(d => d.Hash == definition.Hash)) return AdoptionRefused("The template version is retired for new instances.");
                 var instance = new JsonObject
                 {

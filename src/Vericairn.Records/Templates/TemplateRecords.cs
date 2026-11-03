@@ -63,6 +63,11 @@ public static class TemplateRecords
             if (TemplateCatalog.Pin(context.Record) is not { } pin) return;
             TemplateDefinition definition = TemplateCatalog.Resolve(context.Model, pin);
             resolved = true;
+            if (definition.IsFlow)
+            {
+                context.Error("template.kind", "A flow is a role process a goal runs, not a document's sections; a living document pins a document template.");
+                return;
+            }
             Dictionary<string, JsonElement> allowed = TemplateDefinition.OptionDefinitions(definition.Content);
             JsonElement values = TJson.Object(template.Element, "options");
             if (values.ValueKind == JsonValueKind.Object)
