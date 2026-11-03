@@ -39,7 +39,7 @@ internal sealed class RunAdmissionService(
     /// assignment held, signed and not yet stored, the run carries it, and it is stored with the run's intent, so that neither is left
     /// alone: every refusal before the intent records nothing, that assignment included.
     /// </summary>
-    internal RunResponse? Prepare(RunStartRequest request, AuthoredRecord? routed, out AdmittedRun? admitted, out RecordWritten? assigned)
+    internal RunResponse? Prepare(RunStartRequest request, AuthoredRecord? routed, out AdmittedRun? admitted, out RecordWritten? assigned, bool prepareOnly = false)
     {
         ArgumentNullException.ThrowIfNull(request);
         assigned = null;
@@ -105,7 +105,7 @@ internal sealed class RunAdmissionService(
             (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, files, request, launcher, configuration);
             if (planned is null)
             {
-                if (limited is not null)
+                if (limited is not null && !prepareOnly)
                 {
                     MarkBudgetLimited(model, limited, request.By, refusal!);
                 }
@@ -127,21 +127,25 @@ internal sealed class RunAdmissionService(
             return RunProblem(pending, "not-started", "refused", "This launcher cannot establish a complete tool, configuration, dependency and route inventory; dispatch is unsupported. Nothing was recorded or executed.");
         }
 
-        // Even feature probes need a launcher that can account for what it loads; unsupported implementations execute nothing.
+        // Even feature probes need a launcher that can account for what it loads; unsupported implementations execute nothing. A
+        // preparation alone starts no harness, so it runs none of them.
         Dictionary<string, string> environment = WorkerEnvironment.Build(WorkerOptions.Environment ?? WorkerEnvironment.Current(), launcher.EnvironmentNames);
-        string? unverified;
-        try
+        if (!prepareOnly)
         {
-            unverified = launcher.Verify(settings, environment);
-        }
-        catch (ProviderRefusedException exception)
-        {
-            unverified = exception.Message;
-        }
+            string? unverified;
+            try
+            {
+                unverified = launcher.Verify(settings, environment);
+            }
+            catch (ProviderRefusedException exception)
+            {
+                unverified = exception.Message;
+            }
 
-        if (unverified is not null)
-        {
-            return RunProblem(pending, "not-started", "refused", $"The {launcher.Launcher} launcher cannot run here: {unverified} Nothing was recorded.");
+            if (unverified is not null)
+            {
+                return RunProblem(pending, "not-started", "refused", $"The {launcher.Launcher} launcher cannot run here: {unverified} Nothing was recorded.");
+            }
         }
 
         // Prepare: the workspace on its work branch, never the shared clone, with the brief exported into it.
@@ -150,15 +154,25 @@ internal sealed class RunAdmissionService(
         string brief;
         string? configuredRoot;
         EfficiencyRun? efficiency = null;
+        WorkspaceSetupResult? setup = null;
+        WorkspacePreparation? prepared = null;
+        var preparation = new WorkspacePreparation(plan.Estate, plan.RepositoryIds[0], plan.Branch);
         RunResponse Refused(RunResponse response)
         {
             efficiency?.Dispose();
             if (workspace is null) return response;
             string? retained;
-            try { retained = workspaces.DiscardUnused(workspace, baseline, plan.Brief); }
-            catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
+            if (setup is not null)
             {
-                retained = "Cleanup could not verify that this preparation is unused.";
+                retained = "Its setup command ran there, so it stays with what that left.";
+            }
+            else
+            {
+                try { retained = workspaces.DiscardUnused(workspace, baseline, plan.Brief); }
+                catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
+                {
+                    retained = "Cleanup could not verify that this preparation is unused.";
+                }
             }
             if (retained is null) return response;
             string message = response.Message + $" Workspace kept at '{workspace.Path}'. {retained} Preserve its commits and files before removing it or choosing a root that contains it.";
@@ -173,6 +187,61 @@ internal sealed class RunAdmissionService(
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
+            IReadOnlyList<string> permitted = Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges");
+            WorkspacePreparation.Checkpoint? checkpoint = preparation.Read();
+            string? stale = checkpoint is null ? null : WorkspacePreparation.Stale(checkpoint, workspace, baseline);
+            if (prepareOnly)
+            {
+                return Prepared(request, launcher, configuration, workspaces, configuredRoot, workspace, baseline, preparation, checkpoint, stale, permitted, pending);
+            }
+
+            if (stale is not null)
+            {
+                throw new ProviderRefusedException($"The preparation checkpoint '{preparation.Location}' no longer describes this branch's workspace: {stale}. Prepare it again with vericairn worker run --prepare-only and install there, or remove that file to start from the workspace as it is.");
+            }
+
+            WorkspaceSetupConfiguration? configured = new WorkerConfigurationStore().ReadSetup(launcher.Launcher, plan.RepositoryIds);
+            if (configured is not null || checkpoint is not null)
+            {
+                // What the person changed since preparing it, and what setup changes now, are judged from the workspace as it was
+                // prepared, or as it was just before setup: new links, an incomplete inventory and changes outside the permitted
+                // paths refuse here, before the intent.
+                string commit = checkpoint?.Commit ?? workspace.Commit;
+                WorkspaceSnapshot reference = checkpoint?.Snapshot ?? baseline;
+                if (reference.Problem is not null)
+                {
+                    throw new ProviderRefusedException($"Its setup command was not run, because what it would change in the workspace at '{workspace.Path}' could not be checked: {reference.Problem}");
+                }
+
+                if (configured is not null)
+                {
+                    setup = WorkspaceSetup.Run(configured, workspace.Path, WorkerOptions.Environment ?? WorkerEnvironment.Current());
+                    if (!setup.Succeeded)
+                    {
+                        return Refused(RunProblem(pending, "not-started", "refused", $"The workspace setup command did not succeed ({setup.Facts}); run it in the workspace yourself to see its output. Nothing was recorded."));
+                    }
+
+                    // It ran as the person, with Git at hand: the workspace must still be this branch's own repository, at the head it left.
+                    PreparedWorkspace rechecked = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root);
+                    if (!string.Equals(rechecked.Path, workspace.Path, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    {
+                        throw new ProviderRefusedException($"The branch's workspace moved from '{workspace.Path}' to '{rechecked.Path}' while its setup command ran.");
+                    }
+
+                    workspace = rechecked;
+                    brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
+                }
+
+                WorkspacePreparation.Check(workspaces, workspace, commit, reference, permitted,
+                    checkpoint is null ? "after its setup command" : configured is null ? "since it was prepared" : "since it was prepared and its setup command ran");
+                if (configured is not null)
+                {
+                    // Settlement judges the agent's changes from what setup left.
+                    baseline = workspaces.Capture(workspace);
+                }
+
+                prepared = checkpoint is null ? null : preparation;
+            }
         }
         catch (ProviderRefusedException exception)
         {
@@ -335,6 +404,11 @@ internal sealed class RunAdmissionService(
                 ["cap"] = plan.Cap.DeepClone(),
                 ["execution"] = plan.Selection.DeepClone(),
             };
+            if (setup is not null)
+            {
+                ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = $"A workspace setup command configured on the machine that ran the worker ran before dispatch: {setup.Facts}. Its command, environment and output are not recorded." });
+            }
+
             ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = limits.Describe(Element(plan.Cap)) });
             ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = launcher.Limitations });
             if (excepted is not null)
@@ -380,8 +454,52 @@ internal sealed class RunAdmissionService(
         }
 
         admitted = new AdmittedRun(request, plan, launcher, configuration, workspaces, workspace, baseline, configuredRoot,
-            directory, launch, environment, limits, environmentPolicy, admittedBinding, run, where, intent, excepted, Refused, efficiency);
+            directory, launch, environment, limits, environmentPolicy, admittedBinding, run, where, intent, excepted, Refused, efficiency, prepared);
         return null;
+    }
+
+    /// <summary>
+    /// Prepares and registers a run's workspace as a run would, with the same refusals, and stops there: no harness probe, no setup
+    /// command, no record and no dispatch. The run of the same assignment and branch that follows takes the workspace up.
+    /// </summary>
+    internal RunResponse PrepareOnly(RunStartRequest request) =>
+        Prepare(request, null, out _, out _, prepareOnly: true) ?? throw new InvalidOperationException("A preparation alone admitted a run.");
+
+    /// <summary>
+    /// The end of a preparation alone: what changed since an earlier preparation of the same workspace is checked as its run will check
+    /// it, the records are judged again under the gate, and the workspace as prepared is kept for the run outside the estate. Throws
+    /// <see cref="ProviderRefusedException"/> with the reason when it cannot.
+    /// </summary>
+    private RunResponse Prepared(RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration, IWorkspaceProvider workspaces, string? configuredRoot,
+        PreparedWorkspace workspace, WorkspaceSnapshot inventory, WorkspacePreparation preparation, WorkspacePreparation.Checkpoint? checkpoint, string? stale,
+        IReadOnlyList<string> permitted, string pending)
+    {
+        if (inventory.Problem is not null)
+        {
+            throw new ProviderRefusedException($"The workspace at '{workspace.Path}' cannot be prepared ahead of its run, because what changes there could not be checked: {inventory.Problem}");
+        }
+
+        bool kept = checkpoint is not null && stale is null;
+        if (kept)
+        {
+            WorkspacePreparation.Check(workspaces, workspace, checkpoint!.Commit, checkpoint.Snapshot, permitted, "since it was prepared");
+        }
+
+        lock (gate)
+        {
+            if (WorkspaceRootProblem(configuredRoot) is string rootProblem) throw new ProviderRefusedException(rootProblem);
+            IReadOnlyList<RecordFile> files = session.Files();
+            (RunPlan? planned, string? refusal, _) = Plan(EstateLoader.Load(session.Root, files), files, request, launcher, configuration);
+            if (planned is null) throw new ProviderRefusedException(refusal!);
+            if (!kept) preparation.Save(workspace, inventory);
+        }
+
+        string message = kept
+            ? $"The workspace of branch {workspace.Branch} was already prepared, and what changed there since passes the checks its run will make."
+            : (stale is null ? string.Empty : $"An earlier preparation of branch {workspace.Branch} no longer described its workspace ({stale}) and was replaced. ")
+                + $"The workspace of branch {workspace.Branch} is prepared and registered. Install dependencies there, in paths the repository ignores and without symbolic links.";
+        message += " Then run the same assignment without --prepare-only: the run takes this workspace up and refuses before the agent starts if anything changed outside the assignment's permitted changes. Nothing was recorded, and no setup command or harness ran.";
+        return new RunResponse(pending, "prepared", message, true, Workspace: workspace.Path);
     }
 
     /// <summary>
@@ -441,6 +559,8 @@ internal sealed class RunAdmissionService(
             {
                 // Record timestamps have second precision. Keep identities too, so an earlier attempt in the same second cannot count.
                 priorAttempts = dispatchModel.OfType("attempt").Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
+                // The preparation checkpoint this run took up has served: the next run on the branch starts from the workspace as it is.
+                admitted.Preparation?.Remove();
                 supervisor = start(command);
             }
         }
@@ -668,7 +788,11 @@ internal sealed class RunAdmissionService(
             ["maxBytes"] = JsonNode.Parse(accounting.GetProperty("maxBytes").GetRawText()),
         };
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch) { PromptUse = promptUse }, null, null);
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch)
+        {
+            PromptUse = promptUse,
+            RepositoryIds = [.. model.Chain(resource).Append(request.Repository).Distinct(StringComparer.Ordinal)],
+        }, null, null);
     }
 
     private RunConfiguration? Configuration(IAgentLauncher launcher, string? name) =>
@@ -811,6 +935,9 @@ internal sealed class RunAdmissionService(
     internal sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, JsonElement Context, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null)
     {
         internal JsonObject? PromptUse { get; init; }
+
+        /// <summary>Every id the repository resource is known by, its first revision's first: what machine-local setup and preparation are kept under.</summary>
+        internal IReadOnlyList<string> RepositoryIds { get; init; } = [];
     }
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
@@ -821,5 +948,5 @@ internal sealed class RunAdmissionService(
         IWorkspaceProvider Workspaces, PreparedWorkspace Workspace, WorkspaceSnapshot Baseline, string? ConfiguredRoot,
         RunDirectory Directory, LaunchContext Launch, Dictionary<string, string> Environment, RunLimits Limits,
         RunEnvironmentPolicy? EnvironmentPolicy, string? AdmittedBinding, string Run, string Where, RecordWritten Intent,
-        Excepted? Excepted, Func<RunResponse, RunResponse> Refused, EfficiencyRun? Efficiency);
+        Excepted? Excepted, Func<RunResponse, RunResponse> Refused, EfficiencyRun? Efficiency, WorkspacePreparation? Preparation);
 }

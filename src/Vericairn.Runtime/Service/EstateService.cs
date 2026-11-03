@@ -2541,8 +2541,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, and a result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored
-    /// file gets, on their canonical bytes, since the checks of stored files cannot see them.
+    /// themselves, a decision dated after its own record, and a result whose output no longer has the bytes it claims. Records not
+    /// stored yet get the content checks a stored file gets, on their canonical bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
@@ -2565,6 +2565,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(new Finding(Severity.Error, "result.output-hash", finding.Location, "The file present does not have the hash or size this result claims; name the bytes actually produced."));
+        }
+
+        foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
         }
 
         return relevant;

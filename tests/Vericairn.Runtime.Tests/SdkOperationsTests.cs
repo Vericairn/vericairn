@@ -208,7 +208,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(135, synchronous.Length);
+        Assert.Equal(136, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DecisionBasis));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.DecisionBasis))!.IsAbstract);
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.DecisionBasisAsync))!.IsAbstract);
@@ -225,6 +225,9 @@ public sealed class SdkOperationsTests
             Assert.Single(synchronous, method => method.Name == prompt);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseCheck));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.RunSettle));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.RunPrepare));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.RunPrepare))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.RunPrepareAsync))!.IsAbstract);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.OperatorCloseCandidates));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.OperatorClose));
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseReviewBrief));

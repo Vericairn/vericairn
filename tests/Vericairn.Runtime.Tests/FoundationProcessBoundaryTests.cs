@@ -19,16 +19,17 @@ public sealed class FoundationProcessBoundaryTests
     public void RuntimeConstructsOnlyTheLauncherProcessAndNeverStartsGitItself()
     {
         Instruction[] runtime = Instructions(typeof(ProviderRegistry).Assembly).ToArray();
-        // The generic supervisor constructs the host-supplied launcher. Adapters may also use the bounded process primitive;
-        // neither primitive chooses git, and no other runtime method may construct or retarget a process.
-        Instruction construction = Assert.Single(runtime, i => i.Called is ConstructorInfo && i.Called.DeclaringType == typeof(ProcessStartInfo));
-        Assert.Equal(typeof(RunSupervisor), construction.Method.DeclaringType);
-        Assert.Equal(nameof(RunSupervisor.Start), construction.Method.Name);
+        // The generic supervisor constructs the host-supplied launcher, and workspace setup the command the person configured on
+        // this machine (FIX-86). Adapters may also use the bounded process primitive; none of these chooses git, and no other runtime
+        // method may construct or retarget a process.
+        Assert.Equal([$"{nameof(RunSupervisor)}.{nameof(RunSupervisor.Start)}", $"{nameof(WorkspaceSetup)}.{nameof(WorkspaceSetup.Run)}"],
+            runtime.Where(i => i.Called is ConstructorInfo && i.Called.DeclaringType == typeof(ProcessStartInfo))
+                .Select(i => i.Method.DeclaringType!.Name + "." + i.Method.Name).Order(StringComparer.Ordinal));
         Assert.DoesNotContain(runtime, i => i.Called?.DeclaringType == typeof(ProcessStartInfo) && i.Called.Name is "set_FileName" or "set_Arguments");
         Assert.DoesNotContain(runtime, i => i.Called?.DeclaringType == typeof(Process) && i.Called.Name == nameof(Process.Start));
         Assert.All(runtime.Where(i => i.Called?.DeclaringType == typeof(ContainedProcess) && i.Called.Name == nameof(ContainedProcess.Start)),
-            i => Assert.Contains(i.Method.DeclaringType, new[] { typeof(RunSupervisor), typeof(BoundedProcess) }));
-        Assert.DoesNotContain(runtime.Where(i => i.Method.DeclaringType == typeof(RunSupervisor)
+            i => Assert.Contains(i.Method.DeclaringType, new[] { typeof(RunSupervisor), typeof(BoundedProcess), typeof(WorkspaceSetup) }));
+        Assert.DoesNotContain(runtime.Where(i => i.Method.DeclaringType == typeof(RunSupervisor) || i.Method.DeclaringType == typeof(WorkspaceSetup)
             || i.Method.DeclaringType == typeof(BoundedProcess) || i.Method.DeclaringType == typeof(ContainedProcess)),
             i => i.Text is not null && (i.Text.Equals("git", StringComparison.OrdinalIgnoreCase) || i.Text.Equals("git.exe", StringComparison.OrdinalIgnoreCase)));
     }

@@ -394,6 +394,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome QualifyHarness(HarnessQualifyRequest request) => Post<HarnessQualifyRequest, WriteOutcome>("/v1/harness-qualifications", request)!;
 
     /// <inheritdoc />
+    public RunResponse RunPrepare(RunStartRequest request) => Post<RunStartRequest, RunResponse>("/v1/runs/prepare", request)!;
+
+    /// <inheritdoc />
     public RunResponse RunStart(RunStartRequest request) => Post<RunStartRequest, RunResponse>("/v1/runs", request)!;
 
     /// <inheritdoc />

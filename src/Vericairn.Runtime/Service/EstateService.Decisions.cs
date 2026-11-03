@@ -95,8 +95,10 @@ public sealed partial class EstateService
             string decidedAt = request.DecidedAt ?? request.AnsweredAt;
             if (!RecordParser.IsTimestamp(request.AnsweredAt) || !RecordParser.IsTimestamp(decidedAt))
                 return Failed("Answer and decision times must be UTC record timestamps with second precision.");
-            if (string.CompareOrdinal(request.AnsweredAt, now) > 0 || string.CompareOrdinal(decidedAt, now) > 0)
-                return Failed("The answer and decision times cannot be later than now.");
+            if (DecisionRecordTimeProblem(decidedAt, now, "decision") is { } timeProblem)
+                return new(null, [], timeProblem);
+            if (string.CompareOrdinal(request.AnsweredAt, now) > 0)
+                return Failed($"The answer time {request.AnsweredAt} cannot be later than the recording time {now}.");
             if (string.CompareOrdinal(decidedAt, request.AnsweredAt) > 0)
                 return Failed("The decision time cannot be later than the operator's answer time.");
             if (string.CompareOrdinal(request.AnsweredAt, model.ById[model.Chain(ask)[0]].At) < 0)
@@ -202,4 +204,9 @@ public sealed partial class EstateService
 
         static DecisionNewResponse Failed(string message) => new(null, [], new Problem("refused", message, []));
     }
+
+    private static Problem? DecisionRecordTimeProblem(string? decidedAt, string at, string location) =>
+        DecisionType.RecordTimeFinding(decidedAt, at, location) is { } finding
+            ? new("rejected", finding.Message, [new FindingDto("error", finding.Code, finding.Location, finding.Message)])
+            : null;
 }

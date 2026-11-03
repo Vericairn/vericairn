@@ -77,8 +77,9 @@ public sealed class DecisionNewTests
     }
 
     [Theory]
-    [InlineData("future-answer", "later than now")]
-    [InlineData("future-decision", "later than now")]
+    [InlineData("future-answer", "cannot be later than its record's at")]
+    [InlineData("future-decision", "cannot be later than its record's at")]
+    [InlineData("future-answer-only", "answer time")]
     [InlineData("after-answer", "later than the operator's answer")]
     [InlineData("before-ask", "precede the ask")]
     [InlineData("invalid-time", "UTC record timestamps")]
@@ -96,6 +97,7 @@ public sealed class DecisionNewTests
         {
             "future-answer" => request with { AnsweredAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1)) },
             "future-decision" => request with { DecidedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1)) },
+            "future-answer-only" => request with { DecidedAt = request.AnsweredAt, AnsweredAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1)) },
             "after-answer" => request with { DecidedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddSeconds(-1)) },
             "before-ask" => request with { AnsweredAt = RecordParser.FormatTimestamp(fixture.Ask.AtTime.AddSeconds(-1)) },
             "invalid-time" => request with { AnsweredAt = "tomorrow" },
@@ -246,7 +248,7 @@ public sealed class DecisionNewTests
 
     [Theory]
     [InlineData("answer-hash", "decision.answer")]
-    [InlineData("late-time", "decision.time")]
+    [InlineData("late-time", "decision.record-time")]
     [InlineData("missing-pin", "decision.documents")]
     [InlineData("pin-hash", "decision.pin")]
     [InlineData("extra-document", "decision.documents")]

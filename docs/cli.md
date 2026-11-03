@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 6, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
+Revision 7, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
+
+Revision 6, November 3, 2026. Add `worker run --prepare-only` and workspace setup commands for 0.9.1.
 
 Revision 5, November 2, 2026. Describe 0.8.4's and 0.9.0's command additions as released commands rather than development builds.
 
@@ -305,6 +307,27 @@ requires prepared markers and any existing migration review. After adoption,
 `docs pin --render-template` refreshes those regions. See the complete
 [adoption workflow](templates.md#adopt-an-existing-estate-document) before
 transferring a hand-maintained table to records.
+
+## Preparing a workspace before the agent starts (0.9.1)
+
+`worker run <assignment> ... --prepare-only` prepares and registers the run's
+workspace with the run's own refusals, prints its location on the first line and
+exits. It runs no harness probe or setup command, records nothing and launches
+nothing; `--json` prints the `RunResponse` with status `prepared`. It cannot be
+combined with `--detach`. Install dependencies there, in paths the repository
+ignores and without links, then run the same assignment on the same branch
+without `--prepare-only`: the run takes the workspace up after checking what
+changed since.
+
+`worker configure --repository <resource> --setup-command <executable or JSON
+array>` (or `--launcher <id>` in place of `--repository`) sets a command the
+worker runs in the workspace before each such run, outside the agent's sandbox.
+`--setup-timeout <seconds>` sets its deadline, 1 through 600 and 300 when
+omitted; `--clear-setup` removes it; `--repository` alone shows it, and
+`worker configure` with no choices shows every setup command beside the
+workspace root. See [Preparing a workspace before the agent
+starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
+that follow setup and what the run records.
 
 ## Runs of a flow (0.9.1)
 

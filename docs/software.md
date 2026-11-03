@@ -739,8 +739,9 @@ Workbench ship, for the six platforms. Ordinary builds and the NuGet packages ke
 dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
 `-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
 stale ones. The bill of materials is generated from those restores without restoring again, so it describes
-the packages and every platform graph of the distributables, and a check confirms it names every package
-their lock files hold. Every tool the path installs is pinned to an exact version.
+the packages and every platform graph of the distributables. Its metadata component names Vericairn and
+the packaged release's version. Verification refuses a different name or version and confirms it names
+every package their lock files hold. Every tool the path installs is pinned to an exact version.
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
@@ -797,7 +798,7 @@ its leading arguments. Native qualification refuses leading option flags in that
 harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
 bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
 
-`vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--detach]`:
+`vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--prepare-only] [--detach]`:
 
 1. Refuses, before anything is recorded: an assignment whose work-order step is now held by another assignment,
    whether the run names it explicitly or routing supplied it; an agent that is not the assignment's contributor, or has no admitted device
@@ -825,7 +826,12 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    are unlinked without changing their other names' attributes. Unix cleanup unlinks files without changing modes.
    The brief, as
    `vericairn work brief` gives it, is exported into the workspace as `.vericairn/brief.md`, in a directory that ignores
-   itself so that nothing in it is committed.
+   itself so that nothing in it is committed. From 0.9.1, a directory at the workspace's location that the worker did not
+   prepare and register, such as a clone made by hand, is refused with its path and what makes it no workspace of the
+   branch, and a registered workspace altered since (its `.git` removed or shared, its object alternate or its `HEAD`
+   changed) is refused the same way; nothing is recorded and the directory stays as it is. When a setup command is
+   configured, or the workspace was prepared alone, the checks described under preparing a workspace before the agent
+   starts, below, follow here, before anything is recorded.
 3. Records the intent, the `agent-run` operation with the run's cap from the goal's budget, before anything starts.
 4. Configures the MCP server for the agent, `vericairn --estate <estate root> mcp serve --as <agent>`, in a file outside
    the workspace, and launches the harness in the workspace with an environment built from an allowlist: the path, the
@@ -863,6 +869,45 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
+
+**Preparing a workspace before the agent starts (0.9.1).** An agent's sandbox can have no network, so a workspace needs
+its dependencies before the harness starts. There are two ways, and they can be used together.
+
+**A preparation alone.** `vericairn worker run <assignment> ... --prepare-only` takes the run's own arguments and makes
+its refusals before anything is recorded (step 1, without the launcher's feature probes). It then prepares and registers
+the workspace as step 2 does, exports the brief, prints the workspace's location on its first line and exits. It runs no
+harness probe and no setup command, records nothing and launches nothing. `--json` prints the `RunResponse`, with status
+`prepared` and the location in `workspace`. `--prepare-only` cannot be combined with `--detach`. Install the
+dependencies there, then run the same assignment on the same branch without `--prepare-only`: the run takes the
+registered workspace up.
+
+The preparation leaves a checkpoint of the workspace: its location, commit and file inventory. It is owner-only, under
+`<VericairnHome>/estates/<estate>/preparations`, outside the workspace and never in a record. Before its intent, the run
+compares the workspace with the checkpoint. A change since then outside the assignment's permitted paths, whether
+tracked, untracked or committed, refuses the run and names the path, and so does a symbolic link or reparse point
+anywhere in the workspace that the checkpoint's inventory does not hold. Files the repository ignores are not changes:
+install into an ignored directory, such as `node_modules/` listed in `.gitignore`, and without links (npm's
+`--no-bin-links`, for example). A dependency left in a directory the repository does not ignore is a change. Running
+`--prepare-only` again makes the same check and keeps the checkpoint. The checkpoint is removed when the run's harness is
+dispatched, so a later run on the branch starts from the workspace as it is. A checkpoint that is a link, that other
+users can read or write, or that is unreadable or altered refuses the run and names the file. A checkpoint whose
+workspace was removed or replaced refuses the run too, and `--prepare-only` replaces it. Each of these refusals records
+nothing and keeps the person's workspace.
+
+**A setup command.** A command configured on the machine that runs the worker, for a launcher or for a repository (see
+workspace setup commands, under explicit execution below), runs before every run that uses it. After the workspace is
+prepared and before the intent, the worker runs it in the workspace as the person, outside the agent's sandbox. Its
+environment is the worker's own, less every variable whose name starts with `VERICAIRN_`, so it is handed neither the
+Vericairn home nor a run's bindings. It runs in its own process group (a Job Object on Windows) under its deadline; its
+output is discarded, and whatever it leaves running is ended when it exits. The workspace must then still be the
+branch's own repository, and the checks above follow, from the workspace as it was just before setup, or as it was
+prepared when a checkpoint exists: no new link, a complete inventory, and no change outside the permitted paths. When
+setup fails, times out or cannot be observed to its end, the run is refused before its intent, with the command's status,
+exit code and duration, and nothing is recorded; run the command in the workspace to see its output. When it succeeds,
+the intent's evidence records its status, exit code and duration, never its command, environment or output, and
+settlement judges the agent's changes from what setup left. A workspace a setup command ran in is kept when the run is
+refused afterwards. Setup counts within the fifteen minutes a client observes a run's start, so its deadline is at most
+ten minutes; a longer installation belongs in a preparation alone.
 
 **A foreground run must outlive its shell.** When no daemon serves the estate, `worker run` and `goal step` without
 `--detach` supervise the run in their own process, as `runtime serve` serves in the foreground. Closing that terminal or
@@ -1758,6 +1803,30 @@ skills or other customization, even when the workspace is elsewhere. Use a worke
 discovery root. The native scan permits an empty ordinary directory or one holding only recognized instruction
 files; it refuses other entries, child directories and uninspected links. Workspace-root validation is stricter:
 any `.agents` marker in the root or an ancestor refuses that root, even an empty directory.
+
+**Workspace setup commands (0.9.1).** A workspace setup command is per machine as well, set for one launcher or one
+repository resource:
+
+```sh
+vericairn worker configure --repository <resource> --setup-command '["npm","ci","--ignore-scripts","--no-bin-links"]' [--setup-timeout <seconds>]
+vericairn worker configure --launcher <id> --setup-command <executable>
+vericairn worker configure --repository <resource> --clear-setup
+vericairn worker configure
+```
+
+`--setup-command` is one executable, or a JSON array of the executable and its arguments; nothing is passed to a shell.
+`--setup-timeout` is its deadline, from 1 through 600 seconds, 300 when omitted, and is given with `--setup-command`.
+`--clear-setup` removes the command of that launcher or repository. Each is given with exactly one of `--launcher` (a
+launcher available here) or `--repository`, and separately from launcher defaults, workspace placement and adapter
+admission. `--repository` alone shows that repository's command; `worker configure` with no choices shows the workspace
+root and every setup command, and `--json` adds them as `setup`, each with its `launcher` or `repository`, `command`,
+`timeoutSeconds` and, when its file cannot be read, `problem`. A run uses its repository's command when it has one,
+under any of the resource's revisions, otherwise its launcher's. The command is stored owner-only under
+`VericairnHome`, as `worker/setup-repository-<resource>.json` or `worker/setup-launcher-<id>.json`, with the same atomic
+replacement, link refusal and repository and estate exclusion as the other worker files; unknown fields and duplicate
+keys refuse. It never enters a record or reaches a harness. A file that cannot be read refuses the run, naming the file,
+and nothing is used in its place. A worker run refuses to configure one, since the command runs outside the agent's
+sandbox.
 
 Record credential checks exclude only encoding values validated by the record rules: a device body's
 `publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,

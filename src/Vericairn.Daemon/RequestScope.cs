@@ -263,6 +263,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/launchers"] = null,
         ["GET /v1/runs"] = null,
         ["POST /v1/runs"] = typeof(RunStartRequest),
+        ["POST /v1/runs/prepare"] = typeof(RunStartRequest),
         ["POST /v1/harness-qualifications"] = typeof(HarnessQualifyRequest),
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/runs/{id}/settle"] = typeof(RunSettleRequest),

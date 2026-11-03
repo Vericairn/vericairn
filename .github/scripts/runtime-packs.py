@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Jason Furr
 
-"""Add and verify the runtime and apphost packs resolved by each finished publish."""
+"""Name the packaged release and add and verify the packs resolved by each finished publish."""
 
+import argparse
 import json
 from pathlib import Path
 import re
-import sys
 
 RIDS = ("linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64")
 PROJECTS = {"Vericairn.Cli": "vericairn", "Vericairn.Workbench": "vericairn-workbench"}
@@ -58,8 +58,17 @@ def verify(document, directory):
     print(f"The bill of materials names {len(expected)} resolved runtime and apphost packs across all six platforms.")
 
 
-def complete(bom, directory):
+def complete(bom, directory, release_version):
     document = json.loads(Path(bom).read_text(encoding="utf-8"))
+    component = document.setdefault("metadata", {}).setdefault("component", {"type": "application"})
+    component["name"] = "Vericairn"
+    component["version"] = release_version
+    # The generator's reference reads Vericairn@0.0.0; the release's reference and every dependency entry naming it move together.
+    reference, component["bom-ref"] = component.get("bom-ref"), f"Vericairn@{release_version}"
+    for dependency in document.get("dependencies", []):
+        if dependency.get("ref") == reference:
+            dependency["ref"] = component["bom-ref"]
+        dependency["dependsOn"] = [component["bom-ref"] if ref == reference else ref for ref in dependency.get("dependsOn", [])]
     components = document.setdefault("components", [])
     for (name, version), bundles in sorted(packs(directory).items()):
         matching = [component for component in components if (component["name"].lower(), component["version"]) == (name, version)]
@@ -79,6 +88,9 @@ def complete(bom, directory):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("Usage: runtime-packs.py <bom.json> <runtime-pack-evidence-directory>")
-    complete(sys.argv[1], sys.argv[2])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bom")
+    parser.add_argument("runtime_packs")
+    parser.add_argument("--version", required=True)
+    args = parser.parse_args()
+    complete(args.bom, args.runtime_packs, args.version)

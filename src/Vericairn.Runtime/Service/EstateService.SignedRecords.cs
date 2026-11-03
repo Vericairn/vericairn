@@ -55,6 +55,9 @@ public sealed partial class EstateService
             // The same authoring path as every write, with no signature: the exact record the device will sign, or why there is none.
             (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, model, []);
             if (record is null) return Unprepared("refused", refusal!);
+            if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
+                record.Envelope.At, record.RelativePath) is { } timeProblem)
+                return new(false, Problem: timeProblem);
             draft = draft with { At = record.Envelope.AtTime };
 
             foreach ((string id, PreparedRecord lapsed) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray()) preparedRecords.TryRemove(id, out _);
