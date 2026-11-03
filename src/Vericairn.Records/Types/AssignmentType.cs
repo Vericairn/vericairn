@@ -30,6 +30,7 @@ public sealed class AssignmentType : IRecordType
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests."),
         new("note", "string", false, "Free text."),
+        new("step", "object", false, "For an assignment of a run's work order (design/flow.md § 6), the flow step it carries: key, item for a step that runs over a list, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do.", 3),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
 
@@ -75,6 +76,33 @@ public sealed class AssignmentType : IRecordType
         }
 
         body.Text("note", false, 4000);
+        BodyReader? step = body.Since(3, "step") ? body.Nested("step", false) : null;
+        if (step is not null)
+        {
+            step.Text("key", true, 100, Patterns.Slug, "a step key");
+            step.Text("item", false, 100, Patterns.Slug, "an item name");
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (BodyReader input in step.NestedArray("inputs", false, allowEmpty: false) ?? [])
+            {
+                string? name = input.Text("name", true, 60, Patterns.Slug, "an input name");
+                string? type = input.Text("type", true, 100, Patterns.Slug, "a record type");
+                string? id = input.Ulid("id", true);
+                string? hash = input.Hash("hash", true);
+                input.NoOtherKeys();
+                if (name is not null && !names.Add(name))
+                {
+                    input.Error("assignment.step", "name", "Each input is pinned once.");
+                }
+
+                if (type is not null && context.RequireReference("step.inputs", id, type) is RecordEnvelope pinned && pinned.ComputedHash != hash)
+                {
+                    input.Error("assignment.step", "hash", $"Input {name} does not have the pinned content hash; the brief relied on a different revision.");
+                }
+            }
+
+            step.NoOtherKeys();
+        }
+
         if (body.Since(2, "routedWith"))
         {
             body.Enum("routedWith", false, RoutedWith);
@@ -103,6 +131,11 @@ public sealed class AssignmentType : IRecordType
             && !(context.Format >= 2 && order is not null && Routing.DecidesForStep(context.Model, by, order, context.Record)))
         {
             context.Error("assignment.author", "Work is assigned by the operator, by a principal granted the 'local-engineering' scope, or, for a step of a goal, by the goal's sponsor when the sponsor is a person.");
+        }
+
+        if (context.Format >= 3 && order is not null)
+        {
+            FlowRuns.ValidateStep(context, order, step);
         }
 
         if (contributor is not null && context.Principal(contributor) is null)

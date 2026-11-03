@@ -90,7 +90,8 @@ internal static class PolicySources
                     FileAttributes attributes = File.GetAttributes(path);
                     if ((attributes & FileAttributes.ReparsePoint) != 0) { complete = false; continue; }
                     if ((attributes & FileAttributes.Directory) != 0) { Read(name); continue; }
-                    if (!name.EndsWith(".md", StringComparison.Ordinal)) continue;
+                    // Markdown, and the template content a flow-steps rule resolves a run's flow from (design/flow.md § 5).
+                    if (!name.EndsWith(".md", StringComparison.Ordinal) && !(name.StartsWith("docs/templates/", StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal))) continue;
                     byte[] bytes = File.ReadAllBytes(path);
                     files.Add(new(name, ContentHash.Sha256(bytes), [.. bytes]));
                 }

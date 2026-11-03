@@ -14,7 +14,8 @@ namespace Vericairn.Records.Estate;
 /// <summary>
 /// What <c>vericairn goal</c> shows of a goal, derived from the records alone (the estate's design/goals.md §§ 5, 8 and 12): its
 /// objective, sponsor and status, the budget its activation grants, each condition's verdict with the records it read beside the
-/// current evaluation's verdict, its steps, and what still stands between it and its acceptance. Every client shows the same.
+/// current evaluation's verdict, its steps, a run's position in its flow (design/flow.md § 6), and what still stands between it and its
+/// acceptance. Every client shows the same.
 /// </summary>
 public static class GoalView
 {
@@ -175,6 +176,12 @@ public static class GoalView
             }
         }
 
+        // A run's position, derived from the records (design/flow.md § 6): every step of its flow with its state and why.
+        if (FlowRuns.IsRun(goal))
+        {
+            text.Append(FlowPosition.RenderText(model, FlowPosition.Derive(model, goal, DateTimeOffset.UtcNow)));
+        }
+
         if (view.Acceptance is not null)
         {
             text.Append("Achieved: acceptance ").Append(view.Acceptance.Id).Append(" by ").Append(PrincipalName(model, view.Acceptance.By) ?? view.Acceptance.By).Append(" at ").Append(view.Acceptance.At).Append('\n');
@@ -253,6 +260,11 @@ public static class GoalView
             ["notReady"] = new JsonArray(view.NotReady.Select(r => (JsonNode)r).ToArray()),
             ["acceptance"] = view.Acceptance is null ? null : new JsonObject { ["id"] = view.Acceptance.Id, ["by"] = view.Acceptance.By, ["at"] = view.Acceptance.At, ["statement"] = EstateModel.BodyString(view.Acceptance, "statement") },
         };
+        if (FlowRuns.IsRun(goal))
+        {
+            json["flow"] = FlowPosition.RenderJson(model, FlowPosition.Derive(model, goal, DateTimeOffset.UtcNow));
+        }
+
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);
     }
