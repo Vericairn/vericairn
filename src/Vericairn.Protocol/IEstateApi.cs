@@ -264,6 +264,10 @@ public partial interface IEstateApi
     /// </summary>
     RunResponse RunStart(RunStartRequest request);
 
+    /// <summary>Prepares and registers a workspace without setup, harness probes, dispatch or estate records. Existing implementations refuse.</summary>
+    RunResponse RunPrepare(RunStartRequest request) => new("not-started", "refused", "This API implementation does not support workspace preparation.", false,
+        Problem: new("unsupported", "Workspace preparation is unavailable.", []));
+
     /// <summary>The agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
     RunsResponse Runs();
 

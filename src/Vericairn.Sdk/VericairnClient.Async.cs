@@ -382,6 +382,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> QualifyHarnessAsync(HarnessQualifyRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(QualifyHarness), async token => (await PostAsync<HarnessQualifyRequest, WriteOutcome>("/v1/harness-qualifications", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(QualifyHarness)), cancellationToken);
 
+    /// <summary>The cancellable preparation operation, with a deadline covering the complete response.</summary>
+    public Task<RunResponse> RunPrepareAsync(RunStartRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<RunResponse>(nameof(RunPrepare), async token => (await PostAsync<RunStartRequest, RunResponse>("/v1/runs/prepare", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(RunPrepare)), cancellationToken);
+
     /// <summary>The cancellable RunStart operation, with a deadline covering the complete response.</summary>
     public Task<RunResponse> RunStartAsync(RunStartRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<RunResponse>(nameof(RunStart), async token => (await PostAsync<RunStartRequest, RunResponse>("/v1/runs", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(RunStart)), cancellationToken);

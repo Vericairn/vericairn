@@ -21,6 +21,7 @@ internal sealed class WorkerRunCommand : Command
         var baseOption = new Option<string?>("--base") { Description = "What a new work branch starts from; the clone's HEAD when omitted." };
         var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
         var settingOption = new Option<string[]>("--setting") { Description = "A launcher setting as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
+        var prepareOnlyOption = new Option<bool>("--prepare-only") { Description = "Prepare and register the workspace, print its location and exit without setup, harness probes, dispatch or estate records. Install dependencies there before running the same assignment and branch." };
         var detachOption = new Option<bool>("--detach") { Description = "Return once the harness is launched, leaving the run to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
         Arguments.Add(assignmentArgument);
         Options.Add(launcherOption);
@@ -33,6 +34,7 @@ internal sealed class WorkerRunCommand : Command
         Options.Add(wallMinutesOption);
         Options.Add(settingOption);
         Options.Add(detachOption);
+        Options.Add(prepareOnlyOption);
         var executionOptions = new ExecutionOptions(this);
         SetAction(parseResult => operations.WorkerRun(
             parseResult.GetValue(context.EstateOption)!,
@@ -47,7 +49,7 @@ internal sealed class WorkerRunCommand : Command
                 parseResult.GetValue(baseOption),
                 parseResult.GetValue(wallMinutesOption),
                 parseResult.GetValue(settingOption) ?? [],
-                parseResult.GetValue(detachOption), executionOptions.Read(parseResult)),
+                parseResult.GetValue(detachOption), executionOptions.Read(parseResult), parseResult.GetValue(prepareOnlyOption)),
             parseResult.GetValue(context.JsonOption)));
     }
 }

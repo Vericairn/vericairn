@@ -126,6 +126,7 @@ public static class OpenApiDocument
         ("POST", "/v1/harness-qualifications"),
         ("GET", "/v1/runs"),
         ("POST", "/v1/runs"),
+        ("POST", "/v1/runs/prepare"),
         ("POST", "/v1/runs/{id}/stop"),
         ("POST", "/v1/runs/{id}/settle"),
         ("POST", "/v1/work/{key}/move-plan"),
@@ -550,6 +551,7 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = path switch
             {
+                "/v1/runs/prepare" => "RunResponse: prepared workspace location, no operation and no dispatch; a problem on refusal.",
                 "/v1/runs" => "RunResponse: what was recorded and launched; a problem inside when nothing was launched.",
                 "/v1/runs/{id}/settle" => "RunSettleResponse: the recorded settlement, or a problem explaining why recovery was refused or remains unresolved.",
                 _ => "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked.",
@@ -959,6 +961,7 @@ public static class OpenApiDocument
         "/v1/goals/{id}/accept" => "GoalAcceptRequest",
         "/v1/devices/revoke" => "RevokeRequest",
         "/v1/runs" => "RunStartRequest",
+        "/v1/runs/prepare" => "RunStartRequest",
         "/v1/harness-qualifications" => "HarnessQualifyRequest",
         "/v1/runs/{id}/stop" => "RunStopRequest",
         "/v1/runs/{id}/settle" => "RunSettleRequest",
@@ -1102,6 +1105,7 @@ public static class OpenApiDocument
         ("GET", "/v1/launchers") => "The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, with their settings and limitations; a generic launcher is labeled as not complete agent support.",
         ("POST", "/v1/harness-qualifications") => "Machine-local only: an authorized human qualifies one exact installed native harness version from six local probe digests. Paired local-network devices are refused before probing; local socket and signed loopback retain their authority checks. No agent is launched and no raw probe output is recorded. Remote cannot qualify a harness.",
         ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight), a stop's facts and worker-observed signals with severity and attention references; and the ledger of every goal with a run or active now.",
+        ("POST", "/v1/runs/prepare") => "Machine-local workspace preparation with the same assignment, authority, custody and budget checks as a run. Creates and registers the workspace and exports the brief; no setup, harness probes, dispatch or estate records. Returns its local path for dependency installation. The next run rechecks preparation changes and all admission checks.",
         ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. The principal recording the run (by) is the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
         ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",

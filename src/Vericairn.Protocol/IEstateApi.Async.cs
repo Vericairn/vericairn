@@ -317,6 +317,10 @@ public partial interface IEstateApi
     Task<WriteOutcome> QualifyHarnessAsync(HarnessQualifyRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(QualifyHarness), () => QualifyHarness(request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable preparation bridge. Cancellation does not remove a prepared workspace.</summary>
+    Task<RunResponse> RunPrepareAsync(RunStartRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(RunPrepare), () => RunPrepare(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="RunStart"/>; a stopped observation does not undo an effect.</summary>
     Task<RunResponse> RunStartAsync(RunStartRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(RunStart), () => RunStart(request), true, this as IClientOperationLifetime, cancellationToken);

@@ -489,6 +489,12 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<WriteOutcome> QualifyHarnessAsync(HarnessQualifyRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.QualifyHarnessAsync(request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public RunResponse RunPrepare(RunStartRequest request) => inner.RunPrepareAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<RunResponse> RunPrepareAsync(RunStartRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.RunPrepareAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public RunResponse RunStart(RunStartRequest request) => inner.RunStartAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

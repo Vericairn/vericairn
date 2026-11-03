@@ -77,6 +77,7 @@ internal sealed class WorkerOperations(CommandContext context)
             return context.Fail(problem!);
         }
 
+        if (options.PrepareOnly && options.Detach) return context.Fail("--prepare-only and --detach cannot be combined.");
         return context.WithApi(root, api =>
         {
             if (options.Detach && !context.UsingDaemon)
@@ -84,13 +85,24 @@ internal sealed class WorkerOperations(CommandContext context)
                 return context.Fail("--detach leaves the run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or run in the foreground.");
             }
 
-            RunResponse started = api.RunStart(new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
+            var request = new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings,
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage);
+            RunResponse started = options.PrepareOnly ? api.RunPrepare(request) : api.RunStart(request);
             if (!started.Ok)
             {
                 return started.Problem is { Findings.Count: > 0 } rejected ? context.ReportOutcome(WriteOutcome.Fail(rejected), json) : context.Fail(started.Message);
             }
 
+            if (options.PrepareOnly)
+            {
+                if (json) context.Output.WriteLine(JsonSerializer.Serialize(started, ProtocolJson.Options));
+                else
+                {
+                    context.Output.WriteLine(started.Workspace);
+                    context.Output.WriteLine(started.Message);
+                }
+                return Clean;
+            }
             if (!json)
             {
                 context.Output.WriteLine($"run {started.Run}  {started.Status}  {started.Workspace}");
