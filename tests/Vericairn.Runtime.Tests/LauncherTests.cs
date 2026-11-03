@@ -379,7 +379,9 @@ public class LauncherTests
 
             string occupied = Path.Combine(root, "occupied");
             Directory.CreateDirectory(occupied);
-            Assert.Contains("is not an independent repository of the clone on that branch", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-2", null, occupied)).Message, StringComparison.Ordinal);
+            string unregistered = Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-2", null, occupied)).Message;
+            Assert.Contains($"'{HarnessWorkspace.Canonical(occupied)}' exists but is not a registered workspace of branch work/w-2: it has no .git directory.", unregistered, StringComparison.Ordinal);
+            Assert.Contains("vericairn worker run --prepare-only", unregistered, StringComparison.Ordinal);
             Assert.Contains("is not a branch name git accepts", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/../w", null, Path.Combine(root, "bad"))).Message, StringComparison.Ordinal);
             Assert.Contains("is not a git repository", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(occupied, "work/w-3", null, Path.Combine(root, "none"))).Message, StringComparison.Ordinal);
         }
