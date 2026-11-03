@@ -197,6 +197,88 @@ public class FlowStepRoutingTests
             && c.GetProperty("reasons").EnumerateArray().Any(r => r.GetString() == "the flow marks the listener role a person's, and an agent never holds it"));
     }
 
+    [Fact]
+    public void AnAgentsRunOnAReservedStepsAssignmentIsRefusedBeforeItsIntent()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        JsonObject song = FlowFixture.Song();
+        song["steps"]![0]!["reserved"] = "security-review";
+        string goal = Run(run, song);
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope order = model.ById[model.ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!];
+
+        // The operator, a person, holds the reserved step by its assignment; a run of an agent on that assignment is refused, whoever asks.
+        var body = new JsonObject
+        {
+            ["contributor"] = op, ["step"] = new JsonObject { ["key"] = "draft" },
+            ["brief"] = new JsonObject
+            {
+                ["outcome"] = "Carry step draft.", ["sources"] = new JsonArray(), ["permittedChanges"] = new JsonArray("path:song/"), ["prohibitedEffects"] = new JsonArray("publication"),
+                ["workspace"] = new JsonArray("song repository, a work branch"), ["limits"] = new JsonArray(), ["expectedOutputs"] = new JsonArray("the lyrics"),
+                ["reviewCriteria"] = new JsonArray("the lyrics exist"), ["recovery"] = "Carry it again.",
+            },
+        };
+        string assignment = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, RunEstate.Json(body.ToJsonString()), $"work-order:{order.Id}:{order.ComputedHash}"))).Id;
+        int runs = AgentRuns.All(run.Estate.Load()).Count;
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(assignment, "claude-code", run.Estate.BuilderId, op, run.Resource, WallMinutes: 30, Settings: Command(run, "reserved-run")));
+        Assert.False(refused.Ok);
+        Assert.Contains("Step draft of work order SONG-1 is a reserved act, security-review: no agent's run carries it, and the operator acts on it.", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(runs, AgentRuns.All(run.Estate.Load()).Count);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARevisionThatSwapsTheFlowStartsFromActivationAndLeavesTheOldStepsAssignmentUnroutable()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = Run(run);
+        GoalStepResponse first = Step(run, goal, "swap-draft");
+        Assert.True(first.Ok, first.Message);
+        run.Settled(first.Run!.Run);
+        string drafting = first.Assignment!.Id;
+
+        // Version 2.0.0 of the flow names its first step write, not draft; the run's revision pins it.
+        JsonObject second = FlowFixture.Song();
+        second["version"] = "2.0.0";
+        foreach (JsonObject step in second["steps"]!.AsArray().Select(s => s!.AsObject()))
+        {
+            if (step["key"]!.GetValue<string>() == "draft")
+            {
+                step["key"] = "write";
+            }
+
+            foreach (JsonObject input in (step["inputs"] as JsonArray ?? []).Select(i => i!.AsObject()).Where(i => i["step"]?.GetValue<string>() == "draft"))
+            {
+                input["step"] = "write";
+            }
+        }
+
+        TemplateDefinition installed = FlowFixture.Install(run.Estate, second);
+        JsonObject body = JsonNode.Parse(run.Estate.Load().ById[goal].Body.GetRawText())!.AsObject();
+        body["plan"]!["flow"]!["pin"] = FlowFixture.Pin(installed);
+        string revised = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, RunEstate.Json(body.ToJsonString()), goal))).Id;
+
+        // The revision starts again from its activation: no step of it is taken before then.
+        GoalStepResponse early = run.Service.GoalStep(revised, new GoalStepRequest(op, run.Resource, Command(run, "swap-early"), WallMinutes: 30));
+        Assert.False(early.Ok);
+        Assert.Contains("a step is taken only for an active goal", early.Message, StringComparison.Ordinal);
+        RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(op)));
+
+        // The old assignment names a step the run's flow no longer declares: it holds nothing, routing reaches write afresh, and no run
+        // carries the old assignment.
+        EstateModel model = run.Estate.Load();
+        Assert.Null(Routing.RoleOf(model, model.ById[drafting]));
+        JsonElement write = Route(run.Service.GoalNext(revised)!, "write");
+        Assert.Equal("agent", write.GetProperty("state").GetString());
+        Assert.Null(Step(run.Service.Goal(revised)!, "write").GetProperty("assignment").GetString());
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(drafting, "claude-code", run.Estate.BuilderId, op, run.Resource, WallMinutes: 30, Settings: Command(run, "swap-old")));
+        Assert.False(refused.Ok);
+        Assert.Contains($"Assignment {drafting} names step draft, which the run's flow example/song 2.0.0 at the goal's current revision does not declare", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     /// <summary>Installs the song flow, a work order and a run of it the operator sponsors and activates; returns the goal's id.</summary>
     internal static string Run(RunEstate run, JsonObject? flow = null)
     {

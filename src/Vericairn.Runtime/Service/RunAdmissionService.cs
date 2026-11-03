@@ -13,6 +13,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Store;
@@ -609,9 +610,16 @@ internal sealed class RunAdmissionService(
         }
 
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
-        if (FlowRuns.StepOf(assignment) is not null && Routing.RoleOf(model, assignment) is null)
+        if (FlowRuns.StepOf(assignment) is FlowRuns.StepRef unrouted && Routing.RoleOf(model, assignment) is null)
         {
-            return (null, $"Assignment {assignment.Id} names a step of a run whose flow does not resolve on this machine; nothing of the run is run here.", null);
+            // The goal's current revision decides: a revision that names another flow, or none, leaves the old step's assignments unroutable.
+            RecordEnvelope? running = FlowRuns.RunOf(model, order);
+            FlowDefinition? resolved = running is null ? null : FlowRuns.Resolve(model, running).Flow;
+            return (null, running is null
+                ? $"Assignment {assignment.Id} names step {unrouted} of work order {key}, which no current run carries; nothing of it is run."
+                : resolved is null
+                    ? $"Assignment {assignment.Id} names a step of a run whose flow does not resolve on this machine; nothing of the run is run here."
+                    : $"Assignment {assignment.Id} names step {unrouted}, which the run's flow {resolved.Pin.Id} {resolved.Pin.Version} at the goal's current revision does not declare; nothing of it is run.", null);
         }
 
         // A run's reserved step is never carried by an agent's run, however it was assigned.
