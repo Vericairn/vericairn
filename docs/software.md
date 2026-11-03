@@ -739,8 +739,9 @@ Workbench ship, for the six platforms. Ordinary builds and the NuGet packages ke
 dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
 `-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
 stale ones. The bill of materials is generated from those restores without restoring again, so it describes
-the packages and every platform graph of the distributables, and a check confirms it names every package
-their lock files hold. Every tool the path installs is pinned to an exact version.
+the packages and every platform graph of the distributables. Its metadata component names Vericairn and
+the packaged release's version. Verification refuses a different name or version and confirms it names
+every package their lock files hold. Every tool the path installs is pinned to an exact version.
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
