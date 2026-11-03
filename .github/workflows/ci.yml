@@ -32,6 +32,9 @@ jobs:
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
   # developer builds: neither job signs, installs on or qualifies a real device.
   remote-ios:
+    # iOS alone is pinned to workload set 10.0.401 (iOS 26.5, Xcode 26.6): Avalonia.iOS does not build against the iOS 27.1
+    # bindings of the band's later sets yet. The phone head is a developer build, not a release artifact: that set's Mono
+    # runtime (10.0.12) ships in no release, and the distributables embed the SDK's own runtime.
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -44,7 +47,7 @@ jobs:
           global-json-file: global.json
       - name: Install the iOS workload
         timeout-minutes: 10
-        run: dotnet workload install ios --version 10.0.303.1
+        run: dotnet workload install ios --version 10.0.401
       - name: Select Xcode
         # The pinned iOS workload (26.5) requires Xcode 26.6, and its build finds tools through the macOS SDK.
         run: |
@@ -72,7 +75,7 @@ jobs:
           global-json-file: global.json
       - name: Install the Android workload
         timeout-minutes: 10
-        run: dotnet workload install android --version 10.0.303.1
+        run: dotnet workload install android --version 10.0.403
       - name: Restore (locked)
         timeout-minutes: 10
         run: dotnet restore src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj --locked-mode
