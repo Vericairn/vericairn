@@ -579,6 +579,27 @@ internal static class FakeHarness
                 Git( "add", "README.md", "README-old.md", "src", "docs", ".gitignore", "committed.txt");
                 Git( "commit", "-q", "-m", "Stand-in changes");
                 return 0;
+            case "setup-install":
+                // A workspace setup command: dependencies installed into an ignored directory, as a package manager installs them.
+                Directory.CreateDirectory(Path.Combine("node_modules", "left-pad"));
+                File.WriteAllText(Path.Combine("node_modules", "left-pad", "index.js"), "module.exports = text => text;\n");
+                Emit("installed 1 package");
+                return 0;
+            case "setup-fails":
+                Console.Error.WriteLine("setup failed: no registry here");
+                return 3;
+            case "setup-hangs":
+                WaitForFile(report + ".finish");
+                return 0;
+            case "setup-link":
+                Directory.CreateDirectory(Path.Combine("node_modules", "left-pad"));
+                File.WriteAllText(Path.Combine("node_modules", "left-pad", "index.js"), "module.exports = text => text;\n");
+                Directory.CreateDirectory(Path.Combine("node_modules", ".bin"));
+                File.CreateSymbolicLink(Path.Combine("node_modules", ".bin", "left-pad"), Path.Combine("..", "left-pad", "index.js"));
+                return 0;
+            case "setup-outside":
+                File.AppendAllText("README.md", "changed by a setup command\n");
+                return 0;
             case "generic":
                 Emit("The generic harness ran.");
                 return 0;

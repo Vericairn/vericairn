@@ -21,7 +21,7 @@ internal sealed class WorkerRunCommand : Command
         var baseOption = new Option<string?>("--base") { Description = "What a new work branch starts from; the clone's HEAD when omitted." };
         var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
         var settingOption = new Option<string[]>("--setting") { Description = "A launcher setting as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
-        var prepareOnlyOption = new Option<bool>("--prepare-only") { Description = "Prepare and register the workspace, print its location and exit without setup, harness probes, dispatch or estate records. Install dependencies there before running the same assignment and branch." };
+        var prepareOnlyOption = new Option<bool>("--prepare-only") { Description = "Prepare and register the workspace as a run would, print its location and exit: no harness probe, setup command, record or launch. Install dependencies there, in ignored paths and without links; the next run of the assignment on that branch takes it up after checking what changed." };
         var detachOption = new Option<bool>("--detach") { Description = "Return once the harness is launched, leaving the run to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
         Arguments.Add(assignmentArgument);
         Options.Add(launcherOption);
@@ -33,8 +33,8 @@ internal sealed class WorkerRunCommand : Command
         Options.Add(baseOption);
         Options.Add(wallMinutesOption);
         Options.Add(settingOption);
-        Options.Add(detachOption);
         Options.Add(prepareOnlyOption);
+        Options.Add(detachOption);
         var executionOptions = new ExecutionOptions(this);
         SetAction(parseResult => operations.WorkerRun(
             parseResult.GetValue(context.EstateOption)!,

@@ -25,7 +25,7 @@ public sealed partial class EstateService
     public IReadOnlyList<ProviderRow> Launchers() => ProviderRows().Where(r => r.Kind == "launcher").ToList();
 
     /// <inheritdoc />
-    public RunResponse RunPrepare(RunStartRequest request) => runAdmission.Prepare(request, null, out _, out _, prepareOnly: true)!;
+    public RunResponse RunPrepare(RunStartRequest request) => runAdmission.PrepareOnly(request);
 
     /// <inheritdoc />
     public RunResponse RunStart(RunStartRequest request) => runDispatch.Start(request, null, out _);

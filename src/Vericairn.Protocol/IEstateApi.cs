@@ -264,9 +264,13 @@ public partial interface IEstateApi
     /// </summary>
     RunResponse RunStart(RunStartRequest request);
 
-    /// <summary>Prepares and registers a workspace without setup, harness probes, dispatch or estate records. Existing implementations refuse.</summary>
-    RunResponse RunPrepare(RunStartRequest request) => new("not-started", "refused", "This API implementation does not support workspace preparation.", false,
-        Problem: new("unsupported", "Workspace preparation is unavailable.", []));
+    /// <summary>
+    /// Prepare and register a run's workspace with the same refusals as <see cref="RunStart"/>, and stop there: no harness probe, setup
+    /// command, record or dispatch. The response's workspace is its location on the runtime's machine; a later run of the same
+    /// assignment and branch takes it up after checking what changed there. An implementation without it refuses.
+    /// </summary>
+    RunResponse RunPrepare(RunStartRequest request) => new($"run of assignment {request?.Assignment}", "not-started", "This API implementation does not support preparing a run's workspace alone.", false,
+        Problem: new("unsupported", "Preparing a run's workspace alone is unavailable.", []));
 
     /// <summary>The agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
     RunsResponse Runs();

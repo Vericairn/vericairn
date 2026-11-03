@@ -8,88 +8,138 @@ using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Workers;
 
-/// <summary>Only aggregate facts leave setup; command text, environment and process output never do.</summary>
+/// <summary>What a setup command leaves for the run: its status, exit code and duration, never its command, environment or output.</summary>
+/// <param name="Status">exited, timed-out, not-started, or unobserved when its exit or the end of its processes could not be observed.</param>
+/// <param name="ExitCode">Its exit code, once it exited.</param>
+/// <param name="DurationMilliseconds">How long it ran.</param>
 internal sealed record WorkspaceSetupResult(string Status, int? ExitCode, long DurationMilliseconds)
 {
-    internal bool Success => Status == "exited" && ExitCode == 0;
-    internal string Summary => string.Create(CultureInfo.InvariantCulture,
-        $"Workspace setup: {Status}; exit code {(ExitCode is int code ? code.ToString(CultureInfo.InvariantCulture) : "unavailable")}; duration {DurationMilliseconds} ms.");
+    internal bool Succeeded => Status == "exited" && ExitCode == 0;
+
+    internal string Facts => string.Create(CultureInfo.InvariantCulture,
+        $"status {Status}, exit code {(ExitCode is int code ? code.ToString(CultureInfo.InvariantCulture) : "none")}, {DurationMilliseconds} ms");
 }
 
+/// <summary>
+/// Runs a configured setup command in a workspace before dispatch: as the person, outside the harness's sandbox, inside its own process
+/// group or job with a deadline. Nothing it starts outlives it, so the checks that follow see the workspace as it left it.
+/// </summary>
 internal static class WorkspaceSetup
 {
+    private static readonly TimeSpan Cleanup = TimeSpan.FromSeconds(5);
+
     internal static WorkspaceSetupResult Run(WorkspaceSetupConfiguration configuration, string workspace, IReadOnlyDictionary<string, string> environment)
     {
+        ArgumentNullException.ThrowIfNull(configuration);
         var info = new ProcessStartInfo(configuration.Command[0])
         {
-            WorkingDirectory = workspace, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
-            CreateNoWindow = true,
+            WorkingDirectory = workspace, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
         };
         foreach (string argument in configuration.Command.Skip(1)) info.ArgumentList.Add(argument);
         info.Environment.Clear();
-        foreach ((string name, string value) in environment)
-        {
-            // Setup belongs to the person, outside the harness sandbox. Runtime bindings and custody helpers do not pass.
-            if (!name.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase)
-                && !WorkerEnvironment.McpServer.Contains(name, StringComparer.OrdinalIgnoreCase)) info.Environment[name] = value;
-        }
+        foreach ((string name, string value) in Environment(environment)) info.Environment[name] = value;
 
         var watch = Stopwatch.StartNew();
         ContainedProcess process;
         try { process = ContainedProcess.Start(info); }
-        catch (Exception exception) when (exception is Win32Exception or IOException or ProviderRefusedException or RunLaunchException)
+        catch (RunLaunchException)
+        {
+            return new("unobserved", null, watch.ElapsedMilliseconds);
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or ProviderRefusedException)
         {
             return new("not-started", null, watch.ElapsedMilliseconds);
         }
 
+        // Output is drained and discarded: it can name paths and secrets of this machine.
         Task output = Drain(process.StandardOutput);
         Task error = Drain(process.StandardError);
-        string status = "unverified";
+        string status = "unobserved";
         int? exitCode = null;
-        bool contained = false;
+        long duration;
         try
         {
-            while (watch.Elapsed < TimeSpan.FromSeconds(configuration.TimeoutSeconds))
+            TimeSpan remaining = TimeSpan.FromSeconds(configuration.TimeoutSeconds) - watch.Elapsed;
+            if (process.WaitForExit(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero))
             {
-                if (process.WaitForExit(TimeSpan.Zero) && process.BoundaryExited() && output.IsCompleted && error.IsCompleted)
-                {
-                    contained = true;
-                    Task.WhenAll(output, error).GetAwaiter().GetResult();
-                    status = "exited";
-                    exitCode = process.ExitCode;
-                    break;
-                }
-                Thread.Sleep(10);
+                status = "exited";
+                exitCode = process.ExitCode;
             }
-            if (!contained) status = "timed-out";
+            else
+            {
+                status = "timed-out";
+            }
         }
-        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is Win32Exception or IOException or InvalidOperationException)
         {
-            status = "unverified";
+            status = "unobserved";
         }
         finally
         {
-            if (!contained)
+            duration = watch.ElapsedMilliseconds;
+            bool contained = false;
+            try
             {
+                // What it left running, or all of it at its deadline, ends now: the group or job survives the root's exit.
+                // A group already empty is not signalled; macOS refuses a signal to a group of exited members.
                 try
                 {
-                    process.Signal(force: true);
-                    var cleanup = Stopwatch.StartNew();
-                    do
-                    {
-                        contained = process.WaitForExit(TimeSpan.Zero) && process.BoundaryExited() && output.IsCompleted && error.IsCompleted;
-                        if (contained) break;
-                        Thread.Sleep(10);
-                    } while (cleanup.Elapsed < TimeSpan.FromSeconds(1));
+                    if (!process.BoundaryExited()) process.Signal(force: true);
                 }
-                catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException) { }
-            }
-            if (contained) process.Close();
-            else process.Detach();
-        }
-        return new(status, exitCode, watch.ElapsedMilliseconds);
+                catch (Win32Exception)
+                {
+                    // It may have emptied meanwhile; only the observation below decides.
+                }
 
-        static Task Drain(StreamReader reader) => Task.Factory.StartNew(() => reader.BaseStream.CopyTo(Stream.Null),
-            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                var cleanup = Stopwatch.StartNew();
+                do
+                {
+                    contained = process.WaitForExit(TimeSpan.Zero) && process.BoundaryExited() && output.IsCompleted && error.IsCompleted;
+                    if (contained) break;
+                    Thread.Sleep(10);
+                }
+                while (cleanup.Elapsed < Cleanup);
+            }
+            catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                contained = false;
+            }
+
+            if (contained)
+            {
+                process.Close();
+            }
+            else
+            {
+                // Never release a process that may still change the workspace; the checks are not reached.
+                process.Detach();
+                status = "unobserved";
+                exitCode = null;
+            }
+        }
+
+        return new(status, exitCode, duration);
     }
+
+    /// <summary>The person's own environment, less every variable that would hand the command Vericairn's home or a run's bindings.</summary>
+    internal static Dictionary<string, string> Environment(IReadOnlyDictionary<string, string> source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var environment = new Dictionary<string, string>(WorkerEnvironment.Names);
+        foreach ((string name, string value) in source)
+        {
+            if (!name.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase)) environment[name] = value;
+        }
+
+        return environment;
+    }
+
+    private static Task Drain(StreamReader reader) => Task.Factory.StartNew(() =>
+    {
+        try { reader.BaseStream.CopyTo(Stream.Null); }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+            // A closed pipe ends the drain.
+        }
+    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 }

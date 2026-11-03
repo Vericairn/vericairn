@@ -66,7 +66,8 @@ internal sealed class WorkerOperations(CommandContext context)
 
     /// <summary>
     /// Runs a coding agent on an assignment: starts the run, then waits in the foreground until it settles and reports its usage, a
-    /// Ctrl+C asking it to stop; with --detach, returns once the daemon serving the estate has launched it.
+    /// Ctrl+C asking it to stop; with --detach, returns once the daemon serving the estate has launched it. With --prepare-only, prepares
+    /// the run's workspace alone and prints where it is.
     /// </summary>
     public int WorkerRun(string root, WorkerRunOptions options, bool json)
     {
@@ -77,7 +78,7 @@ internal sealed class WorkerOperations(CommandContext context)
             return context.Fail(problem!);
         }
 
-        if (options.PrepareOnly && options.Detach) return context.Fail("--prepare-only and --detach cannot be combined.");
+        if (options.PrepareOnly && options.Detach) return context.Fail("--prepare-only launches nothing for --detach to leave running; use one or the other.");
         return context.WithApi(root, api =>
         {
             if (options.Detach && !context.UsingDaemon)
@@ -95,14 +96,17 @@ internal sealed class WorkerOperations(CommandContext context)
 
             if (options.PrepareOnly)
             {
+                // The location alone on the first line, so that a script can take it.
                 if (json) context.Output.WriteLine(JsonSerializer.Serialize(started, ProtocolJson.Options));
                 else
                 {
                     context.Output.WriteLine(started.Workspace);
-                    context.Output.WriteLine(started.Message);
+                    context.Output.WriteLine("  " + started.Message);
                 }
+
                 return Clean;
             }
+
             if (!json)
             {
                 context.Output.WriteLine($"run {started.Run}  {started.Status}  {started.Workspace}");
