@@ -77,6 +77,8 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             if (Directory.Exists(registered.Path)) directory = registered.Path;
         }
 
+        bool catalogued = registered is not null && Directory.Exists(registered.Path);
+
         string? expected = CloneHead(clone, branch);
         RefuseLink(directory);
         bool reused = Directory.Exists(directory);
@@ -86,7 +88,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             directory = WorkspacePaths.Canonical(directory);
             if (!Within(root, directory))
                 throw new ProviderRefusedException($"Branch {branch} already has a workspace at '{directory}', outside the selected workspace root. Preserve its work, then remove that workspace directory, or configure a root containing it.");
-            OwnRepository(directory, common, branch);
+            OwnRepository(directory, common, branch, catalogued);
         }
         else
         {
@@ -205,17 +207,43 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         }
     }
 
-    private static void OwnRepository(string directory, string common, string branch)
+    /// <summary>
+    /// Refuses a directory at the workspace's location that is not this branch's own repository of the clone, naming it and why: one
+    /// the catalogue registered and someone altered, or one the worker never prepared, such as a clone made by hand.
+    /// </summary>
+    private static void OwnRepository(string directory, string common, string branch, bool registered)
     {
         string git = Path.Combine(directory, ".git");
         if (File.Exists(git) && Same(WorkspaceGitScope.DirectoryOf(directory), common))
             throw new ProviderRefusedException($"Branch {branch} has a legacy linked worktree at '{directory}'. Preserve its committed and uncommitted work, then use git worktree remove with that path from the registered clone. Retry to prepare an independent workspace repository.");
-        if (!Directory.Exists(git) || (File.GetAttributes(git) & FileAttributes.ReparsePoint) != 0 || Path.Exists(Path.Combine(git, "commondir")))
-            throw new ProviderRefusedException($"The workspace of branch {branch} at '{directory}' exists and is not an independent repository of the clone on that branch. Preserve it, then remove it or name another branch.");
-        string alternate = WorkspaceGitScope.Read(Path.Combine(git, "objects", "info", "alternates"), 32768).TrimEnd('\r', '\n');
-        if (!Same(Path.GetFullPath(alternate), Path.Combine(common, "objects"))
-            || WorkspaceGitScope.Read(Path.Combine(git, "HEAD"), 4096).Trim() != "ref: refs/heads/" + branch)
-            throw new ProviderRefusedException($"The workspace of branch {branch} at '{directory}' is not an independent repository of the clone on that branch. Preserve it, then remove it or name another branch.");
+        if (Unowned() is not string why) return;
+        throw new ProviderRefusedException(registered
+            ? $"The registered workspace of branch {branch} at '{directory}' was altered: {why} Preserve its work, then remove that directory or name another branch."
+            : $"'{directory}' exists but is not a registered workspace of branch {branch}: {why} The worker prepares and registers each workspace itself; to install dependencies before the agent starts, prepare one with vericairn worker run --prepare-only and install there. Preserve anything in that directory, then remove it or name another branch.");
+
+        string? Unowned()
+        {
+            if (!Path.Exists(git)) return "it has no .git directory.";
+            FileAttributes attributes = File.GetAttributes(git);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) return "its .git is a symbolic link or reparse point.";
+            if ((attributes & FileAttributes.Directory) == 0) return "its .git is a file pointing elsewhere, not its own repository directory.";
+            if (Path.Exists(Path.Combine(git, "commondir"))) return "its .git shares another repository's administration (.git/commondir).";
+            string alternate;
+            try { alternate = WorkspaceGitScope.Read(Path.Combine(git, "objects", "info", "alternates"), 32768).TrimEnd('\r', '\n'); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return "it does not borrow the registered clone's objects, having no readable .git/objects/info/alternates of its own; a repository made with git clone is not a worker workspace.";
+            }
+
+            bool borrowed;
+            try { borrowed = Same(Path.GetFullPath(alternate), Path.Combine(common, "objects")); }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { borrowed = false; }
+            if (!borrowed) return "its .git/objects/info/alternates names objects other than the registered clone's.";
+            string head;
+            try { head = WorkspaceGitScope.Read(Path.Combine(git, "HEAD"), 4096).Trim(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return "its .git/HEAD is missing or unreadable."; }
+            return head == "ref: refs/heads/" + branch ? null : $"its HEAD is not on branch {branch}.";
+        }
     }
 
     private static void RefuseCheckedOut(string clone, string branch, string? root)
