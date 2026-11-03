@@ -88,7 +88,8 @@ internal sealed class TemplatesShowCommand : Command
         else if (response.Problem is not null) context.Error.WriteLine(response.Problem.Message);
         else foreach (TemplateDto template in selected)
         {
-            context.Output.WriteLine($"{template.Pin.Id} {template.Pin.Version} at {template.Pin.Hash}");
+            bool flow = template.Definition.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "flow";
+            context.Output.WriteLine($"{template.Pin.Id} {template.Pin.Version} at {template.Pin.Hash}{(flow ? ", a flow" : string.Empty)}");
             if (id is not null) context.Output.WriteLine(template.Definition.GetRawText());
         }
         return response.Problem is not null || (id is not null && selected.Length == 0) ? Failed : Clean;

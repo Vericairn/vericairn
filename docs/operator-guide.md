@@ -1172,6 +1172,52 @@ changed or added, or a changed `info/exclude`, is never applied and counts as a 
 A nested repository anywhere in the workspace, even under an excluded directory, marks the audit incomplete.
 These belong to the running worker: a worker still at 0.8.0 keeps its older audit and settlement.
 
+### Runs of a flow (0.9.1)
+
+A run is a goal whose plan names a [flow](templates.md#flows-091), the subject it serves, its own configuration and,
+optionally, the step it ends at. Its work is one ordinary work order, and each work or review step of the flow is an
+assignment of that work order naming the step. Propose and activate a run as any goal; `--flow` reads the flow's exact pin
+from the templates this runtime offers, and `--subject` binds each field of the flow's subject by its kind:
+
+```sh
+vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \
+  --done '{"type":"release","subject":"<product id>","fields":{"status":"published"}}' \
+  --work-order <work order id> --budget wallMinutes=120 --budget attemptsPerStep=3 \
+  --flow example/song@1.0.0 --subject product=<product id> --subject version=1.0.0 --subject tracks=intro,outro \
+  --flow-option step.shorts=off --until master
+vericairn goal activate <goal> --by <sponsor>
+vericairn goal show <goal>
+```
+
+`goal show`, the API's goal read, the SDK and the MCP `goal_get` and `goal_progress` tools give the run's position from the
+records alone: each step, once or once per item, with its state and why. A step is `done` when its done predicates hold and
+each declared output exists at an exact hash, reviewed where it declares a review; `stale` when an input it used changed after
+use, so it reruns under its recovery once what it waits on is done; `blocked` while an earlier step it waits on is not done,
+naming every failing precondition, trap and due time; `in-review` while its output awaits a review, or its result awaits one
+before another attempt; `stopped` while a person holds its role or its assignment, it is a reserved act, or a watch passed
+its limit; `next` when an agent carries it; and `off` when the run's configuration, its `until` step or an unentered branch
+leaves it out. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
+`template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
+source. The same records give the same position on every machine at the same time (due times and watches read the clock);
+a machine that cannot resolve the flow shows the goal, says so, and takes none of its steps.
+
+`goal next` routes each ready work or review step by its role through the goal's roles, its roster or the estate's, exactly
+as a work order's step is routed, from the assignments and asks of that step alone. `goal step` then takes one step per
+command: the first, in the flow's order, whose route acts. An agent's step is an assignment of the run's work order naming
+the step and item, stored with its run's intent after the worker's preflight, on the branch `work/<work order>-<step>` by
+default; a person's is an assignment and an ask. The assignment's brief pins each input the step takes by type, id and hash,
+carries the step's role brief, outputs, review criteria and recovery, and prohibits what the goal's constraints, the reserved
+effects and the flow's `never` lines prohibit. A person can take over a step an agent holds with `work takeover`, which
+carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
+is a `review` record of the exact result by a principal other than its author: in this build, an operator or an agent.
+
+`goal step` never dispatches a reserved step; it stops, waiting on the operator, and no grant in this build lets an agent
+carry it. Nor does it dispatch an `operation`, `decision`, `effect`, `exchange` or `flow` step: each counts once its done
+predicates hold, recorded by whoever carries it. In this build an exchange's export and intake are not executed, an effect
+has no API or browser route, and nothing takes a run's next steps automatically; a person carries them. A stop is shown in the
+run's position and in `goal step`'s message; its operator request, and its place in status, Workbench and Remote, are not
+built yet, and a step with no available principal is reported rather than asked of the sponsor.
+
 ## 19. Pairing, local-network connections and revocation
 
 Pairing connects another machine to a serving runtime; it does not clone the estate. The listener is off unless configured. Configure it on the runtime's machine and restart:

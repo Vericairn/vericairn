@@ -400,6 +400,109 @@ through raw record authoring, while existing pins remain readable and revisable.
 Estate template files alone have no retirement flag; retaining the original
 content remains necessary to inspect earlier instances.
 
+## Flows (0.9.1)
+
+A template of kind `flow` declares a role process instead of a document's
+sections: what a run is about, its roles, its ordered steps and the hand-off
+contract each step passes on. A goal runs a flow by naming its exact pin in
+`plan.flow`; the [operator guide](operator-guide.md#runs-of-a-flow-091) shows a
+run from proposal to its stops. A flow, its configuration and its extensions
+grant nothing, as every template.
+
+```json
+{
+  "format": "vericairn.template/1",
+  "kind": "flow",
+  "id": "example/song",
+  "version": "1.0.0",
+  "purpose": "Produce a song and release it.",
+  "subject": {
+    "summary": "a recording",
+    "fields": [
+      { "name": "product", "type": "record", "recordType": "product" },
+      { "name": "version", "type": "text" },
+      { "name": "tracks", "type": "list" }
+    ]
+  },
+  "roles": [
+    { "id": "writer", "holder": "either", "brief": "Write and produce the material." },
+    { "id": "listener", "holder": "person", "brief": "Listen to the master." },
+    { "id": "decider", "holder": "person", "brief": "Accept and publish." }
+  ],
+  "options": [{ "id": "review", "values": ["independent", "person", "none"], "default": "none" }],
+  "never": ["never publish without the operator"],
+  "steps": [
+    { "key": "master", "title": "Master the track", "kind": "work", "role": "writer",
+      "presence": "required", "recovery": "Master again from the pinned inputs.",
+      "outputs": [{ "name": "master", "type": "file" }] },
+    { "key": "shorts", "title": "Cut a clip", "kind": "work", "role": "writer",
+      "presence": "optional", "default": "on", "each": "tracks",
+      "inputs": [{ "name": "master", "from": "step", "step": "master", "output": "master" }],
+      "outputs": [{ "name": "clip", "type": "file" }], "recovery": "Cut it again." },
+    { "key": "listen", "title": "Listen", "kind": "review", "role": "listener",
+      "presence": "required", "recovery": "Listen again.",
+      "inputs": [{ "name": "master", "from": "step", "step": "master", "output": "master" }] },
+    { "key": "publish", "title": "Publish", "kind": "operation", "role": "decider",
+      "presence": "optional", "default": "on", "reserved": "publish", "recovery": "Reconcile first.",
+      "done": [{ "type": "release", "subject": "{subject.product}",
+                 "fields": { "version": "{subject.version}", "status": "published" } }] }
+  ]
+}
+```
+
+- `subject` names the fields a run binds: a `record` of a type, a `text`, or a
+  `list` of item names that an `each` step runs over, one instance per item.
+- `roles` give each role its holder, `person`, `agent` or `either`, and its
+  role brief, which the step's assignment carries. Routing never gives a step of
+  a `person` role to an agent, and a goal that names an agent in one is refused.
+- Each step has `key`, `title`, `kind` (`work`, `review`, `operation`, `effect`,
+  `decision`, `exchange` or `flow`), `role`, `presence` (`required` or
+  `optional`, with `default` `on` or `off` for an optional step) and `recovery`.
+  It may add `reserved` (`accept-release`, `publish`, `spend`, `use-credential`
+  or `security-review`), `after`, `requires`, `done`, `action`, `traps`,
+  `inputs`, `outputs`, `review`, `each` and `when`.
+- A step waits on the step declared before it, or on the steps its `after`
+  names (an empty list for none), and on the producers of its inputs; steps
+  whose waits are done may run in parallel. References name earlier steps only.
+- `requires`, `done`, a trap's `holds` and a branch's `when` are record
+  predicates in the goal completion language. Their string values may bind the
+  run: `{subject.<field>}`, `{item}` in an `each` step, `{goal}` and `{work}`.
+- `inputs` name a subject field or an earlier step's output. `outputs` are
+  `file` (a work step's result output by name and hash, with an optional media
+  type), `record` (the newest record of `recordType` the done predicates count),
+  `decision` (likewise, a decision) and `review` (a review step's review record).
+- `review` (`independent`, `person` or `none`) on a work step holds its output
+  until a review by a principal other than its author passes the exact result;
+  without it, the flow's `review` option, when declared, decides.
+- `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
+  watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
+  predicates hold.
+- `effect` names its route (`api`, `person` or `browser`), `exchange` its export
+  (material by input, question, answer format, expiry and route) and intake
+  route, and a `flow` step the pin of the flow it runs.
+- `branches` name steps that stay off until the branch's predicates hold, with
+  the step the run returns to; `triggers` declare standing-agent trigger kinds.
+
+An extension names its base in `extends` and declares no subject. It adds roles,
+options and steps, each placed after a named step with `following` or at the
+end, and it may turn off a step its base declares optional with `off`. It never
+redeclares a base step or role, so it never turns off a required step, removes a
+reserved marking or changes who may hold a role; a branch takes in only the
+extension's own steps, and turning off a step never leaves a required step
+without its input. Resolution checks the whole chain, up to eight bases.
+
+A run's configuration is the flow's defaults, then `template-defaults` for the
+exact flow pin at the estate, at the flow's `domain` and at the run's product
+(the subject's product field, or the product its work order is placed for),
+then the goal's own `plan.flow.options`, the narrowest winning. An optional step
+is configured by the option `step.<key>`, `on` or `off`; an optional step fed by
+a step that is off is off too. No configuration names a required step, so none
+turns one off or removes a reserved marking; a `template-defaults` record or goal
+that turns off a step an active estate policy requires, by a
+[`vericairn.estate/flow-steps`](policies.md#required-flow-steps-091) rule, is
+refused, as is an `until` that ends the run before one. `docs new` refuses a
+flow, and a living document never pins one.
+
 ## Client and extension contract
 
 The API adds `GET /v1/templates`, `POST /v1/documents/new`,

@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 6, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
+
 Revision 5, November 2, 2026. Describe 0.8.4's and 0.9.0's command additions as released commands rather than development builds.
 
 Revision 4, October 23, 2026. Point to the operator's guide for 0.8.3's command additions.
@@ -303,3 +305,25 @@ requires prepared markers and any existing migration review. After adoption,
 `docs pin --render-template` refreshes those regions. See the complete
 [adoption workflow](templates.md#adopt-an-existing-estate-document) before
 transferring a hand-maintained table to records.
+
+## Runs of a flow (0.9.1)
+
+`vericairn templates list` includes flows, templates of kind `flow`. `goal propose --flow <id>@<version>` proposes a run of
+one: its plan names the flow's exact pin, read from the templates the runtime offers, and gives exactly one `--work-order`.
+`--subject name=value` binds each field of the flow's subject by its kind: a record field by its id or `type:id`, a list field
+as comma-separated item names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a flow
+option or `step.<key>=on|off` for an optional step, and `--until <step>` names the step the run ends at.
+
+```sh
+vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \
+  --done '{"type":"release","subject":"<product id>","fields":{"status":"published"}}' --work-order <work order id> \
+  --budget wallMinutes=120 --budget attemptsPerStep=3 --flow example/song@1.0.0 \
+  --subject product=<product id> --subject version=1.0.0 --subject tracks=intro,outro --flow-option step.shorts=off
+vericairn goal show <goal>
+vericairn goal next <goal>
+vericairn goal step <goal> --by <operator> --repository <repository id> --wall-minutes 30
+```
+
+`goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
+per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
+[operator's guide](operator-guide.md#runs-of-a-flow-091) and [Templates](templates.md#flows-091).

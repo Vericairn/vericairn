@@ -124,6 +124,15 @@
       "review",
       "asked",
       "answered"
+    ],
+    "flow-step": [
+      "done",
+      "next",
+      "blocked",
+      "stale",
+      "in-review",
+      "stopped",
+      "off"
     ]
   }
 }
