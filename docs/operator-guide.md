@@ -1,31 +1,30 @@
-# The operator's guide, Vericairn 0.9.0
+# The operator's guide, Vericairn 0.9.1
 
-This guide walks the journeys an operator and the agents working for them perform with the 0.9.0 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
+This guide walks the journeys an operator and the agents working for them perform with the 0.9.1 command line, Workbench and the MCP server. Commands, API operations and record bodies are generated in `cli-reference.md`, `api-reference.md` and `record-reference.md`; the format rules are in `record-format-v1.md`, `record-format-v2.md` and `record-format-v3.md`, related by `record-format.md`. Commands below assume you are inside the estate directory or pass `--estate <path>`; `--json` selects machine-readable output. With the NuGet tool, use `dotnet vc` wherever an example says `vericairn`. Sections 2 to 12 cover established journeys; sections 13 to 16 cover Workbench, MCP and documents; sections 17 to 19 cover goals, the configured worker and pairing. Sections 20 to 23 cover measured context, hand-over, communication and watching; sections 24 and 25 cover release notices and current attention. Sections 26 to 29 cover policies, readable companions, checked changes and client interruption.
 
-0.9.0 follows published 0.8.4 with Remote, the phone companion for iOS and Android, as a developer
+0.9.1 follows published 0.9.0 as a security patch. Every distributable is built with SDK 10.0.403 and embeds
+the .NET and ASP.NET Core 10.0.14 runtimes in place of the 10.0.11 runtimes 0.9.0 embedded, which published
+.NET advisories affect (FIX-91); policy evaluation reads historical repository content in batches (FIX-92); a
+worker run can prepare its workspace before the agent starts (FIX-86); a decision cannot be dated after its
+own record (FIX-87); and the bill of materials names the release's version (FIX-90).
+0.9.0 followed published 0.8.4 with Remote, the phone companion for iOS and Android, as a developer
 build: pairing, attention and work views, decisions and acceptances signed with the phone's presence key,
 and policy and recurring-duty attention (REMOTE-01, REMOTE-02, REMOTE-03, REMOTE-11 and POLICY-05; see
-[Remote](remote.md)). It also adds release lines, channels and cadence, with estates that follow a line
+[Remote](remote.md)). It also added release lines, channels and cadence, with estates that follow a line
 (CODE-12, CODE-13 and CODE-14), disclosure holds and blocked terms (CODE-16 and CODE-17), a redacted
 support bundle (CODE-11), requested progress with its typed claim and the overdue signal (WATCH-02 and
 WATCH-03), warnings withdrawn when their runs settle (OPS-04), generated document revision histories
 (DOCS-10), locally prepared community build guides and catalog (GUIDE-01 and GUIDE-02), the opt-in local
 efficiency adapter, disabled by default (EFF-01), guides for the three operating modes and for LangGraph,
 CrewAI and AutoGen agents (DOCS-13 and DOCS-14), and FIX-73, FIX-75, FIX-76, FIX-77, FIX-78, FIX-80,
-FIX-81, FIX-82 and FIX-83.
-0.8.4 followed published 0.8.3 with declarative document templates and their sections, reviews and
-cohesion (TPL-01, TPL-02 and TPL-COMMS-01), a shared library of saved prompts (PROMPT-01), a signed
-`operator close` action (OPS-02) and durable operator requests (OPS-03), a release-review brief
-generated from the records and run as an assignment (CODE-09), a guided decision from an answered ask
-(CODE-10), a release documentation pass (DOCS-12), read-only MCP resources and prompts (MCP-02), the
-first-party bootstrap for every estate (FIX-68), and FIX-64, FIX-65, FIX-66, FIX-69 and FIX-72, with
-time limits on CI steps and jobs (CI-05). It also hardened how a checked push reads its local objects
-(FIX-67), as its release notes' Security section describes. Earlier published releases, and the
-withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1, are recorded in their own frozen sets.
-0.9.0 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
-upgrades from 0.8.0, 0.8.2, 0.8.3 or 0.8.4 without a format step. The format-3 upgrade from 0.7.3
-preserves historical records and requires explicit adoption afterwards. 0.8.4's, 0.8.3's, 0.8.2's and
-0.8.0's features and earlier corrections remain. Earlier sets stay frozen.
+FIX-81, FIX-82 and FIX-83. It hardened worker runs' temporary directories, charter revisions under required
+signatures and which document revisions clear (FIX-74, FIX-79 and FIX-84), as its release notes' Security
+section describes. Earlier published releases, and the withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and
+0.8.1, are recorded in their own frozen sets.
+0.9.1 reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
+upgrades from 0.8.0, 0.8.2, 0.8.3, 0.8.4 or 0.9.0 without a format step. The format-3 upgrade from 0.7.3
+preserves historical records and requires explicit adoption afterwards. 0.9.0's, 0.8.4's, 0.8.3's, 0.8.2's
+and 0.8.0's features and earlier corrections remain. Earlier sets stay frozen.
 
 NuGet availability follows publication and a successful package workflow. The remaining limits are in
 `limitations-and-platforms.md`.
@@ -71,7 +70,7 @@ without a recorded commit requires this option; omitting it refuses before any m
 are written. The default comes from the build's version metadata, so the estate's Git history does
 not choose the pin.
 
-`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.0 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
+`estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the verified upgrade in section 9 can later move that source pin to a published release. `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.9.1 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
 Expected observation: `status` shows the estate's name, the operator principal, no work orders yet, and `estate check` reports `2 records: 0 errors, 0 warnings`. The manifest is not a third record.
 
@@ -452,15 +451,15 @@ publishes a release automatically.
 
 ### Release procedure
 
-A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.0 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
+A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.1 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
-vericairn release submit --check --product <product id> --version 0.9.0 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
-vericairn release submit --product <product id> --version 0.9.0 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
-vericairn release observe --version 0.9.0 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
+vericairn release submit --check --product <product id> --version 0.9.1 --commit <exact-commit> --expected <current-product-hash> --by <builder id>
+vericairn release submit --product <product id> --version 0.9.1 --commit <exact-commit> --expected <current-product-hash> --by <builder id> [--provider github-releases] [--repository owner/name] [--ref main] [--workflow release.yml] [--setting name=value]
+vericairn release observe --version 0.9.1 --product <product id> --by <builder id> --qualified linux-x64 --qualified osx-arm64 --qualified win-x64 --limitation "..."
 ```
 
 From 0.8.3, `release submit --check` uses the intended submission's options and reports
@@ -550,8 +549,8 @@ The operator accepts the exact candidate before publishing:
 
 ```sh
 vericairn records new acceptance --by <operator id> --subject release:<candidate id>:<candidate hash> --body accept-release.json
-gh release edit v0.9.0 -R owner/name --draft=false --latest
-vericairn release observe --version 0.9.0 --product <product id> --by <builder id>
+gh release edit v0.9.1 -R owner/name --draft=false --latest
+vericairn release observe --version 0.9.1 --product <product id> --by <builder id>
 vericairn release list
 ```
 
@@ -685,7 +684,7 @@ without making a release request. `manifest.release-behind` covers release pins 
 for source pins its comparison is to the build performing the check. It names the target's
 upgrade check command and leaves the pin unchanged. The cache is knowledge, not automatic approval.
 
-An estate running 0.8.0, 0.8.2, 0.8.3 or 0.8.4 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
+An estate running 0.8.0, 0.8.2, 0.8.3, 0.8.4 or 0.9.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
 between the two resumes from that migration record when run again, and until then opening the estate
 warns `upgrade.incomplete`. A legacy release pin with no migration record is refused; a fresh `init --release` pin has its exact dependency observation instead.
@@ -835,20 +834,20 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:
 
 ```sh
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.9.0 --documents docs/releases/documents.json
-vericairn docs check docs/releases/0.9.0
-dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.0
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- generate --out docs/releases/0.9.1 --documents docs/releases/documents.json
+vericairn docs check docs/releases/0.9.1
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.1
 ```
 
 The manifest names the exact reference build commit, distinct from the later documentation or release commit. Comparison checks version, record formats, public inventories, complete reference bytes and retained companion inputs. A later documentation-only commit can retain that build pin only when the build sources agree; both commits must be locally available. A structural docs check does not judge prose, note completeness or release acceptance. FIX-09's frozen-set checksum guard detects changed, missing or added files in earlier sets, including withdrawn 0.7.0; never repair an earlier set in place.
 
-The notes command renders the estate's records from 0.8.4 to 0.9.0:
+The notes command renders the estate's records from 0.9.0 to 0.9.1:
 
 ```sh
-vericairn --estate <root> docs notes --from 0.8.4 --to 0.9.0 --out docs/releases/0.9.0
+vericairn --estate <root> docs notes --from 0.9.0 --to 0.9.1 --out docs/releases/0.9.1
 ```
 
-`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.8.4's recorded end.
+`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.9.0's recorded end.
 From 0.8.4, decisions, work orders, acceptances, identity and policy records, and migrations are listed
 once per supersession chain, at the revision current when the window ends. Revised entries name all
 replaced revision IDs, earliest first, including those recorded before the window. A later revision does

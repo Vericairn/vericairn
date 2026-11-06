@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Read-only display of the effective settings in a developer build; no real-device or communication qualification claimed ([Remote](remote.md)) |
 
-This document describes 0.9.0: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's, 0.8.4's and 0.9.0's corrections and
+This document describes 0.9.1: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with 0.8.2's, 0.8.3's, 0.8.4's, 0.9.0's and 0.9.1's corrections and
 additions described with their owning flows below; 0.8.4's templates, saved prompts, operator close and operator requests, and 0.9.0's [Remote](remote.md), [community build guides](community-build-guides.md) and [efficiency adapter](efficiency-adapter.md), have their own guides. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
-0.9.0 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.9.1 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -374,7 +374,7 @@ A product that declares no artifacts is read by the generic rule: a platform ide
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
 archive is documentation, and a draft is complete when its checksum file names every other asset.
 
-Before submitting, 0.9.0 offers the whole admission gate without an effect:
+Before submitting, 0.9.1 offers the whole admission gate without an effect:
 
 ```sh
 vericairn release submit --check --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash>
@@ -499,9 +499,9 @@ The "Milestone and release acceptances" section includes each operator acceptanc
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.9.0 notes from the estate's records, use
-`vericairn docs notes --from 0.8.4 --to 0.9.0 --out docs/releases/0.9.0`.
-The exclusive start follows 0.8.4's recorded end; the command writes its exact window to the manifest.
+To render the 0.9.1 notes from the estate's records, use
+`vericairn docs notes --from 0.9.0 --to 0.9.1 --out docs/releases/0.9.1`.
+The exclusive start follows 0.9.0's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against
@@ -738,10 +738,15 @@ The self-contained publishes restore locked from committed runtime-specific lock
 Workbench ship, for the six platforms. Ordinary builds and the NuGet packages keep the portable graph. After a
 dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
 `-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
-stale ones. The bill of materials is generated from those restores without restoring again, so it describes
-the packages and every platform graph of the distributables. Its metadata component names Vericairn and
-the packaged release's version. Verification refuses a different name or version and confirms it names
-every package their lock files hold. Every tool the path installs is pinned to an exact version.
+stale ones. The SDK `global.json` pins builds the path's packages and distributables, 10.0.403 for 0.9.1; each
+self-contained distributable embeds that SDK's .NET and ASP.NET Core runtimes, 10.0.14 (FIX-91), while the NuGet
+tool stays framework-dependent. The distributable lock files also pin the SDK's implicit `Microsoft.NET.ILLink.Tasks`
+at that version, so moving the SDK regenerates them too. The bill of materials is generated from those restores
+without restoring again, so it describes the packages and every platform graph of the distributables. Its
+metadata component names Vericairn and the packaged release's version (FIX-90). Verification refuses a different
+name or version and confirms it names every package their lock files hold and, from the publish evidence, the
+runtime and apphost packs each distributable embeds, which lock files do not hold. Every tool the path installs
+is pinned to an exact version.
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
