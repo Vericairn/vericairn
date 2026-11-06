@@ -1526,10 +1526,13 @@ The audit also permits the temporary directory actually supplied in the harness'
 on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. From 0.9.0 each run gets its own temporary directory
 inside its run directory, passed to the harness as `TMPDIR` (`TEMP` and `TMP` on Windows). Codex's sandbox can write
 only the workspace, its `.git` and that directory; the user's shared temporary directory and `/tmp` are excluded.
-Vericairn's MCP server, outside the sandbox, keeps the user's temporary directory. The audit uses the same captured environment as the launched process,
-recognizes those variables in path operands, and checks traversal against the resulting boundary. It does not infer
-a system temporary directory or take a boundary from tool-event input; system `/tmp` is permitted only when the
-run's supplied temporary variable names it.
+Vericairn's MCP server, which the harness starts outside its sandbox, is always given its temporary directory
+explicitly: the worker's own, from its environment or else the system's, and never the run's own temporary directory
+or a path inside it. Before 0.9.1, when the worker's environment named no temporary directory, a harness that passes
+its environment to the servers it starts could give the server the run's own temporary directory. The audit uses the
+same captured environment as the launched process, recognizes those variables in path operands, and checks traversal
+against the resulting boundary. It does not infer a system temporary directory or take a boundary from tool-event
+input; system `/tmp` is permitted only when the run's supplied temporary variable names it.
 
 Common options of `env`, `sudo`, `nohup`, `time`, `nice`, `timeout`, `command`, `exec` and `busybox`, including
 nested wrappers, do not hide the inner command. The `-c` body of `bash`, `sh`, `zsh`, `dash`, `ksh`, `mksh`, `ash`,
