@@ -2,8 +2,8 @@
 
 Generated from the record registry by `vericairn-docs generate`, then selected
 from its canonical `record-reference.md`. Source commit: `7551a8734253f71be1d47f0e07fc002be0321bad`.
-These development additions are for 0.8.4 and stay within record format 3.
-The full release reference will be generated with that release build.
+These additions shipped in 0.8.4 and stay within record format 3.
+Each release set's `record-reference.md` is the full reference, generated with that release's build.
 
 Regenerate into an ignored output directory with the documentation tool and
 select the complete `saved-prompt` and `prompt-preference` sections, plus each

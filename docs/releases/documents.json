@@ -50,5 +50,6 @@
   "frameworks/langgraph.md",
   "frameworks/crewai.md",
   "frameworks/autogen.md",
-  "api-compatibility-0.9.0.md"
+  "api-compatibility-0.9.0.md",
+  "api-compatibility-0.9.1.md"
 ]
