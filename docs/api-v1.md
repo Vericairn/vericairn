@@ -31,15 +31,19 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.9.0. It adds, in `IEstateApi` and over the daemon, records prepared by the
+This document describes 0.9.1. It adds, in `IEstateApi` and over the daemon, `POST /v1/runs/prepare`, which
+prepares a run's workspace alone before the agent starts, and a workspace setup command observed before a
+run's intent (FIX-86), and refuses a new decision or revision dated after its own record (FIX-87); the added
+`IEstateApi` members have default implementations, so existing implementers stay source-compatible, and
+[API compatibility for 0.9.1](api-compatibility-0.9.1.md) lists them. 0.9.0 added, in `IEstateApi` and over
+the daemon, records prepared by the
 runtime and signed by a paired device or by that principal's presence device (REMOTE-03 and REMOTE-11),
 the estate's basis for an answer (REMOTE-11), each principal's attention and its acknowledgment (REMOTE-02)
 with policy and recurring-duty notices (POLICY-05), requested progress, its typed claim and its read
 (WATCH-02 and WATCH-03), release lines, channels and cadence in submissions, upgrades and policy
 responses (CODE-12, CODE-13 and CODE-14), the generated members an upgrade rewrites (FIX-83), and
 settlement of a run whose observation is marked settled or whose supervising worker died (FIX-76 and
-FIX-82); every added `IEstateApi` member has a default implementation, so existing implementers stay
-source-compatible, and [API compatibility for 0.9.0](api-compatibility-0.9.0.md) lists them. 0.8.4 added
+FIX-82), each added `IEstateApi` member with a default implementation. 0.8.4 added
 the release-review brief and its assignment (CODE-09), the operator-request queue and its signed outcomes
 (OPS-03), the publication documentation pass (DOCS-12), read-only MCP resources and saved-prompt prompts
 (MCP-02), the `operator close` candidates and batch (OPS-02), the saved-prompt library (PROMPT-01),
@@ -55,12 +59,12 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, and [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, and [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.9.0 package availability
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.1 package availability
 requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations

@@ -32,16 +32,26 @@ releases. Its [release notes](docs/releases/0.9.0/release-notes.md) and
 
 ## 0.9.1 — planned
 
+A security patch. Every distributable is built on .NET SDK 10.0.403 and embeds .NET and ASP.NET Core runtime
+10.0.14, replacing the 10.0.11 that 0.9.0 embeds. Policy evaluation reads historical repository content in
+batches, so estates that record maintenance duties keep fast writes and checks. A worker run can prepare its
+workspace before the agent starts, a decision cannot be dated after its own record, and the bill of materials
+names the release's version.
+
+## 0.9.2 — planned
+
 Remote grows from attention and decisions to supervision: from the phone you ask for running work to be
 paused, cancelled or contained and see the observed result, see the estate's nodes and connections, and hand a
-task to Workbench; Remote notifies you over the local network, handles lost, replaced and shared phones and
-opens readable records. From Workbench or the phone, a saved
+task to Workbench; Remote notifies you over the local network, reminds you before a supervised window opens,
+handles lost, replaced and shared phones and opens readable records. From Workbench or the phone, a saved
 prompt can be sent to a running agent in one step; it steers the agent without widening what the agent may
-do. A release runs as a goal on a declared procedure: each step's position comes from the records, agents
-carry the steps they may take, and each step reserved to the operator waits with its exact command shown only
-when it is next. An upgrade replaces an older background runtime, so the estate is served only by the release
-it pins. An agent finds the decisions and documents its brief needs by searching the estate, with every
-selected source pinned and nothing it may not read revealed.
+do. A goal can run a declared flow: each step's position, and each required item's provenance, evidence and
+review, comes from the records, agents carry the steps they may take, and each step that waits on a person
+shows its exact command only when it is next. Clients hear what changed through an event stream instead of
+polling. An upgrade replaces an older background runtime, so the estate is served only by the release it
+pins. An agent finds the decisions and documents its brief needs by searching the estate, with every selected
+source pinned and nothing it may not read revealed. Vericairn installs with one command through Homebrew,
+winget or a checked install script.
 
 ## 0.10.x — planned
 
