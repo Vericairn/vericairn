@@ -124,7 +124,18 @@ internal sealed class WorkingTreeLock : IDisposable
             Directory.CreateDirectory(directory);
             // The directory ignores itself even in estates whose root .gitignore does not yet name .vericairn/.
             string ignore = Path.Combine(directory, ".gitignore");
-            if (!File.Exists(ignore)) File.WriteAllText(ignore, "*\n");
+            if (!File.Exists(ignore))
+            {
+                try
+                {
+                    using var stream = new FileStream(ignore, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                    stream.Write("*\n"u8);
+                }
+                catch (IOException) when (File.Exists(ignore))
+                {
+                    // Another writer created it at the same moment, with the same content; on Windows its open handle is a sharing violation.
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
