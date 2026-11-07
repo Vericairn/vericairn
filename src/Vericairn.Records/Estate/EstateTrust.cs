@@ -74,7 +74,9 @@ internal sealed partial class EstateTrust
         rawSupersededBy = model.SupersededBy;
         principalRecords = [.. model.OfType("principal")];
         authorityRecords = [.. model.OfType("authority")];
-        FirstEstate = model.RawFirstEstate();
+        // The first charter is the one the manifest names; another charter that supersedes nothing never displaces it. Only a model read
+        // without a manifest falls back to the first charter by id.
+        FirstEstate = manifest is null ? model.RawFirstEstate() : NamedCharter(model, manifest.Estate);
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
         FirstAuthority = model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
@@ -629,10 +631,13 @@ internal sealed partial class EstateTrust
     internal bool CharterRevisionCounts(RecordEnvelope revised, RecordEnvelope revision) =>
         !RequiresSignatures(revised) || (revision.By == RootOperator && Authentic(revision));
 
+    private static RecordEnvelope? NamedCharter(EstateModel model, string? id) =>
+        id is not null && model.ById.TryGetValue(id, out RecordEnvelope? charter) && charter.Type == "estate" && charter.Supersedes is null ? charter : null;
+
     private RecordEnvelope? ComputeCharter()
     {
         if (FirstEstate is not { } current)
-            return model.OfType("estate").Where(r => !model.SupersededBy.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+            return Manifest is not null ? null : model.OfType("estate").Where(r => !model.SupersededBy.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
         var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
         while (model.SupersededBy.TryGetValue(current.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" &&
             seen.Add(successor.Id) && CharterRevisionCounts(current, successor))

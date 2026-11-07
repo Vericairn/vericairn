@@ -154,8 +154,11 @@ public sealed class EstateModel
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
 
-    /// <summary>The estate's first charter, the one every later revision supersedes (the lowest id wins when several do; validators flag that).</summary>
-    public RecordEnvelope? FirstEstate => applied is not null ? applied.FirstEstate : RawFirstEstate();
+    /// <summary>
+    /// The estate's first charter, the one every later revision supersedes: the charter the manifest names, never displaced by another that
+    /// supersedes nothing (validators flag that one); without a manifest, the first such charter by id.
+    /// </summary>
+    public RecordEnvelope? FirstEstate => Trust.FirstEstate;
 
     /// <summary>The first charter among every record read, before any is judged: the root of trust.</summary>
     internal RecordEnvelope? RawFirstEstate() => OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
