@@ -848,9 +848,19 @@ Duplicates written before this rule, by two writers of an earlier release or by 
 
 1. Stop the extra writer. Run `vericairn records validate` or `vericairn estate reconcile` to list the conflicting records, and read both files and any records that cite them. Dispatch nothing under a duplicated operation identity until it is settled.
 2. Keep one: the one later records already cite, or else the earlier one.
-3. Supersede the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key.
+3. Settle the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key. Two current operations under one identity take a reconciliation that keeps one and withdraws the other, as below.
 
-Some record types have no revision that clears the conflict. In 0.9.2 that includes two current operations under one identity: a revision keeps its identity, and a reconciliation settles only revisions of one record. Leave both files unchanged and report the case to Vericairn's maintainer; no record settles it in this release.
+From 0.9.2 (FIX-100), a reconciliation settles operations recorded independently under one identity, as it settles independent first communication profiles. Its subject is one of them; `kept` names the latest revision of the operation that stands, `withdrawn` names the latest revision of each other one, and `note` gives your reason:
+
+```sh
+vericairn records new reconciliation --by <operator id> --subject operation:<kept id>:<kept hash> --body reconciliation.json
+```
+
+```json
+{"kept": "<kept id>", "withdrawn": ["<other id>"], "note": "Both runtimes recorded the intent; the first stands, and the second was never dispatched."}
+```
+
+Only the operator or a principal with the `local-engineering` scope, the authority that records operations, settles them, and the reconciliation is signed by an admitted device of that principal, whatever the charter's signature policy. Every record it names must be an operation under the subject's identity and the latest revision of its own operation. Neither operation is rewritten: the withdrawn one stays in the estate and counts as superseded by the kept one, `operation.duplicate-identity` is no longer reported, and writes proceed. Nothing settles duplicates automatically. A withdrawn operation whose effect may have happened still needs its own observation before anything is retried under that identity.
 
 ## 11. The daemon
 

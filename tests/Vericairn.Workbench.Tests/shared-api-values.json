@@ -63,7 +63,8 @@
     "record.duplicate-id",
     "batch.incomplete",
     "batch.unreadable",
-    "communication.conflict"
+    "communication.conflict",
+    "operation.duplicate-identity"
   ],
   "Vericairn.Records.Estate.FlowPosition.AttentionKinds": [
     "uncertain",
