@@ -113,3 +113,12 @@ is; and while an earlier action is unfinished, a new one first finishes it when 
 pass, and otherwise is refused with `status` `refused`, naming the earlier action's record id, type and subject. The local
 checkpoint, which is machine state and no record, also keeps the action's type, subject and author and the finished action
 whose receipts the next one tolerates; checkpoints written by earlier builds are read as before.
+
+## An acceptance rests only on reviews that passed (FIX-85)
+
+No route, interface member or protocol type is added or changed. A new acceptance by a principal other than the operator
+whose `basis` names a review of its subject with outcome `findings` or `fail` is now refused at every write surface (the
+command line, the daemon, the SDK and a device-prepared record) with the finding `acceptance.basis-outcome` at severity
+`error` in the response's problem. The operator's acceptances are unchanged. Validation and the estate check report an
+acceptance already in the estate that names such a review with the same code at severity `info`; it adds no error and the
+acceptance keeps accepting its subject. Record format remains 3, and no record body changes.
