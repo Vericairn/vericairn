@@ -129,11 +129,14 @@ public sealed class EstateSession : IDisposable
     /// The estate's objects by content hash, for reading history checkpoint inventories: null when an object is absent, unreadable or not
     /// the bytes its hash names.
     /// </summary>
-    internal Func<string, byte[]?> ObjectReader => hash =>
+    internal Func<string, byte[]?> ObjectReader => Profile == "repository-synced" ? EstateLoader.FileObjects(Root) : hash =>
     {
+        // The repository's objects are read as the loader reads them, refusing links and anything over the object limit; a local-only
+        // store's objects are held in its database, under the same limit.
         try
         {
-            return Objects.Read(hash);
+            byte[]? bytes = Objects.Read(hash);
+            return bytes is null || bytes.LongLength > EstateLayout.MaxObjectBytes ? null : bytes;
         }
         catch (Exception exception) when (exception is ObjectCorruptedException or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
