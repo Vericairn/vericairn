@@ -37,6 +37,21 @@ internal sealed class FakeGh
     internal bool Admin { get; set; } = true;
     internal string FullName { get; set; } = Repository;
 
+    /// <summary>The token scopes the rate-limit answer names; null leaves the header out, as a fine-grained or app token does.</summary>
+    internal string? Scopes { get; set; } = "gist, read:org, repo, workflow";
+
+    /// <summary>How many advisories each page holds; the listing follows cursors across pages.</summary>
+    internal int PageSize { get; set; } = 2;
+
+    /// <summary>Exact page bodies to answer in place of the advisories, for malformed listings.</summary>
+    internal List<string>? PageBodies { get; set; }
+
+    /// <summary>The allowance left that each page's headers report.</summary>
+    internal long PageRemaining { get; set; } = 4980;
+
+    /// <summary>The outcome of every page read, as an output limit or another bounded failure would end it.</summary>
+    internal ProcessOutcome? PageOutcome { get; set; }
+
     /// <summary>no-login, network, rate, not-started or timeout: every call fails that way.</summary>
     internal string? Failure { get; set; }
 
@@ -60,7 +75,7 @@ internal sealed class FakeGh
         string[] arguments = [.. info.ArgumentList];
         lock (gate) Calls.Add(arguments);
         Assert.Equal("api", arguments[0]);
-        Assert.DoesNotContain(arguments, a => a.Contains("token", StringComparison.OrdinalIgnoreCase) || a is "-X" or "--method" or "-f" or "-F" or "--field" or "--raw-field" or "--input");
+        Assert.DoesNotContain(arguments, a => a.Contains("token", StringComparison.OrdinalIgnoreCase) || a is "-X" or "--method" or "-f" or "-F" or "--field" or "--raw-field" or "--input" or "--paginate");
         switch (Failure)
         {
             case "not-started": return new(ProcessOutcome.NotStarted, false, null, string.Empty, string.Empty);
@@ -72,24 +87,35 @@ internal sealed class FakeGh
 
         lock (gate)
         {
-            if (arguments[1] == "rate_limit")
-                return Ok(new JsonObject { ["resources"] = new JsonObject { ["core"] = new JsonObject { ["limit"] = 5000, ["remaining"] = Remaining, ["reset"] = 1_793_000_000 } } });
-            if (arguments[1] == "repos/" + Repository)
-                return Ok(new JsonObject { ["full_name"] = FullName, ["private"] = false, ["description"] = Summary, ["permissions"] = new JsonObject { ["admin"] = Admin, ["push"] = true, ["pull"] = true } });
-            if (arguments[1] == "repos/" + Repository + "/security-advisories?per_page=100")
+            if (arguments is ["api", "-i", "rate_limit"])
             {
-                Assert.Equal(["api", arguments[1], "--paginate", "--slurp"], arguments);
-                // Two pages, as gh --slurp returns them.
-                var first = new JsonArray(Advisories.Take(2).Select(a => (JsonNode)a.DeepClone()).ToArray());
-                var second = new JsonArray(Advisories.Skip(2).Select(a => (JsonNode)a.DeepClone()).ToArray());
-                return Ok(new JsonArray(first, second));
+                var body = new JsonObject { ["resources"] = new JsonObject { ["core"] = new JsonObject { ["limit"] = 5000, ["remaining"] = Remaining, ["reset"] = 1_793_000_000 } } };
+                return Ok(Headers(Scopes is null ? [] : [("X-Oauth-Scopes", Scopes)]) + body.ToJsonString());
+            }
+            if (arguments is ["api", var described] && described == "repos/" + Repository)
+                return Ok(new JsonObject { ["full_name"] = FullName, ["private"] = false, ["description"] = Summary, ["permissions"] = new JsonObject { ["admin"] = Admin, ["push"] = true, ["pull"] = true } }.ToJsonString());
+            const string listing = "repos/" + Repository + "/security-advisories?per_page=100";
+            if (arguments is ["api", "-i", var route] && route.StartsWith(listing, StringComparison.Ordinal))
+            {
+                int page = route == listing ? 0 : int.Parse(route[(listing.Length + "&after=cursor".Length)..], System.Globalization.CultureInfo.InvariantCulture);
+                Assert.True(route == listing || route.StartsWith(listing + "&after=cursor", StringComparison.Ordinal), route);
+                if (PageOutcome is { } outcome) return new(outcome, true, null, Diagnostics, Diagnostics);
+                List<string> pages = PageBodies ?? [.. Advisories.Chunk(PageSize).Select(chunk => new JsonArray([.. chunk.Select(a => (JsonNode)a.DeepClone())]).ToJsonString())];
+                if (pages.Count == 0) pages.Add("[]");
+                var headers = new List<(string, string)> { ("X-RateLimit-Limit", "5000"), ("X-RateLimit-Remaining", PageRemaining.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
+                if (page + 1 < pages.Count)
+                    headers.Add(("Link", $"<https://api.github.com/repositories/1/security-advisories?per_page=100&after=cursor{page + 1}>; rel=\"next\""));
+                return Ok(Headers(headers) + pages[page]);
             }
         }
 
         throw new InvalidOperationException("The reader made a call the stand-in does not answer: " + string.Join(' ', arguments));
     }
 
-    private static ProcessResult Ok(JsonNode body) => new(ProcessOutcome.Exited, true, 0, body.ToJsonString(), Diagnostics);
+    private static string Headers(IEnumerable<(string Name, string Value)> headers) =>
+        "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n" + string.Concat(headers.Select(h => h.Name + ": " + h.Value + "\r\n")) + "\r\n";
+
+    private static ProcessResult Ok(string output) => new(ProcessOutcome.Exited, true, 0, output, Diagnostics);
 }
 
 /// <summary>A format-3 estate with a releasable product whose security-reports declaration names one repository read through a stand-in gh.</summary>

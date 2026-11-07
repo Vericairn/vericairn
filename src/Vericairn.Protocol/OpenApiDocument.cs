@@ -765,7 +765,7 @@ public static class OpenApiDocument
         releaseResponse["properties"]!["check"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseCheckDetails" };
         JsonObject releaseCheck = Object(("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("runtimeBuild", "string"), ("basisBytes", "integer"), ("objections", "array"));
         releaseCheck["properties"]!["objections"]!["items"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseObjection" };
-        JsonObject releaseSubmit = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string"), ("endOfSupport", "string"), ("backportOf", "object"));
+        JsonObject releaseSubmit = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("line", "string"), ("channel", "string"), ("endOfSupport", "string"), ("backportOf", "object"), ("securityReportsUnread", "boolean"));
         releaseSubmit["properties"]!["line"]!["pattern"] = "^[a-z0-9][a-z0-9.-]{0,39}$";
         releaseSubmit["properties"]!["channel"]!["enum"] = new JsonArray("stable", "lts", "prerelease", "nightly");
         releaseSubmit["properties"]!["endOfSupport"]!["format"] = "date-time";

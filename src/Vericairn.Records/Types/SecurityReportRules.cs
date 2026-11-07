@@ -10,7 +10,7 @@ namespace Vericairn.Records.Types;
 
 /// <summary>
 /// The record rules of security reports read before a release (OPS-11): a product's <c>securityReports</c> declaration and the
-/// operator's <c>triage</c> observation of one advisory revision. Records name an advisory only by its identifier, repository and
+/// operator's <c>security-triage</c> observation of one advisory revision. Records name an advisory only by its identifier, repository and
 /// the hash of the provider's response; its summary, description, reporter and credits never enter a record.
 /// </summary>
 public static class SecurityReportRules
@@ -19,7 +19,7 @@ public static class SecurityReportRules
     public const string ProductField = "securityReports";
 
     /// <summary>The observation kind of a triage.</summary>
-    public const string TriageKind = "triage";
+    public const string TriageKind = "security-triage";
 
     /// <summary>The most repositories one product declaration reads.</summary>
     public const int MaxRepositories = 8;
@@ -74,19 +74,29 @@ public static class SecurityReportRules
         string? disposition = facts.Enum("disposition", true, [.. Dispositions]);
         string? reason = facts.Text("reason", false, MaxReason);
         if (disposition == "no-action" && reason is null)
-            facts.Error("triage.reason", "reason", "A triage of no-action gives its reason, in the operator's own words.");
+            facts.Error("security-triage.reason", "reason", "A triage of no-action gives its reason, in the operator's own words.");
         foreach (JsonProperty property in facts.Element.EnumerateObject())
             if (!TriageFacts.Contains(property.Name, StringComparer.Ordinal))
-                facts.Error("triage.facts", property.Name, "A triage names its advisory by identifier, repository and content hash with its disposition and reason only.");
+                facts.Error("security-triage.facts", property.Name, "A triage names its advisory by identifier, repository and content hash with its disposition and reason only.");
 
         RecordEnvelope? subject = context.Find(context.Record.Subject?.Id);
         if (context.Record.Subject?.Type != "resource" || subject is null || GitHubLocation(subject) is not { } located
             || repository is not null && !string.Equals(located, repository, StringComparison.OrdinalIgnoreCase))
-            context.Error("triage.subject", "A triage pins the exact repository resource on GitHub whose advisory it names.");
+            context.Error("security-triage.subject", "A triage pins the exact repository resource on GitHub whose advisory it names.");
 
         // No security principal role is defined yet, so only the operator triages a security report.
         if (!context.HasRole(context.Record.By, Roles.Operator))
-            context.Error("triage.author", "Only the operator records a security report's triage.");
+            context.Error("security-triage.author", "Only the operator records a security report's triage.");
+    }
+
+    /// <summary>Whether a current product's security-reports declaration names any revision of this resource lineage.</summary>
+    public static bool Declares(EstateModel model, IReadOnlyList<string> lineage)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(lineage);
+        return model.Current("product").Any(product => product.Body.TryGetProperty(ProductField, out JsonElement reports) && reports.ValueKind == JsonValueKind.Object
+            && reports.TryGetProperty("repositories", out JsonElement repositories) && repositories.ValueKind == JsonValueKind.Array
+            && repositories.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && lineage.Contains(id.GetString()!, StringComparer.Ordinal)));
     }
 
     /// <summary>A repository resource's GitHub owner/name, or null.</summary>

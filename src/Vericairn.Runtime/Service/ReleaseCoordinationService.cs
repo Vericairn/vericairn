@@ -28,7 +28,7 @@ internal sealed partial class ReleaseCoordinationService(
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
     Func<DateTimeOffset> now,
     Action<string> boundary,
-    Func<string?, bool, IReadOnlyList<FindingDto>> securityReports)
+    Func<string?, bool, bool, IReadOnlyList<FindingDto>> securityReports)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
@@ -272,7 +272,7 @@ internal sealed partial class ReleaseCoordinationService(
         string? releaseCommit = request.Commit ?? (settings.TryGetValue("ref", out string? exactRef) && Patterns.Commit.IsMatch(exactRef) ? exactRef : null);
         // Security reports are read before the gate is taken and only here, before any durable claim: their objections are never
         // retained or written into an intent, so no advisory identity reaches a record through a refused or canceled submission.
-        IReadOnlyList<FindingDto> security = securityReports(request.By, !checkOnly);
+        IReadOnlyList<FindingDto> security = securityReports(request.By, !checkOnly, request.SecurityReportsUnread);
         List<string> basisEvidence = [];
         List<RecordReference> excluded = [];
         RecordEnvelope claimRevision;

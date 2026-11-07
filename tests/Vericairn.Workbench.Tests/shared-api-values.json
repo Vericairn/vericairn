@@ -390,7 +390,7 @@
     "package",
     "vericairn-release",
     "operator-request",
-    "triage"
+    "security-triage"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",

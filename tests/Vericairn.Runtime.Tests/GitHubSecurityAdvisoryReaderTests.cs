@@ -31,8 +31,9 @@ public sealed class GitHubSecurityAdvisoryReaderTests
         Assert.Equal(listing.Advisories.Count, listing.Advisories.Select(a => a.ContentHash).Distinct().Count());
         string kept = JsonSerializer.Serialize(listing);
         Assert.All(FakeGh.OutsideText, text => Assert.DoesNotContain(text, kept, StringComparison.Ordinal));
-        // The allowance is read first, then administrator permission, then the listing; nothing else is called.
-        Assert.Equal([["api", "rate_limit"], ["api", "repos/Example/widget"], ["api", "repos/Example/widget/security-advisories?per_page=100", "--paginate", "--slurp"]], gh.Calls);
+        // The login's scopes and allowance are read first, then administrator permission, then each page by its cursor; nothing else is called.
+        Assert.Equal([["api", "-i", "rate_limit"], ["api", "repos/Example/widget"], ["api", "-i", "repos/Example/widget/security-advisories?per_page=100"],
+            ["api", "-i", "repos/Example/widget/security-advisories?per_page=100&after=cursor1"], ["api", "-i", "repos/Example/widget/security-advisories?per_page=100&after=cursor2"]], gh.Calls);
     }
 
     [Fact]
@@ -69,7 +70,7 @@ public sealed class GitHubSecurityAdvisoryReaderTests
         var gh = new FakeGh { Admin = false };
         ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository));
         Assert.Contains("not an administrator", refused.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(gh.Calls, c => c[1].Contains("security-advisories", StringComparison.Ordinal));
+        Assert.DoesNotContain(gh.Calls, c => c.Any(a => a.Contains("security-advisories", StringComparison.Ordinal)));
         gh = new FakeGh { FullName = "Example/renamed" };
         Assert.Contains("another name", Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository)).Message, StringComparison.Ordinal);
     }
@@ -90,7 +91,66 @@ public sealed class GitHubSecurityAdvisoryReaderTests
         ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => reader.Read(FakeGh.Repository));
         Assert.Contains("share kept for the person's own use", refused.Message, StringComparison.Ordinal);
         Assert.Contains("2026-10-26T", refused.Message, StringComparison.Ordinal);
-        Assert.Equal([["api", "rate_limit"]], gh.Calls);
+        Assert.Equal([["api", "-i", "rate_limit"]], gh.Calls);
+    }
+
+    [Theory]
+    [InlineData(null, "cannot be confirmed")]
+    [InlineData("", "neither the repo nor")]
+    [InlineData("gist, public_repo, read:org", "neither the repo nor")]
+    [InlineData("security_events", "neither the repo nor")]
+    [InlineData("repository_advisories:read", null)]
+    [InlineData("read:org,repo", null)]
+    public void OnlyATokenWhoseScopesShowDraftsAndPrivateReportsReads(string? scopes, string? refusal)
+    {
+        var gh = new FakeGh { Scopes = scopes };
+        var reader = new GitHubSecurityAdvisoryReader(gh.Run);
+        if (refusal is null)
+        {
+            Assert.Equal(3, reader.Read(FakeGh.Repository).Advisories.Count);
+            return;
+        }
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => reader.Read(FakeGh.Repository));
+        Assert.Contains(refusal, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("gh auth", refused.Message, StringComparison.Ordinal);
+        Assert.Equal([["api", "-i", "rate_limit"]], gh.Calls);
+    }
+
+    [Theory]
+    [InlineData("output-limit", "larger than one page may be")]
+    [InlineData("malformed", "unreadable response")]
+    [InlineData("object", "was not a list")]
+    [InlineData("changed", "changed while the listing was read")]
+    [InlineData("too-many-pages", "more than 3000 advisories")]
+    [InlineData("allowance", "before the listing ended")]
+    public void EveryPageIsBoundedAndAnIncompleteListingFailsClosed(string defect, string reason)
+    {
+        var gh = new FakeGh();
+        JsonObject changed = FakeGh.Advisory(FakeGh.Triaged, "triage", "critical");
+        switch (defect)
+        {
+            case "output-limit": gh.PageOutcome = ProcessOutcome.OutputLimitExceeded; break;
+            case "malformed": gh.PageBodies = ["[", "[]"]; break;
+            case "object": gh.PageBodies = ["[]", "{\"ghsa_id\":\"" + FakeGh.Triaged + "\"}"]; break;
+            case "changed": gh.PageBodies = [new JsonArray(FakeGh.Advisory(FakeGh.Triaged, "triage", "high")).ToJsonString(), new JsonArray(changed).ToJsonString()]; break;
+            case "too-many-pages": gh.PageBodies = [.. Enumerable.Repeat("[]", GitHubSecurityAdvisoryReader.MaxPages + 1)]; break;
+            case "allowance": gh.PageRemaining = 1000; break;
+        }
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository));
+        Assert.Contains(reason, refused.Message, StringComparison.Ordinal);
+        Assert.All(FakeGh.OutsideText, text => Assert.DoesNotContain(text, refused.Message, StringComparison.Ordinal));
+        Assert.True(gh.Calls.Count(c => c.Any(a => a.Contains("security-advisories", StringComparison.Ordinal))) <= GitHubSecurityAdvisoryReader.MaxPages);
+    }
+
+    [Fact]
+    public void AnEmptyListingAndALastPageAtTheReserveAreComplete()
+    {
+        var gh = new FakeGh();
+        gh.Advisories.Clear();
+        Assert.Empty(new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository).Advisories);
+        // A last page has no next page to stop before, so the allowance it leaves does not make the listing incomplete.
+        gh = new FakeGh { PageSize = 100, PageRemaining = 10 };
+        Assert.Equal(3, new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository).Advisories.Count);
     }
 
     [Theory]

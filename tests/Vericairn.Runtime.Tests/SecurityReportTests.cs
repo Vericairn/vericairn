@@ -94,19 +94,16 @@ public sealed class SecurityReportTests
         Assert.False(f.Api.SecurityReportsPoll(new(f.Operator)).Held);
     }
 
-    [Theory]
-    [InlineData("published")]
-    [InlineData("closed")]
-    [InlineData("withdrawn")]
-    public void AnAdvisoryTheEstateSettledIsInformationForAWeekAndHoldsNothing(string state)
+    [Fact]
+    public void APublishedAdvisoryIsInformationForAWeekAndHoldsNothing()
     {
         using var f = new SecurityReportFixture();
         f.Gh.Advisories.Clear();
-        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Published, state, "critical"));
+        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Published, "published", "critical"));
         f.Api.SecurityReportsScheduled();
         AttentionNotice notice = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report");
-        Assert.Equal(("information", state), (notice.Kind, notice.State));
-        Assert.Contains($"{FakeGh.Published} on {FakeGh.Repository}, state {state}, severity critical", notice.Why, StringComparison.Ordinal);
+        Assert.Equal(("information", "published"), (notice.Kind, notice.State));
+        Assert.Contains($"{FakeGh.Published} on {FakeGh.Repository}, state published, severity critical", notice.Why, StringComparison.Ordinal);
         Assert.Contains("needs no triage", notice.Why, StringComparison.Ordinal);
         Assert.Equal("information", Vericairn.Runtime.Service.EstateService.Category(notice.Kind));
         ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
@@ -118,6 +115,37 @@ public sealed class SecurityReportTests
         f.Clock.Now = f.Clock.Now.AddDays(8);
         f.Api.SecurityReportsScheduled();
         Assert.DoesNotContain(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType is "security-report" or "security-reports");
+    }
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("withdrawn")]
+    public void AClosedOrWithdrawnReportHoldsUntilAnOperatorTriageNamesItAtAnyRevision(string state)
+    {
+        using var f = new SecurityReportFixture();
+        f.Gh.Advisories.Clear();
+        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Triaged, state, "high"));
+        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Drafted, "draft", "medium"));
+        f.Api.SecurityReportsScheduled();
+        AttentionNotice closed = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectId == FakeGh.Repository + ":" + FakeGh.Triaged);
+        Assert.Equal(("incident", state), (closed.Kind, closed.State));
+        Assert.Contains("closed or withdrawn without the operator's triage", closed.Why, StringComparison.Ordinal);
+        Assert.Contains(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Code == "release.security-report" && o.Message.Contains(FakeGh.Triaged, StringComparison.Ordinal));
+
+        // One triage at any revision settles a closed report; a later change of it is information and holds nothing.
+        Assert.True(f.Triage(FakeGh.Triaged, "no-action", reason: "Not a vulnerability in any shipped configuration.").Ok);
+        f.Gh.Advisories[0]["severity"] = "low";
+        f.Clock.Now = f.Clock.Now.AddMinutes(5);
+        f.Api.SecurityReportsScheduled();
+        Assert.Equal(("information", state), Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectId == FakeGh.Repository + ":" + FakeGh.Triaged) is var n ? (n.Kind, n.State) : default);
+        Assert.DoesNotContain(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Message.Contains(FakeGh.Triaged, StringComparison.Ordinal));
+
+        // A draft the operator triaged and someone then closes holds nothing more: the advisory is already named.
+        Assert.True(f.Triage(FakeGh.Drafted).Ok);
+        f.Gh.Advisories[1]["state"] = state;
+        f.Clock.Now = f.Clock.Now.AddMinutes(5);
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        Assert.True(check.Ok, check.Message);
     }
 
     [Fact]
@@ -196,7 +224,7 @@ public sealed class SecurityReportTests
         string all = seen.ToString();
         Assert.Contains(FakeGh.Triaged, all, StringComparison.Ordinal);
         Assert.All(FakeGh.OutsideText, text => Assert.DoesNotContain(text, all, StringComparison.Ordinal));
-        RecordEnvelope triage = Assert.Single(f.Records.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == "triage");
+        RecordEnvelope triage = Assert.Single(f.Records.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == "security-triage");
         Assert.Equal(["advisory", "contentHash", "disposition", "reason", "repository"], triage.Body.GetProperty("facts").EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Equal(f.Resource.Reference, triage.Subject);
     }
@@ -250,10 +278,11 @@ public sealed class SecurityReportTests
         f.Clock.Now = f.Clock.Now.AddMinutes(20);
         Assert.Contains(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-reports" && n.Why.Contains("no read has completed since", StringComparison.Ordinal));
         Assert.True(f.Api.ReleaseCheck(f.Request).Ok);
-        Assert.Equal(calls + 3, f.Gh.Calls.Count);
+        // One read: the login and allowance, the repository, and each of two pages.
+        Assert.Equal(calls + 4, f.Gh.Calls.Count);
         // A second check within the minute reuses the first check's read, which stays in memory and leaves the live store as it was.
         Assert.True(f.Api.ReleaseCheck(f.Request).Ok);
-        Assert.Equal(calls + 3, f.Gh.Calls.Count);
+        Assert.Equal(calls + 4, f.Gh.Calls.Count);
         Assert.Contains(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-reports");
         f.Api.SecurityReportsScheduled();
         Assert.DoesNotContain(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-reports");
@@ -278,7 +307,7 @@ public sealed class SecurityReportTests
         SecurityReportsResponse triageUnknown = f.Api.SecurityReportsTriage(new(f.Builder, "GHSA-x2x2-x2x2-x2x2", FakeGh.Repository, hash, "security"));
         Assert.Equal(JsonSerializer.Serialize(triage, ProtocolJson.Options), JsonSerializer.Serialize(triageUnknown, ProtocolJson.Options));
         Assert.Equal("denied", triage.Problem!.Code);
-        Assert.DoesNotContain(f.Records.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == "triage");
+        Assert.DoesNotContain(f.Records.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == "security-triage");
 
         Assert.DoesNotContain(f.Api.AttentionGet(f.Builder).Items, n => n.SubjectType is "security-report" or "security-reports");
         ReleaseResponse builderCheck = f.Api.ReleaseCheck(f.Request with { By = f.Builder });
@@ -335,7 +364,7 @@ public sealed class SecurityReportTests
         string hash = f.Api.SecurityReportsPoll(new(f.Operator)).Reports.Single(r => r.Advisory == FakeGh.Triaged).ContentHash;
         JsonObject Body(JsonObject facts) => new()
         {
-            ["kind"] = "triage", ["asOf"] = "2026-11-02T03:00:00Z", ["summary"] = "Triaged.", ["facts"] = facts, ["limitations"] = new JsonArray(),
+            ["kind"] = "security-triage", ["asOf"] = "2026-11-02T03:00:00Z", ["summary"] = "Triaged.", ["facts"] = facts, ["limitations"] = new JsonArray(),
         };
         JsonObject Facts() => new() { ["advisory"] = FakeGh.Triaged, ["repository"] = FakeGh.Repository, ["contentHash"] = hash, ["disposition"] = "security" };
 
@@ -348,9 +377,9 @@ public sealed class SecurityReportTests
         RecordEnvelope elsewhere = f.Records.Add("observation", Body(wrongRepository), subject: f.Resource.Reference);
         EstateModel model = f.Records.Estate.Load();
         string[] Codes(RecordEnvelope record) => model.Findings.Where(x => x.Location.Contains(record.Id, StringComparison.Ordinal)).Select(x => x.Code).ToArray();
-        Assert.Contains("triage.author", Codes(builder));
-        Assert.Contains("triage.facts", Codes(copied));
-        Assert.Contains("triage.subject", Codes(elsewhere));
+        Assert.Contains("security-triage.author", Codes(builder));
+        Assert.Contains("security-triage.facts", Codes(copied));
+        Assert.Contains("security-triage.subject", Codes(elsewhere));
         // An agent's triage never clears the hold, even before the estate check refuses it.
         Assert.Contains(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Code == "release.security-report" && o.Message.Contains(FakeGh.Triaged, StringComparison.Ordinal));
     }

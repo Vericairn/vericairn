@@ -507,6 +507,13 @@ public sealed record ReleaseSubmitRequest(string Product, string Version, string
 
     /// <summary>Exact published release of this product carried across from another line.</summary>
     public ReleaseBackportReference? BackportOf { get; init; }
+
+    /// <summary>
+    /// When true, declared security reports are not read for this request: a declaration alone answers with the single held
+    /// objection that names nothing. The MCP server sets it for every connection that does not act as the operator. It can only
+    /// narrow what a caller learns, never widen it.
+    /// </summary>
+    public bool SecurityReportsUnread { get; init; }
 }
 
 /// <summary>An exact release revision carried across from another line.</summary>

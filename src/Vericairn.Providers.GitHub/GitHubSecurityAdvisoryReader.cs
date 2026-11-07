@@ -26,10 +26,25 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
     /// <summary>The fewest core requests a read leaves for the person's own use, whatever the limit.</summary>
     internal const int MinimumReserve = 100;
 
+    /// <summary>Advisories asked for in one page.</summary>
+    internal const int PageSize = 100;
+
+    /// <summary>The most pages one read follows: 3,000 advisories, beyond which the listing is refused as too large to be complete.</summary>
+    internal const int MaxPages = 30;
+
+    /// <summary>The most characters one page's response may hold, headers included; a larger one fails rather than being truncated.</summary>
+    internal const int PageCharacters = 16 * 1024 * 1024;
+
+    /// <summary>The most characters all of one read's pages may hold together.</summary>
+    internal const long ListingCharacters = 96L * 1024 * 1024;
+
+    /// <summary>The classic token scopes that let a login see a repository's draft and private advisories.</summary>
+    internal static readonly string[] AdvisoryScopes = ["repo", "repository_advisories:read", "repository_advisories:write"];
+
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 
-    /// <summary>Each gh invocation has a one-minute deadline and bounded output.</summary>
-    public GitHubSecurityAdvisoryReader() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(1))) { }
+    /// <summary>Each gh invocation has a one-minute deadline and reads at most one page's bounded output.</summary>
+    public GitHubSecurityAdvisoryReader() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(1), PageCharacters)) { }
 
     internal GitHubSecurityAdvisoryReader(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
 
@@ -39,8 +54,8 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new("github-security-advisories-gh", ISecurityAdvisoryReader.Contract, "implemented", ["read"],
         ["Reads with the operator's own gh login, read-only; Vericairn never sees or stores the token, and posts nothing.",
-         "Drafts and private reports are visible only to a repository's administrators, so a login without administrator permission is refused rather than reported as complete.",
-         "Reads only while GitHub's core rate allowance keeps at least a fifth of its limit, and at least 100 requests, for the person's own use; each read costs one repository request and one per page of 100 advisories.",
+         "Drafts and private reports are visible only to a repository's administrators through a token that carries the repo or repository_advisories:read scope, so another login, or a token whose scopes cannot be confirmed (a fine-grained or app token), is refused rather than reported as complete.",
+         "Reads only while GitHub's core rate allowance keeps at least a fifth of its limit, and at least 100 requests, for the person's own use; each read costs one repository request and one per page of 100 advisories, at most 30 pages.",
          "Keeps each advisory's identifier, state, severity and response hash only, never its text; the estate's App replaces this reader once it exists."],
         Locations: ["github"]);
 
@@ -50,8 +65,8 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
         // A dot segment would let the API path name another endpoint; GitHub has no repository named so.
         if (repository is null || !Patterns.GitHubRepository.IsMatch(repository) || repository.Split('/')[1] is "." or "..")
             throw new ProviderRefusedException("The repository must be a GitHub owner/name.");
-        CheckAllowance();
-        using (JsonDocument described = Json(Invoke("api", "repos/" + repository)))
+        long reserve = CheckLogin();
+        using (JsonDocument described = Json(Body(Invoke("api", "repos/" + repository)).Body))
         {
             JsonElement root = described.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !string.Equals(Text(root, "full_name"), repository, StringComparison.OrdinalIgnoreCase))
@@ -61,20 +76,34 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
                 throw new ProviderRefusedException($"The gh login is not an administrator of {repository}, so its drafts and private reports are invisible to it; log in with gh auth login as an administrator, then read again.");
         }
 
-        using JsonDocument pages = Json(Invoke("api", $"repos/{repository}/security-advisories?per_page=100", "--paginate", "--slurp"));
-        if (pages.RootElement.ValueKind != JsonValueKind.Array)
-            throw new ProviderRefusedException("GitHub's advisory listing was incomplete; no listing is reported.");
+        // Each page is read and bounded on its own and followed by its cursor, so one large report cannot overflow the rest.
         var advisories = new Dictionary<string, SecurityAdvisory>(StringComparer.Ordinal);
-        foreach (JsonElement page in pages.RootElement.EnumerateArray())
+        long characters = 0;
+        string? after = null;
+        for (int page = 1; ; page++)
         {
-            if (page.ValueKind != JsonValueKind.Array) throw new ProviderRefusedException("GitHub's advisory listing was incomplete; no listing is reported.");
-            foreach (JsonElement item in page.EnumerateArray())
+            if (page > MaxPages)
+                throw new ProviderRefusedException($"{repository} lists more than {MaxPages * PageSize} advisories, more than one read follows, so no listing is reported.");
+            ProcessResult result = Invoke("api", "-i", $"repos/{repository}/security-advisories?per_page={PageSize}" + (after is null ? string.Empty : "&after=" + after));
+            characters += result.StandardOutput.Length;
+            if (characters > ListingCharacters)
+                throw new ProviderRefusedException($"{repository}'s advisories are larger than one read holds, so no listing is reported.");
+            (Dictionary<string, string> headers, string body) = Body(result);
+            using JsonDocument listed = Json(body);
+            if (listed.RootElement.ValueKind != JsonValueKind.Array)
+                throw new ProviderRefusedException("A page of GitHub's advisory listing was not a list; no listing is reported.");
+            foreach (JsonElement item in listed.RootElement.EnumerateArray())
             {
                 SecurityAdvisory advisory = Advisory(item);
                 if (advisories.TryGetValue(advisory.Identifier, out SecurityAdvisory? seen) && seen != advisory)
                     throw new ProviderRefusedException("An advisory changed while the listing was read; read again.");
                 advisories[advisory.Identifier] = advisory;
             }
+
+            after = Next(headers);
+            if (after is null) break;
+            if (headers.TryGetValue("x-ratelimit-remaining", out string? left) && long.TryParse(left, NumberStyles.None, CultureInfo.InvariantCulture, out long remaining) && remaining <= reserve)
+                throw new ProviderRefusedException("GitHub's rate allowance reached the share kept for the person's own use before the listing ended, so no listing is reported; read again after it resets.");
         }
 
         return new(repository, advisories.Values.OrderBy(a => a.Identifier, StringComparer.Ordinal).ToArray());
@@ -95,9 +124,17 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
         return advisory;
     }
 
-    private void CheckAllowance()
+    // The token behind the gh login must carry a scope that shows drafts and private reports, and the core allowance must keep its
+    // share; the answer is the number of requests a read leaves untouched.
+    private long CheckLogin()
     {
-        using JsonDocument limits = Json(Invoke("api", "rate_limit"));
+        (Dictionary<string, string> headers, string body) = Body(Invoke("api", "-i", "rate_limit"));
+        if (!headers.TryGetValue("x-oauth-scopes", out string? granted))
+            throw new ProviderRefusedException("The gh login's token scopes cannot be confirmed, as with a fine-grained or app token, including one in GH_TOKEN or GITHUB_TOKEN; log in with gh auth login, whose token carries the repo scope, or use a classic token with repo or repository_advisories:read, then read again.");
+        string[] scopes = [.. granted.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
+        if (!scopes.Any(scope => AdvisoryScopes.Contains(scope, StringComparer.Ordinal)))
+            throw new ProviderRefusedException("The gh login's token carries neither the repo nor the repository_advisories:read scope, so drafts and private reports are invisible to it; run gh auth refresh --scopes repo, or log in with gh auth login, then read again.");
+        using JsonDocument limits = Json(body);
         if (!limits.RootElement.TryGetProperty("resources", out JsonElement resources) || resources.ValueKind != JsonValueKind.Object
             || !resources.TryGetProperty("core", out JsonElement core) || core.ValueKind != JsonValueKind.Object
             || !core.TryGetProperty("limit", out JsonElement limitValue) || !limitValue.TryGetInt64(out long limit) || limit <= 0
@@ -110,6 +147,26 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
                 ? " after " + DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) : " after it resets";
             throw new ProviderRefusedException($"GitHub's rate allowance is within the share kept for the person's own use ({remaining} of {limit} left), so no read was started; read again{reset}.");
         }
+
+        return reserve;
+    }
+
+    // The next page's cursor from a Link header, or null on the last page. A next page named any other way fails closed.
+    private static string? Next(Dictionary<string, string> headers)
+    {
+        if (!headers.TryGetValue("link", out string? link)) return null;
+        foreach (string part in link.Split(','))
+        {
+            int open = part.IndexOf('<', StringComparison.Ordinal), close = part.IndexOf('>', StringComparison.Ordinal);
+            if (open < 0 || close < open || !part[(close + 1)..].Contains("rel=\"next\"", StringComparison.Ordinal)) continue;
+            if (!Uri.TryCreate(part[(open + 1)..close], UriKind.Absolute, out Uri? next))
+                throw new ProviderRefusedException("GitHub named its next page unreadably; no listing is reported.");
+            string? cursor = next.Query.TrimStart('?').Split('&').Where(p => p.StartsWith("after=", StringComparison.Ordinal)).Select(p => p[6..]).SingleOrDefault();
+            if (cursor is null || cursor.Length is 0 or > 512 || !cursor.All(c => char.IsAsciiLetterOrDigit(c) || c is '%' or '.' or '_' or '~' or '+' or '/' or '=' or '-'))
+                throw new ProviderRefusedException("GitHub named its next page without a cursor this reader follows; no listing is reported.");
+            return cursor;
+        }
+        return null;
     }
 
     private ProcessResult Invoke(params string[] arguments)
@@ -121,10 +178,12 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
     }
 
     // GitHub's and gh's diagnostics are classified, never repeated: they may carry text from outside the estate.
-    private static JsonDocument Json(ProcessResult result)
+    private static (Dictionary<string, string> Headers, string Body) Body(ProcessResult result)
     {
         if (!result.Started || result.Outcome == ProcessOutcome.NotStarted)
             throw new ProviderRefusedException("The GitHub CLI could not be started; install gh and log in as an administrator of the repository.");
+        if (result.Outcome == ProcessOutcome.OutputLimitExceeded)
+            throw new ProviderRefusedException("A page of GitHub's answer was larger than one page may be, so no listing is reported.");
         if (result.Outcome != ProcessOutcome.Exited)
             throw new ProviderRefusedException($"The GitHub CLI {result.Description}; GitHub could not be read completely.");
         if (result.ExitCode == 4)
@@ -139,7 +198,25 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
             throw new ProviderRefusedException("GitHub could not be read completely; check the network and the gh login, then read again.");
         }
 
-        try { return JsonDocument.Parse(result.StandardOutput); }
+        string output = result.StandardOutput;
+        if (!output.StartsWith("HTTP/", StringComparison.Ordinal)) return ([], output);
+        int split = output.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        int skip = 4;
+        if (split < 0) { split = output.IndexOf("\n\n", StringComparison.Ordinal); skip = 2; }
+        if (split < 0) throw new ProviderRefusedException("GitHub returned an unreadable response; no listing is reported.");
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string line in output[..split].Split('\n').Skip(1))
+        {
+            int colon = line.IndexOf(':', StringComparison.Ordinal);
+            if (colon > 0) headers[line[..colon].Trim()] = line[(colon + 1)..].Trim();
+        }
+
+        return (headers, output[(split + skip)..]);
+    }
+
+    private static JsonDocument Json(string body)
+    {
+        try { return JsonDocument.Parse(body); }
         catch (JsonException) { throw new ProviderRefusedException("GitHub returned an unreadable response; no listing is reported."); }
     }
 

@@ -61,7 +61,7 @@ public class PolicyGoldenFixtureTests
         });
         lines.Add("observation", new JsonObject
         {
-            ["kind"] = "triage", ["asOf"] = "2026-11-02T03:00:00Z", ["summary"] = "The operator triaged a fixture advisory.",
+            ["kind"] = "security-triage", ["asOf"] = "2026-11-02T03:00:00Z", ["summary"] = "The operator triaged a fixture advisory.",
             ["facts"] = new JsonObject { ["advisory"] = "GHSA-2c4m-9q7r-hx3v", ["repository"] = "Example/advisories", ["contentHash"] = "sha256:" + new string('d', 64), ["disposition"] = "no-action", ["reason"] = "Fixture reason." },
             ["limitations"] = new JsonArray(),
         }, subject: advisories.Reference);

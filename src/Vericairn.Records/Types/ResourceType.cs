@@ -56,10 +56,21 @@ public sealed class ResourceType : IRecordType
             }
         }
 
-        // A repository's location is where checked changes push and merge; only the operator or an administer grant moves it.
-        if (context.Record.Format >= 3 && context.Record.Supersedes is not null && Estate.EstateModel.BodyString(context.Record, "kind") == "repository"
-            && ProductType.Changed(context, "location") && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
-            context.Error("resource.location-author", "A repository resource's location is changed only by the operator or a principal with the 'administer' scope.");
+        // A repository's location is where checked changes push and merge and where security reports are read; only the operator or
+        // an administer grant moves it or turns a resource into, or out of, a repository, and only the operator when a product's
+        // security-reports declaration names it, since that would move or lift a release hold.
+        if (context.Record.Format >= 3 && context.Record.Supersedes is not null
+            && (Estate.EstateModel.BodyString(context.Record, "kind") == "repository" || context.Find(context.Record.Supersedes) is { } previous && Estate.EstateModel.BodyString(previous, "kind") == "repository")
+            && (ProductType.Changed(context, "location") || ProductType.Changed(context, "kind")))
+        {
+            if (SecurityReportRules.Declares(context.Model, context.Model.Chain(context.Model.Latest(context.Record))))
+            {
+                if (!context.HasRole(context.Record.By, Roles.Operator))
+                    context.Error("resource.security-reports-author", "A repository resource that a product's security-reports declaration names changes its kind or location only by the operator.");
+            }
+            else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
+                context.Error("resource.location-author", "A repository resource's kind or location is changed only by the operator or a principal with the 'administer' scope.");
+        }
 
         body.Enum("visibility", true, "public", "private", "n/a");
         body.Text("notes", false, 4000);
