@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
@@ -9,6 +10,7 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Store;
+using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -158,6 +160,60 @@ internal sealed class EstateOperations(CommandContext context)
 
         return Clean;
     });
+
+    /// <summary>
+    /// Rebuilds this clone's derived cache from the repository's record files (FIX-93). A daemon that answers, at any API version,
+    /// refuses it; the runtime's writer lock refuses it while another command has the estate open; a local-only estate is refused.
+    /// </summary>
+    public int CacheRebuild(string root, bool json)
+    {
+        if (!IsEstate(root))
+        {
+            return context.Fail(NotAnEstate(root));
+        }
+
+        try
+        {
+            if (DaemonHost.Discover(root) is { } endpoint && Answers(endpoint))
+            {
+                return context.Fail($"Daemon {endpoint.ProcessId} serves this estate, so its cache is in use. Stop it with 'vericairn runtime stop', then rebuild. Nothing was moved.");
+            }
+
+            LiveStoreRebuilt rebuilt = LiveStoreRecovery.Rebuild(root);
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(new { estate = rebuilt.Estate, cache = rebuilt.Cache, records = rebuilt.Records, retained = rebuilt.Retained, retainedFiles = rebuilt.RetainedFiles }));
+                return Clean;
+            }
+
+            context.Output.WriteLine($"rebuilt the derived cache from {rebuilt.Records} record files: {rebuilt.Cache}");
+            context.Output.WriteLine(rebuilt.Retained is null
+                ? "  no earlier cache was present"
+                : $"  kept the earlier cache for diagnosis, unchanged: {rebuilt.Retained} ({string.Join(", ", rebuilt.RetainedFiles)})");
+            context.Output.WriteLine("Notes kept only on this machine in the earlier cache stay in the kept files. Check the estate with 'vericairn estate check'.");
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
+    }
+
+    // Any answer means a daemon owns the estate's live state, whatever its API version.
+    private bool Answers(DaemonEndpoint endpoint)
+    {
+        try
+        {
+            using var client = new VericairnClient(endpoint);
+            _ = client.HealthAsync(context.CancellationToken).GetAwaiter().GetResult();
+            return true;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or System.Net.Sockets.SocketException or JsonException or UnauthorizedAccessException
+            or ClientUnavailableException or ClientTimeoutException)
+        {
+            return false;
+        }
+    }
 
     public int Restore(string from, string to, bool json)
     {

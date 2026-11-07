@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class WorkReviewCommand : Command
 {
     public WorkReviewCommand(CommandContext context)
-        : base("review", "Review an exact result with its evidence read, signed as the acting principal; records no acceptance.")
+        : base("review", "Review an exact result with its evidence read, signed as the acting principal; records no acceptance. It always needs --expected and an admitted device whose key this runtime holds. A result with duties is reviewed this way or with records new review --expected; a review of a result without duties can be recorded with records new review, which needs neither.")
     {
         var operations = new WorkOperations(context);
         var result = new Argument<string>("result") { Description = "Exact current result id." };

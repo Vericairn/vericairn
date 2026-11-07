@@ -12,8 +12,21 @@ public interface IRecordCommitAdapter
     /// <summary>Require the estate itself to be a clean repository root with a named branch and complete history.</summary>
     RecordCommitBasis Prepare(string directory);
 
+    /// <summary>
+    /// As <see cref="Prepare(string)"/>, tolerating only the named untracked receipts: those of the earlier action the runtime finished from
+    /// its records. An adapter that does not override this tolerates none of them.
+    /// </summary>
+    RecordCommitBasis Prepare(string directory, IReadOnlySet<string> receipts) => Prepare(directory);
+
     /// <summary>Create the branch at the pinned base with only the prepared record and members present, or recognize that branch after interruption; never switch away from unrelated work.</summary>
     void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files);
+
+    /// <summary>
+    /// As <see cref="Branch(string, RecordCommitBasis, string, IReadOnlyDictionary{string, string})"/>, also tolerating the named untracked
+    /// receipts. An adapter that does not override this tolerates none of them.
+    /// </summary>
+    void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts) =>
+        Branch(directory, basis, branch, files);
 
     /// <summary>Commit exactly the record and generated members named by path and byte hash, or recognize their existing commit after a lost receipt. Other changes refuse.</summary>
     string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts);
