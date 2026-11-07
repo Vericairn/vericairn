@@ -199,6 +199,8 @@ public static class EstateLoader
 
             ValidateSubject(model, record, type, findings);
             type.Validate(new ValidationContext(model, record, findings));
+            // Existing records keep their reading. The write boundary promotes this finding only for proposed records.
+            if (RecordAuthorship.Unresolved(model, record) is Finding author) findings.Add(author);
         }
 
         // The manifest is read before the signatures are checked, because which unsigned admissions count depends on the estate's

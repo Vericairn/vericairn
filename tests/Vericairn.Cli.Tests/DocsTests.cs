@@ -7,6 +7,7 @@ using System.CommandLine.Help;
 using Vericairn.Cli;
 using Vericairn.DocsTool;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Cli.Tests;
@@ -525,7 +526,9 @@ public class DocsTests
         string scratch = CliHarness.TempDirectory("notes-window-scratch");
         try
         {
-            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Release notes.", "--operator-name", "Operator", "--organization", "Example", "--commit", "0123456789abcdef0123456789abcdef01234567").Json.GetProperty("operator").GetString()!;
+            // The history below is dated before today, so the operator and charter are recorded before it (FIX-98).
+            string op = EstateInitializer.Initialize(root, new EstateInitialization("Example", "example", "Release notes.", "Operator", "Example", null, "Vericairn/vericairn",
+                "0123456789abcdef0123456789abcdef01234567", new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero))).Operator.Id;
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
 
             // The 0.1.0 notes were made at 00:30, before its build; W-1 was recorded after them and before the 0.1.0 publication at 01:02.

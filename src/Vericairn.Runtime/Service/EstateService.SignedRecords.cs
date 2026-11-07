@@ -58,6 +58,8 @@ public sealed partial class EstateService
             if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
                 record.Envelope.At, record.RelativePath) is { } timeProblem)
                 return new(false, Problem: timeProblem);
+            if (RecordAuthorship.Unresolved(model, record.Envelope) is { } author)
+                return new(false, Problem: new("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
             draft = draft with { At = record.Envelope.AtTime };
 
             foreach ((string id, PreparedRecord lapsed) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray()) preparedRecords.TryRemove(id, out _);
