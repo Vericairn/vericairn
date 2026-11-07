@@ -20,7 +20,7 @@ public static class OperatorRequests
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(request);
         IReadOnlyList<string> chain = model.Chain(request);
-        return model.Records.Where(r => r.Subject is { Type: "operator-request" } subject && chain.Contains(subject.Id) &&
+        return model.CountingRecords.Where(r => r.Subject is { Type: "operator-request" } subject && chain.Contains(subject.Id) &&
             (r.Type == "operator-request-close" || r.Type == "observation" && EstateModel.BodyString(r, "kind") == "operator-request"));
     }
 

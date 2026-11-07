@@ -123,7 +123,26 @@ public sealed class EstateSession : IDisposable
     // Submission checks read the canonical source without refreshing or touching the live cache.
     internal IReadOnlyList<RecordFile> ReadFiles() => Profile == "repository-synced" ? EstateLoader.EnumerateRecordFiles(Root) : Live.Files();
 
-    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles());
+    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles(), ObjectReader);
+
+    /// <summary>
+    /// The estate's objects by content hash, for reading history checkpoint inventories: null when an object is absent, unreadable or not
+    /// the bytes its hash names.
+    /// </summary>
+    internal Func<string, byte[]?> ObjectReader => hash =>
+    {
+        try
+        {
+            return Objects.Read(hash);
+        }
+        catch (Exception exception) when (exception is ObjectCorruptedException or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return null;
+        }
+    };
+
+    /// <summary>Loads and validates a given set of this estate's record files, with its objects.</summary>
+    internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, ObjectReader);
 
     /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
@@ -140,7 +159,7 @@ public sealed class EstateSession : IDisposable
             parseCache.Retain(files.ByPath);
             loadedFiles = files;
         }
-        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache);
+        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         return model;
     }

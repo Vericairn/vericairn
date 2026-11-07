@@ -295,3 +295,45 @@ beside the live store, and the key that names subjects that are not records in `
 owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
+
+## History checkpoints (ID-05)
+
+No route, interface member of `IEstateApi` or protocol type is added or removed. Record format remains 3; it gains the record
+type `history-checkpoint` ([record format 3](record-format-v3.md#history-checkpoints-092)), which `records describe`,
+`records new` and the readable companions cover. An earlier format-3 reader reports it as `record.unknown-type`. The generic
+record reader's implementation identity is unchanged: no existing rendition changes.
+
+The canonical status JSON (`status --json`, `GET /v1/status`, the `estate_status` tool) adds a `history` member:
+`{adopted, heads: [{id, hash}], witnessed, tail, problems: [{code, location, message}]}`. Its bytes, and so a new estate
+observation's `statusHash`, change for every estate; observations already recorded keep their facts. The text status lists
+standing history problems first. `estate check` (`GET /v1/check`) adds the check-time warning `history.deleted-in-git`, or
+information when the clone is shallow; the canonical status does not include it. The command line adds `estate check
+--expect <checkpoint>`, evaluated by the client against `Records("history-checkpoint")` and `Record(id)`, and the estate
+bootstrap scripts accept `--expect <checkpoint>` before their other arguments.
+
+`NewRecord` (`POST /v1/records`, `records new`) refuses `at` and `id` for a history checkpoint, and every write surface,
+a device-prepared record included, refuses a checkpoint that does not follow exactly the copy's heads, list exactly the
+records no head witnesses in objects held here, and state their count and set hash, or that anchors a record not present
+unsigned with that hash or acknowledges the removal of a record that is not witnessed and absent. New findings, each an
+error unless stated: `history.removed`, `history.altered`, `history.checkpoint-missing`, `history.checkpoint-invalid`,
+`history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`, `record.subject-not-counting` and
+`record.reference-not-counting`; `history.deleted-in-git` is a warning and `history.expected` information.
+`signature.required` now also reports an unsigned history checkpoint or device revision.
+
+What counts changes in every estate, without a format step. `EstateModel.OfType`, `Current`, `About`, `IsCurrent`,
+`Latest`, `SupersededBy`, `CurrentPrincipal`, `RolesOf`, `HasRole` and `HasScope` read only records that count;
+`Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
+policy refuses (after adoption, any unanchored unsigned record under required signatures), an unsigned policy record,
+checkpoint or device revision, or a witnessed record present with another hash. `SignatureChecks.Anchored` includes anchoring checkpoints'
+anchors; a device revision changes the device's key or name only when its device signed it. A policy basis
+holds only records that count, and its recorded time is the greatest `at` among them. An estate without checkpoints and
+without signature errors, such as the first-party estate, reads as before.
+
+`Vericairn.Records` adds, each additively: the namespace `Vericairn.Records.History` with `HistoryInventory`,
+`InventoryEntry`, `InventoryObject`, `RecordSets`, `HistoryState`, `CheckpointDraft` and `SignedHistory` (`Of`,
+`Adopted`, `Prepare`, `AuthoringRefusal`, `Expect`); `Types.HistoryCheckpointType`;
+`EstateModel.CountingRecords` and `EstateModel.Counts`; `EstateLoader.Load(string, IReadOnlyList<RecordFile>,
+Func<string, byte[]?>)`, which reads checkpoint inventories through the given object reader, and `EstateLoader.FileObjects`;
+and `EstateStatus.HistoryProblems` and `EstateStatus.HistoryJson`. `Vericairn.Runtime` adds the default interface member
+`ISourceAdapter.DeletedRecordFiles(string)` with the records `RecordDeletion` and `RecordDeletions`, implemented by the git
+adapter; existing implementations compile unchanged and report the warning unavailable by returning null.

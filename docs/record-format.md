@@ -16,8 +16,8 @@ artifact contracts and are not additional record formats.
 A record keeps the format in its own envelope, its original bytes, hash and
 signatures. Format-2 rules extend format 1, and format-3 rules extend format 2.
 The admission rule is estate-wide: at format 2 or 3 an admission or revocation
-counts only when signed or anchored by the signed move to format 2, whatever
-format or date that admission claims. Policy and writing changes and duty
+counts only when signed or anchored by the signed move to format 2, or from 0.9.2
+by an anchoring history checkpoint, whatever format or date that admission claims. Policy and writing changes and duty
 results/reviews have additional signature and exact-approval requirements.
 
 After the target's accepted publication is recorded, an upgrade from 0.7.3
@@ -157,6 +157,39 @@ the charter's signature policy (`signature.required`), as a policy reconciliatio
 supersede its subject keeps its earlier meaning. `operation.duplicate-identity` is now listed among the reconcile
 tasks that `status` and `estate reconcile` show. The rule adds no field and no format number; an earlier release
 reads such a reconciliation as an error and the withdrawn operations as current.
+
+## History checkpoints (0.9.2)
+
+From 0.9.2 an estate can hold signed `history-checkpoint` records, a type within
+record format 3 ([contract](record-format-v3.md#history-checkpoints-092)). Each lists,
+by path and hash in inventory objects, the records it first witnesses and names the
+checkpoints it follows. What a counting checkpoint witnesses cannot be removed or
+altered unnoticed: on any copy, an absent witnessed record is `history.removed`, one
+with another hash is `history.altered` and a missing checkpoint or inventory object is
+`history.checkpoint-missing`, each an error that leads `status` and holds release
+submission until the bytes are restored or the root operator or a person holding
+`administer` acknowledges the removal.
+
+An estate that holds a counting checkpoint has adopted checkpoints. While its charter
+requires signatures, an unsigned record there counts only when an anchoring checkpoint
+of the root operator or a person holding `administer` lists its exact id and hash,
+whatever date it states; an agent never anchors. An estate that has not adopted keeps
+the earlier boundary: an unsigned record dated at or before the current required
+charter revision counts. The first-party estate holds no checkpoint, so its reading
+is unchanged until it adopts.
+
+In every estate from 0.9.2, a record that does not count, such as an unsigned record
+refused by the signature policy or an altered witnessed record, is reported and kept as evidence, and no rule that admits,
+authorizes, accepts, clears or holds reads it. Format 2 already read admissions this
+way; 0.9.2 reads every type this way. An unsigned device revision changes no key
+or name.
+
+Canonical status adds `history`: whether the estate has adopted checkpoints, its heads
+by id and hash, how many records they witness, the unwitnessed tail and the standing
+problems, identical on every copy with the same records and objects. `estate check
+--expect <checkpoint>` refuses a copy that lacks a checkpoint known elsewhere, and
+warns `history.deleted-in-git` for unwitnessed record files deleted in the clone's
+history ([CLI](cli.md#vericairn-estate-check---expect-092)).
 
 ## Published Vericairn dependency observations (0.8.3)
 

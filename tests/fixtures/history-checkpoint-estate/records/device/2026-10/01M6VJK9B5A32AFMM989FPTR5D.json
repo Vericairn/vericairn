@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-13T12:00:08Z",
+  "body": {
+    "algorithm": "ecdsa-p256-sha256",
+    "custody": "file-owner-only",
+    "name": "Second build machine",
+    "platform": "linux",
+    "presence": "none",
+    "principal": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+    "profiles": [
+      "embedded"
+    ],
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEy-B8SypL6zdrHuDuRni5kP0ZLNmGA8uieQ4O3WryjwMQbcRXODgtoKAsabdE9a1y9OZaUNe6DVZl1NcezSklyQ",
+    "purpose": "signing"
+  },
+  "by": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+  "format": "vericairn.record/3",
+  "hash": "sha256:ff65357ca7ee1797ae3c8067fd6adaba8c9df1caf381011cd97cbc8a378dd514",
+  "id": "01M6VJK9B5A32AFMM989FPTR5D",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9B5A32AFMM989FPTR5D",
+      "signature": "5TWBPmLMNVE42Wsa965_me__84dAZGgmnaxe2hrYRwf6GOtws6dbYuP77YtVezsA54m5hXFajuegH7_BGfcUHw"
+    }
+  ],
+  "type": "device"
+}

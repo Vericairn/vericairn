@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-13T12:00:02Z",
+  "body": {
+    "name": "Test Estate",
+    "operator": "01M6VJK9ARK66V397R6Q8F9HQM",
+    "policies": {
+      "releaseAcceptance": [
+        "operator"
+      ],
+      "signatures": "optional"
+    },
+    "purpose": "Exercise the record format.",
+    "recordFormat": 3,
+    "slug": "test-estate"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:abc7f2945196444c165bea62ef12d7d954ad0cbedab47269f1f361499ca92d75",
+  "id": "01M6VJK9AXWT4A4435HK5BR4SP",
+  "type": "estate"
+}

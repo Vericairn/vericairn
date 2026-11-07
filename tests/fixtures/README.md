@@ -16,3 +16,11 @@ READ-01 adds a signed pattern living-document declaration. `PolicyGoldenFixtureW
 synthetic fixture with fresh in-memory test keys, rebinds exact references and approved definition hashes,
 validates the complete result and writes a new inventory. This refresh changes fixture signatures and public
 keys; it retains no private keys and touches neither the format-1 fixture nor frozen release documentation.
+
+`history-checkpoint-estate/` is a synthetic format-3 estate for history checkpoints (ID-05): an adoption checkpoint
+by the root operator that anchors the estate's unsigned records, an agent's interval checkpoint, a closing checkpoint
+that acknowledges a removed record, and a last checkpoint after the revocation that closing names. Its inventory
+objects are under `objects/`. Its devices were made in a disposable key store; only public keys and signatures are
+retained. `inventory.sha256` pins every byte. `HistoryGoldenFixtureTests` validates it, requires every field of the
+type and round-trips every record; setting `VERICAIRN_WRITE_HISTORY_FIXTURE` to a new directory regenerates it there
+with fresh keys.
