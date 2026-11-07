@@ -524,7 +524,7 @@ NuGet Trusted Publishing uploads exactly the package assets the operator publish
 
 From 0.8.2, the tool package carries both `DotnetTool` and `McpServer` package types for
 [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
-Its embedded `.mcp/server.json` describes `io.github.vericairn/vericairn` for the
+Its embedded `.mcp/server.json` describes `io.github.Vericairn/vericairn` for the
 [official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
 package publication; from 0.9.2 the registry listing follows the release's publication through
 the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)). These are publication targets,

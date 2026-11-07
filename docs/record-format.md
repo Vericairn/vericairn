@@ -120,6 +120,29 @@ stays valid. A reference outside the repository goes in the result's `evidence`,
 URL; an output held elsewhere is named by its hash and bytes without a `location`. Rooted paths,
 backslashes and `..` remain errors (`result.output-path`), as before.
 
+## Record authors (0.9.2)
+
+An envelope's `by` names the authoring principal by its id, the id of that principal's first
+record. From 0.9.2, a new record's `by` names a `principal` record the estate holds when the record is
+written, whatever time the record's `at` states. The rule is prospective, as 0.9.1's rule for decision
+times is: it adds no field and no format number, and it binds the records written by a runtime that has
+it. Such a runtime refuses a new record whose `by` names no record or names a record of another type,
+such as the estate charter or a work order (`record.author`, an error), in every record format and at
+every write surface. The root operator's own principal record names itself and is its own author. A
+record already in the estate keeps its reading, whether historical, superseded or imported: `estate
+check` and `records validate` report each unresolved author as information, and no record is rewritten.
+
+What an unsigned `by` establishes is limited. Without a signature, `by` is the author's claim. From
+0.9.2 it names a principal the estate holds, but it does not establish that this principal wrote the
+record, nor that the principal was recorded by the time the record's `at` states: anyone able to add
+records to a copy of the estate can write any principal's id and any time. Records that carry authority,
+such as acceptances, admissions, authority grants and principal records, also check the claimed author's
+roles and scopes, so a claimed author holds only what that principal holds; that check reads the claim
+and does not authenticate it. Authorship is authenticated only by a signature from a device admitted for
+that principal at the record's time. A charter with `policies.signatures: required` makes that signature
+mandatory for every record dated after the current charter revision, so a copy without an admitted
+device key is read-only. The author rule changes no admission, policy or signature check.
+
 ## Settling operations that share an identity (0.9.2)
 
 From 0.9.2, a `reconciliation` also settles operations recorded independently under one identity, such as two
