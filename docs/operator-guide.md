@@ -776,6 +776,8 @@ the unreadable journal's write hold. This is local recovery state, not a new rec
 
 Objects are content-addressed bytes beside the records: `objects put <file>`, `objects list`, `objects verify` reads every object and checks its bytes against its name.
 
+An object holds at most 8 MiB (8,388,608 bytes), and an export carries nothing held outside the estate repository. From 0.9.2, [Large private artifacts](large-artifacts.md) shows how to keep a private artifact above that limit in a private store with exact-byte custody, using existing records, and how to prove a cold recovery by reading its bytes back.
+
 ### A damaged live store (0.9.2)
 
 Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
