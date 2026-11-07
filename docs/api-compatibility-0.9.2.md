@@ -176,3 +176,30 @@ it with HTTP 409 on `WriteOutcome` routes, and a composite response carries it a
 same lock in `write-lock/` beside that store. Read-only sessions take no lock. The lock is separate from FIX-93's
 per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
 record. No record type, record format or generated document changes.
+
+## The event journal and the API stream (WATCH-05)
+
+`IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts
+`EventsAsync` and `EventGetAsync`; each has a default implementation, so existing implementers stay source-compatible, and
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. `Events` has a one-minute deadline, since a long
+poll waits up to 25 seconds. The daemon adds `GET /v1/events`, which answers with server-sent events when the request accepts
+`text/event-stream` and otherwise as a long poll, and `GET /v1/events/{key}`; both are reads, with a request scope and no
+write ledger. The protocol adds `EventEnvelope` (format `vericairn.event/1`), `EventReference`, `EventFilter`,
+`EventsResponse`, `EventStreamItem` and `EventVocabulary`; the OpenAPI document adds the two routes and the schemas
+`EventEnvelope`, `EventReference` and `EventsResponse`. The SDK adds `VericairnClient.StreamEventsAsync` and
+`WatchEventsAsync`, which return `IAsyncEnumerable<EventStreamItem>`. The command line adds `events watch`; no MCP tool or
+notification is added (`MCP-05` adds those).
+
+`StatusResponse`, `ProgressResponse`, `AttentionResponse`, `AsksResponse` and `GoalResponse` add the optional `EventsCursor`
+property, serialized as `eventsCursor` only when the runtime keeps a journal, which the daemon does and the embedded runtime
+does not. It sits beside the canonical JSON, which is unchanged, so the status document stays the same on every machine. These
+are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
+and `Json` instead. Older clients ignore the property and older servers omit it.
+
+`Vericairn.Runtime` adds `EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
+`EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
+principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
+`Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
+beside the live store, owner-only, and runs the derivation for as long as it serves. A state read through the daemon now
+also derives what that read shows and may write the journal; it writes no record. No record type, record format or
+generated document changes.

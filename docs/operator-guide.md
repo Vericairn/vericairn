@@ -827,6 +827,37 @@ From 0.8.0 loopback checks the signing time and the device's current admission b
 
 FIX-09 adds a shared limit of eight simultaneous loopback body reads awaiting signature verification across all devices, with no waiting queue; capacity refusal is `503`. Kestrel also limits concurrent connections to 32. These bounds limit resource use; they do not establish denial-of-service immunity.
 
+### Events (0.9.2)
+
+From 0.9.2 the daemon keeps an event journal (`WATCH-05`), so an agent, a script or a client hears what
+changed instead of polling. A record the runtime first observes, written through it or found after a pull,
+raises a `record` event, and a change in attention, an ask, a flow step, an operator request or a run raises
+an event of that kind. Each event is a hint, never authority: it names the subject by type, id and hash, the
+change, the principal concerned and an attention category, and never carries a body, title, path, secret or
+command. Read the subject before acting on it.
+
+```sh
+vericairn events watch --kind record --kind ask
+vericairn events watch --json --after <cursor>
+```
+
+`events watch` follows the stream over the local socket for the principal you name, the operator by default,
+and reconnects by itself. Start it before reading the state it complements, or resume from the
+`eventsCursor` that `GET /v1/status`, `/v1/progress`, `/v1/attention`, `/v1/asks` and `/v1/goals/{id}`
+return, and no change is missed. A `reset` line means the cursor could not be honored, for example a client
+back after more than a week or after a restore: re-read the state, then continue. The journal keeps at most
+seven days and 100,000 events in an owner-only file beside the live store; a clean restart keeps it, and a
+crash or a lost file starts a new epoch, after which every older cursor resets. The embedded runtime keeps
+no journal, so `events watch` needs a running daemon.
+
+A paired device reads events only for its own principal and with its own signature; a device stream ends
+after 60 minutes and reconnects. Each event passes the audience check before it is delivered: a principal's
+attention and its acknowledgments reach only that principal, and what a reader may not read is dropped
+without any count, error or timing that would show it. Revoking a device closes its streams before the next
+event. A device holds at most four streams, the runtime 16. A script that follows `events watch` and runs
+`goal step` acts with its own principal's authority and stays Community. See
+[API version 1](api-v1.md#the-event-stream-092).
+
 ## 12. Reading the estate
 
 `vericairn status` renders the work orders with their kinds and states, the releases, the assignments with their attempts and outcomes, the living documents that are due and why (section 16), and counts of decisions, document revisions, resources and verifications; record-derived state agrees for the same records. Living-document checks also read covered files and installed contributions, so those findings can differ by machine. `vericairn decisions` lists decisions; `records describe` explains any record type and marks the format that introduced each field; `records validate` parses and validates everything; `estate check` adds the repository checks, living documents due at `warn` or `refuse`, generated regions edited by hand, and records a recovery device signed that no operator has reviewed; `doctor` checks the machine. Through the API, `GET /v1/records?type=<type>` lists the current records of one type, which is how Workbench reads products, operations and reviews and how the MCP tool `records_list` answers an agent; `GET /v1/documents` lists the living documents.

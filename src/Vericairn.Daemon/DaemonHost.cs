@@ -53,6 +53,12 @@ public sealed record DaemonOptions
     /// further requests are refused rather than any remembered signature forgotten.
     /// </summary>
     public int ReplayCapacity { get; init; } = 10_000;
+
+    /// <summary>How often the event journal derives what time changed while a reader listens (0.9.2); tests shorten it.</summary>
+    internal TimeSpan EventTick { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>The most events the journal keeps; tests lower it to reach the bound.</summary>
+    internal int EventCapacity { get; init; } = 100_000;
 }
 
 /// <summary>
@@ -81,6 +87,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private readonly CancellationTokenSource schedule = new();
     private WebApplication? app;
     private Task? scheduled;
+    private Task? deriving;
     private Task? stopping;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
@@ -117,6 +124,15 @@ public sealed class DaemonHost : IAsyncDisposable
     internal RequestAuthenticator Authenticator { get; }
 
     internal TimeProvider Time { get; }
+
+    /// <summary>The event streams and long polls held now, by device and in all.</summary>
+    internal EventStreamSlots EventStreams { get; } = new();
+
+    /// <summary>Signalled when the daemon stops: event streams end, so stopping never waits on a client.</summary>
+    internal CancellationToken Stopping => schedule.Token;
+
+    /// <summary>A test's hook told when an event stream or long poll has opened and listens.</summary>
+    internal Action? EventStreamOpened { get; set; }
 
     /// <summary>A test's hook between device authentication and the operation's write, outside the estate's gate.</summary>
     internal Action? BeforeDeviceWrite { get; set; }
@@ -223,6 +239,18 @@ public sealed class DaemonHost : IAsyncDisposable
         }
 
         var host = new DaemonHost(service, file, directory, options, certificates, identity);
+        try
+        {
+            // The event journal is machine state beside the live store, in the directory just made owner-only.
+            service.EnableEvents(directory, host.Time, options.EventCapacity);
+        }
+        catch
+        {
+            certificates?.Dispose();
+            service.Dispose();
+            throw;
+        }
+
         // Always the production environment: what a development environment adds, such as stack traces in answers, never reaches a client.
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd", EnvironmentName = Environments.Production });
         builder.Logging.ClearProviders();
@@ -315,6 +343,7 @@ public sealed class DaemonHost : IAsyncDisposable
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
         ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
         DaemonRoutes.Map(routes, host);
+        EventRoutes.Map(routes, host);
         try
         {
             host.Authenticator.StartAccepting();
@@ -353,6 +382,7 @@ public sealed class DaemonHost : IAsyncDisposable
             host.scheduled = Task.Run(() => host.RunScheduleAsync(host.schedule.Token), CancellationToken.None);
         }
 
+        host.deriving = Task.Run(() => service.RunEventDerivationAsync(options.EventTick, host.Log, host.schedule.Token), CancellationToken.None);
         return host;
     }
 
@@ -734,6 +764,11 @@ public sealed class DaemonHost : IAsyncDisposable
             if (scheduled is not null)
             {
                 await scheduled.ConfigureAwait(false);
+            }
+
+            if (deriving is not null)
+            {
+                await deriving.ConfigureAwait(false);
             }
         }
         finally

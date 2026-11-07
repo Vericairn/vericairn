@@ -77,6 +77,86 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## The event stream (0.9.2)
+
+From 0.9.2 (`WATCH-05`) a client hears what changed instead of polling. The daemon keeps one bounded,
+ordered event journal per runtime, at most seven days and at most 100,000 events, as owner-only machine
+state beside the live store. A record this runtime observes first, written through it or found after a
+pull, raises a `record` event; a change in a derived state raises an `attention`, `ask`, `step`, `request`
+or `run` event. The runtime derives each consumed state again after a write, at most once a second, and on a
+clock tick of ten seconds while a reader listens, which finds time-based changes such as a step that falls
+due and overdue progress. `due` and `presence` are reserved for reminders and presence leases, which later
+releases raise. The embedded runtime keeps no journal: its event reads answer the problem `unavailable`.
+
+An event is a hint, never authority. Its envelope, `vericairn.event/1`, carries no body, title, summary,
+path, secret or command:
+
+| Field | Meaning |
+|---|---|
+| `format` | `vericairn.event/1` |
+| `key` | A hash of the kind, subject, exact sources, state and principal concerned: stable when the same change is derived again |
+| `cursor` | The opaque position after this event, sealed for the reader |
+| `kind`, `change` | `record` with `written` or `found`; a derived kind with `raised`, `changed`, `acknowledged` or `cleared` |
+| `at` | When this runtime observed the change |
+| `subject` | `type`, `id` and, for a record, `hash`; a subject that is not a record, such as a finding or a flow step, is named by an opaque `sha256:` digest |
+| `sources` | At most 16 records the change rests on, each by type, id and hash |
+| `to` | The principal concerned, when one is |
+| `category` | For attention, one of the six attention kinds: `decision-needed`, `blocked`, `uncertain-effect`, `failed-check`, `incident` or `information` |
+
+A consumer reads the subject through its own checked read before it acts. Within one derivation pass a
+record event comes before the derived events it causes, and derived changes to one subject collapse to the
+last; record events never merge. Nothing orders events across runtimes.
+
+`GET /v1/events` with `Accept: text/event-stream` answers with server-sent events: each message's `id` is
+the cursor after it, its `event` the kind and its `data` the envelope. The opening message carries only the
+`id` where the stream starts, and an `id`-only keep-alive follows every 15 seconds on a fixed schedule. An
+event named `reset`, with data `{"reset":true,"cursor":...}`, means the cursor given could not be honored:
+re-read the state you follow, then continue from its `id`. Without that header the same route is a long
+poll: `EventsResponse` (`events`, `cursor`, `reset`, `problem`) as soon as an event is delivered, or after
+`wait` seconds (0 to 25, by default 20) with no events. The query takes `after`, a cursor, and resumes there;
+a reconnecting stream's `Last-Event-ID` header supersedes it; without either the read starts at the
+journal's head. Filters narrow and never widen: `kind`, `type` (the subject's type, such as a record type),
+`subject` (record ids; a goal matches its work orders, steps and runs), `to` and `category`, each repeatable
+up to 32 values. An unknown kind or category, a malformed value or a `wait` outside its range answers 400.
+`GET /v1/events/{key}` returns the newest event with that key that the reader may read, and 404 alike for
+an unknown key, one the bound dropped and one the reader may not read. Delivery is at least once within
+retention: after a reconnection an event can come again.
+
+Each state read a stream complements returns `eventsCursor`, the journal's position as of that read sealed
+for the reader: `GET /v1/status`, `/v1/progress`, `/v1/attention`, `/v1/asks` and `/v1/goals/{id}`. Read,
+then follow from that cursor, and no change is missed. The status document's own JSON stays portable; the
+cursor sits beside it on the response.
+
+A cursor seals the journal's epoch and the position with a key only this runtime holds, binds the reader's
+principal and reveals no count: each sealing differs, even for one position. A cursor that is malformed,
+sealed for another principal, from another epoch, older than what the journal keeps, or a reader too far
+behind, answers `reset` and nothing else. A journal that is lost, unreadable or was not closed cleanly (a
+crash, or a copy restored from a running machine) starts a new epoch, in which every older cursor answers
+`reset`; a clean restart continues the epoch.
+
+The stream authenticates as its profile does. On the local socket the operating-system user reads for the
+principal named by `principal`, by default the operator, as attention does. On loopback and the local
+network the opening request is device-signed and reads only for its device's principal; naming another
+answers 401, and a device-signed stream ends after 60 minutes to reconnect with a fresh signature. A device,
+or the local socket's user, holds at most four streams and long polls at once, and the runtime 16, half of
+the daemon's 32 connections, below the design's ceiling of 64; one more answers 429. At delivery the
+runtime checks that the device is still admitted with the key that opened the stream and still permitted
+its profile, and that its principal is still known; otherwise the stream closes before the next event, so a
+revocation closes a device's streams. Every event then passes the audience check: per-principal state, such
+as attention and its acknowledgment, reaches only that principal, and the reader must be able to read the
+subject and every source under the matching read's rule. Today an admitted principal reads every record, so
+the per-principal rule is the one that withholds; narrower audiences, once built, bind events as they bind
+reads. A withheld event is dropped, and no count, cursor, error or timing distinguishes it from none: a long
+poll does not answer earlier for one, and a stream writes nothing for one.
+
+The SDK adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)` to `IEstateApi`, each
+with its asynchronous counterpart and a default implementation, and `VericairnClient.StreamEventsAsync`,
+one stream's events, resets and cursors, and `WatchEventsAsync`, which reconnects from the newest cursor
+when a stream ends or drops and stops at a refusal. [vericairn events watch](cli.md#vericairn-events-watch-092)
+follows the stream on the command line. MCP subscriptions and notifications (`MCP-05`) follow separately.
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists
+the additions.
+
 ## Release-basis diagnostics (0.8.3)
 
 FIX-58 changes the failure response of `GET /v1/release-bases/{hash}`. An unknown hash or an

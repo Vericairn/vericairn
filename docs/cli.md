@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 10, November 7, 2026. Add `events watch` in the development build.
+
 Revision 9, November 7, 2026. Add `worker configure --setup-variable` and the setup command's filtered environment in the development build.
 
 Revision 8, November 6, 2026. Add `estate cache rebuild` in the development build.
@@ -391,3 +393,36 @@ vericairn runtime stop
 vericairn estate cache rebuild --json
 vericairn estate check
 ```
+
+## `vericairn events watch` (0.9.2)
+
+Follows the event stream of the daemon serving this estate over the local socket (`WATCH-05`), one line per event, and
+reconnects from the last cursor when a stream ends, until interrupted. An event is a hint carrying identities, kinds and
+states but no content; read its subject before acting. The operating-system user reads for `--principal`, the operator
+when omitted, and every event passes that principal's audience. Only a running daemon keeps the journal: without one the
+command is refused, and `vericairn runtime start` starts it.
+
+| Option | Meaning |
+|---|---|
+| `--after <cursor>` | Resume after this cursor: an event's, a reset's or a state read's `eventsCursor`. From now when omitted. |
+| `--kind <kind>` | Only events of this kind: `record`, `attention`, `ask`, `step`, `request`, `due`, `run` or `presence`; repeatable. |
+| `--type <type>` | Only events whose subject has this type, such as a record type; repeatable. |
+| `--subject <id>` | Only events about this record; a goal matches its work orders, steps and runs; repeatable. |
+| `--to <principal>` | Only events concerning this principal; repeatable. |
+| `--category <category>` | Only attention of this category: `decision-needed`, `blocked`, `uncertain-effect`, `failed-check`, `incident` or `information`; repeatable. |
+| `--principal <id>` | The principal to read for; the operator when omitted. |
+| `--count <n>` | Stop after this many events. |
+| `--json` | One JSON object per line: the opening `{"cursor":...}`, each `vericairn.event/1` envelope, and `{"reset":true,"cursor":...}`. |
+
+A text line reads `<at>  <kind> <change>  <subject type> <subject id>`, then `to <principal>` and the category when the
+event has them. A line beginning `reset:` means the cursor could not be honored: re-read the state you follow, then
+continue. Start the watch before reading that state, or resume from the cursor the read returned, and no change is
+missed. Exit 0 when interrupted or after `--count` events, 2 when refused.
+
+```sh
+vericairn events watch --kind record --kind ask --json
+vericairn events watch --subject <goal id> --after <cursor>
+```
+
+A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
+[API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
