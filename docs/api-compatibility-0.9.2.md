@@ -205,13 +205,19 @@ vocabulary adds `attention`.
   `FlowRunRoutes.Attention`, `Held` and `AttentionNext`. `NextEligible.RouteStates` and `FlowDispatching` add `attention`.
 - `AgentRuns.StepAssignments`, the assignments whose runs count as one step's attempts.
 
-Behavior changes to the runs that PROC-05 adds, each within record format 3. A run's attempts per step count every agent run of a step's work across all of
-its assignments: a stale, reopened or rerun step's fresh assignment no longer starts the count again, and the record type
-refuses a run beyond them. Findings and failures that send a run's work back count only from principals who judge the step.
-A review that names no reviewer role clears an item only when it is by a principal of the estate's `reviewer` role, an
-operator, or the contributor of a review assignment of that item; PROC-05 accepted any principal other than the authors. A result naming `unresolvedEffects` no longer closes its step. Record format remains 3; its addition, an assignment's
-`step.review`, and the enforcement of a run's `limits.consecutiveFailures` are in
-[record format 3](record-format-v3.md#hand-offs-reviews-and-failure-routes-092).
+Behavior changes to the runs that PROC-05 adds, each within record format 3. A run's attempts per step count every agent run
+of a step's work across all of its assignments: a stale, reopened or rerun step's fresh assignment no longer starts the
+count again, and the record type refuses a run beyond them. Findings and failures that send a run's work back count only
+from principals who judge the step. A review that names no reviewer role clears an item only when it is by a principal of
+the estate's `reviewer` role, an operator, or the contributor of a review assignment of that item; PROC-05 accepted any
+principal other than the authors. A review in a role the flow marks `person` counts only from a person. A result naming
+`unresolvedEffects` no longer closes its step, and stops it even when stale or reopened; the record type refuses an
+`agent-run` intent on any assignment of that step while such a result is current (`operation.unreconciled`). The
+consequential independent default and routed reviews apply to work steps only. A failure route that returns to an `effect`
+or `exchange` step, and a failure route through a branch whose `returnTo` is a step after the failed one, are refused with
+the flow. `goal next` and `goal step` hold a failed step's route, its backoff and the run's `limits.consecutiveFailures`; a
+run started directly with `worker start` is not held by them. Record format remains 3; its addition, an assignment's
+`step.review`, and these rules are in [record format 3](record-format-v3.md#hand-offs-reviews-and-failure-routes-092).
 
 The generic record reader advances its implementation identity to `vericairn.records/readers/8`: an assignment's `step` and
 a goal's `limits` change their schema explanations. Its hash changes; declarations pinned to an earlier implementation

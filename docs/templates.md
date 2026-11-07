@@ -461,8 +461,9 @@ every template.
   a `person` role to an agent, and a goal that names an agent in one is refused.
   A role may name, in `document`, the repository path of the estate's own copy
   of its brief, such as `docs/roles/writer.md`, kept as a
-  [living document](living-documents.md) (0.9.2). The brief then names that
-  file and its exact content hash, and a declaration of it due at level
+  [living document](living-documents.md) (0.9.2). When it is a plain file of
+  one byte to 1 MiB with no link on its path, the brief names that file and its
+  exact content hash, and a declaration of it due at level
   `refuse` holds each step of the role still to be briefed until a revision or
   a review clears it.
   The path is portable, outside hidden directories, `records` and `objects`.
@@ -499,11 +500,12 @@ every template.
   - `review`: its own reviewer, an independence (`none`, `self`, `independent`,
     `other-harness` or `person`) as a word, or `{independence, role}` naming the
     reviewer's role. An item without one takes its step's `review`. Without
-    either, an item that feeds a reserved step or leaves the estate (an
-    `effect` or `exchange` step takes it, or a step whose items do) takes an
+    either, a work step's item that feeds a reserved step or leaves the estate
+    (an `effect` or `exchange` step takes it, or a step whose items do) takes an
     `independent` review (0.9.2); any other item of a work step takes the flow's
     `review` option. A configuration sets only that option, so it never lowers
-    the default review of an item that feeds a reserved step.
+    the default review of an item that feeds a reserved step. A review in a role
+    the flow marks `person` is only ever a person's.
 - `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
   watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
   predicates hold; a work or review step has no watch.
@@ -520,8 +522,10 @@ every template.
   and once they are done the run returns to the branch's `returnTo`; and
   `{"route": "stop"}`, the route of a step that declares none, stops it for the
   sponsor. A route returns only to a step before the failed one, outside any
-  other branch, and enters only a branch the flow declares, other than the
-  step's own.
+  other branch, and never to an `effect` or `exchange` step, which would repeat
+  an outside effect. It enters only a branch the flow declares, other than the
+  step's own, whose `returnTo`, when it names one, is the failed step or a step
+  before it. Entering a branch again reruns its steps.
 
 An item is satisfied when it exists at an exact hash and is of its kind, the
 record that produced it shows the declared provenance (a result's or an

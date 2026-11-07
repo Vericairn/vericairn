@@ -229,7 +229,14 @@ public static class FlowPosition
     }
 
     /// <summary>A return of the run to an earlier step by a failure route: the step, its instance (null for every one), when, and why.</summary>
-    private sealed record Return(string? Target, string? Instance, bool Every, DateTimeOffset At, string From, Failure Failure);
+    /// <param name="Target">The step returned to; null for a branch that returns to none.</param>
+    /// <param name="Instance">Its instance, for a step that runs over the failed step's list.</param>
+    /// <param name="Every">True when every instance of the step is returned to.</param>
+    /// <param name="At">When: the failure, or when the branch's steps were done.</param>
+    /// <param name="From">The failed step instance, in words.</param>
+    /// <param name="Failure">The failure that takes the route.</param>
+    /// <param name="Entry">True for the entry of a branch by a failure route, which reopens the branch's steps from the failure.</param>
+    private sealed record Return(string? Target, string? Instance, bool Every, DateTimeOffset At, string From, Failure Failure, bool Entry = false);
 
     private sealed class Deriving
     {
@@ -279,7 +286,12 @@ public static class FlowPosition
                 }
             }
 
-            returns = failures.Where(f => f.Value.Route.Step is not null).Select(f => ReturnTo(f.Value.Route.Step!, f.Key, f.Value.Record.AtTime, f.Value)).Concat(branchReturns).ToList();
+            // A route to an earlier step returns there at once; a branch's entry reopens its steps from the failure, so that a branch entered
+            // again after an earlier failure runs again rather than counting what it did before.
+            returns = failures.Where(f => f.Value.Route.Step is not null).Select(f => ReturnTo(f.Value.Route.Step!, f.Key, f.Value.Record.AtTime, f.Value))
+                .Concat(failures.Where(f => f.Value.Route.Branch is not null).SelectMany(f => flow.Branches.First(b => b.Name == f.Value.Route.Branch).Steps
+                    .Select(member => ReturnTo(member, f.Key, f.Value.Record.AtTime, f.Value) with { Entry = true })))
+                .Concat(branchReturns).ToList();
         }
 
         public List<StepInstance> Instances { get; } = [];
@@ -324,7 +336,7 @@ public static class FlowPosition
             foreach ((FlowRuns.StepRef from, Failure failure) in failures.Where(f => f.Value.Route.Branch is not null))
             {
                 FlowBranch? branch = flow.Branches.FirstOrDefault(b => b.Name == failure.Route.Branch);
-                if (branch is null || BranchDone(branch, failure) is not DateTimeOffset done || returns.Any(r => r.From == from.ToString() && r.Failure == failure))
+                if (branch is null || BranchDone(branch, failure) is not DateTimeOffset done || returns.Any(r => !r.Entry && r.From == from.ToString() && r.Failure == failure))
                 {
                     continue;
                 }
@@ -336,13 +348,21 @@ public static class FlowPosition
             return found;
         }
 
-        /// <summary>When every step of a branch entered by a failure was done after it; null while one is not.</summary>
+        /// <summary>
+        /// When every step of a branch entered by a failure was done after it, or at once when every one of them is off; null while one
+        /// is not.
+        /// </summary>
         private DateTimeOffset? BranchDone(FlowBranch branch, Failure failure)
         {
             List<StepInstance> steps = Instances.Where(i => branch.Steps.Contains(i.Step.Key, StringComparer.Ordinal)).ToList();
             if (steps.Count == 0 || steps.Any(s => s.State is not ("done" or "off")))
             {
                 return null;
+            }
+
+            if (steps.All(s => s.State == "off"))
+            {
+                return failure.Record.AtTime;
             }
 
             DateTimeOffset? last = steps.Where(s => s.State == "done").Select(s => s.DoneAt).Max();
@@ -434,6 +454,14 @@ public static class FlowPosition
                 return Shaped(new StepInstance(step, item, "done", [Completed(step, result, review, done)], Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
             }
 
+            // Retries by outcome (design/flow.md § 7): an uncertain effect is reconciled by reading before any retry, so it stops the step
+            // before anything would rerun it, stale, reopened or waiting.
+            if (Uncertain(step, result, carried, done) is Attention uncertain)
+            {
+                StepInstance stopped = Shaped(new StepInstance(step, item, "stopped", [$"required attention: {uncertain.Summary}"], Who(holder), holder, result, review, outputs, items, inputs, done, null));
+                return step.IsRouted ? stopped with { Attention = uncertain } : stopped;
+            }
+
             // Blocked: what it waits on is not done, or a precondition, a trap, a due time or its role brief does not hold; every reason is
             // listed. A stale step shows stale, and reruns once nothing it waits on holds it.
             var blocked = new List<string>();
@@ -500,15 +528,10 @@ public static class FlowPosition
             // Reopened by a later step's failure route: it reruns from a fresh assignment, routed by its role, within its attempts.
             if (reopened is not null)
             {
-                string why = $"reopened: step {reopened.From} failed ({reopened.Failure.Summary}), and its failure route returns the run here at {Time(reopened.At)}; it reruns under its recovery: {step.Recovery}";
+                string why = reopened.Entry
+                    ? $"reopened: step {reopened.From} failed ({reopened.Failure.Summary}), and its failure route enters branch {reopened.Failure.Route.Branch} again at {Time(reopened.At)}; it reruns under its recovery: {step.Recovery}"
+                    : $"reopened: step {reopened.From} failed ({reopened.Failure.Summary}), and its failure route returns the run here at {Time(reopened.At)}; it reruns under its recovery: {step.Recovery}";
                 return Fresh(why, reopened.Failure.Record);
-            }
-
-            // Retries by outcome (design/flow.md § 7): an uncertain effect is reconciled by reading before any retry.
-            if (Uncertain(step, result, carried, done) is Attention uncertain)
-            {
-                StepInstance stopped = Make("stopped", $"required attention: {uncertain.Summary}");
-                return step.IsRouted ? stopped with { Attention = uncertain } : stopped;
             }
 
             Failure? failed = failures.GetValueOrDefault(reference);
@@ -649,12 +672,17 @@ public static class FlowPosition
                 switch (failure.Route.Route)
                 {
                     case "step":
+                        if (AllOff(failure.Route.Step!, item))
+                        {
+                            return Stop($"its failure route returns the run to {failure.Route.Step}, which is off in this run, so nothing can move: the sponsor is asked, and only what depends on it waits");
+                        }
+
                         return ReturnedSince(failure.Route.Step!, item, failure.Record.AtTime) is DateTimeOffset back
                             ? Again($"its failure route returned the run to {failure.Route.Step}, done again at {Time(back)}, and it reruns from a fresh assignment under its recovery: {step.Recovery}")
                             : Wait($"its failure route returns the run to {failure.Route.Step}, which reruns first");
                     case "branch":
                         FlowBranch entered = flow.Branches.First(b => b.Name == failure.Route.Branch);
-                        Return? returned = returns.LastOrDefault(r => r.From == reference.ToString() && r.Failure == failure);
+                        Return? returned = returns.LastOrDefault(r => !r.Entry && r.From == reference.ToString() && r.Failure == failure);
                         if (returned is null)
                         {
                             return Wait($"its failure route entered branch {entered.Name}: it waits on the branch's steps ({string.Join(", ", entered.Steps)}), then the run returns to {entered.ReturnTo ?? "no step, and the sponsor is asked"}");
@@ -663,6 +691,11 @@ public static class FlowPosition
                         if (returned.Target is null)
                         {
                             return Stop($"its failure route entered branch {entered.Name}, whose steps were done at {Time(returned.At)}, and the branch returns to no step: the sponsor is asked, and only what depends on it waits");
+                        }
+
+                        if (returned.Target != step.Key && AllOff(returned.Target, item))
+                        {
+                            return Stop($"branch {entered.Name}, its failure route, is done and returns the run to {returned.Target}, which is off in this run, so nothing can move: the sponsor is asked, and only what depends on it waits");
                         }
 
                         return returned.Target == step.Key
@@ -674,6 +707,13 @@ public static class FlowPosition
                         return Stop("its failure route stops here: the sponsor is asked, and only what depends on it waits");
                 }
             }
+        }
+
+        /// <summary>True when every derived instance of a step a failure route returns to is off in this run, so the route cannot move.</summary>
+        private bool AllOff(string key, string? item)
+        {
+            List<StepInstance> instances = derived.Values.Where(d => d.Step.Key == key && (flow.Step(key)?.Each is null || d.Instance == item || !derived.Values.Any(o => o.Step.Key == key && o.Instance == item))).ToList();
+            return instances.Count > 0 && instances.All(i => i.State == "off");
         }
 
         /// <summary>When every instance of a step a failure route returns to was done again after a time; null while one is not.</summary>
@@ -726,6 +766,8 @@ public static class FlowPosition
         private IEnumerable<RecordEnvelope> FailuresOf(FlowStep step, string? item)
         {
             List<RecordEnvelope> assignments = held.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item)) ?? [];
+            Func<string, bool> judges = Judges(step, item);
+            IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
             foreach (AttemptState attempt in AttemptsOf(assignments).Where(a => a.Result is not null))
             {
                 if (attempt.Outcome is "blocked" or "abandoned")
@@ -735,8 +777,6 @@ public static class FlowPosition
                 else
                 {
                     IReadOnlyList<string> chain = model.Chain(attempt.Result!);
-                    Func<string, bool> judges = Judges(step, item);
-                    IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
                     foreach (RecordEnvelope failed in model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "fail"
                         && !authors.Contains(r.By) && judges(r.By)))
                     {
@@ -785,21 +825,25 @@ public static class FlowPosition
         private Func<string, bool> Judges(FlowStep step, string? item)
         {
             var named = new HashSet<string>(StringComparer.Ordinal);
+            // A role the flow marks a person's judges only by its persons.
+            void Add(string role, IEnumerable<string> principals) => named.UnionWith(principals.Where(p => !PersonHeld(role) || GoalRules.IsPerson(model, p)));
             List<FlowReview> requirements = step.Outputs.Select(o => ReviewOf(step, o)).Append(ReviewOf(step, null)).Where(r => r.Independence != "none").Distinct().ToList();
             foreach (FlowReview requirement in requirements)
             {
-                named.UnionWith(Routing.Principals(model, goal, requirement.Role ?? Roles.Reviewer).Principals);
+                Add(requirement.Role ?? Roles.Reviewer, Routing.Principals(model, goal, requirement.Role ?? Roles.Reviewer).Principals);
             }
 
             foreach (FlowStep reviewer in flow.Steps.Where(s => s.Kind == "review" && s.Inputs.Any(i => i.Step == step.Key)))
             {
-                named.UnionWith(Routing.Principals(model, goal, reviewer.Role).Principals);
-                named.UnionWith(held.Where(h => h.Key.Key == reviewer.Key).SelectMany(h => h.Value).Select(a => EstateModel.BodyString(a, "contributor")).OfType<string>());
+                Add(reviewer.Role, Routing.Principals(model, goal, reviewer.Role).Principals);
+                Add(reviewer.Role, held.Where(h => h.Key.Key == reviewer.Key).SelectMany(h => h.Value).Select(a => EstateModel.BodyString(a, "contributor")).OfType<string>());
             }
 
-            named.UnionWith(Routing.Principals(model, goal, Roles.Reviewer).Principals);
+            Add(Roles.Reviewer, Routing.Principals(model, goal, Roles.Reviewer).Principals);
             named.UnionWith((reviewing.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item)) ?? []).Select(a => EstateModel.BodyString(a, "contributor")).OfType<string>());
-            return principal => named.Contains(principal) || model.HasRole(principal, Roles.Operator) || model.HasRole(principal, Roles.Reviewer);
+            bool reviewerHeld = PersonHeld(Roles.Reviewer);
+            return principal => named.Contains(principal) || model.HasRole(principal, Roles.Operator)
+                || (model.HasRole(principal, Roles.Reviewer) && (!reviewerHeld || GoalRules.IsPerson(model, principal)));
         }
 
         /// <summary>
@@ -819,7 +863,10 @@ public static class FlowPosition
                 named.UnionWith(producers);
             }
 
-            return principal => named.Contains(principal) || (required.Role is null && (model.HasRole(principal, Roles.Reviewer) || model.HasRole(principal, Roles.Operator)));
+            // A review in a role the flow marks a person's is a person's, whoever the roster or an assignment names.
+            bool person = PersonHeld(required.Role ?? Roles.Reviewer);
+            return principal => (!person || GoalRules.IsPerson(model, principal))
+                && (named.Contains(principal) || (required.Role is null && (model.HasRole(principal, Roles.Reviewer) || model.HasRole(principal, Roles.Operator))));
         }
 
         /// <summary>A record's operation outcome in words, for a failed run: what was observed when it settled.</summary>
@@ -996,7 +1043,8 @@ public static class FlowPosition
         /// </summary>
         private static List<PendingReview> Pending(FlowStep step, List<ItemState> items, List<RecordEnvelope> reviews, IReadOnlySet<string> authors)
         {
-            if (step.Kind == "review" || step.Reserved is not null)
+            // Only a work step's review is routed as an assignment; another kind's item is reviewed by whoever carries it.
+            if (step.Kind != "work" || step.Reserved is not null)
             {
                 return [];
             }
@@ -1214,9 +1262,21 @@ public static class FlowPosition
             return latest is not null && EstateModel.BodyString(latest, "outcome") == "pass" ? latest : null;
         }
 
-        /// <summary>Whether a reviewer meets an independence: self admits anyone, the author's own check; independent another principal than the producers; person a person among them; other-harness an agent on another harness than the producer's.</summary>
+        /// <summary>True when the flow marks a role a person's, so that only a person carries its steps and its reviews.</summary>
+        private bool PersonHeld(string role) => flow.Role(role)?.Holder == "person";
+
+        /// <summary>
+        /// Whether a reviewer meets an independence: self admits anyone, the author's own check; independent another principal than the
+        /// producers; person a person among them; other-harness an agent on another harness than the producer's. A review in a role the
+        /// flow marks a person's is never an agent's.
+        /// </summary>
         private bool Qualifies(string reviewer, IReadOnlySet<string> producers, string producer, FlowReview required)
         {
+            if (PersonHeld(required.Role ?? Roles.Reviewer) && !GoalRules.IsPerson(model, reviewer))
+            {
+                return false;
+            }
+
             if (required.Independence == "self")
             {
                 return true;

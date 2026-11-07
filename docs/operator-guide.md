@@ -993,7 +993,7 @@ vericairn goal accept <goal> --by <sponsor> --statement "I accept this goal from
 
 For record predicates the runtime supplies the evaluation's verdict and records read. For evidence conditions the evaluator supplies `--verdict n:met:reason` (or `not-yet` or `impossible`) and `--read n:<record id>`; numbering starts at one, and a met evidence condition must name a record. The evaluator cannot have authored any step. Acceptance needs the current evaluation of the exact goal revision, every condition met, and every record predicate still holding. The accepter is neither the evaluator nor a step's author: the sponsor when a person, an operator when an agent sponsors it, or the sponsor's named delegate holding `accept-work` for an ordinary goal without reserved actions. A delegate never accepts a goal involving a release or milestone.
 
-`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. A run of a flow is held for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
+`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. For a run of a flow, `goal next` and `goal step` hold the run for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
 
 ## 18. Routing, asks and the worker
 
@@ -1285,14 +1285,17 @@ it, and its brief names each one as handed on: a file by its name and content ha
 its id and hash. When an upstream output changes after a step used it, that step is `stale` and reruns from a fresh assignment
 that pins the new version; the earlier assignment, attempts and results stay recorded.
 
-An item is handed on only after its review. An item that declares no review, in a step that declares none, takes an
-`independent` review when it feeds a reserved step or leaves the estate, through an `effect` or `exchange` step or a step
-whose items do; a configuration of the flow's `review` option never lowers it. The review is a routed step. `goal next` lists
+An item is handed on only after its review. An item of a work step that declares no review, in a step that declares none,
+takes an `independent` review when it feeds a reserved step or leaves the estate, through an `effect` or `exchange` step or a
+step whose items do; a configuration of the flow's `review` option never lowers it. A work step's review is a routed step; an
+item of another kind of step is reviewed by whoever carries the step, with a `review` record of its exact hash. `goal next` lists
 it as `<step> review`, routed to the reviewer role the item names, or to the estate's `reviewer` role. Each candidate must meet
 the review's independence against the step's authors, who are the contributors of its assignments and whoever recorded an
 attempt or a result under one. An author is never offered a review that is not `self`. A `person` review goes only to a
 person, an `other-harness` review only to an agent on a harness none of the authors used, and a person without the operator
-role is not offered one, since only an operator records a review of another's work as a person. `goal step` assigns the
+role is not offered one, since only an operator records a review of another's work as a person. A review in a role the flow
+marks `person` is a person's: an agent the roster names in it is never offered it, and its pass, findings or failure count for
+nothing. `goal step` assigns the
 review as an assignment of the run's work order whose `step.review` names the items and the exact subject that carries them.
 An agent reviewer gets a run of its own, counted against the review's attempts, and a person an assignment and an ask. The
 record type refuses a review assignment to an author, to a principal its independence does not admit, or of a subject that
@@ -1306,15 +1309,17 @@ assignments, so that a fresh assignment never starts the count again; a review's
 
 - An uncertain effect stops the step for its sponsor until it is reconciled by reading. That is a result naming
   `unresolvedEffects`, a run of its work left `uncertain`, or, for a step carried by its action, an `operation` its done
-  predicates read left `uncertain`. A result with unresolved effects closes nothing; revise it without them once each effect is
-  settled.
+  predicates read left `uncertain`. It stops the step even when the step is stale or reopened, so nothing reruns it first. A
+  result with unresolved effects closes nothing; revise it without them once each effect is settled. Until then the record type
+  refuses any run of the step, on any of its assignments and however it is started (`operation.unreconciled`).
 - A run that fails with no result recorded since backs off before the next one. The wait is a minute after the first failed
   run, doubling with each failed run in a row up to an hour, and the step shows `blocked` until then.
 - Findings start another attempt by the same holder.
 - A failed step, one whose latest result is `blocked` or `abandoned` or whose review fails, takes its failure route. A route to
   an earlier step reopens that step, which reruns from a fresh assignment, and the failed step reruns once it is done again. A
-  route to a branch enters the branch, whose steps run, and then returns the run to the branch's `returnTo`. A stop, the route
-  of a step that declares none, stops it for the sponsor.
+  route to a branch enters the branch, and reopens its steps from the failure even when they ran before, so a branch entered
+  again runs again; once they are done the run returns to the branch's `returnTo`. A stop, the route of a step that declares
+  none, stops it for the sponsor, and so does a route that cannot move because the step it returns to is off in this run.
 - When a step must run again and its work has had every run its attempts per step grant, its retry budget is spent and it
   stops for the sponsor.
 
@@ -1327,9 +1332,14 @@ Two kinds of attention hold the whole run instead: the goal's `limits.consecutiv
 and an evaluation that judges a condition impossible. `goal step` asks the sponsor once and dispatches nothing more until a
 decision answers the ask.
 
+`goal next` and `goal step` hold these stops, the backoff, a failed step's route and the run's own attention. A run started
+directly with `worker start` is the starter's explicit act and is not held by them; the record type still refuses one beyond the
+step's attempts per step or while an effect of its work is unreconciled.
+
 A role may name the estate's own copy of its brief, a file such as `docs/roles/writer.md`, in the flow's `document`. Each
 brief for the role then names that file and its content hash and says whether a living document declares it and whether it is
-due. Declared and due at level `refuse`, it holds as `blocked` each step of the role that is still to be briefed, unassigned or
+due. The file is read only when it is a plain file of one byte to 1 MiB with no link on its path; a link, a directory, a device,
+a FIFO or an empty file is not read, and the brief says so and keeps the flow's own brief. Declared and due at level `refuse`, it holds as `blocked` each step of the role that is still to be briefed, unassigned or
 to rerun from a fresh assignment, until a revision or a review clears it; a holder already briefed goes on.
 
 `goal show` and `goal next` show all of this. Each step lists its attempts under every assignment, with their results, and how

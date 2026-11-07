@@ -406,7 +406,8 @@ assignment without `step.review` behaves as before.
 | Record | Additive contract |
 | --- | --- |
 | `assignment` | Optional `step.review: {items?, subject}` marks an assignment of a step's review before hand-off rather than of the step itself. `items` names the step's items it reviews, omitted for a step that declares none, whose result it reviews; `subject` is the exact `{type, id, hash}` of the record that carries them: a result of the step's own work for a file or the step's result, or a record of the type a record item is counted from. Its contributor reviews, and is never among the step's authors. |
-| `goal` | `limits.consecutiveFailures` is enforced for a run of a flow: that many failed steps in a row hold the run until its sponsor answers. It is still recorded, and not enforced, for any other goal. |
+| `goal` | `limits.consecutiveFailures` holds a run of a flow in `goal next` and `goal step`: that many failed steps in a row hold the run until its sponsor answers. A run started directly with `worker start` is not held by it, and for any other goal it is still recorded and not enforced. |
+| `operation` | An `agent-run` intent on an assignment of a run's flow step is refused (`operation.unreconciled`) while a result of that step's work, under any of its assignments, names `unresolvedEffects` at its current revision; revise the result once each effect is reconciled. Assignments of other work keep their earlier reading. |
 
 Validation refuses a review assignment of a review step, of items the step does
 not declare or of items that take different review requirements, and one whose

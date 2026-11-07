@@ -637,8 +637,8 @@ public static class FlowRuns
     }
 
     /// <summary>
-    /// The review an item takes before its step closes (design/flow.md §§ 5 and 6): its own; else its step's; else, for an item that feeds
-    /// a reserved step or leaves the estate, an independent review; else, for a work step, the flow's review option; else none. A
+    /// The review an item takes before its step closes (design/flow.md §§ 5 and 6): its own; else its step's; else, for a work step's item
+    /// that feeds a reserved step or leaves the estate, an independent review; else, for a work step, the flow's review option; else none. A
     /// configuration sets only the flow's option, so it never lowers the review an item that feeds a reserved step or leaves the estate
     /// takes by default. A step that declares no item takes its own review, or the flow's option, on its result.
     /// </summary>
@@ -652,7 +652,7 @@ public static class FlowRuns
             return declared;
         }
 
-        if (output is not null && Consequential(flow, step, output) is not null)
+        if (output is not null && step.Kind == "work" && Consequential(flow, step, output) is not null)
         {
             return new FlowReview("independent", null);
         }
@@ -928,10 +928,11 @@ public static class FlowRuns
         }
 
         Configuration configuration = Configure(context.Model, run, flow, context.Record);
-        List<FlowReview> requirements = reviewed.Select(o => ReviewRequirement(flow, configuration, declared, o)).Distinct().ToList();
+        // Requirements compare as routing groups them: a review that names no role is the estate's reviewer role's.
+        List<FlowReview> requirements = reviewed.Select(o => ReviewRequirement(flow, configuration, declared, o)).Select(r => r with { Role = r.Role ?? Roles.Reviewer }).Distinct().ToList();
         if (requirements.Count != 1)
         {
-            context.Error("assignment.review", $"The items of one review take one review requirement; these take {string.Join(", ", requirements.Select(r => r.Independence + (r.Role is null ? string.Empty : " in the " + r.Role + " role")))}.");
+            context.Error("assignment.review", $"The items of one review take one review requirement; these take {string.Join(", ", requirements.Select(r => r.Independence + " in the " + r.Role + " role"))}.");
             return;
         }
 

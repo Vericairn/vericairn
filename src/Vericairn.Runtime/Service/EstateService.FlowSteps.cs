@@ -224,25 +224,71 @@ public sealed partial class EstateService
             return (text, null);
         }
 
-        string? hash = null;
-        try
-        {
-            string full = GeneratedDocumentVerification.SafeFile(model.Root, path);
-            if (File.Exists(full))
-            {
-                hash = "sha256:" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(full))).ToLowerInvariant();
-            }
-        }
-        catch (Exception error) when (error is InvalidOperationException or IOException or UnauthorizedAccessException)
-        {
-            hash = null;
-        }
-
+        (string? hash, bool refused) = RoleDocumentHash(model.Root, path);
         LivingDocuments.State? state = LivingDocuments.Derive(model).FirstOrDefault(d => d.Path == path && d.Repository is null);
-        text += hash is null
+        text += refused
+            ? $" The estate's copy at {path} is not a plain file of at most {RoleDocumentLimit / 1024} KiB (a link, a directory, a device or an empty file), so it is not read and the flow's brief stands."
+            : hash is null
             ? $" The estate keeps no copy of it at {path}, so the flow's brief stands."
             : $" The estate keeps it as a living document at {path} ({hash}): read it before you start{(state is { Due: true } ? $"; it is due, {state.Describe()}" : state is null ? "; no living-document declaration covers it" : string.Empty)}.";
         return (text, state?.Declaration);
+    }
+
+    /// <summary>The largest role brief document whose hash a brief carries.</summary>
+    private const long RoleDocumentLimit = 1024 * 1024;
+
+    /// <summary>
+    /// The content hash of the estate's copy of a role brief, read through one handle opened only on a plain file: no link on its path,
+    /// no directory or device, and a length from one byte to <see cref="RoleDocumentLimit"/>, so that a FIFO, a socket or a device, which
+    /// report no length, is never opened. The handle's length must match, and the file is hashed as it streams; a file that changes
+    /// while it is read, or becomes a link, is refused. Null with refused false when the file does not exist.
+    /// </summary>
+    private static (string? Hash, bool Refused) RoleDocumentHash(string root, string path)
+    {
+        try
+        {
+            string full = GeneratedDocumentVerification.SafeFile(root, path);
+            var info = new FileInfo(full);
+            if (!info.Exists && !Directory.Exists(full) && info.LinkTarget is null)
+            {
+                return (null, false);
+            }
+
+            if (!info.Exists || info.LinkTarget is not null || (info.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0
+                || info.Length is <= 0 or > RoleDocumentLimit)
+            {
+                return (null, true);
+            }
+
+            using var stream = new FileStream(full, new FileStreamOptions { Mode = FileMode.Open, Access = FileAccess.Read, Share = FileShare.Read, Options = FileOptions.SequentialScan });
+            if (RandomAccess.GetLength(stream.SafeFileHandle) != info.Length)
+            {
+                return (null, true);
+            }
+
+            using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[81920];
+            long read = 0;
+            int count;
+            while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                read += count;
+                if (read > info.Length)
+                {
+                    return (null, true);
+                }
+
+                sha.AppendData(buffer, 0, count);
+            }
+
+            return read != info.Length || new FileInfo(full).LinkTarget is not null
+                ? (null, true)
+                : ("sha256:" + Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant(), false);
+        }
+        catch (Exception error) when (error is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return (null, true);
+        }
     }
 
     /// <summary>One item of a step in words, with every requirement it declares and the review it takes, as the run derives it when given.</summary>

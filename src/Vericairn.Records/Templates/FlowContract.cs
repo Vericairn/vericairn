@@ -451,6 +451,10 @@ public static partial class FlowContract
         {
             failure.Error("flow.failure", "step", $"'{target}' is not a step declared before this one; a failed step returns the run to an earlier step.");
         }
+        else if (earlier.FirstOrDefault(e => e.Key == target) is { Kind: "effect" or "exchange" } outside)
+        {
+            failure.Error("flow.failure", "step", $"'{target}' is an {outside.Kind} step: a failure route never repeats an outside effect.");
+        }
 
         return route == "branch" ? branch : null;
     }

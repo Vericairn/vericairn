@@ -99,6 +99,53 @@ public class FlowHandOffRoutingTests
     }
 
     [Fact]
+    public void AStepWhoseResultNamesAnUnresolvedEffectIsNotRunAgainUntilItIsReconciled()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        string op = run.Estate.OperatorId;
+        string goal = FlowStepRoutingTests.Run(run, change: body => body["plan"]!["flow"]!["options"] = new JsonObject { ["step.review-lyrics"] = "off" });
+        GoalStepResponse drafted = FlowStepRoutingTests.Step(run, goal, "unresolved-draft");
+        Assert.True(drafted.Ok, drafted.Message);
+        run.Settled(drafted.Run!.Run);
+        string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(drafted.Assignment!.Id, run.Estate.BuilderId, "song repository, a work branch", "Carry the step."))).Id;
+        var body = new JsonObject
+        {
+            ["outcome"] = "completed", ["summary"] = "Uploaded the lyrics.", ["outputs"] = new JsonArray(new JsonObject { ["name"] = "lyrics", ["hash"] = FlowFixture.Hash('a'), ["mediaType"] = "text/markdown" }),
+            ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(), ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray("the lyric site's reply to the upload was lost"), ["nextStep"] = "Reconcile the upload.",
+        };
+        RecordWritten unresolved = RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, run.Estate.BuilderId, JsonSerializer.SerializeToElement(body))));
+
+        // goal next routes the effect to the sponsor, and a worker start on the step's assignment is refused before anything is recorded.
+        Assert.Equal("attention", Route(run, goal, "draft").GetProperty("state").GetString());
+        int runs = AgentRuns.All(run.Estate.Load()).Count;
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(drafted.Assignment.Id, "claude-code", run.Estate.BuilderId, op, run.Resource, WallMinutes: 30, Settings: FlowStepRoutingTests.Command(run, "unresolved-again")));
+        Assert.False(refused.Ok);
+        Assert.Contains($"Result {unresolved.Id} of this flow step's work names effects whose outcome is not known", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(runs, AgentRuns.All(run.Estate.Load()).Count);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ALinkedRoleDocumentIsNeverRead()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        JsonObject flow = FlowFixture.Song();
+        flow["roles"]![0]!["document"] = "docs/roles/writer.md";
+        Directory.CreateDirectory(Path.Combine(run.Estate.Root, "docs", "roles"));
+        string outside = Path.Combine(run.Estate.Root, "docs", "elsewhere.md");
+        File.WriteAllText(outside, "# Not the brief\n");
+        File.CreateSymbolicLink(Path.Combine(run.Estate.Root, "docs", "roles", "writer.md"), outside);
+        string goal = FlowStepRoutingTests.Run(run, flow, body => body["plan"]!["flow"]!["options"] = new JsonObject { ["step.review-lyrics"] = "off" });
+        GoalStepResponse drafted = FlowStepRoutingTests.Step(run, goal, "linked-draft");
+        Assert.True(drafted.Ok, drafted.Message);
+        run.Settled(drafted.Run!.Run);
+        string outcome = run.Estate.Load().ById[drafted.Assignment!.Id].Body.GetProperty("brief").GetProperty("outcome").GetString()!;
+        string hash = "sha256:" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(outside))).ToLowerInvariant();
+        Assert.Contains("The estate's copy at docs/roles/writer.md is not a plain file of at most 1024 KiB (a link, a directory, a device or an empty file), so it is not read and the flow's brief stands.", outcome, StringComparison.Ordinal);
+        Assert.DoesNotContain(hash, outcome, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ABriefNamesItsInputsAsHandedOnAndTheEstatesLivingCopyOfItsRoleBrief()
     {
         using var run = new RunEstate(recordFormat: 3);

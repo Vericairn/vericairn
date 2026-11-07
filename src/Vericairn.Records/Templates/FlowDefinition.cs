@@ -440,6 +440,11 @@ public sealed class FlowDefinition
                 errors.Add($"Step '{step.Key}' returns the run to '{failure.Step}' when it fails, a step of branch '{other.Name}', which runs only when it is entered.");
             }
 
+            if (failure.Step is not null && at >= 0 && steps[at].Kind is "effect" or "exchange")
+            {
+                errors.Add($"Step '{step.Key}' returns the run to '{failure.Step}' when it fails, an {steps[at].Kind} step: a failure route never repeats an outside effect.");
+            }
+
             if (failure.Branch is string entered && branches.All(b => b.Name != entered))
             {
                 errors.Add($"Step '{step.Key}' enters branch '{entered}' when it fails, which the flow does not declare.");
@@ -447,6 +452,11 @@ public sealed class FlowDefinition
             else if (failure.Branch is string own && branches.First(b => b.Name == own).Steps.Contains(step.Key, StringComparer.Ordinal))
             {
                 errors.Add($"Step '{step.Key}' enters its own branch '{own}' when it fails; a failure route enters another branch.");
+            }
+            else if (failure.Branch is string back && branches.First(b => b.Name == back).ReturnTo is string target && target != step.Key
+                && steps.FindIndex(s => s.Key == target) > steps.FindIndex(s => s.Key == step.Key))
+            {
+                errors.Add($"Step '{step.Key}' enters branch '{back}' when it fails, which returns the run to '{target}', a step after it: a failure route returns to the failed step or an earlier one.");
             }
         }
 

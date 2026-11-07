@@ -132,6 +132,155 @@ public class FlowHandOffTests
     }
 
     [Fact]
+    public void AStaleStepWhoseResultNamesUnresolvedEffectsIsNeitherRerunNorRunAgain()
+    {
+        using var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope mastering = run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics")));
+        RecordEnvelope master = ResultWithEffects(run, mastering, "the mastering service's reply was lost", "master", null);
+        Assert.Equal(("stopped", "uncertain"), (run.Step("master").State, run.Step("master").Attention!.Kind));
+
+        // New lyrics make the master stale, and it still stops for the effect: nothing reruns it before it is reconciled.
+        run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('c'), "text/markdown"));
+        FlowPosition.StepInstance stale = run.Step("master");
+        Assert.Equal("stopped", stale.State);
+        Assert.False(stale.Rerun);
+        Assert.Equal(master.Id, stale.Attention!.Trigger.Id);
+
+        // A run of the step, on its assignment or a fresh one, is refused at the record until the result is revised without the effect.
+        RecordEnvelope fresh = run.Assign("master", run.Estate.BuilderId);
+        RecordEnvelope intent = Intent(run, fresh, "fresh");
+        Assert.Contains(Errors(run, intent), f => f.Code == "operation.unreconciled" && f.Message.StartsWith($"Result {master.Id} of this flow step's work names effects", StringComparison.Ordinal));
+        Assert.Contains(Errors(run, Intent(run, mastering, "same")), f => f.Code == "operation.unreconciled");
+        JsonObject reconciled = PolicyFixture.Body(master);
+        reconciled["unresolvedEffects"] = new JsonArray();
+        run.Add("result", reconciled, builder: true, subject: master.Subject, supersedes: master.Id);
+        Assert.DoesNotContain(Errors(run, Intent(run, fresh, "after")), f => f.Code == "operation.unreconciled");
+    }
+
+    [Fact]
+    public void AReviewInARoleTheFlowMarksAPersonsIsNeverClearedByAnAgent()
+    {
+        JsonObject flow = FlowFixture.Song();
+        Step(flow, "draft")["outputs"]![0]!["review"] = new JsonObject { ["independence"] = "independent", ["role"] = "listener" };
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" }, roster: false);
+        RecordEnvelope agent = run.Add("principal", new JsonObject { ["kind"] = "agent", ["name"] = "Listening Agent", ["roles"] = new JsonArray("contributor"), ["agent"] = new JsonObject { ["vendor"] = "Another", ["product"] = "Another Agent" } });
+        run.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("writer", run.Estate.BuilderId), FlowFixture.Role("listener", agent.Id, run.Estate.OperatorId), FlowFixture.Role("decider", run.Estate.OperatorId)) });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+
+        // The roster names the agent as a listener; the listener role is a person's, so its pass clears nothing and its findings send nothing back.
+        AgentReview(run, lyrics, agent.Id, "pass");
+        Assert.Equal("in-review", run.Step("draft").State);
+        AgentReview(run, lyrics, agent.Id, "fail");
+        Assert.Null(run.Step("draft").Failed);
+        Assert.Contains(Errors(run, ReviewAssignment(run, agent.Id, lyrics, "lyrics")), f => f.Code == "assignment.review" && f.Message.Contains("an agent never holds it", StringComparison.Ordinal));
+        run.Review(lyrics);
+        Assert.Equal("done", run.Step("draft").State);
+    }
+
+    [Fact]
+    public void ABranchEnteredAgainByASecondFailureRunsAgainAndReturnsTheRun()
+    {
+        JsonObject flow = FlowFixture.Song();
+        JsonObject rework = FlowFixture.Step("rework", "work", "writer", optional: "on");
+        rework["after"] = new JsonArray();
+        flow["steps"]!.AsArray().Add(rework);
+        flow["branches"] = new JsonArray(new JsonObject { ["name"] = "rework", ["when"] = new JsonArray(FlowFixture.Marker("REWORK")), ["steps"] = new JsonArray("rework"), ["returnTo"] = "draft" });
+        Step(flow, "master")["failure"] = new JsonObject { ["route"] = "branch", ["branch"] = "rework" };
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope first = run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics"))), "completed", ("master", FlowFixture.Hash('b'), null));
+        run.Review(first, "fail");
+        run.Result(run.Assign("rework", run.Estate.BuilderId), "completed");
+        RecordEnvelope again = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        Assert.Equal("done", run.Step("draft").State);
+        Assert.True(run.Step("master").Rerun);
+
+        // The rerun fails as well: the branch is entered again, its step reruns rather than counting the earlier run, and the run returns.
+        RecordEnvelope second = run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(again, "lyrics"))), "completed", ("master", FlowFixture.Hash('c'), null));
+        run.Review(second, "fail");
+        FlowPosition.StepInstance reopened = run.Step("rework");
+        Assert.Equal("next", reopened.State);
+        Assert.True(reopened.Rerun);
+        Assert.StartsWith("reopened: step master failed", reopened.Reasons[0], StringComparison.Ordinal);
+        Assert.Contains("enters branch rework again", reopened.Reasons[0], StringComparison.Ordinal);
+        Assert.Equal("done", run.Step("draft").State);
+        run.Result(run.Assign("rework", run.Estate.BuilderId), "completed");
+        Assert.StartsWith("reopened: step master failed", run.Step("draft").Reasons[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailureRouteThatCannotMoveStopsForTheSponsorAndFlowsThatWouldStallAreRefused()
+    {
+        // A route to an earlier step this run leaves off cannot move: the failed step stops for the sponsor.
+        JsonObject flow = FlowFixture.Song();
+        Step(flow, "master")["failure"] = new JsonObject { ["route"] = "step", ["step"] = "review-lyrics" };
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        RecordEnvelope master = run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics"))), "completed", ("master", FlowFixture.Hash('b'), null));
+        RecordEnvelope failed = run.Review(master, "fail");
+        FlowPosition.StepInstance stopped = run.Step("master");
+        Assert.Equal("stopped", stopped.State);
+        Assert.StartsWith("required attention: its failure route returns the run to review-lyrics, which is off in this run, so nothing can move", stopped.Reasons[1], StringComparison.Ordinal);
+        Assert.Equal(("failed", failed.Id), (stopped.Attention!.Kind, stopped.Attention.Trigger.Id));
+
+        // A branch that would return the run past the failed step, and a route back to an outside effect, are refused with the flow.
+        JsonObject past = FlowFixture.Song();
+        JsonObject rework = FlowFixture.Step("rework", "work", "writer", optional: "on");
+        rework["after"] = new JsonArray();
+        past["steps"]!.AsArray().Add(rework);
+        past["branches"] = new JsonArray(new JsonObject { ["name"] = "rework", ["when"] = new JsonArray(FlowFixture.Marker("REWORK")), ["steps"] = new JsonArray("rework"), ["returnTo"] = "shorts" });
+        Step(past, "master")["failure"] = new JsonObject { ["route"] = "branch", ["branch"] = "rework" };
+        Assert.Contains("which returns the run to 'shorts', a step after it", Assert.Throws<InvalidOperationException>(() => FlowDefinition.Resolve(TemplateDefinition.Read(FlowFixture.Element(past)), _ => throw new InvalidOperationException("No base."))).Message, StringComparison.Ordinal);
+
+        JsonObject outside = FlowFixture.Song();
+        JsonObject upload = FlowFixture.Step("upload", "effect", "writer", done: new JsonArray(FlowFixture.Marker("UPLOADED")));
+        upload["effect"] = new JsonObject { ["route"] = "person" };
+        outside["steps"]!.AsArray().Insert(1, upload);
+        Step(outside, "master")["failure"] = new JsonObject { ["route"] = "step", ["step"] = "upload" };
+        Assert.Contains("'upload' is an effect step: a failure route never repeats an outside effect", Refusal(outside), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnlyAWorkStepsItemTakesTheConsequentialReviewAndItsReviewIsTheOnlyOneRouted()
+    {
+        JsonObject flow = FlowFixture.Song();
+        JsonObject observe = FlowFixture.Step("observe", "operation", "writer", done: new JsonArray(new JsonObject { ["type"] = "verification", ["fields"] = new JsonObject { ["method"] = "loudness-check" } }),
+            outputs: new JsonArray(new JsonObject { ["name"] = "loudness", ["kind"] = "verification", ["required"] = true }));
+        observe["after"] = new JsonArray();
+        JsonObject upload = FlowFixture.Step("upload", "effect", "writer", inputs: new JsonArray(FlowFixture.Input("loudness", "observe", "loudness")), done: new JsonArray(FlowFixture.Marker("UPLOADED")));
+        upload["effect"] = new JsonObject { ["route"] = "person" };
+        flow["steps"]!.AsArray().Add(observe);
+        flow["steps"]!.AsArray().Add(upload);
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" });
+        FlowDefinition resolved = run.Position().Flow!;
+        Assert.Equal("none", FlowRuns.ReviewRequirement(resolved, run.Position().Configuration!, resolved.Step("observe")!, resolved.Step("observe")!.Outputs[0]).Independence);
+        run.Add("verification", new JsonObject
+        {
+            ["method"] = "loudness-check", ["commit"] = new string('a', 40), ["environment"] = new JsonObject { ["platform"] = "test" }, ["role"] = "operator", ["outcome"] = "passed",
+            ["summary"] = "Measured the master.", ["evidence"] = new JsonArray(), ["limitations"] = new JsonArray(),
+        });
+        FlowPosition.StepInstance observed = run.Step("observe");
+        Assert.Equal("done", observed.State);
+        Assert.Empty(observed.Reviews);
+        Assert.Equal("stopped", run.Step("upload").State);
+    }
+
+    [Fact]
+    public void AReviewThatNamesTheReviewerRoleAndOneThatNamesNoneAreOneReview()
+    {
+        JsonObject flow = FlowFixture.Song();
+        Step(flow, "draft")["outputs"] = new JsonArray(
+            new JsonObject { ["name"] = "lyrics", ["kind"] = "file", ["required"] = true, ["review"] = new JsonObject { ["independence"] = "independent", ["role"] = "reviewer" } },
+            Item("notes", "independent"));
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" });
+        RecordEnvelope drafted = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), null), ("notes", FlowFixture.Hash('b'), null));
+        FlowPosition.PendingReview pending = Assert.Single(run.Step("draft").Reviews);
+        Assert.Equal(["lyrics", "notes"], pending.Items.Order(StringComparer.Ordinal));
+        Assert.Empty(Errors(run, ReviewAssignment(run, run.Estate.OperatorId, drafted, "lyrics", "notes")));
+    }
+
+    [Fact]
     public void AnUncertainEffectStopsTheStepUntilItIsReconciledByReading()
     {
         JsonObject flow = FlowFixture.Song();
@@ -404,15 +553,25 @@ public class FlowHandOffTests
     private static void AgentReview(FlowFixture run, RecordEnvelope result, string reviewer, string outcome) =>
         run.Estate.Add("review", reviewer, new JsonObject { ["independence"] = "independent-agent", ["outcome"] = outcome, ["summary"] = "Reviewed it.", ["findings"] = new JsonArray() }.ToJsonString(), result.Reference);
 
-    private static RecordEnvelope ResultWithEffects(FlowFixture run, RecordEnvelope assignment, string effect)
+    private static RecordEnvelope ResultWithEffects(FlowFixture run, RecordEnvelope assignment, string effect, string output = "lyrics", string? mediaType = "text/markdown")
     {
         RecordEnvelope attempt = run.Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(run.Estate.Clock), ["workspace"] = "song repository, a work branch", ["note"] = "Carry the step." }, builder: true, subject: assignment.Reference);
         return run.Add("result", new JsonObject
         {
-            ["outcome"] = "completed", ["summary"] = "Carried the step.", ["outputs"] = new JsonArray(new JsonObject { ["name"] = "lyrics", ["hash"] = FlowFixture.Hash('a'), ["mediaType"] = "text/markdown" }),
+            ["outcome"] = "completed", ["summary"] = "Carried the step.", ["outputs"] = new JsonArray(mediaType is null
+                ? new JsonObject { ["name"] = output, ["hash"] = FlowFixture.Hash('a') }
+                : new JsonObject { ["name"] = output, ["hash"] = FlowFixture.Hash('a'), ["mediaType"] = mediaType }),
             ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(), ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(effect), ["nextStep"] = "Reconcile it.",
         }, builder: true, subject: attempt.Reference);
     }
+
+    /// <summary>An agent run's intent on an assignment, before anything is dispatched.</summary>
+    private static RecordEnvelope Intent(FlowFixture run, RecordEnvelope assignment, string identity) => run.Add("operation", new JsonObject
+    {
+        ["provider"] = "claude-code", ["action"] = "agent-run", ["identity"] = "run-" + identity + "-" + assignment.Id, ["intent"] = "Run the writer.",
+        ["target"] = new JsonObject { ["assignment"] = assignment.Id, ["principal"] = run.Estate.BuilderId, ["workspace"] = "song repository, branch work/song-1-master", ["goal"] = run.Goal.Id },
+        ["status"] = "not-started", ["evidence"] = new JsonArray(), ["cap"] = new JsonObject { ["wallMinutes"] = 10, ["attemptsPerStep"] = 3 },
+    });
 
     /// <summary>An agent run on an assignment, from its intent to its settlement: dispatched, then settled as given, charged a minute.</summary>
     private static RecordEnvelope AgentRun(FlowFixture run, RecordEnvelope assignment, string identity, string status)
