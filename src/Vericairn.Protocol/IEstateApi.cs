@@ -235,7 +235,7 @@ public partial interface IEstateApi
     /// <summary>Hands a step an agent holds over to a person: a new assignment carrying the agent's brief and naming its assignment, and a stop asked of the agent's runs in flight.</summary>
     TakeoverResponse WorkTakeover(TakeoverRequest request);
 
-    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it. The body's limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.</summary>
+    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);
 
     /// <summary>Activates a proposed goal, which grants its budget: its sponsor, a person with the authority to spend, or an operator when an agent sponsors it.</summary>

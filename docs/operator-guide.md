@@ -1396,8 +1396,8 @@ the review's independence against the step's authors, who are the contributors o
 attempt or a result under one. An author is never offered a review that is not `self`. A `person` review goes only to a
 person, an `other-harness` review only to an agent on a harness none of the authors used, and a person without the operator
 role is not offered one, since only an operator records a review of another's work as a person. A review in a role the flow
-marks `person` is a person's: an agent the roster names in it is never offered it, and its pass, findings or failure count for
-nothing. `goal step` assigns the
+marks `person` is a person's: an agent the roster names in it is never offered it and its pass never clears the item; its findings
+or failure count only when it also judges the step another way, as a holder of the estate's `reviewer` role. `goal step` assigns the
 review as an assignment of the run's work order whose `step.review` names the items and the exact subject that carries them.
 An agent reviewer gets a run of its own, counted against the review's attempts, and a person an assignment and an ask. The
 record type refuses a review assignment to an author, to a principal its independence does not admit, or of a subject that

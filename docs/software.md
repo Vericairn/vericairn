@@ -1090,7 +1090,8 @@ A goal's pause or stop changes its recorded lifecycle and prevents new runs; it 
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
 observed containment. In 0.8.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
-`stallSeconds`; operators must act on deadlines and consecutive failures themselves.
+`stallSeconds`; operators must act on deadlines and consecutive failures themselves. From 0.9.2, `goal next` and `goal step` hold a run of a flow once it reaches `limits.consecutiveFailures`
+(PROC-10); a direct `worker start` is not held by it, and `limits.deadline` is still not enforced.
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state
 writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
