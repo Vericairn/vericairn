@@ -2550,8 +2550,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, a decision dated after its own record, and a result whose output no longer has the bytes it claims. Records not
-    /// stored yet get the content checks a stored file gets, on their canonical bytes, since the checks of stored files cannot see them.
+    /// themselves, a decision dated after its own record, a result whose output location carries a URL scheme, and a result whose
+    /// output no longer has the bytes it claims. Records not stored yet get the content checks a stored file gets, on their canonical
+    /// bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
@@ -2578,6 +2579,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new result's output locations carry no URL scheme (FIX-97); results already in the estate keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Code == ResultType.OutputSchemeCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.outputs")))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

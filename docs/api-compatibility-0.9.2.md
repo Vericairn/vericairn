@@ -92,3 +92,14 @@ so do the `records new --expected` and `work review` help. Because the field des
 reader's schema explanation, that reader advances to `vericairn.records/readers/7`. Its hash changes, and declarations
 pinned to an earlier implementation need the ordinary explicit generator update before regeneration. Earlier golden
 fixtures remain. The generator id and contract version 1 are unchanged.
+
+## Output locations carry no scheme (FIX-97)
+
+No route, interface member, protocol type or public member is added or changed. A new result whose `outputs[].location`
+begins with a URL scheme (letters, digits, `+`, `-` or `.` before a colon, such as `https:` or `file:`) is now refused at
+every write surface (`NewRecord`, `Result`, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP)
+with the finding `result.output-scheme` at severity `error` in the response's problem; before, such a location was accepted.
+Validation and the estate check report a result already in the estate with such a location under the same code at severity
+`warning`, once per result, at `#body.outputs`, naming each such output and its scheme; it adds no error and the result
+keeps its reading. Evidence locations, which may be URLs, are unchanged. Record
+format remains 3, and no record body or field description changes.

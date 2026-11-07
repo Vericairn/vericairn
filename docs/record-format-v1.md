@@ -194,6 +194,9 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   information; a completed result with a failed check is a warning for the reviewer (`result.checks`) until a
   current acceptance recorded after it accepts the result itself or its work order, and from then on information
   naming that acceptance and whether it was a self-acceptance (`result.checks-accepted`).
+  From 0.9.2, a new result's output `location` carries no URL scheme such as `https:` and is refused when it
+  does (`result.output-scheme`); an external reference goes in `evidence`. A result already in the estate
+  keeps its reading and is reported as a warning.
 - `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys. The

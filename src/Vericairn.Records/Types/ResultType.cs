@@ -19,6 +19,12 @@ public sealed class ResultType : IRecordType
     /// <summary>Allowed check outcomes.</summary>
     public static readonly ImmutableArray<string> CheckOutcomes = ["passed", "failed", "skipped", "not-performed"];
 
+    /// <summary>
+    /// An output's location carries a URL scheme. From 0.9.2 the write boundary refuses a new result with this finding; a result
+    /// already in the estate keeps its reading, and validation reports it as a warning.
+    /// </summary>
+    internal const string OutputSchemeCode = "result.output-scheme";
+
     /// <inheritdoc />
     public string Name => "result";
 
@@ -56,7 +62,8 @@ public sealed class ResultType : IRecordType
         string? outcome = body.Enum("outcome", true, Outcomes);
         body.Text("summary", true, 8000);
         bool failedCheck = false;
-        foreach (BodyReader output in body.NestedArray("outputs", true, allowEmpty: true) ?? [])
+        List<string> schemes = [];
+        foreach ((BodyReader output, int index) in (body.NestedArray("outputs", true, allowEmpty: true) ?? []).Select((o, i) => (o, i)))
         {
             output.Text("name", true, 300);
             string? hash = output.Hash("hash", true);
@@ -65,7 +72,13 @@ public sealed class ResultType : IRecordType
             string? location = output.Text("location", false, 500);
             bool section = TemplateRecords.Output(context, output, hash, bytes, location);
             output.NoOtherKeys();
-            if (!section) VerifyOutput(context, output, hash, bytes, location);
+            if (!section && VerifyOutput(context, output, hash, bytes, location) is string scheme) schemes.Add($"outputs[{index}] ({scheme})");
+        }
+
+        if (schemes.Count > 0)
+        {
+            // Existing results keep their reading. The write boundary promotes this finding only for proposed records.
+            context.Findings.Warning(OutputSchemeCode, context.Location + "#body.outputs", SchemeMessage(schemes));
         }
 
         foreach (BodyReader evidence in body.NestedArray("evidence", true, allowEmpty: true) ?? [])
@@ -157,23 +170,69 @@ public sealed class ResultType : IRecordType
             .LastOrDefault();
     }
 
-    private static void VerifyOutput(ValidationContext context, BodyReader output, string? hash, long? bytes, string? location)
+    /// <summary>
+    /// The outputs of a result whose locations carry a URL scheme, as the one warning validation reports for them; null when none does.
+    /// Section outputs are left to the section rule, which requires the declared document path.
+    /// </summary>
+    internal static Finding? OutputSchemeFinding(RecordEnvelope result, string location)
+    {
+        if (!result.Body.TryGetProperty("outputs", out JsonElement outputs) || outputs.ValueKind != JsonValueKind.Array) return null;
+        List<string> schemes = [];
+        int index = 0;
+        foreach (JsonElement output in outputs.EnumerateArray())
+        {
+            if (output.ValueKind == JsonValueKind.Object && !output.TryGetProperty("section", out _) && output.TryGetProperty("location", out JsonElement path)
+                && path.ValueKind == JsonValueKind.String && Scheme(path.GetString()!) is string scheme)
+            {
+                schemes.Add($"outputs[{index}] ({scheme})");
+            }
+
+            index++;
+        }
+
+        return schemes.Count == 0 ? null : new(Severity.Warning, OutputSchemeCode, location + "#body.outputs", SchemeMessage(schemes));
+    }
+
+    /// <summary>The URL scheme a location begins with, colon included, such as https:; null for a path.</summary>
+    private static string? Scheme(string location)
+    {
+        int colon = location.IndexOf(':', StringComparison.Ordinal);
+        if (colon < 1 || !char.IsAsciiLetter(location[0])) return null;
+        for (int i = 1; i < colon; i++)
+        {
+            char c = location[i];
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('+' or '-' or '.')) return null;
+        }
+
+        return location[..(colon + 1)];
+    }
+
+    private static string SchemeMessage(IReadOnlyList<string> schemes) =>
+        $"Output locations carry a URL scheme: {string.Join(", ", schemes)}. An output's location is a repository-relative path; name an external reference in the result's evidence instead. From 0.9.2 a new result with such a location is refused; a result already in the estate keeps its reading.";
+
+    /// <summary>Checks an output's location and the file at it; returns the URL scheme the location carries, which names no file, or null.</summary>
+    private static string? VerifyOutput(ValidationContext context, BodyReader output, string? hash, long? bytes, string? location)
     {
         if (location is null)
         {
-            return;
+            return null;
         }
 
         if (Path.IsPathRooted(location) || location.Contains("..", StringComparison.Ordinal) || location.Contains('\\', StringComparison.Ordinal))
         {
             output.Error("result.output-path", "location", "Output locations are repository-relative paths with forward slashes.");
-            return;
+            return null;
+        }
+
+        if (Scheme(location) is string scheme)
+        {
+            return scheme;
         }
 
         string full = Path.Combine(context.Model.Root, location.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(full))
         {
-            return;
+            return null;
         }
 
         // A result names the exact bytes it produced. The path may legitimately change later (a manifest is re-pinned,
@@ -182,5 +241,7 @@ public sealed class ResultType : IRecordType
         {
             context.Findings.Info("result.output-changed", output.Location, $"The file at {location} no longer has the hash or size this result recorded; the result names the bytes it produced, not the path's current content.");
         }
+
+        return null;
     }
 }
