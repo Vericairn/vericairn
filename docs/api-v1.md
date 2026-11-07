@@ -83,9 +83,11 @@ From 0.9.2 (`WATCH-05`) a client hears what changed instead of polling. The daem
 ordered event journal per runtime, at most seven days and at most 100,000 events, as owner-only machine
 state beside the live store. A record this runtime observes first, written through it or found after a
 pull, raises a `record` event; a change in a derived state raises an `attention`, `ask`, `step`, `request`
-or `run` event. The runtime derives each consumed state again after a write, at most once a second, and on a
-clock tick of ten seconds while a reader listens, which finds time-based changes such as a step that falls
-due and overdue progress. `due` and `presence` are reserved for reminders and presence leases, which later
+or `run` event. The runtime derives each consumed state, one a listening reader's filter admits, again after
+a write, at most once a second, and on a clock tick of ten seconds while a reader listens, which finds
+time-based changes such as a step that falls due and overdue progress. On an estate whose derivation is slow
+the passes are spaced further apart, so that they hold the runtime at most a fifth of the time; a state no
+reader consumes keeps its last derivation, which the next one compares against, so nothing is lost. `due` and `presence` are reserved for reminders and presence leases, which later
 releases raise. The embedded runtime keeps no journal: its event reads answer the problem `unavailable`.
 
 An event is a hint, never authority. Its envelope, `vericairn.event/1`, carries no body, title, summary,

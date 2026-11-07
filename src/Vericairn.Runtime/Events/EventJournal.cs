@@ -683,12 +683,21 @@ internal sealed class EventJournal : IDisposable
     private static SqliteConnection Connect(string path)
     {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
-        connection.Open();
-        using SqliteCommand wal = connection.CreateCommand();
-        // A crash starts a new epoch whatever the last transaction kept, so the journal does not wait on every commit's flush.
-        wal.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
-        wal.ExecuteNonQuery();
-        return connection;
+        try
+        {
+            connection.Open();
+            using SqliteCommand wal = connection.CreateCommand();
+            // A crash starts a new epoch whatever the last transaction kept, so the journal does not wait on every commit's flush.
+            wal.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
+            wal.ExecuteNonQuery();
+            return connection;
+        }
+        catch
+        {
+            // Released before the caller replaces the file, which Windows refuses while a handle is open.
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static void OwnerOnly(string path)

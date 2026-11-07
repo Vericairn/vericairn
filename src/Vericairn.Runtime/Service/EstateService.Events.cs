@@ -78,7 +78,9 @@ public sealed partial class EstateService
 
     /// <summary>
     /// Derives every consumed projection now and appends what changed: the records first observed, then the derived changes they cause.
-    /// The pump calls this; it holds the estate's gate while it reads.
+    /// A projection is consumed when a listening reader's filter admits its kind, and each principal's attention when one of its
+    /// readers admits attention; one no reader consumes keeps its last derivation, which the next derivation compares against, so a
+    /// reader that consumes it later still hears every change since. The pump calls this; it holds the estate's gate while it reads.
     /// </summary>
     public void DeriveEvents()
     {
@@ -87,11 +89,13 @@ public sealed partial class EstateService
             return;
         }
 
+        EventSubscription[] readers = [.. listening.Keys];
+        bool Consumed(string kind) => readers.Any(s => s.Admits(kind));
         lock (gate)
         {
             EstateModel model = session.Load();
-            var pass = new EventPass { Full = true };
-            foreach (EventSubscription subscription in listening.Keys.Where(s => s.AdmitsAttention))
+            var pass = new EventPass { Asks = Consumed("ask"), Requests = Consumed("request"), Steps = Consumed("step"), Runs = Consumed("run") };
+            foreach (EventSubscription subscription in readers.Where(s => s.Admits("attention")))
             {
                 pass.Attention.TryAdd(subscription.Principal, null);
             }
@@ -108,24 +112,29 @@ public sealed partial class EstateService
     public async Task RunEventDerivationAsync(TimeSpan tick, Action<string>? log, CancellationToken cancellationToken)
     {
         long last = 0;
+        TimeSpan took = TimeSpan.Zero;
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await eventWork.WaitAsync(tick, cancellationToken).ConfigureAwait(false);
+                // A pass holds the estate's gate, so passes are spaced to hold it at most a fifth of the time, whatever the estate's size.
+                await eventWork.WaitAsync(Max(tick, took * 5), cancellationToken).ConfigureAwait(false);
                 if (listening.IsEmpty)
                 {
                     continue;
                 }
 
+                TimeSpan spacing = Max(TimeSpan.FromSeconds(1), took * 4);
                 TimeSpan since = Stopwatch.GetElapsedTime(last);
-                if (last != 0 && since < TimeSpan.FromSeconds(1))
+                if (last != 0 && since < spacing)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(1) - since, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(spacing - since, cancellationToken).ConfigureAwait(false);
                 }
 
+                long started = Stopwatch.GetTimestamp();
                 DeriveEvents();
                 last = Stopwatch.GetTimestamp();
+                took = Stopwatch.GetElapsedTime(started, last);
             }
             catch (Exception exception) when (exception is ObjectDisposedException || exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
             {
@@ -397,6 +406,8 @@ public sealed partial class EstateService
         }
     }
 
+    private static TimeSpan Max(TimeSpan one, TimeSpan other) => one > other ? one : other;
+
     private static readonly Problem EventsUnavailable = new("unavailable", "This runtime keeps no event journal: the daemon keeps it. Start the runtime with 'vericairn runtime start' and read events through it.", []);
 
     private static string AttentionProjection(string principal) => "attention:" + principal;
@@ -500,15 +511,20 @@ public sealed partial class EstateService
             }
         }
 
-        bool full = pass.Full || initialize;
+        // An epoch's first pass observes every global projection, so that each later derivation has something to compare against.
+        bool full = initialize;
         if (full || pass.Asks)
         {
             Compare("ask", AskItems(model, relations), events.Baseline("ask"), initialize);
         }
 
-        if (full)
+        if (full || pass.Requests)
         {
             Compare("request", RequestItems(model, relations), events.Baseline("request"), initialize);
+        }
+
+        if (full || pass.Steps)
+        {
             Compare("step", StepItems(model, relations, null), events.Baseline("step"), initialize);
         }
         else if (pass.StepsOfGoal is string goal)
@@ -760,11 +776,14 @@ public sealed partial class EstateService
     /// <summary>What one derivation pass covers.</summary>
     private sealed class EventPass
     {
-        /// <summary>Every global projection.</summary>
-        public bool Full { get; init; }
-
         /// <summary>The asks, as an asks read shows them.</summary>
         public bool Asks { get; init; }
+
+        /// <summary>The operator requests.</summary>
+        public bool Requests { get; init; }
+
+        /// <summary>Every goal's flow steps.</summary>
+        public bool Steps { get; init; }
 
         /// <summary>The runs, as a progress read shows them.</summary>
         public bool Runs { get; init; }

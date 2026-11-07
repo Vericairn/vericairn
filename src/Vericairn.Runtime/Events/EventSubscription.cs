@@ -52,8 +52,8 @@ public sealed class EventSubscription
     /// <summary>The position after everything read so far, sealed for the reader, with a fresh nonce each time.</summary>
     public string Cursor => journal.Seal(Interlocked.Read(ref position), Principal);
 
-    /// <summary>Whether its filter admits attention, the per-principal projection the pump derives for listening readers.</summary>
-    internal bool AdmitsAttention => matcher.Admits("attention");
+    /// <summary>Whether its filter admits a kind at all: what the pump derives for listening readers.</summary>
+    internal bool Admits(string kind) => matcher.Admits(kind);
 
     /// <summary>Why the reader may no longer read events now, or null.</summary>
     public string? Refusal() => service.EventRefusal(Principal, device, devicePublicKey, profile);
