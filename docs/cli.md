@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 11, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
+Revision 12, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
+
+Revision 11, November 7, 2026. Add `events watch` in the development build.
 
 Revision 10, November 7, 2026. Add the runtime step of `estate upgrade` and the serving release in `runtime status` and `status` in the development build.
 
@@ -378,7 +380,16 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 ```
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
-per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
+per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
+attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and
+the exact subject, with an agent's run or a person's ask. For required attention, `goal step` records one ask to the sponsor
+about the record that raised it and dispatches nothing for it. The run's own required attention, consecutive failed steps or an
+evaluation of impossible, is asked first and holds every dispatch until a decision answers it. With `--json`, `goal next`
+gains `attention`, `held` and each step's `review` and `attention`, and `goal show`'s flow gains each step's `attempts`,
+`attemptsUsed`, `attemptsAllowed`, `reviews`, `attention`, `failed`, `failure` and `rerun`, and the run's `attention`. See
+[hand-offs, reviews and failure routes](operator-guide.md#hand-offs-reviews-and-failure-routes-092). See the
 [operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
 
 ## `vericairn estate cache rebuild` (0.9.2)
@@ -419,6 +430,39 @@ line. `status --json` stays the canonical document, identical on every machine, 
 vericairn estate upgrade --to <published-version> --by <principal id>
 vericairn runtime status
 ```
+
+## `vericairn events watch` (0.9.2)
+
+Follows the event stream of the daemon serving this estate over the local socket (`WATCH-05`), one line per event, and
+reconnects from the last cursor when a stream ends, until interrupted. An event is a hint carrying identities, kinds and
+states but no content; read its subject before acting. The operating-system user reads for `--principal`, the operator
+when omitted, and every event passes that principal's audience. Only a running daemon keeps the journal: without one the
+command is refused, and `vericairn runtime start` starts it.
+
+| Option | Meaning |
+|---|---|
+| `--after <cursor>` | Resume after this cursor: an event's, a reset's or a state read's `eventsCursor`. From now when omitted. |
+| `--kind <kind>` | Only events of this kind: `record`, `attention`, `ask`, `step`, `request`, `due`, `run` or `presence`; repeatable. |
+| `--type <type>` | Only events whose subject has this type, such as a record type; repeatable. |
+| `--subject <id>` | Only events about this record; a goal matches its work orders, steps and runs; repeatable. |
+| `--to <principal>` | Only events concerning this principal; repeatable. |
+| `--category <category>` | Only attention of this category: `decision-needed`, `blocked`, `uncertain-effect`, `failed-check`, `incident` or `information`; repeatable. |
+| `--principal <id>` | The principal to read for; the operator when omitted. |
+| `--count <n>` | Stop after this many events. |
+| `--json` | One JSON object per line: the opening `{"cursor":...}`, each `vericairn.event/1` envelope, and `{"reset":true,"cursor":...}`. |
+
+A text line reads `<at>  <kind> <change>  <subject type> <subject id>`, then `to <principal>` and the category when the
+event has them. A line beginning `reset:` means the cursor could not be honored: re-read the state you follow, then
+continue. Start the watch before reading that state, or resume from the cursor the read returned, and no change is
+missed. Exit 0 when interrupted or after `--count` events, 2 when refused.
+
+```sh
+vericairn events watch --kind record --kind ask --json
+vericairn events watch --subject <goal id> --after <cursor>
+```
+
+A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
+[API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
 
 ## `vericairn security-reports` (0.9.2)
 

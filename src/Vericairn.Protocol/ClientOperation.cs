@@ -125,6 +125,8 @@ public static class ClientOperation
         "PolicyDeclare" or "PolicyRevise" or "PolicyRetire" or "PolicyExcept" or "PolicyRevokeException" or "WritingExceptionAdd" or "WritingExceptionRemove" or "WorkPlace" or "WorkMovePlan" or "ReleaseWithdraw" or "ReleaseReviewAssign" or "Result" or "ReviewResult" or "ReleaseBasis" or
         "QualifyHarness" or "RunPrepare" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" or "OperatorFinish" or "OperatorClose" => TimeSpan.FromMinutes(15),
         "PackagesObserve" or "ReleaseCheck" or "SecurityReportsPoll" => TimeSpan.FromMinutes(3),
+        // A long poll waits up to 25 seconds before it answers, and may first derive what changed.
+        "Events" => TimeSpan.FromMinutes(1),
         _ => TimeSpan.FromSeconds(30),
     };
 

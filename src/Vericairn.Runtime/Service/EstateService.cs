@@ -150,7 +150,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 && facts.TryGetProperty("adapter", out _)).Select(r => new { run = r.Id, measurement = r.Latest.Body.GetProperty("executionObserved").GetProperty("adapter") }).ToArray();
             if (adapters.Length > 0) json["efficiencyAdapters"] = JsonSerializer.SerializeToNode(adapters, ProtocolJson.Options);
             string adapterText = adapters.Length == 0 ? string.Empty : "\nRecorded efficiency measurements:\n" + string.Join('\n', adapters.Select(a => "  run " + a.run + " " + AdapterPresentation.Describe(a.measurement))) + "\n";
-            return MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + adapterText + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
+            StatusResponse status = MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + adapterText + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
+            // Status shows what the records say, so the records first observed are the pass it needs.
+            return journal is null ? status : status with { EventsCursor = EventsCursorLocked(model, null, new EventPass()) };
         }
     }
 
@@ -172,7 +174,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             ProgressResponse progress = ProgressCore(model, RepositoryChecks(model));
             JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
-            return progress with { Json = Element(json) };
+            return progress with { Json = Element(json), EventsCursor = EventsCursorLocked(model, null, new EventPass { Runs = true }) };
         }
     }
 
@@ -1090,7 +1092,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             using JsonDocument json = JsonDocument.Parse(global::Vericairn.Records.Estate.Asks.RenderJson(model, principal));
-            return new AsksResponse(global::Vericairn.Records.Estate.Asks.RenderText(model, principal), json.RootElement.Clone());
+            // A device's cursor is its own principal's; on the local socket the user reads for the principal asked, when one is.
+            return new AsksResponse(global::Vericairn.Records.Estate.Asks.RenderText(model, principal), json.RootElement.Clone())
+            {
+                EventsCursor = EventsCursorLocked(model, RequestPrincipal(model) ?? (model.CurrentPrincipal(principal) is null ? null : principal), new EventPass { Asks = true }),
+            };
         }
     }
 
@@ -1117,7 +1123,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             using JsonDocument json = JsonDocument.Parse(GoalView.RenderJson(model, goal));
-            return new GoalResponse(GoalView.RenderText(model, goal), json.RootElement.Clone());
+            return new GoalResponse(GoalView.RenderText(model, goal), json.RootElement.Clone())
+            {
+                EventsCursor = EventsCursorLocked(model, null, new EventPass { StepsOfGoal = model.Chain(goal)[0] }),
+            };
         }
     }
 
@@ -1758,6 +1767,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Standing(session.Read(), deviceId);
         }
     }
+
+    /// <summary>A device's standing in a model already loaded.</summary>
+    internal static DeviceStanding? StandingIn(EstateModel model, string deviceId) => Standing(model, deviceId);
 
     private static DeviceStanding? Standing(EstateModel model, string deviceId)
     {

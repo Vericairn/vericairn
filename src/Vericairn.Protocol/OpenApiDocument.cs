@@ -101,6 +101,8 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/pin"),
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
+        ("GET", "/v1/events"),
+        ("GET", "/v1/events/{key}"),
         ("GET", "/v1/operator/actions"),
         ("GET", "/v1/operator/requests"),
         ("POST", "/v1/operator/requests"),
@@ -259,6 +261,14 @@ public static class OpenApiDocument
                     ["schema"] = new JsonObject { ["type"] = name is "favorites" or "includeUnavailable" ? "boolean" : "string" },
                 }).ToArray());
             }
+            if (method == "GET" && path == "/v1/events")
+                operation["parameters"] = EventParameters();
+
+            if (method == "GET" && path == "/v1/events/{key}")
+                operation["parameters"] = new JsonArray(
+                    new JsonObject { ["name"] = "key", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "An event's key, sha256:<64 hex digits>." },
+                    new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = EventPrincipalDescription });
+
             if (method == "GET" && path is "/v1/asks" or "/v1/operator/requests")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
@@ -374,6 +384,39 @@ public static class OpenApiDocument
                 ["description"] = "A versioned read result with explicit unavailable, historical, current or different basis. Generation grants no authority or authored clearance.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
             };
+        }
+        else if (path == "/v1/events")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "With Accept: text/event-stream, server-sent events: each message's id is the cursor after it, its event the kind and its data the vericairn.event/1 envelope; "
+                    + "the opening message's id is where the stream starts, an id-only keep-alive comes every 15 seconds on a fixed schedule, and an event named reset (data {reset, cursor}) means re-read state "
+                    + "and continue from its id. A device-signed stream ends after 60 minutes; reconnect with Last-Event-ID and a fresh signature. Otherwise a long poll: EventsResponse after up to wait seconds. "
+                    + "Envelopes carry identities, hashes, kinds, states and categories, never content; an event is a hint and never authority. Events the reader may not read are dropped, and no count, cursor, "
+                    + "error or timing distinguishes them from none.",
+                ["content"] = new JsonObject
+                {
+                    ["application/json"] = new JsonObject { ["schema"] = SchemaReference("EventsResponse") },
+                    [EventVocabulary.StreamMediaType] = new JsonObject { ["schema"] = new JsonObject { ["type"] = "string" } },
+                },
+            };
+            responses["400"] = new JsonObject { ["description"] = "An unknown kind or category, a malformed filter value, more than 32 values in one filter, a repeated single parameter or a wait outside 0 to 25 (Problem)." };
+            responses["401"] = new JsonObject { ["description"] = "As every request on its profile; and a device naming another principal, or a principal not known here (Problem with code denied). A device that loses admission, its key or its profile mid-stream has the stream closed before the next event." };
+            responses["429"] = new JsonObject { ["description"] = "The device already holds four streams and long polls, or the runtime its limit (Problem)." };
+            responses["503"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code unavailable)." };
+        }
+        else if (path == "/v1/events/{key}")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "EventEnvelope: the newest event with that key that the reader may read, sealed for it.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("EventEnvelope") } },
+            };
+            responses["404"] = new JsonObject { ["description"] = "No event with that key is kept that the reader may read: unknown, dropped and unreadable keys are answered alike." };
+        }
+        else if (path is "/v1/status" or "/v1/progress" or "/v1/asks" or "/v1/goals/{id}")
+        {
+            responses["200"] = new JsonObject { ["description"] = "What the runtime observed. From 0.9.2 the response adds eventsCursor, the event journal's position as of this read sealed for the reader, when the runtime keeps a journal: GET /v1/events from it leaves no gap." };
         }
         else if (path is "/v1/attention" or "/v1/attention/acknowledge")
         {
@@ -743,6 +786,7 @@ public static class OpenApiDocument
         attentionRequest["required"] = new JsonArray("by", "kind", "subjectType", "subjectId", "expected");
         JsonObject attentionResponse = Object(("principal", "string"), ("asOf", "string"), ("items", "array"));
         attentionResponse["properties"]!["items"]!["items"] = SchemaReference("AttentionNotice");
+        attentionResponse["properties"]!["eventsCursor"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "The event journal's position as of this read, sealed for the reader (0.9.2); absent when the runtime keeps no journal." };
         JsonObject acknowledgment = Object(("item", "object"), ("problem", "object"), ("ok", "boolean"));
         acknowledgment["properties"]!["item"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("AttentionNotice")) };
         acknowledgment["properties"]!["problem"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("Problem")) };
@@ -760,6 +804,9 @@ public static class OpenApiDocument
         {
             ["AttentionAcknowledgeRequest"] = attentionRequest,
             ["AttentionResponse"] = attentionResponse,
+            ["EventReference"] = EventReferenceSchema(),
+            ["EventEnvelope"] = EventEnvelopeSchema(),
+            ["EventsResponse"] = EventsResponseSchema(),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -1127,12 +1174,14 @@ public static class OpenApiDocument
         ("GET", "/v1/documents/pass/{version}") => "The documents still due for this exact publication, their covered paths and release changes, assignments and proposed front-document patches. Reads records and local registered clones; writes, fetches and commits nothing.",
         ("POST", "/v1/documents/pass/{version}/assignments") => "Assign the exact displayed selection to a reviewer through an ordinary work order and assignment, validated together. Rechecks current publication and due declarations; clears no document and applies no patch.",
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
+        ("GET", "/v1/events") => "Follow the estate's events after a cursor, as server-sent events or a long poll, narrowed by kind, record type, subject, recipient and category. Delivery is at least once within retention; each event passes the audience check at delivery. Writes nothing.",
+        ("GET", "/v1/events/{key}") => "The newest event with a key that the reader may read; unknown and unreadable keys are answered alike. Writes nothing.",
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
         ("GET", "/v1/operator/close") => "Read every current work order whose latest result is completed, has current passing reviews and has no acceptance of that exact result. Includes the exit question, result summary, review summaries and independence, and exact record hashes. Reads sign and write nothing. Not exposed through MCP.",
         ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody currently checks presence per signature. Not exposed through MCP.",
-        ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.",
+        ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
         ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
@@ -1181,6 +1230,69 @@ public static class OpenApiDocument
         ("POST", "/v1/runtime/certificate") => "Replace the runtime certificate now: paired devices keep working, since the runtime identity signs the new one; for a compromise every other open connection is closed too, and identity replaces the runtime identity as well, after which every device pairs again. On the runtime's own machine only.",
         _ => string.Empty,
     };
+
+    private const string EventPrincipalDescription = "The principal read for: on the local socket the operating-system user reads for it, by default the operator; a device reads only for its own principal and may omit it.";
+
+    private static JsonArray EventParameters()
+    {
+        var parameters = new JsonArray(
+            new JsonObject { ["name"] = "after", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A cursor from an event, a long poll or a state read's eventsCursor; the journal's head when omitted. A cursor that cannot be honored answers reset." },
+            new JsonObject { ["name"] = "Last-Event-ID", ["in"] = "header", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A reconnecting stream's newest id; it supersedes after." },
+            new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = EventPrincipalDescription },
+            new JsonObject { ["name"] = "wait", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = EventVocabulary.MaxWaitSeconds, ["default"] = EventVocabulary.DefaultWaitSeconds }, ["description"] = "A long poll's longest wait in seconds; it answers as soon as an event is delivered." });
+        foreach ((string name, string description, IReadOnlyList<string>? values) in new (string, string, IReadOnlyList<string>?)[]
+        {
+            ("kind", "Event kinds, repeated; due and presence are reserved for later releases.", EventVocabulary.Kinds),
+            ("type", "Subject types, such as record types, repeated.", null),
+            ("subject", "Record ids, repeated; a goal matches its work orders, steps and runs.", null),
+            ("to", "Principals concerned, repeated.", null),
+            ("category", "Attention categories, repeated.", EventVocabulary.Categories),
+        })
+        {
+            var items = new JsonObject { ["type"] = "string" };
+            if (values is not null) items["enum"] = new JsonArray(values.Select(v => (JsonNode)v).ToArray());
+            parameters.Add(new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["explode"] = true, ["schema"] = new JsonObject { ["type"] = "array", ["maxItems"] = EventVocabulary.MaxFilterValues, ["items"] = items }, ["description"] = description });
+        }
+
+        return parameters;
+    }
+
+    private static JsonObject EventReferenceSchema()
+    {
+        JsonObject reference = Object(("type", "string"), ("id", "string"), ("hash", "string"));
+        reference["required"] = new JsonArray("type", "id");
+        reference["properties"]!["hash"]!["nullable"] = true;
+        reference["description"] = "A record by type, id and hash, or a derived subject by its kind and an opaque sha256 digest.";
+        return reference;
+    }
+
+    private static JsonObject EventEnvelopeSchema()
+    {
+        JsonObject envelope = Object(("format", "string"), ("key", "string"), ("cursor", "string"), ("kind", "string"), ("change", "string"), ("at", "string"),
+            ("subject", "object"), ("sources", "array"), ("to", "string"), ("category", "string"));
+        envelope["required"] = new JsonArray("format", "key", "cursor", "kind", "change", "at", "subject", "sources");
+        envelope["description"] = "vericairn.event/1: a hint, never authority, carrying no body, title, summary, path, secret or command.";
+        envelope["properties"]!["format"]!["enum"] = new JsonArray(EventVocabulary.Format);
+        envelope["properties"]!["kind"]!["enum"] = new JsonArray(EventVocabulary.Kinds.Select(k => (JsonNode)k).ToArray());
+        envelope["properties"]!["change"]!["enum"] = new JsonArray(EventVocabulary.Changes.Select(c => (JsonNode)c).ToArray());
+        envelope["properties"]!["category"]!["enum"] = new JsonArray(EventVocabulary.Categories.Select(c => (JsonNode)c).ToArray());
+        envelope["properties"]!["category"]!["nullable"] = true;
+        envelope["properties"]!["to"]!["nullable"] = true;
+        envelope["properties"]!["subject"] = SchemaReference("EventReference");
+        envelope["properties"]!["sources"]!["items"] = SchemaReference("EventReference");
+        envelope["properties"]!["sources"]!["maxItems"] = EventVocabulary.MaxSources;
+        return envelope;
+    }
+
+    private static JsonObject EventsResponseSchema()
+    {
+        JsonObject response = Object(("events", "array"), ("cursor", "string"), ("reset", "boolean"), ("problem", "object"));
+        response["required"] = new JsonArray("events", "cursor", "reset");
+        response["properties"]!["events"]!["items"] = SchemaReference("EventEnvelope");
+        response["properties"]!["problem"]!["nullable"] = true;
+        response["description"] = "The events after the cursor the reader may read, and the cursor to continue from; with reset, re-read state first.";
+        return response;
+    }
 
     private static JsonObject Object(params (string Name, string Type)[] properties)
     {

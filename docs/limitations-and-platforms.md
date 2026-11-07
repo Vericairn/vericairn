@@ -144,7 +144,7 @@ nuget.org availability or account-holder qualification claim.
 - FIX-12 checks the work order's current holder for every run, before workspace preparation and again under the write lock before intent. A new run on an assignment displaced by hand-over is refused whether explicitly named or routed, with nothing recorded or charged. The check grants no new authority and does not certify containment of an existing run.
 - Asks deliver at most three per principal in a read response, with the remainder queued. A stalled run can record an attention ask, but there is no external notification delivery here. A decision by the principal asked answers it; reading, dismissing or waiting does not.
 - Settlement withdraws the run's still-open or notified process attention asks, including stall and command-audit asks, as no longer needed. Withdrawals pin the exact settlement and preserve the question and observations; already answered asks stay answered. Closed asks no longer produce stale-subject warnings. The new `attempt-missing` and `scope-settlement` asks remain open for review, pinned to the settled operation's exact revision and hash. The settlement, new asks and withdrawals are validated together and journaled; interrupted storage still requires reconciliation. Withdrawal is not an answer by the person asked and accepts no work.
-- Pausing or abandoning a goal prevents new launches; it does not stop runs already in flight. `goal stop` records abandonment; use `worker stop` for each run that must stop and inspect the stop facts. `limits.deadline` and `limits.consecutiveFailures` are validated and recorded but not yet enforced by the routing or worker code. Operators must monitor and act on them.
+- Pausing or abandoning a goal prevents new launches; it does not stop runs already in flight. `goal stop` records abandonment; use `worker stop` for each run that must stop and inspect the stop facts. `limits.deadline` is validated and recorded but not yet enforced by the routing or worker code, and so is `limits.consecutiveFailures` for a goal that runs no flow; operators must monitor and act on them. From 0.9.2, `goal next` and `goal step` hold a run of a flow that reaches its `limits.consecutiveFailures` in failed steps in a row until its sponsor answers; a run started directly with `worker start` is not held by it.
 - Resumption and goal revision do not erase run charges: the ledger includes runs naming any revision of that goal. Concurrency defaults to one when not stated; omitted token or currency allowance is not unlimited spending authority.
 
 ## Worker launchers, limits and custody
@@ -715,6 +715,19 @@ available through `work observe`; later unaccepted results remain separate. Supe
 Classification uses current estate state, not a snapshot at the window's end; work-order acceptance does
 not accept each result. Later imports with older timestamps can require another explicit widening.
 Earlier sets and their checksums remain unchanged.
+
+## Event journal limits (0.9.2)
+
+The daemon's event journal (`WATCH-05`) keeps at most seven days and 100,000 events. A cursor older than
+that, from another epoch or sealed for another principal answers `reset`, and the client re-reads state. A
+crash or a lost `events.db` starts a new epoch. A copy of a cleanly stopped journal restored from a backup
+is not detected: it continues its epoch, and a client holding a cursor from after the copy can miss events.
+After such a restore, delete `events.db` beside the live store before starting the daemon. When the daemon
+restarts, events derived from a time-based state that appeared and cleared while it was down, or while no
+reader consumed that state, are not raised; the records behind them still raise their own events. Device
+streams share 16 slots, at most four per device and eight per principal, with two more kept for the local
+socket. A reset tells a client only that its cursor could not be honored; how often one comes depends on the
+journal's whole volume, including events that client may not read. The embedded runtime keeps no journal.
 
 ## Context and hand-over limits
 

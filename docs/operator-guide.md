@@ -879,9 +879,19 @@ Duplicates written before this rule, by two writers of an earlier release or by 
 
 1. Stop the extra writer. Run `vericairn records validate` or `vericairn estate reconcile` to list the conflicting records, and read both files and any records that cite them. Dispatch nothing under a duplicated operation identity until it is settled.
 2. Keep one: the one later records already cite, or else the earlier one.
-3. Supersede the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key.
+3. Settle the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key. Two current operations under one identity take a reconciliation that keeps one and withdraws the other, as below.
 
-Some record types have no revision that clears the conflict. In 0.9.2 that includes two current operations under one identity: a revision keeps its identity, and a reconciliation settles only revisions of one record. Leave both files unchanged and report the case to Vericairn's maintainer; no record settles it in this release.
+From 0.9.2 (FIX-100), a reconciliation settles operations recorded independently under one identity, as it settles independent first communication profiles. Its subject is one of them; `kept` names the latest revision of the operation that stands, `withdrawn` names the latest revision of each other one, and `note` gives your reason:
+
+```sh
+vericairn records new reconciliation --by <operator id> --subject operation:<kept id>:<kept hash> --body reconciliation.json
+```
+
+```json
+{"kept": "<kept id>", "withdrawn": ["<other id>"], "note": "Both runtimes recorded the intent; the first stands, and the second was never dispatched."}
+```
+
+Only the operator or a principal with the `local-engineering` scope, the authority that records operations, settles them, and the reconciliation is signed by an admitted device of that principal, whatever the charter's signature policy. Every record it names must be an operation under the subject's identity and the latest revision of its own operation. Neither operation is rewritten: the withdrawn one stays in the estate and counts as superseded by the kept one, `operation.duplicate-identity` is no longer reported, and writes proceed. Nothing settles duplicates automatically. A withdrawn operation whose effect may have happened still needs its own observation before anything is retried under that identity.
 
 ## 11. The daemon
 
@@ -902,6 +912,41 @@ From 0.9.2 (OPS-05) `runtime status` also shows the serving daemon's release aga
 From 0.8.0 loopback checks the signing time and the device's current admission before reading a request body. Both device-signed profiles cap bodies at 8 MiB (8,388,608 bytes), or a lower configured server limit, and allow at most 30 seconds to read one, shortened when the signature expires sooner. Signature verification follows the read; the headers alone do not authenticate a body. Admission and freshness are checked again, and a key rotation during a loopback read requires signing afresh. Size refusal is `413`; timeout is `401`. Refused bodies are discarded only within 64 KiB and ten seconds after the response completes. The local socket keeps its configured body limit, 30,000,000 bytes by default; pairing messages are limited to 16 KiB.
 
 FIX-09 adds a shared limit of eight simultaneous loopback body reads awaiting signature verification across all devices, with no waiting queue; capacity refusal is `503`. Kestrel also limits concurrent connections to 32. These bounds limit resource use; they do not establish denial-of-service immunity.
+
+### Events (0.9.2)
+
+From 0.9.2 the daemon keeps an event journal (`WATCH-05`), so an agent, a script or a client hears what
+changed instead of polling. A record the runtime first observes, written through it or found after a pull,
+raises a `record` event, and a change in attention, an ask, a flow step, an operator request or a run raises
+an event of that kind. Each event is a hint, never authority: it names the subject by type, id and hash, the
+change, the principal concerned and an attention category, and never carries a body, title, path, secret or
+command. Read the subject before acting on it.
+
+```sh
+vericairn events watch --kind record --kind ask
+vericairn events watch --json --after <cursor>
+```
+
+`events watch` follows the stream over the local socket for the principal you name, the operator by default,
+and reconnects by itself. Start it before reading the state it complements, or resume from the
+`eventsCursor` that `GET /v1/status`, `/v1/progress`, `/v1/attention`, `/v1/asks` and `/v1/goals/{id}`
+return, and no change is missed. A `reset` line means the cursor could not be honored, for example a client
+back after more than a week or after a restore: re-read the state, then continue. The journal keeps at most
+seven days and 100,000 events in an owner-only file beside the live store; a clean restart keeps it, and a
+crash or a lost file starts a new epoch, after which every older cursor resets. A copy of a cleanly
+stopped journal restored from a backup is not detected and continues its epoch, so a client that read past
+the copy can miss events: after restoring the runtime's state directory, stop the daemon, delete
+`events.db` beside the live store and start it again, so every cursor resets. The embedded runtime keeps
+no journal, so `events watch` needs a running daemon.
+
+A paired device reads events only for its own principal and with its own signature; a device stream ends
+after 60 minutes and reconnects. Each event passes the audience check before it is delivered: a principal's
+attention and its acknowledgments reach only that principal, and what a reader may not read is dropped
+without any count, error or timing that would show it. Revoking a device closes its streams before the next
+event. A device holds at most four streams, one principal's devices eight and all devices 16; the local
+socket keeps two more for itself, so paired devices never lock out the runtime machine's own user. A script that follows `events watch` and runs
+`goal step` acts with its own principal's authority and stays Community. See
+[API version 1](api-v1.md#the-event-stream-092).
 
 ## 12. Reading the estate
 
@@ -1069,7 +1114,7 @@ vericairn goal accept <goal> --by <sponsor> --statement "I accept this goal from
 
 For record predicates the runtime supplies the evaluation's verdict and records read. For evidence conditions the evaluator supplies `--verdict n:met:reason` (or `not-yet` or `impossible`) and `--read n:<record id>`; numbering starts at one, and a met evidence condition must name a record. The evaluator cannot have authored any step. Acceptance needs the current evaluation of the exact goal revision, every condition met, and every record predicate still holding. The accepter is neither the evaluator nor a step's author: the sponsor when a person, an operator when an agent sponsors it, or the sponsor's named delegate holding `accept-work` for an ordinary goal without reserved actions. A delegate never accepts a goal involving a release or milestone.
 
-`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, and `limits.consecutiveFailures` are validated and recorded but not yet enforced. Monitor them and act explicitly. Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
+`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. For a run of a flow, `goal next` and `goal step` hold the run for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
 
 ## 18. Routing, asks and the worker
 
@@ -1338,8 +1383,10 @@ recovery, and prohibits what the goal's constraints, the reserved effects and th
 an operation may record its own `provenance` (its inputs by hash, provider, tool and settings) where an item requires it. A
 person can take over a step an agent holds with `work takeover`, which carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
 is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal other than its author
-and the step's own holders, of the item's reviewer role with its independence: in this build, an operator or an agent. A
-review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
+and the step's own holders, with the item's independence and of its reviewer role: a principal the role names, or for a
+review that names none a principal of the estate's `reviewer` role or an operator, or the contributor of a review assignment
+of that item ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). In this build such a review is an operator's or an
+agent's. A review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
 contributor of its own assignment. A verification an item names is a `verification` record of that exact subject that
 passed. Evidence is any passing verification of the exact subject by the declared method, whoever recorded it, the item's
 producer included; independence is what an item's review requires, not its evidence. A provenance that names a principal
@@ -1351,6 +1398,74 @@ predicates hold, recorded by whoever carries it. In this build an exchange's exp
 has no API or browser route, and nothing takes a run's next steps automatically; a person carries them. A stop is shown in the
 run's position and in `goal step`'s message; its operator request, and its place in status, Workbench and Remote, are not
 built yet, and a step with no available principal is reported rather than asked of the sponsor.
+
+### Hand-offs, reviews and failure routes (0.9.2)
+
+Each step hands on exact outputs and the next step pins them. A step's assignment pins each input by the record that carries
+it, and its brief names each one as handed on: a file by its name and content hash in the result that carries it, a record by
+its id and hash. When an upstream output changes after a step used it, that step is `stale` and reruns from a fresh assignment
+that pins the new version; the earlier assignment, attempts and results stay recorded.
+
+An item is handed on only after its review. An item of a work step that declares no review, in a step that declares none,
+takes an `independent` review when it feeds a reserved step or leaves the estate, through an `effect` or `exchange` step or a
+step whose items do; a configuration of the flow's `review` option never lowers it. A work step's review is a routed step; an
+item of another kind of step is reviewed by whoever carries the step, with a `review` record of its exact hash. `goal next` lists
+it as `<step> review`, routed to the reviewer role the item names, or to the estate's `reviewer` role. Each candidate must meet
+the review's independence against the step's authors, who are the contributors of its assignments and whoever recorded an
+attempt or a result under one. An author is never offered a review that is not `self`. A `person` review goes only to a
+person, an `other-harness` review only to an agent on a harness none of the authors used, and a person without the operator
+role is not offered one, since only an operator records a review of another's work as a person. A review in a role the flow
+marks `person` is a person's: an agent the roster names in it is never offered it and its pass never clears the item; its findings
+or failure count only when it also judges the step another way, as a holder of the estate's `reviewer` role. `goal step` assigns the
+review as an assignment of the run's work order whose `step.review` names the items and the exact subject that carries them.
+An agent reviewer gets a run of its own, counted against the review's attempts, and a person an assignment and an ask. The
+record type refuses a review assignment to an author, to a principal its independence does not admit, or of a subject that
+does not carry the items. A pass by its contributor at that hash hands the items on. Findings send the step back to its author
+for another attempt, and a review that fails it takes its failure route. Findings and failures count only from principals who
+judge the step: an operator, the reviewer roles of its items and of review steps that review it, and its review assignments'
+contributors.
+
+Retries go by outcome, within the goal's `attemptsPerStep`, which counts every agent run of a step's work across all of its
+assignments, so that a fresh assignment never starts the count again; a review's runs count apart.
+
+- An uncertain effect stops the step for its sponsor until it is reconciled by reading. That is a result naming
+  `unresolvedEffects`, a run of its work left `uncertain`, or, for a step carried by its action, an `operation` its done
+  predicates read left `uncertain`. It stops the step even when the step is stale or reopened, so nothing reruns it first. A
+  result with unresolved effects closes nothing; revise it without them once each effect is settled. Until then the record type
+  refuses any run of the step, on any of its assignments and however it is started (`operation.unreconciled`).
+- A run that fails with no result recorded since backs off before the next one. The wait is a minute after the first failed
+  run, doubling with each failed run in a row up to an hour, and the step shows `blocked` until then.
+- Findings start another attempt by the same holder.
+- A failed step, one whose latest result is `blocked` or `abandoned` or whose review fails, takes its failure route. A route to
+  an earlier step reopens that step, which reruns from a fresh assignment, and the failed step reruns once it is done again. A
+  route to a branch enters the branch, and reopens its steps from the failure even when they ran before, so a branch entered
+  again runs again; once they are done the run returns to the branch's `returnTo`. A stop, the route of a step that declares
+  none, stops it for the sponsor, and so does a route that cannot move because the step it returns to is off in this run.
+- When a step must run again and its work has had every run its attempts per step grant, its retry budget is spent and it
+  stops for the sponsor.
+
+Each of these stops is required attention. `goal next` routes it to who decides for the goal, its sponsor, as the route state
+`attention`, and `goal step` records one ask about the record that raised it, with a recommendation, and dispatches nothing for
+it. Only what depends on the step waits, and the run's other steps go on. While the ask waits the route is `asked`; once a
+decision answers it, it is `answered` and is not asked again. The step goes on when its records change, for example when a
+person takes it over with `work takeover`, a result is revised, or a revision of the goal grants more attempts and is activated.
+Two kinds of attention hold the whole run instead: the goal's `limits.consecutiveFailures` reached by failed steps in a row,
+and an evaluation that judges a condition impossible. `goal step` asks the sponsor once and dispatches nothing more until a
+decision answers the ask.
+
+`goal next` and `goal step` hold these stops, the backoff, a failed step's route and the run's own attention. A run started
+directly with `worker start` is the starter's explicit act and is not held by them; the record type still refuses one beyond the
+step's attempts per step or while an effect of its work is unreconciled.
+
+A role may name the estate's own copy of its brief, a file such as `docs/roles/writer.md`, in the flow's `document`. Each
+brief for the role then names that file and its content hash and says whether a living document declares it and whether it is
+due. The file is read only when it is a plain file of one byte to 1 MiB with no link on its path; a link, a directory, a device,
+a FIFO or an empty file is not read, and the brief says so and keeps the flow's own brief. Declared and due at level `refuse`, it holds as `blocked` each step of the role that is still to be briefed, unassigned or
+to rerun from a fresh assignment, until a revision or a review clears it; a holder already briefed goes on.
+
+`goal show` and `goal next` show all of this. Each step lists its attempts under every assignment, with their results, and how
+many runs of its attempts per step it has used. They also show its reviews before hand-off, its required attention, the
+failure its latest work stands on, and whether it reruns from a fresh assignment. A run lists its own required attention.
 
 ## 19. Pairing, local-network connections and revocation
 

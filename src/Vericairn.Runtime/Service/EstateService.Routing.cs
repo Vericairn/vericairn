@@ -60,7 +60,10 @@ public sealed partial class EstateService
     /// <param name="Route">Its route from this machine.</param>
     /// <param name="Flow">For a run, the run's position.</param>
     /// <param name="Step">For a run, the step instance.</param>
-    private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.StepInstance? Step = null);
+    /// <param name="Review">For a run, a review before hand-off of the step's items, which its assignment carries; null for the step itself.</param>
+    /// <param name="Attention">For a run, the required attention its sponsor is asked about; null for a step to carry.</param>
+    private sealed record Taken(RecordEnvelope Order, string Key, string Title, NextEligible.Route Route, FlowPosition.Position? Flow = null, FlowPosition.StepInstance? Step = null,
+        FlowPosition.PendingReview? Review = null, FlowPosition.Attention? Attention = null);
 
     /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request)
@@ -108,12 +111,19 @@ public sealed partial class EstateService
                     return StepProblem(goalId, "refused", $"Goal {goalId} is a run whose {flow.Position.Unavailable ?? "work order is missing"}: it is shown, and none of its steps is taken on this machine. Nothing was recorded.");
                 }
 
+                // The run's own required attention is asked of the sponsor first, and holds every dispatch until it is answered.
+                if (flow.AttentionNext is NextEligible.AttentionRoute held)
+                {
+                    return AttentionAsk(model, current, new Taken(flow.Position.Work, "the run", "the run's required attention", held.Route, flow.Position, null, null, held.Attention), request);
+                }
+
                 if (flow.Next is not NextEligible.FlowStepRoute step)
                 {
                     return new GoalStepResponse(goalId, "none", NothingToTake(goalId, flow), true);
                 }
 
-                taken = new Taken(flow.Position.Work, step.Step.Name, step.Step.Step.Title, step.Route!, flow.Position, step.Step);
+                string title = step.Review is null ? step.Step.Step.Title : $"the review of {step.Review.What} of step {step.Step.Name} before it is handed on";
+                taken = new Taken(flow.Position.Work, step.Name, title, step.Route!, flow.Position, step.Step, step.Review, step.Route!.State == "attention" ? step.Attention : null);
             }
             else
             {
@@ -263,6 +273,11 @@ public sealed partial class EstateService
     /// <summary>Records what a step routed to a person, or to no one, asks: the person's assignment and ask, or the sponsor's ask.</summary>
     private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
     {
+        if (step.Attention is not null)
+        {
+            return AttentionAsk(model, goal, step, request);
+        }
+
         string key = step.Key;
         NextEligible.Route route = step.Route;
         string title = step.Title;
@@ -286,14 +301,20 @@ public sealed partial class EstateService
             }
 
             string id = assignment.Envelope.Id;
-            question = route.State == "reserved"
+            question = step.Review is FlowPosition.PendingReview review
+                ? $"Will you review {review.What} at {review.Hash}, of step {step.Step!.Name} of goal {goalTitle}, before it is handed on? It is assigned to you as its {route.Role} (assignment {id}), a{(review.Requirement.Independence == "independent" ? "n" : string.Empty)} {review.Requirement.Independence} review."
+                : route.State == "reserved"
                 ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {id})."
                 : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {id}).";
             string from = step.Step is null ? $"vericairn work brief {key}" : $"assignment {id}'s brief, which pins the step's inputs, with vericairn work brief {EstateModel.BodyString(step.Order, "key") ?? step.Order.Id}";
-            recommendation = route.State == "reserved"
+            recommendation = step.Review is FlowPosition.PendingReview reviewing
+                ? $"Review it from assignment {id}'s brief: record a review of {reviewing.Subject.Type} {reviewing.Subject.Id} at {reviewing.Hash} with outcome pass, findings or fail. Findings send the step back to its author; fail takes its failure route."
+                : route.State == "reserved"
                 ? $"Carry it yourself, from {from}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
                 : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; {from} is everything it needs.";
-            consequence = route.State == "reserved"
+            consequence = step.Review is not null
+                ? $"Step {step.Step!.Name} is not handed on until it is reviewed, and what depends on it waits; the goal's other steps go on."
+                : route.State == "reserved"
                 ? $"{key} waits until you act, and nothing reserved is done for you; the goal's other steps go on."
                 : $"{key} waits with you, and no other contributor is given it; the goal's other steps go on.";
         }
@@ -368,11 +389,59 @@ public sealed partial class EstateService
         string whom = PrincipalName(model, route.Principal);
         string said = route.State switch
         {
+            "person" when step.Review is not null => $"{key} is routed to a person: the review is assigned to {whom} (assignment {assigned!.Id}) and asked of them (ask {asked.Id}).",
             "reserved" => $"{key} is a reserved action: it is assigned to {whom}, who holds it (assignment {assigned!.Id}), and asked of them (ask {asked.Id}).",
             "person" => $"{key} is routed to a person: it is assigned to {whom} (assignment {assigned!.Id}) and asked of them (ask {asked.Id}).",
             _ => $"No principal is available for {key}: {whom} is asked to assign someone or change the roster (ask {asked.Id}); it is given to no one else.",
         };
         return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked);
+    }
+
+    /// <summary>
+    /// Records the ask that required attention becomes (design/flow.md §§ 7 and 8): to who decides for the goal, its sponsor, about the
+    /// record that raised it, with the recommendation its kind calls for; no assignment, and nothing is dispatched. Only what depends
+    /// on a step's attention waits; the run's own attention holds every dispatch until the ask is answered.
+    /// </summary>
+    private GoalStepResponse AttentionAsk(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
+    {
+        FlowPosition.Attention attention = step.Attention!;
+        NextEligible.Route route = step.Route;
+        string key = step.Key;
+        if (route.Principal is null)
+        {
+            return StepProblem(goal.Id, "refused", $"{key} raises required attention ({attention.Summary}), and the estate names no one who decides for goal {goal.Id}: it has no charter operator. Nothing was recorded.", key, route);
+        }
+
+        string goalTitle = EstateModel.BodyString(goal, "title") ?? goal.Id;
+        bool run = step.Step is null;
+        string holder = step.Step?.Assignment is RecordEnvelope held ? $"vericairn work takeover {held.Id} --by <person>" : "vericairn work takeover <assignment> --by <person>";
+        string recommendation = attention.Kind switch
+        {
+            "uncertain" => $"Reconcile it by reading the outside state first: revise the result once each effect is settled, or reconcile the run under its original identity; nothing is retried before then. Then take the step again, or take it over yourself ({holder}).",
+            "failed" => $"Read the failure, then decide: take the step over yourself ({holder}), revise the goal for another route, which needs a fresh activation, or end the goal. Answering this ask records the decision; it carries nothing out.",
+            "exhausted" => $"Read its attempts, then decide: take the step over yourself ({holder}), or revise the goal with more attempts per step, which needs a fresh activation; no further run of it starts on its own.",
+            "consecutive-failures" => "Read the failed steps, then decide: answer this ask to let the run go on, revise the goal, or end it.",
+            _ => "End the goal as impossible, or revise it; answering this ask lets the run go on.",
+        };
+        var ask = new JsonObject
+        {
+            ["to"] = route.Principal,
+            ["question"] = Clip($"Required attention in goal {goalTitle}{(run ? string.Empty : $", step {key}")}: {attention.Summary}. How does the run go on?", 4000),
+            ["recommendation"] = Clip(recommendation, 4000),
+            ["consequence"] = Clip(run ? "Nothing more of the run is dispatched until this ask is answered." : $"{key} waits, and only what depends on it waits; the run's other steps go on.", 2000),
+            ["goal"] = goal.Id,
+            ["state"] = "open",
+        };
+        RecordEnvelope trigger = attention.Trigger;
+        WriteOutcome written = WriteLocked(new RecordDraft("ask", request.By, Element(ask), new RecordReference(trigger.Type, trigger.Id, trigger.ComputedHash)), model);
+        if (!written.Ok)
+        {
+            return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, key, route.State, route.Principal, Problem: written.Problem);
+        }
+
+        string whom = PrincipalName(model, route.Principal);
+        return new GoalStepResponse(goal.Id, "ask", $"{(run ? "The run" : key)} raises required attention ({attention.Kind}): {attention.Summary}. {whom} is asked (ask {written.Written!.Id}), about {trigger.Type} {trigger.Id}; nothing was dispatched. Waiting answers nothing: the ask is answered by a decision of {whom}.",
+            true, key, route.State, route.Principal, null, written.Written);
     }
 
     /// <summary>

@@ -459,12 +459,21 @@ every template.
 - `roles` give each role its holder, `person`, `agent` or `either`, and its
   role brief, which the step's assignment carries. Routing never gives a step of
   a `person` role to an agent, and a goal that names an agent in one is refused.
+  A role may name, in `document`, the repository path of the estate's own copy
+  of its brief, such as `docs/roles/writer.md`, kept as a
+  [living document](living-documents.md) (0.9.2). When it is a plain file of
+  one byte to 1 MiB with no link on its path, the brief names that file and its
+  exact content hash, and a declaration of it due at level
+  `refuse` holds each step of the role still to be briefed until a revision or
+  a review clears it.
+  The path is portable, outside hidden directories, `records` and `objects`.
 - Each step has `key`, `title`, `kind` (`work`, `review`, `operation`, `effect`,
   `decision`, `exchange` or `flow`), `role`, either `required: true` or
   `optional: true` with a `default` of `on` or `off`, and `recovery`. It may add
   `reserved` (`accept-release`, `publish`, `spend`, `use-credential` or
   `security-review`), `after`, `requires`, `done`, `action`, `traps`, `inputs`,
-  `outputs`, `review`, `each` and `when`.
+  `outputs`, `review`, `each` and `when`, and a work step may add `failure`
+  (0.9.2).
 - A step waits on the step declared before it, or on the steps its `after`
   names (an empty list for none), and on the producers of its inputs; steps
   whose waits are done may run in parallel. References name earlier steps only.
@@ -490,8 +499,13 @@ every template.
     and `role`, that must pass at the item's exact hash.
   - `review`: its own reviewer, an independence (`none`, `self`, `independent`,
     `other-harness` or `person`) as a word, or `{independence, role}` naming the
-    reviewer's role. An item without one takes its step's `review`, which
-    defaults to the flow's `review` option.
+    reviewer's role. An item without one takes its step's `review`. Without
+    either, a work step's item that feeds a reserved step or leaves the estate
+    (an `effect` or `exchange` step takes it, or a step whose items do) takes an
+    `independent` review (0.9.2); any other item of a work step takes the flow's
+    `review` option. A configuration sets only that option, so it never lowers
+    the default review of an item that feeds a reserved step. A review in a role
+    the flow marks `person` is only ever a person's.
 - `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
   watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
   predicates hold; a work or review step has no watch.
@@ -500,6 +514,18 @@ every template.
   route, and a `flow` step the pin of the flow it runs.
 - `branches` name steps that stay off until the branch's predicates hold, with
   the step the run returns to; `triggers` declare standing-agent trigger kinds.
+- `failure` (0.9.2) is a work step's failure route, taken when its latest result
+  is `blocked` or `abandoned` or a review of it fails:
+  `{"route": "step", "step": "<earlier step>"}` returns the run to an earlier
+  step, which reruns, and then the failed step reruns;
+  `{"route": "branch", "branch": "<name>"}` enters a branch, whose steps run,
+  and once they are done the run returns to the branch's `returnTo`; and
+  `{"route": "stop"}`, the route of a step that declares none, stops it for the
+  sponsor. A route returns only to a step before the failed one, outside any
+  other branch, and never to an `effect` or `exchange` step, which would repeat
+  an outside effect. It enters only a branch the flow declares, other than the
+  step's own, whose `returnTo`, when it names one, is the failed step or a step
+  before it. Entering a branch again reruns its steps.
 
 An item is satisfied when it exists at an exact hash and is of its kind, the
 record that produced it shows the declared provenance (a result's or an

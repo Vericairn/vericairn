@@ -20,8 +20,10 @@ internal static class PolicyAuthority
         "result" => PolicyRecords.Property(record.Body, "duties").ValueKind != JsonValueKind.Undefined,
         // A review is duty evidence by its subject: a result with duties. Its read list alone does not make it one (FIX-94).
         "review" => IsDutyReview(model, record.Subject),
+        // From 0.9.2 (FIX-100), settling operations that share an identity is signed as well.
         "reconciliation" => record.Subject is { } reference && model.ById.TryGetValue(reference.Id, out RecordEnvelope? target) &&
-            (target.Type is "estate-policy" or "policy-exception" or "writing-exception" || target.Type == "authority" && IsPolicyGrant(model, target)),
+            (target.Type is "estate-policy" or "policy-exception" or "writing-exception" || target.Type == "authority" && IsPolicyGrant(model, target))
+            || ReconciliationType.SettlesIdentity(model, record),
         _ => false,
     };
 

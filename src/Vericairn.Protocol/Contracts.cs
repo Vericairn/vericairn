@@ -71,6 +71,10 @@ public sealed record StatusResponse(string Text, JsonElement Json, bool HasError
     /// <summary>Local requested progress beside liveness; separate from the portable record-derived Json and Text.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<RequestedProgress>? RequestedProgress { get; init; }
+
+    /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventsCursor { get; init; }
 }
 
 /// <summary>
@@ -82,7 +86,12 @@ public sealed record StatusResponse(string Text, JsonElement Json, bool HasError
 /// <param name="Text">The report as text, with agent claims and worker observations labelled separately.</param>
 /// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>
 /// <param name="HasErrors">Whether the check the report shows found errors.</param>
-public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors);
+public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors)
+{
+    /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventsCursor { get; init; }
+}
 
 /// <summary>Findings of a validation or check.</summary>
 /// <param name="Summary">For example '161 records'.</param>
@@ -337,7 +346,12 @@ public sealed record GoalRow(string Id, string Hash, string Title, string Status
 /// </summary>
 /// <param name="Text">Human form.</param>
 /// <param name="Json">Machine form, canonical.</param>
-public sealed record GoalResponse(string Text, JsonElement Json);
+public sealed record GoalResponse(string Text, JsonElement Json)
+{
+    /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventsCursor { get; init; }
+}
 
 /// <summary>
 /// A goal's next steps routed from the runtime's machine (the next-eligible view with routing and budget): each of its steps with the
@@ -404,7 +418,12 @@ public sealed record TakeoverResponse(string Message, bool Ok, RecordWritten? As
 /// </summary>
 /// <param name="Text">Human form.</param>
 /// <param name="Json">Machine form, canonical: format vericairn.asks/1.</param>
-public sealed record AsksResponse(string Text, JsonElement Json);
+public sealed record AsksResponse(string Text, JsonElement Json)
+{
+    /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventsCursor { get; init; }
+}
 
 /// <summary>
 /// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
@@ -412,7 +431,7 @@ public sealed record AsksResponse(string Text, JsonElement Json);
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).
 /// </summary>
 /// <param name="By">The proposing principal; for a revision, who decides for the goal it supersedes.</param>
-/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits. limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.</param>
+/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits. limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.</param>
 /// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
 

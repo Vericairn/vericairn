@@ -11,7 +11,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version, updates.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, events, status, progress, ask, decisions, doctor, version, updates.</summary>
     public static RootCommand Build(ReleaseUpdates? updates = null, IEstateApi? borrowedApi = null, CancellationToken cancellationToken = default)
     {
         updates ??= new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default);
@@ -44,6 +44,7 @@ internal static class CliApp
         root.Subcommands.Add(new TemplatesCommand(context));
         root.Subcommands.Add(new McpCommand(context));
         root.Subcommands.Add(new ContextCommand(context));
+        root.Subcommands.Add(new EventsCommand(context));
         root.Subcommands.Add(new UpdatesCommand(context));
 
         root.Subcommands.Add(new StatusCommand(context, updates));

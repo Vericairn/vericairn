@@ -84,6 +84,9 @@ public class CompanionImplementationTests
             JsonObject produced = JsonNode.Parse(model.OfType("result").First().Body.GetRawText())!.AsObject();
             produced["provenance"] = JsonNode.Parse("""{"inputs":[{"name":"lyrics","type":"result","id":"01M57TPYRE2FCVBP9F6DS0EAGX","hash":"sha256:23d78316cf2eea2ddc96fb0a0c110d021ee1bcd816c0f8359e5b797347464959"}],"provider":"Example Audio","tool":"example-mixer","settings":{"loudness":"-14 LUFS"}}""");
             cases.Add("result-provenance.md", RecordCompanionTests.Render([RecordCompanionTests.Source("result", produced)]));
+            JsonObject reviewing = JsonNode.Parse(model.OfType("assignment").First().Body.GetRawText())!.AsObject();
+            reviewing["step"] = JsonNode.Parse("""{"key":"draft","review":{"items":["lyrics"],"subject":{"type":"result","id":"01M57TPYRE2FCVBP9F6DS0EAGX","hash":"sha256:23d78316cf2eea2ddc96fb0a0c110d021ee1bcd816c0f8359e5b797347464959"}}}""");
+            cases.Add("assignment-review-before-hand-off.md", RecordCompanionTests.Render([RecordCompanionTests.Source("assignment", reviewing)]));
             JsonObject product = ReleaseLineFixture.ProductBody();
             product["lines"] = new JsonArray(new JsonObject { ["name"] = "current", ["channel"] = "stable" },
                 new JsonObject { ["name"] = "1.x", ["channel"] = "lts", ["endOfSupport"] = "2028-01-01T00:00:00Z" });

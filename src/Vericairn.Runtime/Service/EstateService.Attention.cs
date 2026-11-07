@@ -20,7 +20,11 @@ public sealed partial class EstateService
             EstateModel model = session.Load();
             principal ??= RequestPrincipal(model) ?? (model.CurrentEstate is { } charter ? EstateModel.BodyString(charter, "operator") : null);
             if (AttentionPrincipalRefusal(model, principal) is { } problem) throw new UnauthorizedAccessException(problem.Message);
-            return AttentionLocked(model, principal!);
+            AttentionResponse attention = AttentionLocked(model, principal!);
+            if (journal is null) return attention;
+            var pass = new EventPass();
+            pass.Attention[principal!] = attention;
+            return attention with { EventsCursor = EventsCursorLocked(model, principal, pass) };
         }
     }
 
@@ -43,6 +47,7 @@ public sealed partial class EstateService
             string at = item.AcknowledgedAt ?? RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
             kept[item.Key] = new(item.Revision, at);
             session.Live.SetMeta("attention:" + request.By, JsonSerializer.Serialize(kept, ProtocolJson.Options));
+            MarkEventsDirty();
             return new(item with { AcknowledgedAt = at });
         }
     }

@@ -13,24 +13,39 @@ using Vericairn.Records.Templates;
 namespace Vericairn.Records.Estate;
 
 /// <summary>
-/// A run's steps routed from this machine (the estate's design/flow.md § 6): its position from the records, and for each work or review
-/// step that is ready, the principal its role reaches through the goal's roles, its roster or the estate's, exactly as a work order's
-/// step is routed, with the assignments and asks of that step alone. A step of a role the flow marks person is never routed to an agent;
-/// a reserved step is never routed; a stale step is routed afresh, so its new brief pins its inputs as they are now.
+/// A run's steps routed from this machine (the estate's design/flow.md §§ 6 to 8): its position from the records, and for each work or
+/// review step that is ready, the principal its role reaches through the goal's roles, its roster or the estate's, exactly as a work
+/// order's step is routed, with the assignments and asks of that step alone. A step of a role the flow marks person is never routed to
+/// an agent; a reserved step is never routed; a stale, reopened or rerun step is routed afresh, so its new brief pins its inputs as they
+/// are now. A review before hand-off is a routed step too: dispatched to its reviewer role, never to an author of the work it reviews
+/// unless the review is self. Required attention, a step's or the whole run's, is routed to the sponsor as an ask; the run's own
+/// attention holds every dispatch until the sponsor answers.
 /// </summary>
 public static partial class NextEligible
 {
-    /// <summary>The route states the one-step operation acts on for a run: an agent's run, or a person's assignment and ask.</summary>
-    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved"];
+    /// <summary>The route states the one-step operation acts on for a run: an agent's run, a person's assignment and ask, or the sponsor's ask for required attention.</summary>
+    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention"];
 
-    /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step.</summary>
+    /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step, a review before hand-off, or required attention.</summary>
     /// <param name="Step">The step instance and its derived state.</param>
     /// <param name="Route">Its route, or null for a step that is not routed now.</param>
-    public sealed record FlowStepRoute(FlowPosition.StepInstance Step, Route? Route)
+    /// <param name="Review">For a review before hand-off of the step's items, the review routed; null for the step itself.</param>
+    public sealed record FlowStepRoute(FlowPosition.StepInstance Step, Route? Route, FlowPosition.PendingReview? Review = null)
     {
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Route is not null && FlowDispatching.IndexOf(Route.State) >= 0;
+
+        /// <summary>The step, or its review, in words.</summary>
+        public string Name => Review is null ? Step.Name : Step.Name + " review";
+
+        /// <summary>The required attention it routes to the sponsor, when its route is that ask.</summary>
+        public FlowPosition.Attention? Attention => Route?.State is "attention" or "asked" or "answered" && Review is null ? Step.Attention : null;
     }
+
+    /// <summary>The required attention a whole run raises, routed to the sponsor as an ask.</summary>
+    /// <param name="Attention">The attention.</param>
+    /// <param name="Route">Its route: attention (to ask), asked (its ask waits) or answered.</param>
+    public sealed record AttentionRoute(FlowPosition.Attention Attention, Route Route);
 
     /// <summary>A run's steps routed from this machine.</summary>
     /// <param name="Goal">The goal's current revision.</param>
@@ -42,8 +57,17 @@ public static partial class NextEligible
     /// <param name="Asks">Every current ask that names the goal, oldest first.</param>
     public sealed record FlowRunRoutes(RecordEnvelope Goal, string Status, AgentRuns.Ledger Ledger, IReadOnlyList<string> Fenced, FlowPosition.Position Position, IReadOnlyList<FlowStepRoute> Steps, IReadOnlyList<RecordEnvelope> Asks)
     {
-        /// <summary>The step the one-step operation takes: the first, in the flow's order, whose route dispatches; null when none does.</summary>
-        public FlowStepRoute? Next => Steps.FirstOrDefault(s => s.Dispatches);
+        /// <summary>The required attention the whole run raises, each with its route to the sponsor.</summary>
+        public IReadOnlyList<AttentionRoute> Attention { get; init; } = [];
+
+        /// <summary>True while the run's own attention holds every dispatch: it is still to be asked, or its ask waits.</summary>
+        public bool Held => Attention.Any(a => a.Route.State is "attention" or "asked");
+
+        /// <summary>The run's attention the one-step operation asks the sponsor about first; null when none is still to be asked.</summary>
+        public AttentionRoute? AttentionNext => Attention.FirstOrDefault(a => a.Route.State == "attention");
+
+        /// <summary>The step the one-step operation takes: the first, in the flow's order, whose route dispatches; null when none does or the run is held.</summary>
+        public FlowStepRoute? Next => Held ? null : Steps.FirstOrDefault(s => s.Dispatches);
     }
 
     /// <summary>A run's steps routed from this machine; read-only, nothing is recorded or started.</summary>
@@ -62,6 +86,24 @@ public static partial class NextEligible
         var steps = new List<FlowStepRoute>();
         foreach (FlowPosition.StepInstance instance in position.Steps)
         {
+            // Required attention of a held step is routed to the sponsor as an ask, never to another contributor.
+            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && instance.Step.IsRouted)
+            {
+                steps.Add(new FlowStepRoute(instance, AttentionOf(model, current, status, instance.Step.Role, attention, machine)));
+                continue;
+            }
+
+            // A review before hand-off is routed to its reviewer role, from its own assignments and asks.
+            if (position.Work is not null && position.Flow is not null && instance.State == "in-review" && instance.Reviews.Count > 0)
+            {
+                foreach (FlowPosition.PendingReview review in instance.Reviews)
+                {
+                    steps.Add(new FlowStepRoute(instance, ReviewRoute(model, current, status, ledger, position.Flow, instance, review, runs, goals, machine), review));
+                }
+
+                continue;
+            }
+
             if (position.Work is null || position.Flow is null || !instance.Step.IsRouted || instance.Step.Reserved is not null || instance.Waiting
                 || instance.State is not ("next" or "stopped" or "stale" or "in-review"))
             {
@@ -71,12 +113,11 @@ public static partial class NextEligible
 
             IReadOnlyList<RecordEnvelope> assignments = Routing.Assignments(model, position.Work, instance.Ref);
             var held = assignments.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
-            IReadOnlyList<RecordEnvelope> asks = model.Current("ask")
-                .Where(a => EstateModel.BodyString(a, "goal") is string g && goals.Contains(g) && EstateModel.BodyString(a, "assignment") is string named && held.Contains(named))
-                .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+            IReadOnlyList<RecordEnvelope> asks = AsksNaming(model, goals, held);
 
-            // A stale step reruns from a fresh assignment whose brief pins its inputs as they are now, once no run of it is in flight.
-            if (instance.State == "stale" && !runs.Any(r => r.Assignment is not null && held.Contains(r.Assignment)))
+            // A stale, reopened or rerun step reruns from a fresh assignment whose brief pins its inputs as they are now, once no run of
+            // it is in flight; the earlier assignments, attempts and results stay recorded.
+            if (instance.Rerun && !runs.Any(r => r.Assignment is not null && held.Contains(r.Assignment)))
             {
                 assignments = [];
                 asks = [];
@@ -90,7 +131,57 @@ public static partial class NextEligible
             steps.Add(new FlowStepRoute(instance, route));
         }
 
-        return new FlowRunRoutes(current, status, ledger, fenced, position, steps, Routing.AsksOf(model, current));
+        List<AttentionRoute> attentions = position.RunAttention.Select(a => new AttentionRoute(a, AttentionOf(model, current, status, "sponsor", a, machine))).ToList();
+        return new FlowRunRoutes(current, status, ledger, fenced, position, steps, Routing.AsksOf(model, current)) { Attention = attentions };
+    }
+
+    /// <summary>The current asks of a goal that name one of a step's assignments, oldest first.</summary>
+    private static List<RecordEnvelope> AsksNaming(EstateModel model, IReadOnlyList<string> goals, HashSet<string> held) =>
+        model.Current("ask")
+            .Where(a => EstateModel.BodyString(a, "goal") is string g && goals.Contains(g) && EstateModel.BodyString(a, "assignment") is string named && held.Contains(named))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// The route of a review before hand-off (design/flow.md § 6): to the principals of its reviewer role, or for a self review to the
+    /// step's authors, each admitted only when it meets the review's independence against the step's authors; from the review
+    /// assignments of this exact subject and these items, and the asks that name them.
+    /// </summary>
+    private static Route ReviewRoute(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, FlowDefinition flow, FlowPosition.StepInstance instance,
+        FlowPosition.PendingReview review, List<AgentRuns.Run> runs, IReadOnlyList<string> goals, Routing.Machine machine)
+    {
+        var held = review.Assignments.SelectMany(a => model.Chain(a)).ToHashSet(StringComparer.Ordinal);
+        (IReadOnlyList<string> Principals, Routing.Source Source)? named = review.Requirement.Independence == "self"
+            ? (review.Authors.Where(a => instance.Assignment is null || EstateModel.BodyString(instance.Assignment, "contributor") == a).ToList(), new Routing.Source(null, "the step's own holder, for a self review"))
+            : null;
+        return RouteOf(model, goal, status, ledger, review.Role, null, review.Assignments, AsksNaming(model, goals, held), runs, machine, candidate =>
+            FlowRuns.ReviewerRefusals(model, flow, review.Requirement, review.Role, candidate.Principal, review.Authors) is { Count: > 0 } refusals
+                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, .. refusals] }
+                : candidate, named);
+    }
+
+    /// <summary>
+    /// The route of required attention (design/flow.md §§ 7 and 8): an ask to who decides for the goal, the sponsor, about the record
+    /// that raised it; asked while an ask about that record waits, and answered once one is answered, so it is asked once.
+    /// </summary>
+    private static Route AttentionOf(EstateModel model, RecordEnvelope goal, string status, string role, FlowPosition.Attention attention, Routing.Machine machine)
+    {
+        string? sponsor = Routing.Asked(model, goal, null, machine.Now);
+        IReadOnlyList<string> trigger = model.Chain(attention.Trigger);
+        List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)).ToList();
+        IReadOnlyList<string> fence = status == "active" ? [] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+        var source = new Routing.Source(null, "who decides for the goal, its sponsor");
+        RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
+        if (waiting is not null)
+        {
+            return new Route(role, null, source, [], "asked", EstateModel.BodyString(model.Latest(waiting), "to"), null, null, waiting, null, fence, [], $"required attention ({attention.Kind}): {attention.Summary}; ask {waiting.Id} about it waits for an answer");
+        }
+
+        if (asks.LastOrDefault(a => Asks.State(model, a).State == "answered") is RecordEnvelope answered)
+        {
+            return new Route(role, null, source, [], "answered", EstateModel.BodyString(model.Latest(answered), "to"), null, null, answered, null, fence, [], $"required attention ({attention.Kind}): {attention.Summary}; ask {answered.Id} about it was answered, and it is not asked again");
+        }
+
+        return new Route(role, null, source, [], "attention", sponsor, null, null, asks.LastOrDefault(), null, fence, [], $"required attention ({attention.Kind}): {attention.Summary}; {Routing.NameOf(model, sponsor)} is asked");
     }
 
     /// <summary>A run's steps as text: the budget, the position, each routed step with its route, and the goal's asks.</summary>
@@ -115,12 +206,17 @@ public static partial class NextEligible
             text.Append("  ").Append(line).Append('\n');
         }
 
+        foreach (AttentionRoute attention in routes.Attention)
+        {
+            text.Append("  The run's required attention (").Append(attention.Attention.Kind).Append("): ").Append(attention.Route.State).Append(", ").Append(attention.Route.Reason).Append('\n');
+        }
+
         List<FlowStepRoute> routed = routes.Steps.Where(s => s.Route is not null).ToList();
         text.Append("  Routed: ").Append(routed.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
         foreach (FlowStepRoute step in routed)
         {
             Route route = step.Route!;
-            text.Append("  ").Append(step.Step.Name).Append("  ").Append(step.Step.Step.Title).Append(" [").Append(step.Step.State).Append("]\n");
+            text.Append("  ").Append(step.Name).Append("  ").Append(step.Review is null ? step.Step.Step.Title : $"review of {step.Review.What} at {step.Review.Hash} ({step.Review.Requirement.Independence})").Append(" [").Append(step.Step.State).Append("]\n");
             text.Append("    ").Append(route.Role).Append(route.Reserved is null ? string.Empty : $", a reserved action ({Routing.Describe(route.Reserved)})").Append(": ").Append(route.State)
                 .Append(route.Principal is null ? string.Empty : $", {Routing.NameOf(model, route.Principal)} [principal {route.Principal}]").Append(route.Launcher is null ? string.Empty : $" through {route.Launcher}").Append('\n');
             text.Append("      ").Append(route.Reason).Append('\n');
@@ -147,9 +243,13 @@ public static partial class NextEligible
             text.Append("    ").Append(Asks.State(model, ask).State).Append(", to ").Append(Routing.NameOf(model, EstateModel.BodyString(latest, "to"))).Append(": ").Append(EstateModel.BodyString(latest, "question")).Append(" [ask ").Append(ask.Id).Append("]\n");
         }
 
-        text.Append(routes.Next is FlowStepRoute next
-            ? $"  Next: {next.Step.Name}, {next.Route!.State}; vericairn goal step {goal.Id} takes it\n"
-            : "  Next: nothing goal step dispatches; every ready step is held, stopped or carried outside it\n");
+        text.Append(routes.AttentionNext is AttentionRoute first
+            ? $"  Next: the run's required attention ({first.Attention.Kind}), asked of the sponsor; vericairn goal step {goal.Id} asks it\n"
+            : routes.Held
+                ? "  Next: nothing; the run's required attention holds every dispatch until the sponsor answers\n"
+                : routes.Next is FlowStepRoute next
+                    ? $"  Next: {next.Name}, {next.Route!.State}; vericairn goal step {goal.Id} takes it\n"
+                    : "  Next: nothing goal step dispatches; every ready step is held, stopped or carried outside it\n");
         return text.ToString();
     }
 
@@ -174,7 +274,14 @@ public static partial class NextEligible
             },
             ["flow"] = FlowPosition.RenderJson(model, routes.Position),
             ["steps"] = new JsonArray(routes.Steps.Select(s => (JsonNode)FlowStepJson(model, s)).ToArray()),
-            ["next"] = routes.Next?.Step.Name,
+            ["attention"] = new JsonArray(routes.Attention.Select(a => (JsonNode)new JsonObject
+            {
+                ["kind"] = a.Attention.Kind, ["summary"] = a.Attention.Summary,
+                ["trigger"] = new JsonObject { ["type"] = a.Attention.Trigger.Type, ["id"] = a.Attention.Trigger.Id, ["hash"] = a.Attention.Trigger.ComputedHash },
+                ["state"] = a.Route.State, ["principal"] = a.Route.Principal, ["ask"] = a.Route.Ask?.Id, ["reason"] = a.Route.Reason,
+            }).ToArray()),
+            ["held"] = routes.Held,
+            ["next"] = routes.Next?.Name,
             ["asks"] = new JsonArray(routes.Asks.Select(a => (JsonNode)AskJson(model, a)).ToArray()),
         };
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
@@ -184,7 +291,7 @@ public static partial class NextEligible
     private static JsonObject FlowStepJson(EstateModel model, FlowStepRoute step)
     {
         Route? route = step.Route;
-        RecordEnvelope? assignment = step.Step.Assignment;
+        RecordEnvelope? assignment = step.Review is null ? step.Step.Assignment : step.Review.Assignments.Count == 0 ? null : step.Review.Assignments[^1];
         string? contributor = assignment is null ? null : EstateModel.BodyString(assignment, "contributor");
         return new JsonObject
         {
@@ -195,6 +302,14 @@ public static partial class NextEligible
             ["status"] = step.Step.State,
             ["role"] = step.Step.Step.Role,
             ["reasons"] = Strings(step.Step.Reasons),
+            ["review"] = step.Review is null ? null : new JsonObject
+            {
+                ["items"] = new JsonArray(step.Review.Items.Select(i => (JsonNode)i).ToArray()),
+                ["independence"] = step.Review.Requirement.Independence,
+                ["role"] = step.Review.Role,
+                ["subject"] = new JsonObject { ["type"] = step.Review.Subject.Type, ["id"] = step.Review.Subject.Id, ["hash"] = step.Review.Hash },
+            },
+            ["attention"] = step.Attention is null ? null : new JsonObject { ["kind"] = step.Attention.Kind, ["summary"] = step.Attention.Summary, ["trigger"] = new JsonObject { ["type"] = step.Attention.Trigger.Type, ["id"] = step.Attention.Trigger.Id, ["hash"] = step.Attention.Trigger.ComputedHash } },
             ["assignment"] = assignment is null ? null : new JsonObject { ["id"] = assignment.Id, ["contributor"] = contributor, ["contributorName"] = Routing.NameOf(model, contributor) },
             ["route"] = route is null ? null : new JsonObject
             {

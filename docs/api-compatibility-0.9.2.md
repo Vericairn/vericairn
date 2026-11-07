@@ -206,6 +206,96 @@ and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, w
 ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
 No record type, record format or generated document changes.
 
+## A reconciliation settles operations that share an identity (FIX-100)
+
+No route, interface member or protocol type is added or changed. A `reconciliation` whose subject is an operation and whose
+`kept` and `withdrawn` records are not revisions of that subject now settles operations recorded independently under one
+identity: each named record must be an operation under the subject's identity and the latest revision of its own operation,
+or the finding `reconciliation.identity` is an error; it is accepted only from the operator or under the `local-engineering`
+scope (`reconciliation.author`) and only when signed by an admitted device (`signature.required`), whatever the charter's
+signature policy. The withdrawn operations then read as superseded by the kept one. Before, such a reconciliation was
+refused with `reconciliation.successor`. Reconciliations of revisions of one record are unchanged.
+`EstateStatus.ReconcileCodes` adds `operation.duplicate-identity`, so status's `reconcile` list, `estate reconcile` and the
+required-attention incidents include it. Record format remains 3; the reconciliation type's summary and field descriptions,
+and with them the generic record reader's identity, are unchanged.
+
+## Hand-offs, reviews and failure routes (PROC-10)
+
+No route, interface member or protocol type is added or changed. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds the
+run's `attention`, and each step instance adds `failure` (a work step's failure route), `rerun`, `attemptsUsed`,
+`attemptsAllowed`, `attempts` (each with its assignment, attempt, result and outcome), `reviews` (each review before hand-off
+with its items, independence, role, subject and assignment), `attention` and `failed`. `GET /v1/goals/{id}/next` keeps
+`vericairn.next/1`; for a run it adds `attention` and `held`, each step entry adds `review` and `attention`, a review before
+hand-off is a step entry of its own whose `next` name is `<step> review`, and the route vocabulary adds `attention`.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; for required attention its `outcome` is `ask` with no
+assignment, and its `step` is the step, or `the run` for the run's own attention. Older clients ignore the added members and
+values. The SDK's and the MCP server's goal reads carry the same JSON; no tool is added. The state language's `step-route`
+vocabulary adds `attention`.
+
+`Vericairn.Records` adds public types and members:
+
+- `Templates.FlowContract.FailureRoutes`; `Templates.FlowFailure` with `Stop`; `FlowStep.Failure`, an optional trailing
+  parameter, and `FlowStep.FailureRoute`; and `FlowRole.Document`, an optional trailing parameter.
+- `Estate.FlowRuns.ReviewRef`, `ReviewOf`, `ReviewRequirement`, `Consequential`, `Authors`, `Harness` and
+  `ReviewerRefusals`; `FlowRuns.StepRef` gains an optional trailing `Review` parameter and `Work`, and its `ToString` adds
+  `review` for a review's step.
+- `Estate.FlowPosition.AttentionKinds`, `RetryBackoff`, `RetryBackoffLimit` and the records `AttemptState`,
+  `PendingReview`, `Attention` and `Failure`; `StepInstance.Attempts`, `AttemptsUsed`, `AttemptsAllowed`, `Reviews`,
+  `Attention`, `Failed` and `Rerun`; `ItemState.Requirement`; and `Position.RunAttention`. `Position.Find` finds a review's
+  step by its step.
+- `NextEligible.AttentionRoute`; `FlowStepRoute.Review`, an optional trailing parameter, `Name` and `Attention`;
+  `FlowRunRoutes.Attention`, `Held` and `AttentionNext`. `NextEligible.RouteStates` and `FlowDispatching` add `attention`.
+- `AgentRuns.StepAssignments`, the assignments whose runs count as one step's attempts.
+
+Behavior changes to the runs that PROC-05 adds, each within record format 3. A run's attempts per step count every agent run
+of a step's work across all of its assignments: a stale, reopened or rerun step's fresh assignment no longer starts the
+count again, and the record type refuses a run beyond them. Findings and failures that send a run's work back count only
+from principals who judge the step. A review that names no reviewer role clears an item only when it is by a principal of
+the estate's `reviewer` role, an operator, or the contributor of a review assignment of that item; PROC-05 accepted any
+principal other than the authors. A review in a role the flow marks `person` counts only from a person. A result naming
+`unresolvedEffects` no longer closes its step, and stops it even when stale or reopened; the record type refuses an
+`agent-run` intent on any assignment of that step while such a result is current (`operation.unreconciled`). The
+consequential independent default and routed reviews apply to work steps only. A failure route that returns to an `effect`
+or `exchange` step, and a failure route through a branch whose `returnTo` is a step after the failed one, are refused with
+the flow. `goal next` and `goal step` hold a failed step's route, its backoff and the run's `limits.consecutiveFailures`; a
+run started directly with `worker start` is not held by them. Record format remains 3; its addition, an assignment's
+`step.review`, and these rules are in [record format 3](record-format-v3.md#hand-offs-reviews-and-failure-routes-092).
+
+The generic record reader advances its implementation identity to `vericairn.records/readers/8`: an assignment's `step` and
+a goal's `limits` change their schema explanations. Its hash changes; declarations pinned to an earlier implementation
+require the ordinary explicit generator update before regeneration, and earlier golden fixtures remain retained. The
+generator id and contract version 1 are unchanged.
+
+## The event journal and the API stream (WATCH-05)
+
+`IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts
+`EventsAsync` and `EventGetAsync`; each has a default implementation, so existing implementers stay source-compatible, and
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. `Events` has a one-minute deadline, since a long
+poll waits up to 25 seconds. The daemon adds `GET /v1/events`, which answers with server-sent events when the request accepts
+`text/event-stream` and otherwise as a long poll, and `GET /v1/events/{key}`; both are reads, with a request scope and no
+write ledger. The protocol adds `EventEnvelope` (format `vericairn.event/1`), `EventReference`, `EventFilter`,
+`EventsResponse`, `EventStreamItem` and `EventVocabulary`; the OpenAPI document adds the two routes and the schemas
+`EventEnvelope`, `EventReference` and `EventsResponse`. The SDK adds `VericairnClient.StreamEventsAsync` and
+`WatchEventsAsync`, which return `IAsyncEnumerable<EventStreamItem>`. The command line adds `events watch`; no MCP tool or
+notification is added (`MCP-05` adds those).
+
+`StatusResponse`, `ProgressResponse`, `AttentionResponse`, `AsksResponse` and `GoalResponse` add the optional `EventsCursor`
+property, serialized as `eventsCursor` only when the runtime keeps a journal, which the daemon does and the embedded runtime
+does not. It sits beside the canonical JSON, which is unchanged, so the status document stays the same on every machine. These
+are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
+and `Json` instead. Older clients ignore the property and older servers omit it.
+
+`EventBatch.Closed` is true when the journal closed under a reader; a long poll then answers 503 with `unavailable`, and a stream
+ends. A state read whose derivation fails answers without `eventsCursor` instead of failing. `Vericairn.Runtime` adds
+`EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
+`EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
+principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
+`Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
+beside the live store, and the key that names subjects that are not records in `events.key`, kept across epochs, both
+owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
+also derives what that read shows and may write the journal; it writes no record. No record type, record format or
+generated document changes.
+
 ## Security reports before a release (OPS-11)
 
 Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
@@ -240,8 +330,8 @@ and `GET /v1/status` are unchanged. `GET /v1/providers` adds rows of kind `secur
 the command line. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
 `TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
 `ObservationType.Kinds` adds `triage`, and `ProductType.Fields` adds `securityReports`. Record format remains 3; the record
-additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader advances its
-implementation identity to `vericairn.records/readers/8`, since the product schema changed its explanations; earlier
-golden fixtures remain retained. The command line adds `security-reports poll` and `security-reports triage`
+additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
+`vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
+fixtures include it. The command line adds `security-reports poll` and `security-reports triage`
 ([CLI](cli.md#vericairn-security-reports-092)).
 

@@ -30,7 +30,7 @@ public sealed class AssignmentType : IRecordType
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery; from format 3, optional reviewBrief retains the complete release review text and optional progressRequest (types, statusText, cadence) replaces broader progress requests."),
         new("note", "string", false, "Free text."),
-        new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do.", 3),
+        new("step", "object", false, "For an assignment of a run's work order, the flow step it carries: key, instance for a step that runs over a list under each, and optional inputs, each input of the step its brief pins by name and the exact record {type, id, hash} that carries it. Every assignment of a run's work order names its step, and only those do. A review before hand-off adds review: the items it reviews (none for a step that declares no items) and the exact subject {type, id, hash} that carries them; its contributor is never an author of the step's work unless every item takes a self review.", 3),
         new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
 
@@ -98,6 +98,32 @@ public sealed class AssignmentType : IRecordType
                 {
                     input.Error("assignment.step", "hash", $"Input {name} does not have the pinned content hash; the brief relied on a different revision.");
                 }
+            }
+
+            // A review before hand-off (design/flow.md § 6): the items it reviews and the exact subject that carries them.
+            BodyReader? review = step.Nested("review", false);
+            if (review is not null)
+            {
+                IReadOnlyList<string>? items = review.StringArray("items", false, allowEmpty: false, maxItemLength: 60, itemPattern: Patterns.Slug, patternHint: "an item name");
+                if (items is not null && items.Distinct(StringComparer.Ordinal).Count() != items.Count)
+                {
+                    review.Error("assignment.step", "items", "Each item is reviewed once.");
+                }
+
+                BodyReader? subject = review.Nested("subject", true);
+                if (subject is not null)
+                {
+                    string? type = subject.Text("type", true, 100, Patterns.Slug, "a record type");
+                    string? id = subject.Ulid("id", true);
+                    string? hash = subject.Hash("hash", true);
+                    subject.NoOtherKeys();
+                    if (type is not null && context.RequireReference("step.review.subject", id, type) is RecordEnvelope reviewed && reviewed.ComputedHash != hash)
+                    {
+                        subject.Error("assignment.step", "hash", "The reviewed subject does not have the pinned content hash; a review names the exact revision it reviews.");
+                    }
+                }
+
+                review.NoOtherKeys();
             }
 
             step.NoOtherKeys();
