@@ -196,16 +196,16 @@ From 0.9.2 (OPS-05), applying an upgrade, or running it again once applied, ends
 When a daemon of a release older than the new pin serves the estate on this machine, the upgrade
 stops it and, when its own command line is the pinned release's build (its version and the source
 commit the pinned release names), starts that release's daemon in its place; a `runtime:` line names
-both. It never touches a daemon of the pinned release or a newer one,
-another estate's daemon or a daemon serving another root, and it starts none where none served.
-When it cannot stop the older daemon, for example because another user started it, or when its
-command line is not the pinned release, it warns with exactly what to run: `vericairn --estate <root>
-runtime stop`, then `./bootstrap runtime start` in the estate's directory (`.\bootstrap.ps1 runtime
-start` on Windows), which runs the pinned release. The upgrade's records and pin stand either way,
-and `--check` leaves the runtime alone. The restart before the upgrade remains where the estate has
-no recorded Vericairn release, because the serving daemon verifies the published dependency.
-`vericairn runtime status` and `vericairn status` show the serving daemon's release against the
-estate's pin, with a mismatch line and its commands while they differ.
+both. It never touches a daemon of the pinned release or a newer one, another estate's daemon or a
+daemon serving another root, and it starts none where none served. When it cannot stop the older
+daemon, for example because another user started it, or when its command line is not the pinned
+release, it warns with exactly what to run:
+`vericairn --estate <root> runtime stop`, then `./bootstrap runtime start` in the estate's directory
+(`.\bootstrap.ps1 runtime start` on Windows), which runs the pinned release. The upgrade's records
+and pin stand either way, and `--check` leaves the runtime alone. The restart before the upgrade
+remains where the estate has no recorded Vericairn release, because the serving daemon verifies the
+published dependency. `vericairn runtime status` and `vericairn status` show the serving daemon's
+release against the estate's pin, with a mismatch line and its commands while they differ.
 
 The command uses a recorded Vericairn release when one exists. Otherwise it anonymously
 reads the target's GitHub release, its tag and `SHA256SUMS`, downloads this machine's platform archive
