@@ -239,6 +239,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
         ["POST /v1/documents/pin"] = typeof(DocumentPinRequest),
         ["GET /v1/asks"] = null,
+        // The reader is the device's own principal; the route refuses a request naming another, and every delivery is judged again.
+        ["GET /v1/events"] = null,
+        ["GET /v1/events/{key}"] = null,
         ["GET /v1/operator/actions"] = null,
         ["GET /v1/operator/requests"] = null,
         ["POST /v1/operator/requests"] = typeof(OperatorRequestWriteRequest),

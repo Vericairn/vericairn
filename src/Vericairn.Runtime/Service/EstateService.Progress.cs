@@ -105,6 +105,7 @@ public sealed partial class EstateService
             var claim = new WorkProgressClaim(attempt.Id, request.By, request.Phase, request.Note, at, request.Completed, written?.Id)
                 { Progress = request.Progress?.Clone(), StatusText = request.StatusText };
             session.Live.SetMeta("work-progress:" + attempt.Id, JsonSerializer.Serialize(claim, ProtocolJson.Options));
+            MarkEventsDirty();
             return new WorkProgressResponse(claim, written);
         }
     }

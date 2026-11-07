@@ -27,7 +27,12 @@ public sealed record AttentionNotice(string Kind, string Subject, string Why, st
 public sealed record PolicyAttention(PolicyFindingDto Finding, string Origin, IReadOnlyList<OperatorDutyDto> Operator);
 
 /// <summary>One principal's complete current attention, including acknowledged items.</summary>
-public sealed record AttentionResponse(string Principal, string AsOf, IReadOnlyList<AttentionNotice> Items);
+public sealed record AttentionResponse(string Principal, string AsOf, IReadOnlyList<AttentionNotice> Items)
+{
+    /// <summary>The event journal's position as of this read, sealed for the reader, so a stream from it leaves no gap (0.9.2); null when the runtime keeps no journal.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EventsCursor { get; init; }
+}
 
 /// <summary>Acknowledge only the exact observed notice for the acting principal, without a record or a signature.</summary>
 public sealed record AttentionAcknowledgeRequest(string By, string Kind, string SubjectType, string SubjectId, string Expected);
