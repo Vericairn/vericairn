@@ -39,6 +39,7 @@ Every runnable job has an explicit `timeout-minutes` limit:
 | `package.yml` | `published-cli` (each platform) | 30 |
 | `release.yml` | `draft` | 20 |
 | `nuget.yml` | `publish` | 20 |
+| `mcp-registry.yml` | `publish` | 45 |
 | `secret-scan.yml` | `secret-scan` | 15 |
 
 Package installation and download steps have a 10-minute limit: .NET SDK setup,
@@ -85,6 +86,12 @@ the event's commit range and keeps findings redacted.
 manual dispatch; it downloads and verifies the published release's exact assets,
 then publishes those packages through Trusted Publishing. It never rebuilds them.
 Only its publication job can request an identity token, log in to NuGet or push.
+`mcp-registry.yml` also runs on release publication or manual dispatch naming a published,
+immutable release. It verifies that release's `dotnet-vc` package against `SHA256SUMS`,
+checks its embedded `.mcp/server.json` with the same verifier, waits until nuget.org
+serves the version, and publishes the manifest to the official MCP Registry as
+`io.github.vericairn/vericairn` with a pinned, checksum-verified `mcp-publisher`, signing
+in with this repository's OIDC identity. No person's token is used.
 The verifiers' unit tests use Python's standard library:
 
 ```sh
