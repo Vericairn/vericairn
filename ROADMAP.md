@@ -4,39 +4,22 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.9.0 — current published release
+## 0.9.1 — current published release
 
-0.9.0 follows 0.8.4. Remote, the phone companion for iOS and Android, brings pairing, attention and work to
-your phone on the local network, with decisions and acceptances signed by the phone's presence key and an
-estate's policy and recurring-duty findings handed to the desktop for review; it is a developer build you
-make from source, not in an app store. Releases follow lines and channels, an estate follows a release line,
-and a release cadence is a recurring duty; under a disclosure hold, Vericairn's checked push refuses a fix's
-held description in a public repository until its release, and configured blocked terms are refused in
-records and generated documents. Agents report progress
-when their configuration asks for it, with a signal when a report is overdue. A support bundle collects what
-a support case needs, with secrets and paths removed, and shows you everything in it before you share it, and
-design documents' revision lines are generated from the revisions the estate records. The optional local
-efficiency adapter is built and disabled by default, for the operator to admit on a machine. Guides show how
-to run Vericairn with people only, with people and agents, and with agents only, and how to connect LangGraph,
-CrewAI and AutoGen agents over MCP, and a public example estate and app show the whole loop on GitHub and are
-upgraded with every release. Community build guides and the proposed public catalog repository are prepared
-locally; publishing them and opening implementation requests remain separate decisions. `status` stays fast
-as an estate grows, the release check gives up within seconds instead of holding a command, and a run whose
-settlement was interrupted can still settle. Each worker run has its own temporary directory, a charter that
-requires signatures changes only by the root operator's signed revision, and a document clears only as its
-declaration allows, as the release notes' Security section describes. This release's cycle also designed the
-editions and their services, the contract for foundries with the first software foundries, and the website,
-web application, book, book series and world-building domains, among designs whose builds follow in later
-releases. Its [release notes](docs/releases/0.9.0/release-notes.md) and
-[documentation set](docs/releases/0.9.0/README.md) describe what shipped and its limits.
-
-## 0.9.1 — planned
-
-A security patch. Every distributable is built on .NET SDK 10.0.403 and embeds .NET and ASP.NET Core runtime
-10.0.14, replacing the 10.0.11 that 0.9.0 embeds. Policy evaluation reads historical repository content in
-batches, so estates that record maintenance duties keep fast writes and checks. A worker run can prepare its
-workspace before the agent starts, a decision cannot be dated after its own record, and the bill of materials
-names the release's version.
+0.9.1 follows 0.9.0 as a security patch. Every distributable is built on .NET SDK 10.0.403 and embeds .NET and
+ASP.NET Core runtime 10.0.14, replacing the 10.0.11 that 0.9.0 embedded, and a worker run gives Vericairn's MCP
+server its temporary directory explicitly, never the run's own, as the release notes' Security section
+describes. A worker run can prepare its workspace before the agent starts, with setup commands configured on the
+worker's machine; a decision cannot be dated after its own record; the bill of materials names the release's
+version; and policy evaluation reads historical repository content in batches, so estates that record
+maintenance duties keep fast writes and checks. Everything 0.9.0 brought remains: Remote, the phone companion
+for iOS and Android, as a developer build you make from source; release lines, channels and cadence; the
+disclosure hold and blocked terms; requested progress; the support bundle; generated revision lines; the
+optional local efficiency adapter, disabled by default; the guides for the three ways to run Vericairn and for
+LangGraph, CrewAI and AutoGen agents; and the public example estate. Its
+[release notes](docs/releases/0.9.1/release-notes.md) and [documentation set](docs/releases/0.9.1/README.md)
+describe what shipped and its limits, and [0.9.0's](docs/releases/0.9.0/release-notes.md) describe the
+release it patches.
 
 ## 0.9.2 — planned
 
