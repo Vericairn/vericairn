@@ -280,11 +280,13 @@ public class FlowStepRoutingTests
     }
 
     /// <summary>Installs the song flow, a work order and a run of it the operator sponsors and activates; returns the goal's id.</summary>
-    internal static string Run(RunEstate run, JsonObject? flow = null)
+    internal static string Run(RunEstate run, JsonObject? flow = null, Action<JsonObject>? change = null)
     {
         string op = run.Estate.OperatorId;
         (string Order, TemplateDefinition Flow) prepared = Setup(run, flow);
-        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(Body(run, prepared, op))))).Id;
+        JsonObject body = Body(run, prepared, op);
+        change?.Invoke(body);
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(op, JsonSerializer.SerializeToElement(body)))).Id;
         RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(op)));
         return goal;
     }
@@ -323,10 +325,10 @@ public class FlowStepRoutingTests
     }
 
     /// <summary>One step, its run capped at thirty minutes so that two runs of the goal's budget may be in flight together.</summary>
-    private static GoalStepResponse Step(RunEstate run, string goal, string report) =>
+    internal static GoalStepResponse Step(RunEstate run, string goal, string report) =>
         run.Service.GoalStep(goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, report), WallMinutes: 30));
 
-    private static Dictionary<string, string> Command(RunEstate run, string report) =>
+    internal static Dictionary<string, string> Command(RunEstate run, string report) =>
         new(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
 
     private static JsonElement Step(GoalResponse goal, string key) =>

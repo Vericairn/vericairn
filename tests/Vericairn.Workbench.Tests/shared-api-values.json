@@ -65,6 +65,13 @@
     "batch.unreadable",
     "communication.conflict"
   ],
+  "Vericairn.Records.Estate.FlowPosition.AttentionKinds": [
+    "uncertain",
+    "failed",
+    "exhausted",
+    "consecutive-failures",
+    "impossible"
+  ],
   "Vericairn.Records.Estate.FlowPosition.ItemStates": [
     "satisfied",
     "missing",
@@ -112,7 +119,8 @@
   "Vericairn.Records.Estate.NextEligible.FlowDispatching": [
     "agent",
     "person",
-    "reserved"
+    "reserved",
+    "attention"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -123,7 +131,8 @@
     "assigned",
     "review",
     "asked",
-    "answered"
+    "answered",
+    "attention"
   ],
   "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
     "hash",
@@ -163,6 +172,11 @@
     "macos-secure-enclave",
     "ios-secure-enclave",
     "android-keystore"
+  ],
+  "Vericairn.Records.Templates.FlowContract.FailureRoutes": [
+    "branch",
+    "step",
+    "stop"
   ],
   "Vericairn.Records.Templates.FlowContract.Holders": [
     "person",

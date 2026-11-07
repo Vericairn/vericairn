@@ -6,11 +6,35 @@ using Vericairn.Records.Estate;
 
 namespace Vericairn.Records.Templates;
 
-/// <summary>A role of a flow: who may hold it and its role brief, a living document a step's brief carries.</summary>
+/// <summary>
+/// A role of a flow: who may hold it and its role brief, which a step's brief carries; the estate's own copy of the brief, kept in its
+/// repository as a living document, when the role names one (design/process-profiles.md § 11).
+/// </summary>
 /// <param name="Id">The role's name, by which the roster routes its steps.</param>
 /// <param name="Holder">person, agent or either: who may hold it.</param>
-/// <param name="Brief">The role brief.</param>
-public sealed record FlowRole(string Id, string Holder, string Brief);
+/// <param name="Brief">The role brief the flow ships.</param>
+/// <param name="Document">The repository-relative path of the estate's copy of the role brief, a living document; null when the flow's brief stands alone.</param>
+public sealed record FlowRole(string Id, string Holder, string Brief, string? Document = null);
+
+/// <summary>
+/// What a failed work step does (design/flow.md § 7): enter a branch, return the run to an earlier step, or stop for the sponsor.
+/// </summary>
+/// <param name="Route">branch, step or stop.</param>
+/// <param name="Branch">For route branch, the branch it enters.</param>
+/// <param name="Step">For route step, the earlier step the run returns to.</param>
+public sealed record FlowFailure(string Route, string? Branch, string? Step)
+{
+    /// <summary>The route of a step that declares none: a stop, for the sponsor.</summary>
+    public static FlowFailure Stop { get; } = new("stop", null, null);
+
+    /// <summary>The route in words.</summary>
+    public override string ToString() => Route switch
+    {
+        "branch" => $"it enters branch {Branch}",
+        "step" => $"the run returns to {Step}",
+        _ => "it stops, and the sponsor is asked",
+    };
+}
 
 /// <summary>An input of a step: a field of the run's subject, or a named output of an earlier step, which the step's brief pins by hash.</summary>
 /// <param name="Name">The input's name within the step.</param>
@@ -101,10 +125,15 @@ public sealed record FlowBranch(string Name, IReadOnlyList<JsonElement> When, IR
 /// <param name="When">Its timing, a due time or a watch; undefined without one.</param>
 /// <param name="Element">The step's declared content.</param>
 /// <param name="DeclaredIn">The flow version that declares it.</param>
+/// <param name="Failure">A work step's declared failure route; null when it declares none, and then a failure stops.</param>
 public sealed record FlowStep(string Key, string Title, string Kind, string Role, bool Required, bool DefaultOn, string? Reserved, IReadOnlyList<string> After,
     IReadOnlyList<JsonElement> Requires, IReadOnlyList<JsonElement> Done, string? Action, string Recovery, IReadOnlyList<FlowTrap> Traps,
-    IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn)
+    IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn,
+    FlowFailure? Failure = null)
 {
+    /// <summary>The failure route it takes: the one it declares, or a stop.</summary>
+    public FlowFailure FailureRoute => Failure ?? FlowFailure.Stop;
+
     /// <summary>True for the kinds the conductor routes as an assignment of the run's work order: work and review.</summary>
     public bool IsRouted => FlowContract.Routed.IndexOf(Kind) >= 0;
 
@@ -260,7 +289,7 @@ public sealed class FlowDefinition
                     continue;
                 }
 
-                roles.Add(new FlowRole(id, TJson.Text(role, "holder")!, TJson.Text(role, "brief")!));
+                roles.Add(new FlowRole(id, TJson.Text(role, "holder")!, TJson.Text(role, "brief")!, TJson.Text(role, "document")));
             }
 
             foreach (JsonElement option in TJson.Array(flow.Content, "options"))
@@ -396,6 +425,31 @@ public sealed class FlowDefinition
             }
         }
 
+        // A failure route returns to a step before the failed one, or enters a branch the flow declares, whichever content declares it.
+        foreach (FlowStep step in steps.Where(s => s.Failure is not null))
+        {
+            FlowFailure failure = step.Failure!;
+            int at = failure.Step is null ? -1 : steps.FindIndex(s => s.Key == failure.Step);
+            if (failure.Step is not null && (at < 0 || at >= steps.FindIndex(s => s.Key == step.Key)))
+            {
+                errors.Add($"Step '{step.Key}' returns the run to '{failure.Step}' when it fails, which is not a step before it.");
+            }
+            else if (failure.Step is not null && branches.FirstOrDefault(b => b.Steps.Contains(failure.Step, StringComparer.Ordinal)) is FlowBranch other
+                && !other.Steps.Contains(step.Key, StringComparer.Ordinal))
+            {
+                errors.Add($"Step '{step.Key}' returns the run to '{failure.Step}' when it fails, a step of branch '{other.Name}', which runs only when it is entered.");
+            }
+
+            if (failure.Branch is string entered && branches.All(b => b.Name != entered))
+            {
+                errors.Add($"Step '{step.Key}' enters branch '{entered}' when it fails, which the flow does not declare.");
+            }
+            else if (failure.Branch is string own && branches.First(b => b.Name == own).Steps.Contains(step.Key, StringComparer.Ordinal))
+            {
+                errors.Add($"Step '{step.Key}' enters its own branch '{own}' when it fails; a failure route enters another branch.");
+            }
+        }
+
         // An input from a step that runs over a list comes item by item, to a step that runs over the same list.
         foreach (FlowStep step in steps)
         {
@@ -525,7 +579,8 @@ public sealed class FlowDefinition
         return new FlowStep(TJson.Text(content, "key")!, TJson.Text(content, "title")!, TJson.Text(content, "kind")!, TJson.Text(content, "role")!,
             !TJson.Flag(content, "optional"), TJson.Text(content, "default") != "off", TJson.Text(content, "reserved"), after,
             TJson.Array(content, "requires").ToList(), TJson.Array(content, "done").ToList(), TJson.Text(content, "action"), TJson.Text(content, "recovery")!,
-            traps, inputs, outputs, ReviewOf(TJson.Object(content, "review")), TJson.Text(content, "each"), TJson.Object(content, "when"), content.Clone(), pin);
+            traps, inputs, outputs, ReviewOf(TJson.Object(content, "review")), TJson.Text(content, "each"), TJson.Object(content, "when"), content.Clone(), pin,
+            TJson.Object(content, "failure") is { ValueKind: JsonValueKind.Object } failure ? new FlowFailure(TJson.Text(failure, "route")!, TJson.Text(failure, "branch"), TJson.Text(failure, "step")) : null);
     }
 
     private static FlowReview? ReviewOf(JsonElement review) => review.ValueKind switch

@@ -596,21 +596,212 @@ public static class FlowRuns
             FlowContract.Binding().Match(text) is { Success: true } match ? bindings.GetValueOrDefault(match.Groups["name"].Value) ?? "{unbound " + match.Groups["name"].Value + "}" : text;
     }
 
-    /// <summary>A step instance an assignment names: the step's key, and its instance for a step that runs over a list.</summary>
+    /// <summary>
+    /// A step instance an assignment names: the step's key, its instance for a step that runs over a list, and whether the assignment
+    /// carries the step's review before hand-off rather than the step itself (design/flow.md § 6).
+    /// </summary>
     /// <param name="Key">The step's key.</param>
     /// <param name="Instance">The instance under each, or null.</param>
-    public sealed record StepRef(string Key, string? Instance)
+    /// <param name="Review">True for an assignment of the step's review before hand-off, whose contributor reviews and never authors it.</param>
+    public sealed record StepRef(string Key, string? Instance, bool Review = false)
     {
-        /// <summary>The step instance in words: key, or key[instance].</summary>
-        public override string ToString() => Instance is null ? Key : $"{Key}[{Instance}]";
+        /// <summary>The step instance itself, without the review marking.</summary>
+        public StepRef Work => Review ? this with { Review = false } : this;
+
+        /// <summary>The step instance in words: key, or key[instance], and "review" for its review.</summary>
+        public override string ToString() => (Instance is null ? Key : $"{Key}[{Instance}]") + (Review ? " review" : string.Empty);
     }
+
+    /// <summary>A review before hand-off an assignment carries: the items it reviews (none for the step's result) and the exact subject.</summary>
+    /// <param name="Items">The items it reviews; empty for a step that declares none, whose result it reviews.</param>
+    /// <param name="Subject">The exact record that carries them.</param>
+    public sealed record ReviewRef(IReadOnlyList<string> Items, RecordReference Subject);
 
     /// <summary>The step an assignment names, or null for an assignment of ordinary work.</summary>
     public static StepRef? StepOf(RecordEnvelope assignment)
     {
         ArgumentNullException.ThrowIfNull(assignment);
         JsonElement step = TJson.Object(assignment.Body, "step");
-        return TJson.Text(step, "key") is string key ? new StepRef(key, TJson.Text(step, "instance")) : null;
+        return TJson.Text(step, "key") is string key ? new StepRef(key, TJson.Text(step, "instance"), TJson.Object(step, "review").ValueKind == JsonValueKind.Object) : null;
+    }
+
+    /// <summary>The review before hand-off an assignment carries, or null when it carries none.</summary>
+    public static ReviewRef? ReviewOf(RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(assignment);
+        JsonElement review = TJson.Object(TJson.Object(assignment.Body, "step"), "review");
+        JsonElement subject = TJson.Object(review, "subject");
+        return review.ValueKind == JsonValueKind.Object && TJson.Text(subject, "type") is string type && TJson.Text(subject, "id") is string id
+            ? new ReviewRef(TJson.Strings(review, "items").ToList(), new RecordReference(type, id, TJson.Text(subject, "hash")))
+            : null;
+    }
+
+    /// <summary>
+    /// The review an item takes before its step closes (design/flow.md §§ 5 and 6): its own; else its step's; else, for an item that feeds
+    /// a reserved step or leaves the estate, an independent review; else, for a work step, the flow's review option; else none. A
+    /// configuration sets only the flow's option, so it never lowers the review an item that feeds a reserved step or leaves the estate
+    /// takes by default. A step that declares no item takes its own review, or the flow's option, on its result.
+    /// </summary>
+    public static FlowReview ReviewRequirement(FlowDefinition flow, Configuration configuration, FlowStep step, FlowOutput? output)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(step);
+        if ((output?.Review ?? step.Review) is FlowReview declared)
+        {
+            return declared;
+        }
+
+        if (output is not null && Consequential(flow, step, output) is not null)
+        {
+            return new FlowReview("independent", null);
+        }
+
+        return step.Kind == "work" && configuration.Value("review") is string option && FlowContract.Reviews.Contains(option) ? new FlowReview(option, null) : new FlowReview("none", null);
+    }
+
+    /// <summary>
+    /// Why an item's review is independent by default (design/flow.md § 17, recommendation 2): the first step it reaches, through the
+    /// steps that take it and theirs, that is a reserved act or leaves the estate (an effect or an exchange); null when it reaches none.
+    /// </summary>
+    public static string? Consequential(FlowDefinition flow, FlowStep step, FlowOutput output)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(output);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<(string Step, string Output)>([(step.Key, output.Name)]);
+        while (pending.Count > 0)
+        {
+            (string producer, string name) = pending.Dequeue();
+            foreach (FlowStep consumer in flow.Steps.Where(s => s.Inputs.Any(i => i.Step == producer && i.Output == name)))
+            {
+                if (consumer.Reserved is string act)
+                {
+                    return $"it feeds step {consumer.Key}, a reserved act ({act})";
+                }
+
+                if (consumer.Kind is "effect" or "exchange")
+                {
+                    return $"it leaves the estate through step {consumer.Key}, an {consumer.Kind}";
+                }
+
+                if (seen.Add(consumer.Key))
+                {
+                    foreach (FlowOutput next in consumer.Outputs)
+                    {
+                        pending.Enqueue((consumer.Key, next.Name));
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The authors of a step instance's work (design/goals.md § 3): the contributor of each assignment that carried it, and whoever recorded
+    /// an attempt or a result under one; a review assignment's contributor reviews and is not among them.
+    /// </summary>
+    public static IReadOnlySet<string> Authors(EstateModel model, IEnumerable<RecordEnvelope> assignments)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignments);
+        var authors = new HashSet<string>(StringComparer.Ordinal);
+        foreach (RecordEnvelope assignment in assignments.Where(a => StepOf(a) is not { Review: true }))
+        {
+            if (EstateModel.BodyString(assignment, "contributor") is string contributor)
+            {
+                authors.Add(contributor);
+            }
+
+            foreach (RecordEnvelope attempt in WorkView.AttemptsOf(model, assignment))
+            {
+                authors.Add(attempt.By);
+                if (WorkView.ResultOf(model, attempt) is RecordEnvelope result)
+                {
+                    authors.Add(result.By);
+                }
+            }
+        }
+
+        return authors;
+    }
+
+    /// <summary>An agent principal's harness, as its record names its product; null for a person or an agent that names none.</summary>
+    public static string? Harness(EstateModel model, string? principal)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return model.CurrentPrincipal(principal) is RecordEnvelope record && EstateModel.BodyString(record, "kind") == "agent"
+            ? TJson.Text(TJson.Object(record.Body, "agent"), "product")
+            : null;
+    }
+
+    /// <summary>
+    /// Why a principal may not carry a review of a step instance's items before hand-off (design/flow.md § 6), the builder's
+    /// independence checks: an author of the step's work reviews it only under a self review; a person's review is a person's, and in
+    /// this build only an operator records a review of another's work as a person; another harness's is an agent's on a harness none of
+    /// the authors used; an agent never reviews in a role the flow marks a person's. Empty when it may.
+    /// </summary>
+    public static IReadOnlyList<string> ReviewerRefusals(EstateModel model, FlowDefinition flow, FlowReview requirement, string role, string reviewer, IReadOnlySet<string> authors)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(requirement);
+        ArgumentNullException.ThrowIfNull(authors);
+        var refusals = new List<string>();
+        RecordEnvelope? principal = model.CurrentPrincipal(reviewer);
+        string kind = principal is null ? "missing" : EstateModel.BodyString(principal, "kind") ?? "?";
+        if (requirement.Independence == "none")
+        {
+            refusals.Add("the item takes no review");
+            return refusals;
+        }
+
+        if (requirement.Independence == "self")
+        {
+            return refusals;
+        }
+
+        if (authors.Contains(reviewer))
+        {
+            refusals.Add("it authored the step's work, as a holder of the step or by an attempt or a result, and a review by its author is not independent");
+        }
+
+        if (kind == "human" && !model.HasRole(reviewer, Roles.Operator))
+        {
+            refusals.Add("a person other than an operator records no review of another's work in this build");
+        }
+        else if (kind is not ("human" or "agent"))
+        {
+            refusals.Add($"a {kind} principal records no review");
+        }
+
+        if (requirement.Independence == "person" && kind != "human")
+        {
+            refusals.Add("the review is a person's, and it is not a person");
+        }
+
+        if (requirement.Independence == "other-harness")
+        {
+            string? harness = Harness(model, reviewer);
+            List<string> used = authors.Select(a => Harness(model, a)).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+            if (kind != "agent" || harness is null)
+            {
+                refusals.Add("the review is an agent's on another harness, and it is not an agent that names its harness");
+            }
+            else if (used.Contains(harness, StringComparer.OrdinalIgnoreCase))
+            {
+                refusals.Add($"the review is on another harness than the step's authors used, and it runs on {harness}, as they did");
+            }
+        }
+
+        if (flow.Role(role)?.Holder == "person" && kind != "human")
+        {
+            refusals.Add($"the flow marks the {role} role a person's, and an agent never holds it");
+        }
+
+        return refusals;
     }
 
     /// <summary>The run a work order is the work of, as of a record when one is given; null when it is the work of none.</summary>
@@ -676,7 +867,7 @@ public static class FlowRuns
                 context.Error("assignment.step", $"Step {declared.Key} is a reserved act, {declared.Reserved}: it is assigned only to a person who holds it, never to an agent.");
             }
 
-            if (flow.Role(declared.Role)?.Holder == "person")
+            if (flow.Role(declared.Role)?.Holder == "person" && TJson.Object(step.Element, "review").ValueKind != JsonValueKind.Object)
             {
                 context.Error("assignment.step", $"Step {declared.Key} is carried in the {declared.Role} role, which the flow marks a person's: it is never assigned to an agent.");
             }
@@ -697,6 +888,80 @@ public static class FlowRuns
             {
                 context.Error("assignment.step", $"Step {declared.Key} declares no input '{TJson.Text(input, "name")}'.");
             }
+        }
+
+        if (TJson.Object(step.Element, "review") is { ValueKind: JsonValueKind.Object } review)
+        {
+            ValidateReview(context, order, run, flow, declared, item, review, contributor);
+        }
+    }
+
+    /// <summary>
+    /// Validates an assignment of a step's review before hand-off (design/flow.md § 6), the builder's independence checks at the record:
+    /// it reviews a step other than a review step, items the step declares and that take one review requirement, and its contributor
+    /// meets that requirement against the step's authors as the records stood when it was written: never an author unless every item
+    /// takes a self review.
+    /// </summary>
+    private static void ValidateReview(ValidationContext context, RecordEnvelope order, RecordEnvelope run, FlowDefinition flow, FlowStep declared, string? instance, JsonElement review, string? contributor)
+    {
+        if (declared.Kind == "review")
+        {
+            context.Error("assignment.review", $"Step {declared.Key} is a review step: its own assignment carries the review, and a review is not reviewed again.");
+            return;
+        }
+
+        List<string> items = TJson.Strings(review, "items").ToList();
+        List<FlowOutput?> reviewed = items.Count == 0 ? [null] : items.Select(name => declared.Outputs.FirstOrDefault(o => o.Name == name)).ToList();
+        if (items.Count == 0 && declared.Outputs.Count > 0)
+        {
+            context.Error("assignment.review", $"Step {declared.Key} declares items: its review names the items it reviews.");
+            return;
+        }
+
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (reviewed[index] is null)
+            {
+                context.Error("assignment.review", $"Step {declared.Key} declares no item '{items[index]}'.");
+                return;
+            }
+        }
+
+        Configuration configuration = Configure(context.Model, run, flow, context.Record);
+        List<FlowReview> requirements = reviewed.Select(o => ReviewRequirement(flow, configuration, declared, o)).Distinct().ToList();
+        if (requirements.Count != 1)
+        {
+            context.Error("assignment.review", $"The items of one review take one review requirement; these take {string.Join(", ", requirements.Select(r => r.Independence + (r.Role is null ? string.Empty : " in the " + r.Role + " role")))}.");
+            return;
+        }
+
+        // The subject is what carries the items: a result of the step's own work for a file or the step's result, or a record of the
+        // type a record item is counted from.
+        var work = new StepRef(declared.Key, instance);
+        List<RecordEnvelope> carried = Routing.Assignments(context.Model, order, work).Where(a => GoalRules.Before(a, context.Record)).ToList();
+        RecordEnvelope? subject = TJson.Text(TJson.Object(review, "subject"), "id") is string id ? context.Find(id) : null;
+        if (subject is not null)
+        {
+            IReadOnlyList<string> holders = carried.SelectMany(a => context.Model.Chain(context.Model.Latest(a))).ToList();
+            bool result = subject.Type == "result" && WorkView.AttemptOfResult(context.Model, subject) is RecordEnvelope attempt
+                && WorkView.AssignmentOfAttempt(context.Model, attempt) is RecordEnvelope holder && holders.Contains(holder.Id);
+            if (reviewed.Any(o => o is null || o.Kind == "file") ? !result : reviewed.Any(o => !(o!.Counts ?? string.Empty).Split('|').Contains(subject.Type, StringComparer.Ordinal)))
+            {
+                context.Error("assignment.review", $"A review of step {work} names the record that carries its items: a result of the step's own work for a file or its result, or a record of the type a record item is counted from; {subject.Type} {subject.Id} is neither.");
+                return;
+            }
+        }
+
+        if (contributor is null)
+        {
+            return;
+        }
+
+        FlowReview requirement = requirements[0];
+        string role = requirement.Role ?? Roles.Reviewer;
+        foreach (string refusal in ReviewerRefusals(context.Model, flow, requirement, role, contributor, Authors(context.Model, carried)))
+        {
+            context.Error("assignment.review", $"{Routing.NameOf(context.Model, contributor)} does not review step {work}: {refusal}.");
         }
     }
 

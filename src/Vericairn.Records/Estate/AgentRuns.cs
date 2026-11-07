@@ -330,7 +330,7 @@ public static class AgentRuns
 
         if (assignment is not null)
         {
-            IReadOnlyList<string> step = model.ById.TryGetValue(assignment, out RecordEnvelope? record) ? model.Chain(model.Latest(record)) : [assignment];
+            IReadOnlyList<string> step = StepAssignments(model, assignment);
             Run? uncertain = All(model, before).FirstOrDefault(r => r.Status == "uncertain" && r.Assignment is not null && step.Contains(r.Assignment));
             if (uncertain is not null)
             {
@@ -372,9 +372,38 @@ public static class AgentRuns
     private static string SpentRefusal(Ledger ledger, string unit) =>
         $"The goal's budget is spent: {ledger.Describe(unit)} charged to its runs, every run in flight at its cap.";
 
+    /// <summary>
+    /// The assignments whose runs count as one step's attempts, by every revision's id: for an assignment of a run's flow step, every
+    /// assignment of its work order that names the same step instance, so that a fresh assignment of a stale, reopened or rerun step
+    /// never starts its attempts afresh (design/flow.md § 7), a review's apart from the step's own and one review's per subject; for any
+    /// other assignment, its own revisions.
+    /// </summary>
+    public static IReadOnlyList<string> StepAssignments(EstateModel model, string assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (!model.ById.TryGetValue(assignment, out RecordEnvelope? record))
+        {
+            return [assignment];
+        }
+
+        RecordEnvelope latest = model.Latest(record);
+        if (FlowRuns.StepOf(latest) is not FlowRuns.StepRef step || WorkView.OrderOfAssignment(model, latest) is not RecordEnvelope order)
+        {
+            return model.Chain(latest);
+        }
+
+        IReadOnlyList<string> orders = model.Chain(model.Latest(order));
+        RecordReference? subject = step.Review ? FlowRuns.ReviewOf(latest)?.Subject : null;
+        return model.OfType("assignment")
+            .Where(a => a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == step
+                && (subject is null || (FlowRuns.ReviewOf(a)?.Subject is RecordReference other && other.Id == subject.Id && other.Hash == subject.Hash)))
+            .Select(a => a.Id).Append(assignment).Distinct(StringComparer.Ordinal).ToList();
+    }
+
     private static string? AttemptsRefusal(EstateModel model, Ledger ledger, string assignment)
     {
-        IReadOnlyList<string> step = model.ById.TryGetValue(assignment, out RecordEnvelope? record) ? model.Chain(model.Latest(record)) : [assignment];
+        IReadOnlyList<string> step = StepAssignments(model, assignment);
         int had = ledger.Attempts(step);
         return had >= ledger.AttemptsPerStep
             ? $"The step has had {had.ToString(CultureInfo.InvariantCulture)} runs, the {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} attempts per step the goal's budget grants."
