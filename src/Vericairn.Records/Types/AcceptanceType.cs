@@ -10,6 +10,12 @@ namespace Vericairn.Records.Types;
 /// <summary>Acceptance of an exact subject revision by a principal allowed to accept it.</summary>
 public sealed class AcceptanceType : IRecordType
 {
+    /// <summary>
+    /// A principal other than the operator names a basis review whose outcome is not pass. From 0.9.2 the write boundary refuses a new
+    /// acceptance with this finding; an acceptance already in the estate keeps its reading, and the check reports it as information.
+    /// </summary>
+    internal const string BasisOutcomeCode = "acceptance.basis-outcome";
+
     /// <inheritdoc />
     public string Name => "acceptance";
 
@@ -63,6 +69,12 @@ public sealed class AcceptanceType : IRecordType
             }
         }
 
+        if (BasisOutcomeFinding(context.Model, context.Record, context.Location) is Finding outcome)
+        {
+            // Existing acceptances keep their reading. The write boundary promotes this finding only for proposed records.
+            context.Findings.Add(outcome);
+        }
+
         bool sameAuthor = subject.By == context.Record.By;
         if (self is not null && self.Value != sameAuthor)
         {
@@ -106,5 +118,31 @@ public sealed class AcceptanceType : IRecordType
         {
             context.Warning("acceptance.unresolved", "The subject was superseded after this acceptance; it accepts an earlier revision and needs reconsideration.");
         }
+    }
+
+    /// <summary>
+    /// Information when a principal other than the operator accepts on a basis review of the same subject whose outcome is not pass;
+    /// null otherwise. The operator's acceptance may rest on any review, or on none.
+    /// </summary>
+    internal static Finding? BasisOutcomeFinding(EstateModel model, RecordEnvelope acceptance, string location)
+    {
+        if (acceptance.Subject is null || model.HasRole(acceptance.By, Roles.Operator) || !acceptance.Body.TryGetProperty("basis", out System.Text.Json.JsonElement basis)
+            || basis.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        List<string> unpassed = [];
+        foreach (System.Text.Json.JsonElement id in basis.EnumerateArray())
+        {
+            if (id.ValueKind == System.Text.Json.JsonValueKind.String && id.GetString() is string named && model.ById.TryGetValue(named, out RecordEnvelope? review)
+                && review.Type == "review" && review.Subject?.Id == acceptance.Subject.Id && EstateModel.BodyString(review, "outcome") is string outcome && outcome != "pass")
+            {
+                unpassed.Add($"{named} ({outcome})");
+            }
+        }
+
+        return unpassed.Count == 0 ? null : new(Severity.Info, BasisOutcomeCode, location + "#body.basis",
+            $"A principal other than the operator accepts only on reviews that passed; basis review {string.Join(", ", unpassed)} did not pass.");
     }
 }

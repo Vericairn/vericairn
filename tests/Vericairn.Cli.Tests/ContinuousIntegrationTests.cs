@@ -53,6 +53,7 @@ public class ContinuousIntegrationTests
     [InlineData("package.yml", "published-cli:", 30)]
     [InlineData("release.yml", "draft:", 20)]
     [InlineData("nuget.yml", "publish:", 20)]
+    [InlineData("mcp-registry.yml", "publish:", 45)]
     [InlineData("secret-scan.yml", "secret-scan:", 15)]
     public void JobTimeLimitsLeaveRoomForNormalRuns(string file, string job, int minutes)
     {

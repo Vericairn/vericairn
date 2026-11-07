@@ -97,6 +97,16 @@ and does not inject wall-clock or cached release knowledge into canonical status
 lines known is reported explicitly. Legacy dependency observations and the shared latest-release
 cache retain their `current/stable` meaning; other lines use published release records.
 
+## Acceptance on passing reviews (0.9.2)
+
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews of its subject whose
+`outcome` is `pass`. The rule is prospective, as 0.9.1's rule for decision times is: it adds no field and no format
+number, and it binds the records written by a runtime that has it. Such a runtime refuses a new acceptance whose
+`basis` names a review with outcome `findings` or `fail` (`acceptance.basis-outcome`, an error), in every record
+format, whatever authority scope its author holds. An acceptance already in the estate keeps its reading: it still
+accepts its subject, and `estate check` and `records validate` report it as information naming each such review and
+its outcome. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none.
+
 ## Output locations carry no scheme (0.9.2)
 
 From 0.9.2, a result output's `location` names a repository-relative path and never carries a URL

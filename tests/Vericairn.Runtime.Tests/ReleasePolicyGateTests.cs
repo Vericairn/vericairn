@@ -758,7 +758,7 @@ public sealed partial class ReleasePolicyGateTests
         RecordEnvelope intent = f.Api.Session.Load().OfType("operation").Single(o => EstateModel.BodyString(o, "status") == "not-started");
         using JsonDocument evidence = JsonDocument.Parse(f.Api.Session.Objects.Read(hash)!);
         JsonElement root = evidence.RootElement;
-        Assert.Equal("vericairn.release-basis/2", root.GetProperty("format").GetString());
+        Assert.Equal("vericairn.release-basis/3", root.GetProperty("format").GetString());
         // Records and sources are named by hash; the evidence below resolves them to their exact bytes.
         Assert.All(root.GetProperty("records").EnumerateArray(), r => Assert.False(r.TryGetProperty("body", out _)));
         Assert.All(root.GetProperty("repositories").EnumerateArray().SelectMany(r => r.GetProperty("files").EnumerateArray()),

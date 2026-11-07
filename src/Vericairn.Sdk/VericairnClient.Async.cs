@@ -315,6 +315,14 @@ public sealed partial class VericairnClient
         RunOperationAsync<OperatorRecordResponse>(nameof(OperatorRecord), async token => (await PostAsync<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorRecord)), cancellationToken);
 
     /// <inheritdoc />
+    public Task<OperatorUnfinishedResponse> OperatorUnfinishedAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OperatorUnfinishedResponse>(nameof(OperatorUnfinished), async token => (await GetAsync<OperatorUnfinishedResponse>("/v1/operator/unfinished", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(OperatorUnfinished)), cancellationToken);
+
+    /// <summary>The cancellable OperatorFinish operation, with a deadline covering the complete response.</summary>
+    public Task<OperatorRecordResponse> OperatorFinishAsync(OperatorFinishRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OperatorRecordResponse>(nameof(OperatorFinish), async token => (await PostAsync<OperatorFinishRequest, OperatorRecordResponse>("/v1/operator/unfinished", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorFinish)), cancellationToken);
+
+    /// <inheritdoc />
     public Task<OperatorCloseCandidatesResponse> OperatorCloseCandidatesAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<OperatorCloseCandidatesResponse>(nameof(OperatorCloseCandidates), async token => (await GetAsync<OperatorCloseCandidatesResponse>("/v1/operator/close", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(OperatorCloseCandidates)), cancellationToken);
 

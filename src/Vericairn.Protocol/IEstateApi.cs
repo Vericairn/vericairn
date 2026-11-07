@@ -200,6 +200,13 @@ public partial interface IEstateApi
     /// <summary>Sign the operator's own record and carry its isolated commit through recorded repository operations; resume identical input safely.</summary>
     OperatorRecordResponse OperatorRecord(OperatorRecordRequest request);
 
+    /// <summary>This clone's unfinished operator action: its record, pull request and stage, and what finishing it needs. Reading changes nothing.</summary>
+    OperatorUnfinishedResponse OperatorUnfinished() => new(null, new("unsupported", "This API implementation does not support reading an unfinished operator action.", []));
+
+    /// <summary>Finishes this clone's unfinished operator action from its own records once its recorded merge's target checks pass; nothing is signed, branched or committed.</summary>
+    OperatorRecordResponse OperatorFinish(OperatorFinishRequest request) =>
+        new("operator-record", "refused", "This API implementation does not support finishing an operator action.", false, "Use a runtime that supports operator unfinished --finish.");
+
     /// <summary>Lists every latest completed, reviewed and unaccepted result with the exact evidence to inspect before closing it.</summary>
     OperatorCloseCandidatesResponse OperatorCloseCandidates() => new([], new("unsupported", "This API implementation does not support operator close.", []));
 

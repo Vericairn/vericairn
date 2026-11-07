@@ -22,7 +22,9 @@ internal sealed record WorkspaceSetupResult(string Status, int? ExitCode, long D
 
 /// <summary>
 /// Runs a configured setup command in a workspace before dispatch: as the person, outside the harness's sandbox, inside its own process
-/// group or job with a deadline. Nothing it starts outlives it, so the checks that follow see the workspace as it left it.
+/// group or job with a deadline. Nothing it starts outlives it, so the checks that follow see the workspace as it left it. What it runs
+/// can be the work branch's own content, so it starts with a harness's filtered environment and the variables it names, never the
+/// worker's whole environment (FIX-96).
 /// </summary>
 internal static class WorkspaceSetup
 {
@@ -37,7 +39,7 @@ internal static class WorkspaceSetup
         };
         foreach (string argument in configuration.Command.Skip(1)) info.ArgumentList.Add(argument);
         info.Environment.Clear();
-        foreach ((string name, string value) in Environment(environment)) info.Environment[name] = value;
+        foreach ((string name, string value) in Environment(environment, configuration.Variables ?? [])) info.Environment[name] = value;
 
         var watch = Stopwatch.StartNew();
         ContainedProcess process;
@@ -121,12 +123,18 @@ internal static class WorkspaceSetup
         return new(status, exitCode, duration);
     }
 
-    /// <summary>The person's own environment, less every variable that would hand the command Vericairn's home or a run's bindings.</summary>
-    internal static Dictionary<string, string> Environment(IReadOnlyDictionary<string, string> source)
+    /// <summary>
+    /// What a harness would receive of the person's environment, by its allowlist and with its credential and loader filters, plus the
+    /// variables the configuration names, as the person holds them; never a variable that would hand the command Vericairn's home or
+    /// a run's bindings.
+    /// </summary>
+    internal static Dictionary<string, string> Environment(IReadOnlyDictionary<string, string> source, IReadOnlyCollection<string> named)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(named);
+        var names = new HashSet<string>(named, WorkerEnvironment.Names);
         var environment = new Dictionary<string, string>(WorkerEnvironment.Names);
-        foreach ((string name, string value) in source)
+        foreach ((string name, string value) in WorkerEnvironment.Build(source).Concat(source.Where(variable => names.Contains(variable.Key))))
         {
             if (!name.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase)) environment[name] = value;
         }

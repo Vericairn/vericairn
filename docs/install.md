@@ -526,8 +526,8 @@ From 0.8.2, the tool package carries both `DotnetTool` and `McpServer` package t
 [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
 Its embedded `.mcp/server.json` describes `io.github.vericairn/vericairn` for the
 [official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
-package publication; the registry listing requires the operator's separate
-[publication step](operator-actions.md#mcp-registry-publication). These are publication targets,
+package publication; from 0.9.2 the registry listing follows the release's publication through
+the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)). These are publication targets,
 not evidence that either listing is already live.
 
 With 0.9.1 published, a client with the .NET 10 SDK can start the server without
