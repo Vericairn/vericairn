@@ -340,12 +340,17 @@ stored read asks the journal to derive at once. `GET /v1/providers` adds rows of
 `Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
 the command line. It runs `gh api -i rate_limit` to confirm the token's `X-OAuth-Scopes` (`repo` or `repository_advisories:read`)
 and the allowance, then reads the listing page by page with `gh api -i`, following each `Link` header's `after` cursor, each
-page and the whole listing bounded. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+page and the whole listing bounded. It follows a next page only on `api.github.com`'s own advisory listing, with exactly one
+`after` cursor of base64 characters, which it decodes, checks and encodes again; anything else fails closed. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
 `TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
-`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` refuses a
-change of a repository resource's kind, as well as its location, by any author but the operator or an `administer` grant
-(`resource.location-author`), and by any author but the operator while a security-reports declaration names it
-(`resource.security-reports-author`). `SecurityReportRules` also adds `Declares`. Record format remains 3; the record
+`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` judges each
+revision against the declarations and grants in force at its time: while a security-reports declaration names a resource,
+only the operator changes its kind or location (`resource.security-reports-author`), and a repository's location moves only
+by the operator or an `administer` grant, as before (`resource.location-author`). Validation reports, as information under
+the same codes, a revision already in the estate that turns a resource into or out of a repository without that authority,
+or that a later declaration would forbid; the write boundary refuses such a revision when it is new, as it does for
+FIX-97's and FIX-98's rules. `ResourceType` adds the constants `LocationAuthorCode` and `SecurityReportsAuthorCode`, and
+`SecurityReportRules` adds `DeclaresAt`. Record format remains 3; the record
 additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
 `vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
 fixtures include it. The command line adds `security-reports poll` and `security-reports triage`

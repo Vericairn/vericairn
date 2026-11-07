@@ -2666,6 +2666,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding with { Severity = Severity.Error });
         }
 
+        // From 0.9.2, a new repository-resource revision needs the authority its change takes now (OPS-11), however early its time;
+        // revisions already in the estate keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is ResourceType.LocationAuthorCode or ResourceType.SecurityReportsAuthorCode
+            && records.Any(r => f.Location == r.RelativePath)))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
         // From 0.9.2, a new record's author is a known principal (FIX-98); records already in the estate keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Code == RecordAuthorship.Code && records.Any(r => f.Location == r.RelativePath + "#by")))
         {

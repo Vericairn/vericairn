@@ -46,7 +46,13 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
     /// <summary>Each gh invocation has a one-minute deadline and reads at most one page's bounded output.</summary>
     public GitHubSecurityAdvisoryReader() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(1), PageCharacters)) { }
 
-    internal GitHubSecurityAdvisoryReader(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
+    internal GitHubSecurityAdvisoryReader(Func<ProcessStartInfo, ProcessResult> run, long listingCharacters = ListingCharacters)
+    {
+        this.run = run;
+        listingLimit = listingCharacters;
+    }
+
+    private readonly long listingLimit;
 
     /// <inheritdoc />
     public string Provider => ProviderId;
@@ -86,7 +92,7 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
                 throw new ProviderRefusedException($"{repository} lists more than {MaxPages * PageSize} advisories, more than one read follows, so no listing is reported.");
             ProcessResult result = Invoke("api", "-i", $"repos/{repository}/security-advisories?per_page={PageSize}" + (after is null ? string.Empty : "&after=" + after));
             characters += result.StandardOutput.Length;
-            if (characters > ListingCharacters)
+            if (characters > listingLimit)
                 throw new ProviderRefusedException($"{repository}'s advisories are larger than one read holds, so no listing is reported.");
             (Dictionary<string, string> headers, string body) = Body(result);
             using JsonDocument listed = Json(body);
@@ -151,22 +157,29 @@ public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
         return reserve;
     }
 
-    // The next page's cursor from a Link header, or null on the last page. A next page named any other way fails closed.
+    // The next page's cursor from a Link header, or null on the last page. Only GitHub's own advisory listing, with one cursor of
+    // base64 characters, is followed; anything else fails closed. The cursor is decoded, checked and encoded again, so it can carry
+    // no separator, placeholder, flag or space into the route.
     private static string? Next(Dictionary<string, string> headers)
     {
         if (!headers.TryGetValue("link", out string? link)) return null;
-        foreach (string part in link.Split(','))
-        {
-            int open = part.IndexOf('<', StringComparison.Ordinal), close = part.IndexOf('>', StringComparison.Ordinal);
-            if (open < 0 || close < open || !part[(close + 1)..].Contains("rel=\"next\"", StringComparison.Ordinal)) continue;
-            if (!Uri.TryCreate(part[(open + 1)..close], UriKind.Absolute, out Uri? next))
-                throw new ProviderRefusedException("GitHub named its next page unreadably; no listing is reported.");
-            string? cursor = next.Query.TrimStart('?').Split('&').Where(p => p.StartsWith("after=", StringComparison.Ordinal)).Select(p => p[6..]).SingleOrDefault();
-            if (cursor is null || cursor.Length is 0 or > 512 || !cursor.All(c => char.IsAsciiLetterOrDigit(c) || c is '%' or '.' or '_' or '~' or '+' or '/' or '=' or '-'))
-                throw new ProviderRefusedException("GitHub named its next page without a cursor this reader follows; no listing is reported.");
-            return cursor;
-        }
-        return null;
+        string[] nexts = [.. link.Split(',').Where(part => part.Contains("rel=\"next\"", StringComparison.Ordinal))];
+        if (nexts.Length == 0) return null;
+        if (nexts.Length > 1) throw new ProviderRefusedException("GitHub named more than one next page; no listing is reported.");
+        string part = nexts[0];
+        int open = part.IndexOf('<', StringComparison.Ordinal), close = part.IndexOf('>', StringComparison.Ordinal);
+        if (open < 0 || close < open || !Uri.TryCreate(part[(open + 1)..close], UriKind.Absolute, out Uri? next) || next.Scheme != Uri.UriSchemeHttps
+            || !string.Equals(next.Host, "api.github.com", StringComparison.OrdinalIgnoreCase) || !next.AbsolutePath.EndsWith("/security-advisories", StringComparison.Ordinal))
+            throw new ProviderRefusedException("GitHub named its next page somewhere other than its own advisory listing; no listing is reported.");
+        string[] cursors = [.. next.Query.TrimStart('?').Split('&').Where(p => p.StartsWith("after=", StringComparison.Ordinal)).Select(p => p[6..])];
+        if (cursors.Length != 1)
+            throw new ProviderRefusedException($"GitHub named its next page with {(cursors.Length == 0 ? "no" : "more than one")} cursor; no listing is reported.");
+        string cursor;
+        try { cursor = Uri.UnescapeDataString(cursors[0]); }
+        catch (UriFormatException) { throw new ProviderRefusedException("GitHub named its next page with an unreadable cursor; no listing is reported."); }
+        if (cursor.Length is 0 or > 512 || cursor[0] == '-' || !cursor.All(c => char.IsAsciiLetterOrDigit(c) || c is '+' or '/' or '=' or '_' or '-'))
+            throw new ProviderRefusedException("GitHub named its next page with a cursor this reader does not follow; no listing is reported.");
+        return Uri.EscapeDataString(cursor);
     }
 
     private ProcessResult Invoke(params string[] arguments)

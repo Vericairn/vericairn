@@ -49,6 +49,9 @@ internal sealed class FakeGh
     /// <summary>The allowance left that each page's headers report.</summary>
     internal long PageRemaining { get; set; } = 4980;
 
+    /// <summary>A Link header the first page answers with in place of the stand-in's own cursor, for crafted next pages.</summary>
+    internal string? FirstLink { get; set; }
+
     /// <summary>The outcome of every page read, as an output limit or another bounded failure would end it.</summary>
     internal ProcessOutcome? PageOutcome { get; set; }
 
@@ -97,13 +100,17 @@ internal sealed class FakeGh
             const string listing = "repos/" + Repository + "/security-advisories?per_page=100";
             if (arguments is ["api", "-i", var route] && route.StartsWith(listing, StringComparison.Ordinal))
             {
-                int page = route == listing ? 0 : int.Parse(route[(listing.Length + "&after=cursor".Length)..], System.Globalization.CultureInfo.InvariantCulture);
-                Assert.True(route == listing || route.StartsWith(listing + "&after=cursor", StringComparison.Ordinal), route);
+                Assert.True(route == listing || route.StartsWith(listing + "&after=", StringComparison.Ordinal), route);
+                // A cursor the stand-in did not issue reads as the listing's last page.
+                int page = route == listing ? 0
+                    : int.TryParse(route[(listing.Length + "&after=".Length)..].Replace("cursor", string.Empty, StringComparison.Ordinal), System.Globalization.CultureInfo.InvariantCulture, out int named) ? named : int.MaxValue;
                 if (PageOutcome is { } outcome) return new(outcome, true, null, Diagnostics, Diagnostics);
                 List<string> pages = PageBodies ?? [.. Advisories.Chunk(PageSize).Select(chunk => new JsonArray([.. chunk.Select(a => (JsonNode)a.DeepClone())]).ToJsonString())];
                 if (pages.Count == 0) pages.Add("[]");
+                page = Math.Min(page, pages.Count - 1);
                 var headers = new List<(string, string)> { ("X-RateLimit-Limit", "5000"), ("X-RateLimit-Remaining", PageRemaining.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
-                if (page + 1 < pages.Count)
+                if (page == 0 && FirstLink is not null) headers.Add(("Link", FirstLink));
+                else if (page + 1 < pages.Count)
                     headers.Add(("Link", $"<https://api.github.com/repositories/1/security-advisories?per_page=100&after=cursor{page + 1}>; rel=\"next\""));
                 return Ok(Headers(headers) + pages[page]);
             }

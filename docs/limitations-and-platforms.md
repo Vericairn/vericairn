@@ -690,7 +690,8 @@ hides drafts and private reports from other logins; a fine-grained or app token 
 while GitHub's core allowance keeps a fifth of its limit, and at least 100 requests, for the person's own use, and stops
 before a further page once a page leaves no more than that. GitHub keeps repository advisories only for
 public repositories, so a declared private repository's listing is refused and holds releases. It does not use
-conditional requests or webhooks, and it reads `github.com` through the host `gh` is logged in to. A repository whose
+conditional requests or webhooks. It follows next pages only on `api.github.com`, so it reads `github.com` and not a GitHub
+Enterprise Server. A repository whose
 listing cannot be completed holds every release until it can; there is no override other than the operator's product
 revision without the declaration.
 

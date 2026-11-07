@@ -142,6 +142,57 @@ public sealed class GitHubSecurityAdvisoryReaderTests
         Assert.True(gh.Calls.Count(c => c.Any(a => a.Contains("security-advisories", StringComparison.Ordinal))) <= GitHubSecurityAdvisoryReader.MaxPages);
     }
 
+    [Theory]
+    [InlineData("after=abc def", "cursor this reader does not follow")]
+    [InlineData("after=--paginate", "cursor this reader does not follow")]
+    [InlineData("after=%7Bowner%7D", "cursor this reader does not follow")]
+    [InlineData("after={owner}", "cursor this reader does not follow")]
+    [InlineData("after=abc%26state%3Dpublished", "cursor this reader does not follow")]
+    [InlineData("after=abc%20def", "cursor this reader does not follow")]
+    [InlineData("after=a&after=b", "more than one cursor")]
+    [InlineData("state=published", "no cursor")]
+    public void OnlyOneBase64CursorOfGitHubsOwnListingIsFollowed(string query, string reason)
+    {
+        var gh = new FakeGh { FirstLink = "<https://api.github.com/repositories/1/security-advisories?per_page=100&" + query + ">; rel=\"next\"" };
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository));
+        Assert.Contains(reason, refused.Message, StringComparison.Ordinal);
+        // The crafted page is never requested: the route the reader builds carries nothing from it.
+        Assert.Single(gh.Calls, c => c.Any(a => a.Contains("security-advisories", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData("<https://evil.example/repositories/1/security-advisories?after=abc>; rel=\"next\"")]
+    [InlineData("<http://api.github.com/repositories/1/security-advisories?after=abc>; rel=\"next\"")]
+    [InlineData("<https://api.github.com/user/repos?after=abc>; rel=\"next\"")]
+    [InlineData("<not a url>; rel=\"next\"")]
+    [InlineData("<https://api.github.com/repositories/1/security-advisories?after=a>; rel=\"next\", <https://api.github.com/repositories/1/security-advisories?after=b>; rel=\"next\"")]
+    public void ANextPageAnywhereButGitHubsOwnListingFailsClosed(string link)
+    {
+        var gh = new FakeGh { FirstLink = link };
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository));
+        Assert.Contains("next page", refused.Message, StringComparison.Ordinal);
+        Assert.Single(gh.Calls, c => c.Any(a => a.Contains("security-advisories", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void AnEncodedBase64CursorIsFollowedExactlyInTheRouteItself()
+    {
+        var gh = new FakeGh { FirstLink = "<https://api.github.com/repositories/1/security-advisories?per_page=100&after=Y3Vyc29yOnYy%3D%3D>; rel=\"next\"" };
+        new GitHubSecurityAdvisoryReader(gh.Run).Read(FakeGh.Repository);
+        Assert.Equal(["api", "-i", "repos/Example/widget/security-advisories?per_page=100&after=Y3Vyc29yOnYy%3D%3D"], gh.Calls[^1]);
+    }
+
+    [Fact]
+    public void AListingLargerThanOneReadHoldsIsRefusedAndTheBoundIsNinetySixMebicharacters()
+    {
+        Assert.Equal(96L * 1024 * 1024, GitHubSecurityAdvisoryReader.ListingCharacters);
+        Assert.Equal(16 * 1024 * 1024, GitHubSecurityAdvisoryReader.PageCharacters);
+        var gh = new FakeGh();
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitHubSecurityAdvisoryReader(gh.Run, listingCharacters: 1000).Read(FakeGh.Repository));
+        Assert.Contains("larger than one read holds", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(3, new GitHubSecurityAdvisoryReader(gh.Run, listingCharacters: 1_000_000).Read(FakeGh.Repository).Advisories.Count);
+    }
+
     [Fact]
     public void AnEmptyListingAndALastPageAtTheReserveAreComplete()
     {

@@ -89,15 +89,32 @@ public static class SecurityReportRules
             context.Error("security-triage.author", "Only the operator records a security report's triage.");
     }
 
-    /// <summary>Whether a current product's security-reports declaration names any revision of this resource lineage.</summary>
-    public static bool Declares(EstateModel model, IReadOnlyList<string> lineage)
+    /// <summary>
+    /// Whether a product's security-reports declaration named any revision of this resource lineage at a time: each product's
+    /// revisions up to that time are read in order, a revision naming it declares it, and only the operator's revision undeclares
+    /// it, since any other author's change to the declaration is refused (<c>product.security-reports-author</c>).
+    /// </summary>
+    public static bool DeclaresAt(EstateModel model, IReadOnlyList<string> lineage, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(lineage);
-        return model.Current("product").Any(product => product.Body.TryGetProperty(ProductField, out JsonElement reports) && reports.ValueKind == JsonValueKind.Object
-            && reports.TryGetProperty("repositories", out JsonElement repositories) && repositories.ValueKind == JsonValueKind.Array
-            && repositories.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && lineage.Contains(id.GetString()!, StringComparer.Ordinal)));
+        foreach (IGrouping<string, RecordEnvelope> product in model.OfType("product").Where(p => p.AtTime <= at).GroupBy(p => model.Chain(p)[0], StringComparer.Ordinal))
+        {
+            bool declared = false;
+            foreach (RecordEnvelope revision in product.OrderBy(p => model.Chain(p).Count).ThenBy(p => p.At, StringComparer.Ordinal))
+            {
+                if (Names(revision, lineage)) declared = true;
+                else if (model.HasRole(revision.By, Roles.Operator)) declared = false;
+            }
+            if (declared) return true;
+        }
+        return false;
     }
+
+    private static bool Names(RecordEnvelope product, IReadOnlyList<string> lineage) =>
+        product.Body.TryGetProperty(ProductField, out JsonElement reports) && reports.ValueKind == JsonValueKind.Object
+        && reports.TryGetProperty("repositories", out JsonElement repositories) && repositories.ValueKind == JsonValueKind.Array
+        && repositories.EnumerateArray().Any(id => id.ValueKind == JsonValueKind.String && lineage.Contains(id.GetString()!, StringComparer.Ordinal));
 
     /// <summary>A repository resource's GitHub owner/name, or null.</summary>
     public static string? GitHubLocation(RecordEnvelope resource)

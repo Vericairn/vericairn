@@ -52,21 +52,57 @@ public sealed class SecurityReportHoldTests
         Assert.Contains(after.Check!.Objections, o => o.Code == "resource.security-reports-author");
     }
 
+    private static string[] Information(SecurityReportFixture f, RecordEnvelope record) =>
+        [.. f.Records.Estate.Load().Findings.Where(x => x.Severity == Severity.Info && x.Location.Contains(record.Id, StringComparison.Ordinal)).Select(x => x.Code)];
+
     [Fact]
-    public void KindAndLocationChangesOfAnUndeclaredRepositoryNeedTheOperatorOrAdminister()
+    public void ANewKindChangeOfAnUndeclaredRepositoryNeedsTheOperatorOrAdministerWhileOlderOnesKeepTheirReading()
     {
         using var f = new SecurityReportFixture(declare: false);
         RecordEnvelope site = f.Records.Add("resource", Repository("repository", "Example/site"));
+        // A builder's kind change already in the estate keeps its reading: information, not an error.
         RecordEnvelope service = f.Records.Add("resource", Repository("service", "Example/site"), builder: true, supersedes: site.Id);
-        Assert.Contains("resource.location-author", Errors(f, service));
-        RecordEnvelope other = f.Records.Add("resource", Repository("service", "Example/other"));
-        RecordEnvelope promoted = f.Records.Add("resource", Repository("repository", "Example/other"), builder: true, supersedes: other.Id);
-        Assert.Contains("resource.location-author", Errors(f, promoted));
-        RecordEnvelope renamed = f.Records.Add("resource", Repository("repository", FakeGh.Repository, name: "Renamed"), builder: true, supersedes: f.Resource.Id);
-        Assert.Empty(Errors(f, renamed));
-        RecordEnvelope byOperator = f.Records.Add("resource", Repository("service", "Example/third"), supersedes: renamed.Id);
-        Assert.Empty(Errors(f, byOperator));
+        Assert.Empty(Errors(f, service));
+        Assert.Contains("resource.location-author", Information(f, service));
+        // Through the runtime, a new kind change by anyone without the authority is refused before it is written.
+        RecordEnvelope other = f.Records.Add("resource", Repository("repository", "Example/other"));
+        WriteOutcome refused = f.Api.NewRecord(new NewRecordRequest("resource", f.Builder, PolicyFixtureElement(Repository("service", "Example/other")), Supersedes: other.Id));
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, x => x.Code == "resource.location-author");
+        WriteOutcome allowed = f.Api.NewRecord(new NewRecordRequest("resource", f.Operator, PolicyFixtureElement(Repository("service", "Example/other")), Supersedes: other.Id));
+        Assert.True(allowed.Ok, allowed.Problem?.Message);
+
+        // A builder's move of a repository's location stays refused, as before.
+        RecordEnvelope moved = f.Records.Add("resource", Repository("repository", "Example/elsewhere", name: "Widget"), builder: true, supersedes: f.Resource.Id);
+        Assert.Contains("resource.location-author", Errors(f, moved));
     }
+
+    [Fact]
+    public void AMoveMadeUnderAuthorityBeforeADeclarationStaysValidAndAMoveAfterItIsTheOperatorsAlone()
+    {
+        using var f = new SecurityReportFixture(declare: false);
+        f.Records.Add("authority", new JsonObject
+        {
+            ["grantee"] = f.Builder, ["scope"] = new JsonArray("administer"), ["reserved"] = new JsonArray("publication"), ["conditions"] = new JsonArray(),
+            ["basis"] = f.Records.Decision.Id,
+        });
+        RecordEnvelope moved = f.Records.Add("resource", Repository("repository", "Example/moved", name: "Widget"), builder: true, supersedes: f.Resource.Id);
+        Assert.Empty(Errors(f, moved));
+
+        // The operator declares the resource afterwards: the earlier move keeps its reading, so the estate stays valid.
+        f.Records.Estate.SetClock(f.Records.Estate.Clock.AddMinutes(5));
+        f.Records.Add("product", f.ProductBody(Vericairn.Providers.GitHub.GitHubSecurityAdvisoryReader.ProviderId), supersedes: f.Product.Id);
+        Assert.Empty(Errors(f, moved));
+        Assert.Contains("resource.security-reports-author", Information(f, moved));
+        Assert.DoesNotContain(f.Records.Estate.Load().Findings, x => x.Severity == Severity.Error);
+
+        // A move after the declaration needs the operator, whatever grant its author holds.
+        f.Records.Estate.SetClock(f.Records.Estate.Clock.AddMinutes(5));
+        RecordEnvelope again = f.Records.Add("resource", Repository("repository", "Example/again", name: "Widget"), builder: true, supersedes: moved.Id);
+        Assert.Contains("resource.security-reports-author", Errors(f, again));
+    }
+
+    private static System.Text.Json.JsonElement PolicyFixtureElement(JsonObject body) => Records.Tests.PolicyFixture.Element(body);
 
     [Fact]
     public void ADeclaredResourceThatNoLongerResolvesToAGitHubRepositoryHoldsAndIsNeverSkipped()
