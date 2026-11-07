@@ -194,6 +194,42 @@ public sealed class EventJournalTests : IDisposable
     }
 
     [Fact]
+    public void AWiderKeyFileIsMadeOwnerOnlyAndAKeyThatCannotBeKeptStillLetsTheJournalOpen()
+    {
+        string key = Path.Combine(directory, EventJournal.KeyFileName);
+        string name;
+        using (EventJournal journal = EventJournal.Open(Path_))
+        {
+            name = journal.Name("finding", "a");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            // An earlier build or a copy left the key readable by others: the next opening keeps the key and narrows its mode.
+            File.SetUnixFileMode(key, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+            using (EventJournal reopened = EventJournal.Open(Path_))
+            {
+                Assert.Equal(name, reopened.Name("finding", "a"));
+            }
+
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(key));
+        }
+
+        // A directory where the key file belongs can be neither read nor replaced: the journal still opens, naming subjects under a
+        // key of its own for this opening, and events still flow.
+        File.Delete(key);
+        Directory.CreateDirectory(key);
+        using EventJournal keyless = EventJournal.Open(Path_);
+        Append(keyless, 1);
+        Assert.Equal(1, keyless.Head);
+        string here = keyless.Name("finding", "a");
+        Assert.StartsWith("hmac-sha256:", here, StringComparison.Ordinal);
+        Assert.Equal(here, keyless.Name("finding", "a"));
+        Assert.NotEqual(name, here);
+        Assert.True(Directory.Exists(key));
+    }
+
+    [Fact]
     public void TwoAttentionItemsOnOneSubjectThatChangeInOnePassStayTwoEvents()
     {
         using var estate = new TestEstate(3);
