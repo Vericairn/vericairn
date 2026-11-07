@@ -1017,7 +1017,8 @@ A goal's pause or stop changes its recorded lifecycle and prevents new runs; it 
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
 observed containment. In 0.8.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
-`stallSeconds`; operators must act on deadlines and consecutive failures themselves.
+`stallSeconds`; operators must act on deadlines and consecutive failures themselves. From 0.9.2, `goal next` and `goal step` hold a run of a flow once it reaches `limits.consecutiveFailures`
+(PROC-10); a direct `worker start` is not held by it, and `limits.deadline` is still not enforced.
 
 `RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
 fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
