@@ -90,10 +90,11 @@ public sealed class DutyTransportTests
         JsonElement result = PolicyFixture.Element(body);
         f.Advance();
         int before = f.Model.Records.Count;
-        Assert.Equal("conflict", f.Api.Result(new(attempt.Id, attempt.By, result)).Problem!.Code);
+        // A missing expected hash is a refusal naming it (FIX-94); a stale one is a conflict.
+        Missing(f.Api.Result(new(attempt.Id, attempt.By, result)), "expected hash of the current attempt");
         Assert.Equal("conflict", f.Api.Result(new(attempt.Id, attempt.By, result, "stale")).Problem!.Code);
         string subject = "attempt:" + attempt.Id + ":" + attempt.ComputedHash;
-        Assert.Equal("conflict", f.Api.NewRecord(new("result", attempt.By, result, subject)).Problem!.Code);
+        Missing(f.Api.NewRecord(new("result", attempt.By, result, subject)), "expected hash of the current attempt");
         Assert.False(f.Api.NewRecord(new("result", attempt.By, result, subject, At: attempt.At, Expected: attempt.ComputedHash)).Ok);
         body["duties"]![0]!["proofs"] = new JsonArray(new JsonObject { ["clause"] = "invented", ["records"] = new JsonArray() });
         Assert.False(f.Api.Result(new(attempt.Id, attempt.By, PolicyFixture.Element(body), attempt.ComputedHash)).Ok);
@@ -105,6 +106,77 @@ public sealed class DutyTransportTests
         Assert.Equal("conflict", f.Api.ReviewResult(new(written.Id, f.Operator, review, "stale")).Problem!.Code);
         Assert.False(f.Api.NewRecord(new("review", f.Operator, review, "result:" + written.Id + ":" + written.ComputedHash, At: written.At, Expected: written.ComputedHash)).Ok);
         Assert.Equal(before, f.Model.Records.Count);
+    }
+
+    [Fact]
+    public void AnOrdinaryResultsReviewCarriesReadWithoutAnExpectedHashOrADevice()
+    {
+        // The estate report's three cases (#299): without duties, a read list changes nothing about how the review is authored.
+        using var f = new Fixture(devices: false);
+        RecordEnvelope result = f.Records.Result(sign: false);
+        string subject = "result:" + result.Id + ":" + result.ComputedHash;
+        foreach ((JsonElement body, string? expected) in new[] { (ReviewBody(), (string?)null), (ReviewBody(Ref(result)), null), (ReviewBody(Ref(result)), result.ComputedHash) })
+        {
+            RecordWritten written = Ok(f.Api.NewRecord(new("review", f.Operator, body, subject, Expected: expected)));
+            RecordEnvelope review = f.Model.ById[written.Id];
+            Assert.Empty(review.Signatures);
+            Assert.Equal(CanonicalJson.Serialize(body), CanonicalJson.Serialize(review.Body));
+        }
+        Assert.False(f.Model.Findings.HasErrors, string.Join('\n', f.Model.Findings));
+        // An expected hash it is given is still checked, never ignored.
+        int before = f.Model.Records.Count;
+        Assert.Equal("conflict", f.Api.NewRecord(new("review", f.Operator, ReviewBody(Ref(result)), subject, Expected: Stale)).Problem!.Code);
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
+    [Fact]
+    public void ADutyResultsReviewNamesEachMissingPreconditionApartFromAStaleHash()
+    {
+        using var f = new Fixture(devices: false);
+        RecordEnvelope policy = f.Records.Policy();
+        f.Due();
+        RecordEnvelope result = f.Records.Result(f.Records.DutyLink(policy));
+        string subject = "result:" + result.Id + ":" + result.ComputedHash;
+        int before = f.Model.Records.Count;
+        // With or without read, a duty result's review is duty evidence: no expected hash and no held device are both named.
+        foreach (JsonElement body in new[] { ReviewBody(), ReviewBody(Ref(policy)) })
+        {
+            Missing(f.Api.NewRecord(new("review", f.Operator, body, subject)), "expected hash of the current result", "admitted device of principal " + f.Operator);
+            // The exact current hash leaves only the device, never a stale-hash conflict.
+            WriteOutcome device = f.Api.NewRecord(new("review", f.Operator, body, subject, Expected: result.ComputedHash));
+            Missing(device, "admitted device of principal " + f.Operator);
+            Assert.DoesNotContain("expected hash", device.Problem!.Message, StringComparison.Ordinal);
+        }
+        Missing(f.Api.NewRecord(new("review", f.Operator, ReviewBody(), "result:" + result.Id, Expected: result.ComputedHash)), "exact subject, pinned as result:<id>:<hash>");
+        Missing(f.Api.ReviewResult(new(result.Id, f.Operator, ReviewBody(), null!)), "expected hash of the current result", "admitted device");
+        Missing(f.Api.ReviewResult(new(result.Id, f.Operator, ReviewBody(), result.ComputedHash)), "admitted device");
+        Assert.Equal(before, f.Model.Records.Count);
+        // work review is always signed; for an ordinary result it points to the unsigned route.
+        RecordEnvelope ordinary = f.Records.Result(sign: false);
+        before = f.Model.Records.Count;
+        Assert.Contains("records new review", Missing(f.Api.ReviewResult(new(ordinary.Id, f.Operator, ReviewBody(Ref(ordinary)), ordinary.ComputedHash)), "admitted device"), StringComparison.Ordinal);
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
+    [Fact]
+    public void WithAHeldDeviceADutyResultsReviewNeedsTheExpectedHashAndAStaleOneConflicts()
+    {
+        using var f = new Fixture();
+        RecordEnvelope policy = f.Records.Policy();
+        f.Due();
+        RecordEnvelope result = f.Records.Result(f.Records.DutyLink(policy));
+        f.Advance();
+        string subject = "result:" + result.Id + ":" + result.ComputedHash;
+        int before = f.Model.Records.Count;
+        WriteOutcome missing = f.Api.NewRecord(new("review", f.Operator, ReviewBody(), subject));
+        Missing(missing, "expected hash of the current result");
+        Assert.DoesNotContain("admitted device", missing.Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal("conflict", f.Api.NewRecord(new("review", f.Operator, ReviewBody(), subject, Expected: Stale)).Problem!.Code);
+        Assert.Equal("conflict", f.Api.ReviewResult(new(result.Id, f.Operator, ReviewBody(), Stale)).Problem!.Code);
+        Assert.Equal(before, f.Model.Records.Count);
+        // The exact current hash and the held device write the signed duty evidence, without read as with it.
+        RecordWritten written = Ok(f.Api.NewRecord(new("review", f.Operator, ReviewBody(), subject, Expected: result.ComputedHash)));
+        Assert.True(SignatureChecks.IsAuthentic(f.Model, f.Model.ById[written.Id]));
     }
 
     [Fact]
@@ -149,6 +221,25 @@ public sealed class DutyTransportTests
         unresolvedEffects = Array.Empty<string>(), nextStep = "Review the exact result.", duties = new[] { duty },
     }, ProtocolJson.Options)!.AsObject();
 
+    private static readonly string Stale = "sha256:" + new string('0', 64);
+
+    private static JsonElement ReviewBody(params PolicyRecordReference[] read)
+    {
+        JsonObject body = new() { ["independence"] = "operator", ["outcome"] = "pass", ["summary"] = "Reviewed the exact result.", ["findings"] = new JsonArray() };
+        if (read.Length > 0) body["read"] = JsonSerializer.SerializeToNode(read, ProtocolJson.Options);
+        return PolicyFixture.Element(body);
+    }
+
+    // A refusal naming each missing precondition, never the stale-hash conflict.
+    private static string Missing(WriteOutcome outcome, params string[] named)
+    {
+        Assert.False(outcome.Ok);
+        Assert.Equal("refused", outcome.Problem!.Code);
+        foreach (string name in named) Assert.Contains(name, outcome.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was written.", outcome.Problem.Message, StringComparison.Ordinal);
+        return outcome.Problem.Message;
+    }
+
     private static DutyFindingDto Duty(EstateService api) => Assert.Single(api.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!;
     private static PolicyRecordReference Ref(RecordEnvelope record) => new(record.Type, record.Id, record.ComputedHash);
     private static RecordWritten Ok(WriteOutcome outcome) { Assert.True(outcome.Ok, JsonSerializer.Serialize(outcome, ProtocolJson.Options)); return outcome.Written!; }
@@ -188,11 +279,11 @@ public sealed class DutyTransportTests
         internal string Operator => Records.Estate.OperatorId;
         internal string OperatorDevice { get; } = "";
         internal EstateModel Model => Api.Session.Load();
-        internal Fixture()
+        internal Fixture(bool devices = true)
         {
             DateTimeOffset setup = Records.Estate.Clock;
             Api = EstateService.Open(Records.Estate.Root);
-            foreach (string principal in new[] { Operator, Records.Estate.BuilderId })
+            foreach (string principal in devices ? new[] { Operator, Records.Estate.BuilderId } : [])
             {
                 RecordWritten device = Ok(Api.DeviceCreate(new(principal, "Fixture evidence signer", "file")));
                 if (principal == Operator) OperatorDevice = device.Id;
@@ -203,6 +294,7 @@ public sealed class DutyTransportTests
             Advance();
             Records.Estate.SetClock(setup);
         }
+        internal void Due() => Records.Estate.SetClock(new DateTimeOffset(2026, 10, 13, 14, 0, 0, TimeSpan.Zero));
         internal void Advance() { Time.Now = Model.Records.Max(r => r.AtTime).AddSeconds(1); Records.Estate.SetClock(Time.Now); }
         public void Dispose() { Api.Dispose(); Records.Dispose(); }
     }

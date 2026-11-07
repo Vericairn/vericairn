@@ -67,3 +67,28 @@ sessions take no lock.
 The command line adds `estate cache rebuild`, which is not offered over the API, the SDK or MCP. It runs only on the
 estate's own machine with no daemon serving the estate. Its JSON output is `{estate, cache, records, retained,
 retainedFiles}`. No record type, record format or generated document changes.
+
+## Review evidence route (FIX-94)
+
+No route, interface member, protocol type or command option is added or removed. `NewRecord` (`POST /v1/records`,
+`records new`) classifies a review as duty evidence only when its subject result revision carries `duties`. Before, any
+`read` list did. A review of a result without duties is written as an ordinary record, with or without `read`. It needs no
+`expected` hash and no admitted device, and it is signed only as every ordinary write is, when the author holds an admitted
+device. An `expected` supplied for an ordinary result or review is now checked against the record it supersedes, or else the
+exact current subject. A stale one is a `conflict`, where it was ignored before.
+
+Duty evidence through `NewRecord`, `Result` or `ReviewResult` that lacks its exact subject pin, its `expected` hash or an
+admitted device whose key the runtime holds now fails with a `refused` problem naming each one missing. Before, a missing
+`expected` was reported as the `conflict` used for a stale hash. A supplied hash that is no longer current remains a
+`conflict`. `ReviewResult` (`work review`, `work_review`) still always signs, whatever its result.
+
+Record validation follows the same rule: `signature.required` applies to a review only when its subject result has
+`duties`. An unsigned review of a result without duties that carries `read` is valid from 0.9.2. An earlier build reports it as
+`signature.required`, so an estate that records one should not be opened by an earlier release. Duty completion still reads
+only signed reviews of the exact duty result.
+
+The review type's summary and its `read` field description say which reviews need `expected` and an admitted device, and
+so do the `records new --expected` and `work review` help. Because the field description is part of the generic record
+reader's schema explanation, that reader advances to `vericairn.records/readers/7`. Its hash changes, and declarations
+pinned to an earlier implementation need the ordinary explicit generator update before regeneration. Earlier golden
+fixtures remain. The generator id and contract version 1 are unchanged.

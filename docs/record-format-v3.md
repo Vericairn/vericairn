@@ -167,6 +167,9 @@ itself uses `{kind: result-verification, clause}`. This avoids a hash cycle. An 
 carry unique exact references in `read`; it cites the later verification. Goal reviews keep their existing
 `conditions.read`. Duty results and their reviews require admitted-device signatures. Recording a result
 before verification, review or a next-date declaration is permitted; its completion evidence remains pending.
+From 0.9.2 (FIX-94), a review requires that signature only when its subject result revision has `duties`.
+Its `read` list alone no longer requires one, so an unsigned review of a result without duties may carry
+`read`. Such a review is valid in 0.9.2 and later. An earlier build reports it as `signature.required`.
 
 `estate-policy.dutyDispositions` entries contain `rule`, exact originating `policy`, subject identity,
 `occurrence`, `disposition: ended-unmet` and `reason`. They are part of the approved definition. Entries name
