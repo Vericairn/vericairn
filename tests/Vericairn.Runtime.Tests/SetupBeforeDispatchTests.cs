@@ -48,7 +48,8 @@ public sealed class SetupBeforeDispatchTests
         // a loader directive and an unnamed setting do not (FIX-96).
         Assert.Equal(mark, environment["PERSON_SETTING"]!.GetValue<string>());
         Assert.Equal(mark, environment[named]!.GetValue<string>());
-        Assert.True(environment.ContainsKey("PATH"));
+        // Windows names it Path; variable names compare without case there.
+        Assert.Contains(environment, variable => string.Equals(variable.Key, "PATH", StringComparison.OrdinalIgnoreCase));
         foreach (string absent in new[] { ambient, "NODE_OPTIONS", "UNNAMED_SETTING" }) Assert.False(environment.ContainsKey(absent), absent);
         Assert.DoesNotContain(environment, variable => variable.Key.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase));
         string workspace = given["directory"]!.GetValue<string>();
