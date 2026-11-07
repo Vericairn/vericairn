@@ -56,6 +56,12 @@ public static partial class FlowContract
     /// <summary>The kinds whose steps the conductor routes to their role's principal as an assignment of the run's work order.</summary>
     public static readonly ImmutableArray<string> Routed = ["work", "review"];
 
+    /// <summary>
+    /// The failure routes a work step may declare (design/flow.md § 7): a branch it enters, an earlier step the run returns to, or a stop
+    /// for the sponsor; a step that declares none stops.
+    /// </summary>
+    public static readonly ImmutableArray<string> FailureRoutes = ["branch", "step", "stop"];
+
     /// <summary>The prefix of the option a flow's optional step is configured by: step.&lt;key&gt;, on or off.</summary>
     public const string StepOption = "step.";
 
@@ -98,6 +104,12 @@ public static partial class FlowContract
             string? id = role.Text("id", true, 60, Patterns.Slug, "a lower-case role name");
             string? holder = role.Enum("holder", true, Holders);
             role.Text("brief", true, 8000);
+            string? document = role.Text("document", false, 500, Patterns.RelativePath, "a normalized repository-relative path");
+            if (document is not null && (!DocumentPatterns.IsSafePath(document) || document.Split('/')[0].ToLowerInvariant() is "records" or "objects"))
+            {
+                role.Error("flow.role", "document", "A role brief's document is a portable path to a file the estate keeps in its repository, outside hidden directories, its records and its objects.");
+            }
+
             role.NoOtherKeys();
             if (id is not null && !roles.TryAdd(id, holder ?? "either"))
             {
@@ -150,9 +162,14 @@ public static partial class FlowContract
             }
         }
 
+        var branches = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader branch in body.NestedArray("branches", false, allowEmpty: false) ?? [])
         {
-            branch.Text("name", true, 100, Patterns.Slug, "a branch name");
+            if (branch.Text("name", true, 100, Patterns.Slug, "a branch name") is string name)
+            {
+                branches.Add(name);
+            }
+
             foreach (BodyReader predicate in branch.NestedArray("when", true, allowEmpty: false) ?? [])
             {
                 Predicate(predicate, subject, extension, instance: false);
@@ -161,6 +178,16 @@ public static partial class FlowContract
             branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
             branch.Text("returnTo", false, 100, Patterns.Slug, "a step key");
             branch.NoOtherKeys();
+        }
+
+        // A failure route that enters a branch names one this content declares; an extension's route to its base's branch is checked
+        // when the flow is resolved.
+        if (!extension)
+        {
+            foreach (StepShape step in declared.Where(s => s.FailureBranch is not null && !branches.Contains(s.FailureBranch)))
+            {
+                step.Body.Error("flow.failure", "failure", $"The step's failure route enters branch '{step.FailureBranch}', which the flow does not declare.");
+            }
         }
 
         body.NoOtherKeys();
@@ -202,7 +229,7 @@ public static partial class FlowContract
         return fields;
     }
 
-    private sealed record StepShape(BodyReader Body, string? Key, string? Kind, string? Role, IReadOnlyDictionary<string, string> Outputs, string? Each);
+    private sealed record StepShape(BodyReader Body, string? Key, string? Kind, string? Role, IReadOnlyDictionary<string, string> Outputs, string? Each, string? FailureBranch = null);
 
     private static StepShape Step(BodyReader step, Dictionary<string, string> subject, bool extension, List<StepShape> earlier, Dictionary<string, string> roles)
     {
@@ -384,8 +411,52 @@ public static partial class FlowContract
             }
         }
 
+        string? failureBranch = null;
+        BodyReader? failure = step.Nested("failure", false);
+        if (failure is not null)
+        {
+            failureBranch = Failure(failure, step, kind, earlier, extension);
+        }
+
         step.NoOtherKeys();
-        return new StepShape(step, key, kind, role, outputs, each);
+        return new StepShape(step, key, kind, role, outputs, each, failureBranch);
+    }
+
+    /// <summary>
+    /// A work step's failure route (design/flow.md § 7): route branch with the branch it enters, route step with the earlier step the run
+    /// returns to, or route stop. Returns the branch it enters, checked once the flow's branches are read.
+    /// </summary>
+    private static string? Failure(BodyReader failure, BodyReader step, string? kind, List<StepShape> earlier, bool extension)
+    {
+        string? route = failure.Enum("route", true, FailureRoutes);
+        string? branch = failure.Text("branch", route == "branch", 100, Patterns.Slug, "a branch name");
+        string? target = failure.Text("step", route == "step", 100, Patterns.Slug, "a step key");
+        failure.NoOtherKeys();
+        if (kind is not null && kind != "work")
+        {
+            step.Error("flow.failure", "failure", "A work step declares its failure route; a review's failure is the failure of the work it reviews, and the other kinds are carried by a person in this build.");
+        }
+
+        if (route != "branch" && failure.Has("branch"))
+        {
+            failure.Error("flow.failure", "branch", "Only a failure route of route branch names a branch.");
+        }
+
+        if (route != "step" && failure.Has("step"))
+        {
+            failure.Error("flow.failure", "step", "Only a failure route of route step names the step the run returns to.");
+        }
+
+        if (target is not null && !extension && earlier.All(e => e.Key != target))
+        {
+            failure.Error("flow.failure", "step", $"'{target}' is not a step declared before this one; a failed step returns the run to an earlier step.");
+        }
+        else if (earlier.FirstOrDefault(e => e.Key == target) is { Kind: "effect" or "exchange" } outside)
+        {
+            failure.Error("flow.failure", "step", $"'{target}' is an {outside.Kind} step: a failure route never repeats an outside effect.");
+        }
+
+        return route == "branch" ? branch : null;
     }
 
     /// <summary>
