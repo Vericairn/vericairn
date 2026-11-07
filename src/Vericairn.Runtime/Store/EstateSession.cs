@@ -218,8 +218,12 @@ public sealed class EstateSession : IDisposable
             Live.Put(record.RelativePath, record.Bytes);
         }
 
+        Written?.Invoke(record.Envelope.Id);
         return record.RelativePath;
     }
+
+    /// <summary>Told the id of each record this session stores, once it is stored: what the event journal calls written here (0.9.2).</summary>
+    internal Action<string>? Written { get; set; }
 
     /// <summary>Removes a record that was just written and turned out to make the estate invalid.</summary>
     public void Discard(AuthoredRecord record)

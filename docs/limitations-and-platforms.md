@@ -694,6 +694,19 @@ Classification uses current estate state, not a snapshot at the window's end; wo
 not accept each result. Later imports with older timestamps can require another explicit widening.
 Earlier sets and their checksums remain unchanged.
 
+## Event journal limits (0.9.2)
+
+The daemon's event journal (`WATCH-05`) keeps at most seven days and 100,000 events. A cursor older than
+that, from another epoch or sealed for another principal answers `reset`, and the client re-reads state. A
+crash or a lost `events.db` starts a new epoch. A copy of a cleanly stopped journal restored from a backup
+is not detected: it continues its epoch, and a client holding a cursor from after the copy can miss events.
+After such a restore, delete `events.db` beside the live store before starting the daemon. When the daemon
+restarts, events derived from a time-based state that appeared and cleared while it was down, or while no
+reader consumed that state, are not raised; the records behind them still raise their own events. Device
+streams share 16 slots, at most four per device and eight per principal, with two more kept for the local
+socket. A reset tells a client only that its cursor could not be honored; how often one comes depends on the
+journal's whole volume, including events that client may not read. The embedded runtime keeps no journal.
+
 ## Context and hand-over limits
 
 Context packages measure exact UTF-8 payload bytes including accounting overhead. Tokens, harness framing and model fit remain unknown without a qualified local tokenizer; this build includes none and makes no network tokenization call. A context byte allocation is not a spending cap. Mandatory material must fit; optional selected sources have a complete withheld list. The remainder of the document catalogue is outside the selection, so an empty withheld list is not a whole-estate read claim. A human `work brief` keeps its full selected scope with no byte limit set; preparation and MCP briefs without an allocation withhold named optional bodies.

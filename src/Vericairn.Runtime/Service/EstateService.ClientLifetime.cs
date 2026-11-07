@@ -38,6 +38,8 @@ public sealed partial class EstateService : IClientOperationLifetime
         resourcesClosed = true;
         runDispatch.Dispose();
         keywordIndex?.Dispose();
+        // Closed cleanly before the store, so the next start continues this epoch.
+        journal?.Dispose();
         session.Dispose();
     }
 
