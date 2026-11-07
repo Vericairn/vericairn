@@ -601,14 +601,20 @@ public static class FlowRuns
         return bindings;
     }
 
-    /// <summary>The newest current operator request that carries a run's step instance, by its flowStep: the run's first revision, the key and the instance.</summary>
+    /// <summary>
+    /// The operator request that carries a run's step instance, by its flowStep (the run's first revision, the key and the instance): the
+    /// newest one its addressed operator closed as done, so that a later request recorded by anyone never undoes the operator's recorded
+    /// act, else the newest current one.
+    /// </summary>
     internal static RecordEnvelope? Request(EstateModel model, RecordEnvelope goal, string key, string? item)
     {
         ArgumentNullException.ThrowIfNull(model);
         string first = model.Chain(goal)[0];
-        return model.Current("operator-request")
+        List<RecordEnvelope> requests = model.Current("operator-request")
             .Where(r => TJson.Object(r.Body, "flowStep") is { ValueKind: JsonValueKind.Object } step && TJson.Text(step, "goal") == first && TJson.Text(step, "key") == key && TJson.Text(step, "instance") == item)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+        return requests.LastOrDefault(r => OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && (c.Type == "observation" || EstateModel.BodyString(c, "outcome") == "done")))
+            ?? requests.LastOrDefault();
     }
 
     /// <summary>The instances a run's subject list field names, in order.</summary>

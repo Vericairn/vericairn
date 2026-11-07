@@ -175,6 +175,10 @@ public class SoftwareFlowExtensionTests
         RecordEnvelope again = run.Request("announce-x");
         run.Done(again);
         Assert.Equal("done", run.State("announce-x"));
+
+        // A later request for the step, by anyone, never undoes the operator's recorded act.
+        run.Request("announce-x", builder: true);
+        Assert.Equal("done", run.State("announce-x"));
         Assert.Equal(("stopped", "stopped"), (run.State("mcp-registry"), run.State("announce-discussions")));
 
         // A close of another step's request completes no other step.

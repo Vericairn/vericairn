@@ -68,6 +68,12 @@ public class FlowContractTests
         { "command-binds-an-instance-outside-each", "flow.binding" },
         { "command-binds-an-undeclared-input", "flow.binding" },
         { "command-binds-an-input-part-it-lacks", "flow.binding" },
+        { "request-outside-a-reserved-step", "flow.binding" },
+        { "request-in-a-reserved-steps-precondition", "flow.binding" },
+        { "request-as-a-field", "flow.binding" },
+        { "predicate-binds-an-undeclared-input", "flow.binding" },
+        { "trap-without-holds-or-check", "body.missing" },
+        { "trap-check-not-a-name", "body.pattern" },
     };
 
     [Theory]
@@ -113,6 +119,12 @@ public class FlowContractTests
             case "command-binds-an-instance-outside-each": Step("publish")["action"] = "example-provider publish --track {instance}"; break;
             case "command-binds-an-undeclared-input": Step("publish")["action"] = "example-provider publish --master {input.master.hash}"; break;
             case "command-binds-an-input-part-it-lacks": Step("accept")["inputs"] = new JsonArray(FlowFixture.Input("master", "master", "master")); Step("accept")["action"] = "example-provider accept --size {input.master.size}"; break;
+            case "request-outside-a-reserved-step": Step("master")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-in-a-reserved-steps-precondition": Step("accept")["requires"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-as-a-field": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["fields"] = new JsonObject { ["outcome"] = "{request}" } }); break;
+            case "predicate-binds-an-undeclared-input": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "acceptance", ["subject"] = "{input.master.id}" }); break;
+            case "trap-without-holds-or-check": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "nothing", ["summary"] = "Checks nothing." }); break;
+            case "trap-check-not-a-name": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "odd", ["summary"] = "An odd check.", ["check"] = "Release Client Build" }); break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 
@@ -179,6 +191,12 @@ public class FlowContractTests
             case "required-loses-input": extension["off"] = new JsonArray("review-lyrics"); break;
             case "unknown-binding": extension["steps"] = new JsonArray(FlowFixture.Step("archive", "operation", "decider", done: new JsonArray(new JsonObject { ["type"] = "release", ["subject"] = "{subject.carrier}" }))); break;
             case "base-is-a-document": break;
+            case "request-outside-a-reserved-step": Step("master")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-in-a-reserved-steps-precondition": Step("accept")["requires"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-as-a-field": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["fields"] = new JsonObject { ["outcome"] = "{request}" } }); break;
+            case "predicate-binds-an-undeclared-input": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "acceptance", ["subject"] = "{input.master.id}" }); break;
+            case "trap-without-holds-or-check": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "nothing", ["summary"] = "Checks nothing." }); break;
+            case "trap-check-not-a-name": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "odd", ["summary"] = "An odd check.", ["check"] = "Release Client Build" }); break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 

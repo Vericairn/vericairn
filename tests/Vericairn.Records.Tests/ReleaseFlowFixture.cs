@@ -226,18 +226,18 @@ public sealed class ReleaseFlowFixture : IDisposable
     }
 
     /// <summary>goal step's operator request for a reserved step, carrying the command its position gives now.</summary>
-    public RecordEnvelope Request(string step)
+    public RecordEnvelope Request(string step, bool builder = false)
     {
         FlowPosition.StepInstance instance = Step(step);
-        string command = instance.Command ?? throw new InvalidOperationException($"Step {step} has no command now: {string.Join("; ", instance.Reasons)}");
+        string command = instance.Command ?? (builder ? "a later request" : throw new InvalidOperationException($"Step {step} has no command now: {string.Join("; ", instance.Reasons)}"));
         return Add("operator-request", new JsonObject
         {
-            ["to"] = Estate.OperatorId, ["askedBy"] = Estate.OperatorId, ["action"] = "Carry the reserved act of step " + step + ".", ["why"] = "The step is next.",
+            ["to"] = Estate.OperatorId, ["askedBy"] = builder ? Estate.BuilderId : Estate.OperatorId, ["action"] = "Carry the reserved act of step " + step + ".", ["why"] = "The step is next.",
             ["recommendation"] = "Run the command yourself.", ["consequence"] = "The step waits.", ["kind"] = instance.Step.Reserved == "publish" ? "publication" : "action",
             ["destination"] = "the reserved act of step " + step,
             ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
             ["flowStep"] = new JsonObject { ["goal"] = Estate.Load().Chain(Goal)[0], ["key"] = step },
-        }, subject: Carrier.Reference);
+        }, builder: builder, subject: Carrier.Reference);
     }
 
     /// <summary>The operator's own close of a request as done, with the observed link of a publication.</summary>
