@@ -176,3 +176,16 @@ it with HTTP 409 on `WriteOutcome` routes, and a composite response carries it a
 same lock in `write-lock/` beside that store. Read-only sessions take no lock. The lock is separate from FIX-93's
 per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
 record. No record type, record format or generated document changes.
+
+## A reconciliation settles operations that share an identity (FIX-100)
+
+No route, interface member or protocol type is added or changed. A `reconciliation` whose subject is an operation and whose
+`kept` and `withdrawn` records are not revisions of that subject now settles operations recorded independently under one
+identity: each named record must be an operation under the subject's identity and the latest revision of its own operation,
+or the finding `reconciliation.identity` is an error; it is accepted only from the operator or under the `local-engineering`
+scope (`reconciliation.author`) and only when signed by an admitted device (`signature.required`), whatever the charter's
+signature policy. The withdrawn operations then read as superseded by the kept one. Before, such a reconciliation was
+refused with `reconciliation.successor`. Reconciliations of revisions of one record are unchanged.
+`EstateStatus.ReconcileCodes` adds `operation.duplicate-identity`, so status's `reconcile` list, `estate reconcile` and the
+required-attention incidents include it. Record format remains 3; the reconciliation type's summary and field descriptions,
+and with them the generic record reader's identity, are unchanged.

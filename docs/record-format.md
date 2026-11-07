@@ -120,6 +120,21 @@ stays valid. A reference outside the repository goes in the result's `evidence`,
 URL; an output held elsewhere is named by its hash and bytes without a `location`. Rooted paths,
 backslashes and `..` remain errors (`result.output-path`), as before.
 
+## Settling operations that share an identity (0.9.2)
+
+From 0.9.2, a `reconciliation` also settles operations recorded independently under one identity, such as two
+runtimes' concurrent intents written before the working tree's write lock, as it already settles independent first
+communication profiles at one scope. Its subject is an operation; `kept` and every `withdrawn` entry name operations
+under the subject's identity, each the latest revision of its own operation, and none a revision of the subject or of
+another named operation (`reconciliation.identity`, an error, otherwise). The withdrawn operations count as superseded
+by the kept one, so `operation.duplicate-identity` is no longer reported for them; no record is rewritten or deleted,
+and `note` keeps the settling principal's reason. Only the operator or a principal with the `local-engineering` scope
+settles operations this way (`reconciliation.author`), and the reconciliation is signed by an admitted device whatever
+the charter's signature policy (`signature.required`), as a policy reconciliation is. A reconciliation whose records
+supersede its subject keeps its earlier meaning. `operation.duplicate-identity` is now listed among the reconcile
+tasks that `status` and `estate reconcile` show. The rule adds no field and no format number; an earlier release
+reads such a reconciliation as an error and the withdrawn operations as current.
+
 ## Published Vericairn dependency observations (0.8.3)
 
 An existing `observation` record may have kind `vericairn-release`. This additive kind uses the

@@ -119,7 +119,9 @@ From 0.9.2, one writer at a time writes a working tree: every runtime takes the 
 `.vericairn/write-lock/` from judging a write until it is stored, so two runtimes on one tree no longer both write
 records the estate then finds invalid together. Duplicates written before that, or met at a merge, are never repaired
 automatically; the [operator guide](operator-guide.md#one-writer-per-working-tree-092) gives the recovery: inspect
-both, keep one, and supersede the other under its record type's rules where they allow it.
+both, keep one, and settle the other under its record type's rules. From 0.9.2 a reconciliation about one of several
+operations recorded independently under one identity keeps one and withdraws the others, signed by the operator or a
+principal with the `local-engineering` scope ([record format](record-format.md#settling-operations-that-share-an-identity-092)).
 
 ## Export and restore
 
