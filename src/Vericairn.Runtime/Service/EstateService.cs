@@ -59,7 +59,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
-            AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
+            AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary),
+            SecurityReportObjections);
     }
 
     /// <summary>
@@ -1438,6 +1439,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         foreach (IReleaseProvider provider in Providers.ReleaseProviders)
         {
             rows.Add(Row(provider.Provider, "release", provider.Descriptor));
+        }
+
+        foreach (ISecurityAdvisoryReader reader in Providers.SecurityAdvisoryReaders)
+        {
+            rows.Add(Row(reader.Provider, "security-advisories", reader.Descriptor));
         }
 
         foreach (ISourceAdapter adapter in Providers.SourceAdapters)

@@ -27,7 +27,8 @@ internal sealed partial class ReleaseCoordinationService(
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, byte[]> serializeBasis,
     Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
     Func<DateTimeOffset> now,
-    Action<string> boundary)
+    Action<string> boundary,
+    Func<string?, bool, IReadOnlyList<FindingDto>> securityReports)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
@@ -269,6 +270,9 @@ internal sealed partial class ReleaseCoordinationService(
         if (string.IsNullOrWhiteSpace(destination)) destination = "unavailable";
         string identity = ReleaseFlow.Identity(providerId, destination, request.Version);
         string? releaseCommit = request.Commit ?? (settings.TryGetValue("ref", out string? exactRef) && Patterns.Commit.IsMatch(exactRef) ? exactRef : null);
+        // Security reports are read before the gate is taken and only here, before any durable claim: their objections are never
+        // retained or written into an intent, so no advisory identity reaches a record through a refused or canceled submission.
+        IReadOnlyList<FindingDto> security = securityReports(request.By, !checkOnly);
         List<string> basisEvidence = [];
         List<RecordReference> excluded = [];
         RecordEnvelope claimRevision;
@@ -287,6 +291,7 @@ internal sealed partial class ReleaseCoordinationService(
             if (current is not null) claimBody["dispatchedAt"] = RecordParser.FormatTimestamp(now());
             var first = Admission(model, request, releaseCommit, descriptor, destination, claimBody, current?.Id);
             first.Objections.AddRange(setup);
+            first.Objections.AddRange(security);
             string? identityProblem = releaseDispatches.Contains(identity) ? "A dispatch is still in progress; observe and reconcile it before any retry." : status switch
             {
                 "observed-success" => "This release was already observed as built; a corrective release is a new version.",

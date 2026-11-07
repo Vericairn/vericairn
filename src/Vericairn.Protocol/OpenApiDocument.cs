@@ -145,6 +145,8 @@ public static class OpenApiDocument
         ("POST", "/v1/packages/observe"),
         ("POST", "/v1/packages/unlist"),
         ("POST", "/v1/packages/deprecate"),
+        ("POST", "/v1/security-reports/poll"),
+        ("POST", "/v1/security-reports/triage"),
 
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/estate/export"),
@@ -520,6 +522,11 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "PackagesResponse: exact registry observations, or the original account-holder intent with its latest outcome and manual step.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PackagesResponse" } } } };
+        }
+        else if (method == "POST" && path.StartsWith("/v1/security-reports/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject { ["description"] = "SecurityReportsResponse: the operator's view of each declared repository's latest read and each observed advisory revision by identifier, state, severity and content hash, never its text; held says whether releases wait. Any other principal receives the same refusal whatever exists.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/SecurityReportsResponse" } } } };
         }
         else if (method == "POST" && path.StartsWith("/v1/changes/", StringComparison.Ordinal))
         {
@@ -901,6 +908,9 @@ public static class OpenApiDocument
             ["PackagesObserveRequest"] = Object(("by", "string"), ("product", "string"), ("version", "string"), ("operation", "string"), ("reserved", "boolean")),
             ["PackagesUnlistRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reserved", "boolean")),
             ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string"), ("reserved", "boolean")),
+            ["SecurityReportsPollRequest"] = Object(("by", "string")),
+            ["SecurityReportTriageRequest"] = Object(("by", "string"), ("advisory", "string"), ("repository", "string"), ("expected", "string"), ("disposition", "string"), ("reason", "string")),
+            ["SecurityReportsResponse"] = Object(("ok", "boolean"), ("message", "string"), ("reads", "array"), ("reports", "array"), ("held", "boolean"), ("triage", "object"), ("problem", "object")),
             ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
             ["ReleaseWithdrawRequest"] = Object(("release", "string"), ("by", "string"), ("expected", "string"), ("provider", "string"), ("reason", "string"), ("settings", "object")),
@@ -1012,6 +1022,8 @@ public static class OpenApiDocument
         "/v1/packages/observe" => "PackagesObserveRequest",
         "/v1/packages/unlist" => "PackagesUnlistRequest",
         "/v1/packages/deprecate" => "PackagesDeprecateRequest",
+        "/v1/security-reports/poll" => "SecurityReportsPollRequest",
+        "/v1/security-reports/triage" => "SecurityReportTriageRequest",
 
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/estate/export" => "ExportRequest",
@@ -1149,6 +1161,8 @@ public static class OpenApiDocument
         ("POST", "/v1/changes/observe") => "Record an observation under an original change's provider and head; incomplete or uncertain outcomes remain uncertain.",
         ("POST", "/v1/packages/observe") => "Record nuget.org public API state and response digests for a product's packages or an original account-holder intent. An absent version is not found, never unlisted.",
         ("POST", "/v1/packages/unlist") => "Record unlisting intent and return the exact nuget.org step for the account holder. An identical rerun keeps the original intent; no registry write or API key is used.",
+        ("POST", "/v1/security-reports/poll") => "Read every repository a product's security-reports declaration names now, through its reader, as the operator; nothing is recorded or posted. Keeps each advisory's identifier, state, severity and response hash on this machine, never its text.",
+        ("POST", "/v1/security-reports/triage") => "Record the operator's triage of one observed advisory revision, named by identifier, repository and content hash, with its disposition and reason. A changed revision needs triage again.",
         ("POST", "/v1/packages/deprecate") => "Record exact deprecation intent and return the account holder's nuget.org step. Observe the original operation afterwards to record the outcome.",
         ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",
         ("POST", "/v1/estate/upgrade") => "Plan or apply an upgrade to a published release.",

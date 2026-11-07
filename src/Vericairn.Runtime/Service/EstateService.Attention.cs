@@ -114,6 +114,9 @@ public sealed partial class EstateService
                 item.RecordType ?? "attention", item.Record ?? item.Command ?? item.Kind, item.Hash, item.AsOf, item.Target, basis);
         }
 
+        // Machine-local observations only: reading GitHub never happens under the gate, so attention never waits on the network.
+        foreach (var security in SecurityNotices(model, principal))
+            Add(security.Kind, security.Subject, security.Why, security.State, security.Next, security.Type, security.Id, security.Hash, security.At, security.Target, security.Basis);
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

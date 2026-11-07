@@ -53,6 +53,9 @@ public sealed record DaemonOptions
     /// further requests are refused rather than any remembered signature forgotten.
     /// </summary>
     public int ReplayCapacity { get; init; } = 10_000;
+
+    /// <summary>How soon after starting the daemon first reads declared security reports, so a daemon that was not running catches up.</summary>
+    internal TimeSpan SecurityReportsFirstRead { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>
@@ -81,6 +84,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private readonly CancellationTokenSource schedule = new();
     private WebApplication? app;
     private Task? scheduled;
+    private Task? securityReports;
     private Task? stopping;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
@@ -352,6 +356,8 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             host.scheduled = Task.Run(() => host.RunScheduleAsync(host.schedule.Token), CancellationToken.None);
         }
+
+        host.securityReports = Task.Run(() => host.RunSecurityReportsAsync(host.schedule.Token), CancellationToken.None);
 
         return host;
     }
@@ -725,6 +731,41 @@ public sealed class DaemonHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Reads declared security reports on the daemon's schedule (OPS-11): shortly after start, then every interval. An estate whose
+    /// products declare none reads nothing. A read already started finishes on its own and is never awaited by a stop.
+    /// </summary>
+    private async Task RunSecurityReportsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(options.SecurityReportsFirstRead, Time, cancellationToken).ConfigureAwait(false);
+            using var timer = new PeriodicTimer(EstateService.SecurityReportsInterval, Time);
+            do
+            {
+                await Task.Run(ReadSecurityReports, CancellationToken.None).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping.
+        }
+    }
+
+    // A failed read is shown as unconfirmed security reports in the operator's attention; the log repeats no provider text.
+    private void ReadSecurityReports()
+    {
+        try
+        {
+            Service.SecurityReportsScheduled();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (!schedule.IsCancellationRequested) Log("security reports could not be read on schedule; the operator's attention shows them as unconfirmed until a read completes.");
+        }
+    }
+
     private async Task StopCoreAsync()
     {
         await schedule.CancelAsync().ConfigureAwait(false);
@@ -734,6 +775,11 @@ public sealed class DaemonHost : IAsyncDisposable
             if (scheduled is not null)
             {
                 await scheduled.ConfigureAwait(false);
+            }
+
+            if (securityReports is not null)
+            {
+                await securityReports.ConfigureAwait(false);
             }
         }
         finally

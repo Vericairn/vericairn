@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Diagnostics;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text.Json;
+using Vericairn.Records.Types;
+using Vericairn.Runtime.Providers;
+
+namespace Vericairn.Providers.GitHub;
+
+/// <summary>
+/// Reads a repository's security advisories, drafts and private reports included, through bounded gh processes using the
+/// operator's own login, read-only (OPS-11). It never posts, never reads or stores a credential, never passes GitHub's text on,
+/// and keeps no diagnostic output: each advisory leaves as its identifier, state, severity and the hash of its response.
+/// </summary>
+public sealed class GitHubSecurityAdvisoryReader : ISecurityAdvisoryReader
+{
+    /// <summary>The provider id a product's security-reports declaration names.</summary>
+    public const string ProviderId = "github-security-advisories";
+
+    /// <summary>The share of the core allowance kept for the person's own use: a read starts only above a fifth of the limit.</summary>
+    internal const int ReserveDivisor = 5;
+
+    /// <summary>The fewest core requests a read leaves for the person's own use, whatever the limit.</summary>
+    internal const int MinimumReserve = 100;
+
+    private readonly Func<ProcessStartInfo, ProcessResult> run;
+
+    /// <summary>Each gh invocation has a one-minute deadline and bounded output.</summary>
+    public GitHubSecurityAdvisoryReader() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(1))) { }
+
+    internal GitHubSecurityAdvisoryReader(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
+
+    /// <inheritdoc />
+    public string Provider => ProviderId;
+
+    /// <inheritdoc />
+    public ProviderDescriptor Descriptor { get; } = new("github-security-advisories-gh", ISecurityAdvisoryReader.Contract, "implemented", ["read"],
+        ["Reads with the operator's own gh login, read-only; Vericairn never sees or stores the token, and posts nothing.",
+         "Drafts and private reports are visible only to a repository's administrators, so a login without administrator permission is refused rather than reported as complete.",
+         "Reads only while GitHub's core rate allowance keeps at least a fifth of its limit, and at least 100 requests, for the person's own use; each read costs one repository request and one per page of 100 advisories.",
+         "Keeps each advisory's identifier, state, severity and response hash only, never its text; the estate's App replaces this reader once it exists."],
+        Locations: ["github"]);
+
+    /// <inheritdoc />
+    public SecurityAdvisoryListing Read(string repository)
+    {
+        // A dot segment would let the API path name another endpoint; GitHub has no repository named so.
+        if (repository is null || !Patterns.GitHubRepository.IsMatch(repository) || repository.Split('/')[1] is "." or "..")
+            throw new ProviderRefusedException("The repository must be a GitHub owner/name.");
+        CheckAllowance();
+        using (JsonDocument described = Json(Invoke("api", "repos/" + repository)))
+        {
+            JsonElement root = described.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !string.Equals(Text(root, "full_name"), repository, StringComparison.OrdinalIgnoreCase))
+                throw new ProviderRefusedException($"GitHub answered for {repository} under another name; it may have moved. Correct its repository resource, then read again.");
+            if (!root.TryGetProperty("permissions", out JsonElement permissions) || permissions.ValueKind != JsonValueKind.Object
+                || !permissions.TryGetProperty("admin", out JsonElement admin) || admin.ValueKind != JsonValueKind.True)
+                throw new ProviderRefusedException($"The gh login is not an administrator of {repository}, so its drafts and private reports are invisible to it; log in with gh auth login as an administrator, then read again.");
+        }
+
+        using JsonDocument pages = Json(Invoke("api", $"repos/{repository}/security-advisories?per_page=100", "--paginate", "--slurp"));
+        if (pages.RootElement.ValueKind != JsonValueKind.Array)
+            throw new ProviderRefusedException("GitHub's advisory listing was incomplete; no listing is reported.");
+        var advisories = new Dictionary<string, SecurityAdvisory>(StringComparer.Ordinal);
+        foreach (JsonElement page in pages.RootElement.EnumerateArray())
+        {
+            if (page.ValueKind != JsonValueKind.Array) throw new ProviderRefusedException("GitHub's advisory listing was incomplete; no listing is reported.");
+            foreach (JsonElement item in page.EnumerateArray())
+            {
+                SecurityAdvisory advisory = Advisory(item);
+                if (advisories.TryGetValue(advisory.Identifier, out SecurityAdvisory? seen) && seen != advisory)
+                    throw new ProviderRefusedException("An advisory changed while the listing was read; read again.");
+                advisories[advisory.Identifier] = advisory;
+            }
+        }
+
+        return new(repository, advisories.Values.OrderBy(a => a.Identifier, StringComparer.Ordinal).ToArray());
+    }
+
+    // Only the identifier, two closed enumerations and a hash leave this method; every other field stays in the response.
+    private static SecurityAdvisory Advisory(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object) throw new ProviderRefusedException("GitHub's advisory listing was incomplete; no listing is reported.");
+        string identifier = Text(item, "ghsa_id");
+        if (!Patterns.GitHubAdvisory.IsMatch(identifier))
+            throw new ProviderRefusedException("GitHub listed an advisory without a valid identifier, so the listing cannot be reported as complete.");
+        string state = Text(item, "state");
+        string severity = Text(item, "severity");
+        var advisory = new SecurityAdvisory(identifier, SecurityAdvisory.States.Contains(state, StringComparer.Ordinal) ? state : "unknown",
+            SecurityAdvisory.Severities.Contains(severity, StringComparer.Ordinal) ? severity : "unknown", Hash(item));
+        advisory.Validate();
+        return advisory;
+    }
+
+    private void CheckAllowance()
+    {
+        using JsonDocument limits = Json(Invoke("api", "rate_limit"));
+        if (!limits.RootElement.TryGetProperty("resources", out JsonElement resources) || resources.ValueKind != JsonValueKind.Object
+            || !resources.TryGetProperty("core", out JsonElement core) || core.ValueKind != JsonValueKind.Object
+            || !core.TryGetProperty("limit", out JsonElement limitValue) || !limitValue.TryGetInt64(out long limit) || limit <= 0
+            || !core.TryGetProperty("remaining", out JsonElement remainingValue) || !remainingValue.TryGetInt64(out long remaining) || remaining < 0)
+            throw new ProviderRefusedException("GitHub's rate allowance could not be read, so no read was started.");
+        long reserve = Math.Max(MinimumReserve, limit / ReserveDivisor);
+        if (remaining <= reserve)
+        {
+            string reset = core.TryGetProperty("reset", out JsonElement resetValue) && resetValue.TryGetInt64(out long seconds)
+                ? " after " + DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) : " after it resets";
+            throw new ProviderRefusedException($"GitHub's rate allowance is within the share kept for the person's own use ({remaining} of {limit} left), so no read was started; read again{reset}.");
+        }
+    }
+
+    private ProcessResult Invoke(params string[] arguments)
+    {
+        var info = new ProcessStartInfo("gh") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        foreach (string argument in arguments) info.ArgumentList.Add(argument);
+        info.Environment["GH_PROMPT_DISABLED"] = "1";
+        return run(info);
+    }
+
+    // GitHub's and gh's diagnostics are classified, never repeated: they may carry text from outside the estate.
+    private static JsonDocument Json(ProcessResult result)
+    {
+        if (!result.Started || result.Outcome == ProcessOutcome.NotStarted)
+            throw new ProviderRefusedException("The GitHub CLI could not be started; install gh and log in as an administrator of the repository.");
+        if (result.Outcome != ProcessOutcome.Exited)
+            throw new ProviderRefusedException($"The GitHub CLI {result.Description}; GitHub could not be read completely.");
+        if (result.ExitCode == 4)
+            throw new ProviderRefusedException("The GitHub CLI is not logged in; run gh auth login yourself as an administrator of the repository. Vericairn stores no token.");
+        if (result.ExitCode != 0)
+        {
+            string diagnostics = result.StandardOutput + "\n" + result.StandardError;
+            if (diagnostics.Contains("rate limit", StringComparison.OrdinalIgnoreCase) || diagnostics.Contains("HTTP 429", StringComparison.Ordinal))
+                throw new ProviderRefusedException("GitHub's rate limit stopped the read; read again once it resets.");
+            if (diagnostics.Contains("HTTP 404", StringComparison.Ordinal) || diagnostics.Contains("HTTP 403", StringComparison.Ordinal) || diagnostics.Contains("HTTP 401", StringComparison.Ordinal))
+                throw new ProviderRefusedException("GitHub refused the read for this login; the repository or its advisories are not readable by it.");
+            throw new ProviderRefusedException("GitHub could not be read completely; check the network and the gh login, then read again.");
+        }
+
+        try { return JsonDocument.Parse(result.StandardOutput); }
+        catch (JsonException) { throw new ProviderRefusedException("GitHub returned an unreadable response; no listing is reported."); }
+    }
+
+    private static string Text(JsonElement element, string key) =>
+        element.TryGetProperty(key, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : string.Empty;
+
+    /// <summary>
+    /// sha256 over one canonical form of the advisory's JSON: members by ordinal name, no insignificant whitespace, integers as
+    /// themselves and other numbers in their shortest round-trip form, so gh's formatting never makes a new revision.
+    /// </summary>
+    internal static string Hash(JsonElement element)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = false, SkipValidation = false }))
+            Write(writer, element);
+        return "sha256:" + Convert.ToHexStringLower(SHA256.HashData(buffer.ToArray()));
+    }
+
+    private static void Write(Utf8JsonWriter writer, JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (JsonProperty property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    Write(writer, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (JsonElement item in element.EnumerateArray()) Write(writer, item);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String: writer.WriteStringValue(element.GetString()); break;
+            case JsonValueKind.Number:
+                if (element.TryGetInt64(out long integer)) writer.WriteNumberValue(integer);
+                else if (element.TryGetDouble(out double number) && double.IsFinite(number)) writer.WriteNumberValue(number);
+                else throw new ProviderRefusedException("GitHub returned a number this reader cannot represent; no listing is reported.");
+                break;
+            case JsonValueKind.True: writer.WriteBooleanValue(true); break;
+            case JsonValueKind.False: writer.WriteBooleanValue(false); break;
+            default: writer.WriteNullValue(); break;
+        }
+    }
+}

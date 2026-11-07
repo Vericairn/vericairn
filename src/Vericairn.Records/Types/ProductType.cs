@@ -39,6 +39,7 @@ public sealed class ProductType : IRecordType
         new("release", "object", false, "How the product's releases are made: destination (provider id and its settings, string values), checksums (the asset that lists the others' hashes) and artifacts (name with {version} and optionally {platform}, role distributable|sbom|notices|documentation|other, platforms). Read by release 0.4.2, the first published release to read it, and later (0.4.0, which introduced it, was withdrawn)."),
         new("lines", "object[]", false, "Named release lines: name, channel and, only for lts, required RFC 3339 endOfSupport.", 3),
         new("cadence", "object", false, "Recurring-duty reference: policy (exact type, id, hash of an estate-policy) and rule key. Declares no automatic release.", 3),
+        new(SecurityReportRules.ProductField, "object", false, "Security reports read before every release: provider (a provider id; github-security-advisories reads through the operator's own gh login) and repositories (one to eight distinct repository resource ids located on GitHub). While any product declares it, every release of the estate waits until each declared repository's advisories, drafts and private reports included, are read completely and each one's current revision is triaged by the operator. Declared, changed or removed only by the operator.", 3),
     ];
 
     /// <inheritdoc />
@@ -162,6 +163,7 @@ public sealed class ProductType : IRecordType
             context.Error("product.changes-author", "A product's checked-changes declaration is declared, changed or removed only by the operator or a principal with the 'administer' scope.");
 
         ReleaseLines.ValidateProduct(context);
+        SecurityReportRules.Product(context);
         body.NoOtherKeys();
         if (context.Principal(context.Record.By) is null)
         {
