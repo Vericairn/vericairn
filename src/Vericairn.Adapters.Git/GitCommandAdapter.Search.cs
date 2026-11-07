@@ -31,8 +31,15 @@ public sealed partial class GitCommandAdapter
         string[] arguments = ["ls-tree", "-r", "-z", "--full-tree", commit, "--", .. directories.Select(d => ":(literal)" + d)];
         if (GitFileSource.RunIsolated(root, out byte[] listing, arguments) != 0) return null;
         var entries = new List<(string Path, string Id)>();
-        foreach (string entry in new UTF8Encoding(false, true).GetString(listing).Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        var strict = new UTF8Encoding(false, true);
+        foreach (Range part in listing.AsSpan().Split((byte)0))
         {
+            if (listing.AsSpan(part).IsEmpty) continue;
+            string entry;
+            // A name that is not UTF-8 cannot be a record or a pinned document's path; it is skipped, and any pin it was meant to
+            // hold is unavailable at this commit.
+            try { entry = strict.GetString(listing.AsSpan(part)); }
+            catch (DecoderFallbackException) { continue; }
             int tab = entry.IndexOf('\t');
             if (tab < 0 || entries.Count >= MaximumTreeFiles) return null;
             string[] metadata = entry[..tab].Split(' ');

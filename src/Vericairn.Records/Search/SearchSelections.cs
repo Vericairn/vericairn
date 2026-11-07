@@ -40,6 +40,15 @@ public static partial class SearchSelections
     /// <summary>The statement a record carries when it omits candidates its readers could not all read; it gives no count.</summary>
     public const string Limited = "Candidates whose audience does not cover every reader of this record are omitted.";
 
+    /// <summary>
+    /// The one opaque entry a record keeps, in the reader's audiences and the index segments, for every segment its readers cannot
+    /// all read: no label, count or hash of those segments is recorded.
+    /// </summary>
+    internal const string RestrictedAudience = "Restricted";
+
+    // The audiences every reader of the estate's records may read.
+    private static bool CoversRecordReaders(string audience) => audience is "Internal" or "Public";
+
     private static readonly IReadOnlySet<string> HashKey = new HashSet<string>(StringComparer.Ordinal) { "hash" };
 
     /// <summary>The selection's own content hash: SHA-256 of its canonical JSON without the <c>hash</c> member.</summary>
@@ -120,7 +129,10 @@ public static partial class SearchSelections
         {
             if (reader.Element.TryGetProperty("principal", out JsonElement principal) && principal.ValueKind == JsonValueKind.Null) reader.Allow("principal");
             else reader.Ulid("principal", true);
-            reader.StringArray("audiences", true, allowEmpty: true, maxItemLength: 80);
+            IReadOnlyList<string>? audiences = reader.StringArray("audiences", true, allowEmpty: true, maxItemLength: 80);
+            // A record names only the audiences all its readers may read, and one opaque entry for the rest.
+            if (recordReaders && audiences is not null && audiences.Any(a => !CoversRecordReaders(a) && a != RestrictedAudience))
+                reader.Error("search.selection-audience", "audiences", "A record names only audiences that cover all its readers, and Restricted for any other.");
             reader.NoOtherKeys();
         }
 
@@ -132,13 +144,26 @@ public static partial class SearchSelections
             // The latest recorded time among the indexed records: with it a copy holding later records can rebuild exactly this basis.
             if (index.Element.TryGetProperty("asOf", out JsonElement asOf) && asOf.ValueKind == JsonValueKind.Null) index.Allow("asOf");
             else index.Timestamp("asOf", true);
+            int opaque = 0;
             foreach (BodyReader segment in index.NestedArray("segments", true, allowEmpty: true) ?? [])
             {
-                segment.Text("audience", true, 80);
+                string? audience = segment.Text("audience", true, 80);
+                // The opaque entry stands for segments a record's readers cannot all read, and carries no hash of them.
+                if (audience == RestrictedAudience)
+                {
+                    opaque++;
+                    segment.NoOtherKeys();
+                    continue;
+                }
+
+                if (recordReaders && audience is not null && !CoversRecordReaders(audience))
+                    segment.Error("search.selection-audience", "audience", "A record names only segments that cover all its readers, and one Restricted entry for any other.");
                 segment.Hash("records", true);
                 segment.Hash("documents", true);
                 segment.NoOtherKeys();
             }
+
+            if (opaque > 1) index.Error("search.selection", "segments", "A selection holds at most one Restricted segment entry.");
             index.NoOtherKeys();
         }
 
@@ -154,7 +179,7 @@ public static partial class SearchSelections
             string? kind = candidate.Enum("kind", true, Kinds);
             string? audience = candidate.Text("audience", true, 80);
             // A record carries only candidates every reader of the estate's records may read: Internal or Public passages.
-            if (recordReaders && audience is not null and not ("Internal" or "Public"))
+            if (recordReaders && audience is not null && !CoversRecordReaders(audience))
                 candidate.Error("search.selection-audience", "audience", "A record carries only candidates whose audience covers all its readers.");
             bool fault = candidate.Enum("state", true, States) == "index-fault";
             candidate.Text("reason", false, 200);
@@ -200,7 +225,16 @@ public static partial class SearchSelections
         selection.Flag("more", true);
         selection.Text("limited", false, 200);
         selection.NoOtherKeys();
-        if (declared is not null && declared != Hash(selection.Element))
+        string? computed;
+        // A value canonical JSON cannot hold (a fraction or a duplicate member) is a finding about this selection, never an exception.
+        try { computed = Hash(selection.Element); }
+        catch (CanonicalJsonException exception)
+        {
+            selection.Error("search.selection-canonical", "hash", "A selection is canonical JSON: " + exception.Message);
+            return;
+        }
+
+        if (declared is not null && declared != computed)
             selection.Error("search.selection-hash", "hash", "A selection's hash identifies its exact canonical content.");
     }
 

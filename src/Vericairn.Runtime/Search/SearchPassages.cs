@@ -83,7 +83,7 @@ internal static class SearchPassages
         }
 
         string? key = EstateModel.BodyString(record, "key");
-        return new SearchPassage(SearchAudiences.Internal, "record", 0, 0, record.Type, key?.ToLowerInvariant(),
+        return new SearchPassage(SearchAudiences.Internal, "record", 0, 0, record.Type, key is null ? null : SearchAnalyzer.Normalize(key),
             Join(identParts.Concat(identWhole)), Join(titleParts), Join(bodyParts)) { Fields = fields };
     }
 
@@ -134,7 +134,7 @@ internal static class SearchPassages
             audience = SearchAudiences.FromFrontMatter(values.GetValueOrDefault("audience"));
             knowledgeKind = values.TryGetValue("kind", out string? declared) ? Scalar(declared).ToLowerInvariant() : null;
             if (knowledgeKind is not null && !(knowledgeKind.Length <= 64 && knowledgeKind.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))) knowledgeKind = null;
-            var identWhole = new List<string> { path.ToLowerInvariant() };
+            var identWhole = new List<string> { SearchAnalyzer.Normalize(path) };
             var titleParts = new List<string>();
             var bodyParts = new List<string>();
             var fields = new List<(string, string)>();
@@ -165,7 +165,7 @@ internal static class SearchPassages
             long stop = endLine < lines.Count ? lines[endLine].Start : bytes.LongLength;
             if (stop <= start) return;
             string heading = string.Join(" › ", headings.Select(h => h.Text));
-            var identWhole = new List<string> { path.ToLowerInvariant() };
+            var identWhole = new List<string> { SearchAnalyzer.Normalize(path) };
             var titleParts = new List<string>();
             var bodyParts = new List<string>();
             SearchAnalyzer.Analyze(documentTitle, titleParts, identWhole);
@@ -217,7 +217,7 @@ internal static class SearchPassages
                 {
                     string[] cells = Cells(trimmed);
                     string heading = string.Join(" › ", headings.Select(h => h.Text));
-                    var identWhole = new List<string> { path.ToLowerInvariant() };
+                    var identWhole = new List<string> { SearchAnalyzer.Normalize(path) };
                     var titleParts = new List<string>();
                     var bodyParts = new List<string>();
                     var fields = new List<(string, string)>();

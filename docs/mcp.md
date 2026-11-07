@@ -53,8 +53,12 @@ candidates of each become optional sources pinned by exact hash after the explic
 search. Without `search` both tools are unchanged.
 
 A worker starts its run's server as `mcp serve --as <agent> --run <run id>`. With `--run`, each search the server serves is
-appended to that run's own machine-local, owner-only directory, and the run's settlement records them as `searchesObserved`
-(record format 3). Searches made any other way are ordinary reads and are not recorded.
+appended to a log in that run's own machine-local, owner-only directory, which the worker creates empty as the run starts, and
+the run's settlement records them as `searchesObserved` (record format 3): the searches as logged by the run's MCP server.
+The log is not tamper-evident: an agent whose harness does not sandbox it runs as the same user and could change it, and the
+run does not record whether its harness was sandboxed. A log that went missing, or a line that cannot be read as a selection,
+is recorded as an incomplete list; an empty log records nothing. Searches made any other way are ordinary reads and are not
+recorded.
 
 ## Discovery and dnx
 

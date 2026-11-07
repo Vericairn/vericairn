@@ -71,13 +71,15 @@ public sealed class SearchSelectionRecordTests
             ["index"] = new JsonObject
             {
                 ["asOf"] = "2026-11-01T12:00:00Z", ["commit"] = "uncommitted", ["current"] = true, ["revision"] = "sha256:" + new string('d', 64),
-                ["segments"] = new JsonArray(new JsonObject { ["audience"] = "Internal", ["documents"] = "sha256:" + new string('e', 64), ["records"] = "sha256:" + new string('f', 64) }),
+                // As a record keeps them: the segments every reader may read, and one opaque entry, without hashes, for the rest.
+                ["segments"] = new JsonArray(new JsonObject { ["audience"] = "Internal", ["documents"] = "sha256:" + new string('e', 64), ["records"] = "sha256:" + new string('f', 64) },
+                    new JsonObject { ["audience"] = SearchSelections.RestrictedAudience }),
             },
             ["limit"] = 10,
             ["method"] = new JsonObject { ["analyzer"] = "nfkc-casefold", ["engine"] = "sqlite fts5 bm25", ["name"] = "keyword", ["version"] = SearchSelections.KeywordMethod },
             ["more"] = false,
             ["query"] = new JsonObject { ["filters"] = new JsonObject { ["history"] = false }, ["phrases"] = new JsonArray(), ["terms"] = new JsonArray("keyword"), ["text"] = "keyword" },
-            ["reader"] = new JsonObject { ["audiences"] = new JsonArray("Internal", "Members only", "Public"), ["principal"] = null },
+            ["reader"] = new JsonObject { ["audiences"] = new JsonArray("Internal", "Public", SearchSelections.RestrictedAudience), ["principal"] = null },
             ["selectLimit"] = 10,
         };
         selection["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(selection));
@@ -130,6 +132,30 @@ public sealed class SearchSelectionRecordTests
         Assert.Contains(Findings(Selection(estate, audience: "Members only")), f => f.Code == "search.selection-audience");
         Assert.Contains(Findings(Selection(estate, audience: "restricted: partners")), f => f.Code == "search.selection-audience");
         Assert.Empty(Findings(Selection(estate, audience: "Members only"), recordReaders: false));
+
+        // Nor a restricted audience's label in the reader's audiences or the segments, nor its hashes, nor two opaque entries.
+        JsonObject named = Selection(estate);
+        named["reader"]!["audiences"] = new JsonArray("Internal", "Public", "restricted: acquisition target acme");
+        named["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(named));
+        Assert.Contains(Findings(named), f => f.Code == "search.selection-audience" && f.Location.EndsWith("reader.audiences", StringComparison.Ordinal));
+        Assert.Empty(Findings(named, recordReaders: false));
+        JsonObject segment = Selection(estate);
+        segment["index"]!["segments"]![1] = new JsonObject { ["audience"] = "Members only", ["documents"] = "sha256:" + new string('e', 64), ["records"] = "sha256:" + new string('f', 64) };
+        segment["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(segment));
+        Assert.Contains(Findings(segment), f => f.Code == "search.selection-audience" && f.Location.Contains("segments", StringComparison.Ordinal));
+        JsonObject hashed = Selection(estate);
+        hashed["index"]!["segments"]![1]!["records"] = "sha256:" + new string('f', 64);
+        hashed["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(hashed));
+        Assert.NotEmpty(Findings(hashed, recordReaders: false));
+        JsonObject twice = Selection(estate);
+        twice["index"]!["segments"]!.AsArray().Add(new JsonObject { ["audience"] = SearchSelections.RestrictedAudience });
+        twice["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(twice));
+        Assert.Contains(Findings(twice, recordReaders: false), f => f.Code == "search.selection" && f.Location.EndsWith("segments", StringComparison.Ordinal));
+
+        // A value canonical JSON cannot hold is a finding, never an exception.
+        JsonObject fraction = Selection(estate);
+        fraction["limit"] = 10.5;
+        Assert.Contains(Findings(fraction), f => f.Code == "search.selection-canonical");
         Assert.Contains(Findings(Selection(estate, candidates: 51)), f => f.Code == "search.selection");
 
         JsonObject semantic = Selection(estate);

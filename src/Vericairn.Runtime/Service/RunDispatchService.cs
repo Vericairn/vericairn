@@ -777,7 +777,7 @@ internal sealed partial class RunDispatchService(
     }
 
     // The searches the run's MCP server served its agent are recorded once, with whichever revision settles the run, from record
-    // format 3. An unreadable log leaves the settlement without them rather than holding it.
+    // format 3. A log that cannot be read never holds the settlement: the run settles, and its list says it is incomplete.
     private void ObserveSearches(AgentRuns.Run run, JsonObject body)
     {
         if (session.Manifest.RecordFormat < 3 || body["searchesObserved"] is not null || body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure")
@@ -786,9 +786,10 @@ internal sealed partial class RunDispatchService(
         {
             if (Search.ObservedSearches.Read(WorkerOptions.OpenRunDirectory(session.Manifest.Estate, run.Id)) is JsonObject searches) body["searchesObserved"] = searches;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or JsonException
+            or Records.Canonical.CanonicalJsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
-            // Nothing is recorded that was not read whole.
+            body["searchesObserved"] = Search.ObservedSearches.Incomplete();
         }
     }
 

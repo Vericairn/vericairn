@@ -1,0 +1,230 @@
+{
+  "analyzer": "nfkc-casefold unicode-16.0.0; letter-digit runs; connected identifiers also whole; no stemming",
+  "entries": [
+    {
+      "normalized": "file full café x2",
+      "parts": [
+        "file",
+        "full",
+        "café",
+        "x2"
+      ],
+      "text": "ﬁle Ｆｕｌｌ Café x²",
+      "whole": []
+    },
+    {
+      "normalized": "context-02 design/search.md 0.9.2 sha256:abc1 running école file end.",
+      "parts": [
+        "context",
+        "02",
+        "design",
+        "search",
+        "md",
+        "0",
+        "9",
+        "2",
+        "sha256",
+        "abc1",
+        "running",
+        "école",
+        "file",
+        "end"
+      ],
+      "text": "CONTEXT-02 design/search.md 0.9.2 sha256:ABC1 Running ÉCOLE ﬁle end.",
+      "whole": [
+        "context-02",
+        "design/search.md",
+        "0.9.2",
+        "sha256:abc1"
+      ]
+    },
+    {
+      "normalized": "strasse strasse ss",
+      "parts": [
+        "strasse",
+        "strasse",
+        "ss"
+      ],
+      "text": "Straße STRASSE ẞ",
+      "whole": []
+    },
+    {
+      "normalized": "i̇stanbul ısık",
+      "parts": [
+        "i̇stanbul",
+        "ısık"
+      ],
+      "text": "İstanbul ısık",
+      "whole": []
+    },
+    {
+      "normalized": "οδυσσευσ όδυσσευσ",
+      "parts": [
+        "οδυσσευσ",
+        "όδυσσευσ"
+      ],
+      "text": "ΟΔΥΣΣΕΥΣ όδυσσευς",
+      "whole": []
+    },
+    {
+      "normalized": "한국어 한",
+      "parts": [
+        "한국어",
+        "한"
+      ],
+      "text": "한국어 한",
+      "whole": []
+    },
+    {
+      "normalized": "日本語のテキスト カタカナ",
+      "parts": [
+        "日本語のテキスト",
+        "カタカナ"
+      ],
+      "text": "日本語のテキスト ｶﾀｶﾅ",
+      "whole": []
+    },
+    {
+      "normalized": "العَرَبِيَّة",
+      "parts": [
+        "العَرَبِيَّة"
+      ],
+      "text": "العَرَبِيَّة",
+      "whole": []
+    },
+    {
+      "normalized": "हिन्दी क़",
+      "parts": [
+        "हिन्दी",
+        "क़"
+      ],
+      "text": "हिन्दी क़",
+      "whole": []
+    },
+    {
+      "normalized": "1 m2 iv 1⁄2 tm",
+      "parts": [
+        "1",
+        "m2",
+        "iv",
+        "1",
+        "2",
+        "tm"
+      ],
+      "text": "① ㎡ Ⅳ ½ ™",
+      "whole": []
+    },
+    {
+      "normalized": "𐐨𐐨 a0",
+      "parts": [
+        "𐐨𐐨",
+        "a0"
+      ],
+      "text": "𐐀𐐨 𝐀𝟎",
+      "whole": []
+    },
+    {
+      "normalized": "ᲊᲊ ɤƛ",
+      "parts": [
+        "ᲊᲊ",
+        "ɤƛ"
+      ],
+      "text": "Ᲊᲊ ꟋꟜ",
+      "whole": []
+    },
+    {
+      "normalized": "zero​width soft­hyphen non break join‍me",
+      "parts": [
+        "zero",
+        "width",
+        "soft",
+        "hyphen",
+        "non",
+        "break",
+        "join",
+        "me"
+      ],
+      "text": "zero​width soft­hyphen non break join‍me",
+      "whole": []
+    },
+    {
+      "normalized": "å ω å å",
+      "parts": [
+        "å",
+        "ω",
+        "å",
+        "å"
+      ],
+      "text": "Å Ω Å Å",
+      "whole": []
+    },
+    {
+      "normalized": "mañana mañana",
+      "parts": [
+        "mañana",
+        "mañana"
+      ],
+      "text": "mañana mañana",
+      "whole": []
+    },
+    {
+      "normalized": "😀 👍🏽 emoji",
+      "parts": [
+        "emoji"
+      ],
+      "text": "😀 👍🏽 emoji",
+      "whole": []
+    },
+    {
+      "normalized": "path/to/résumé.md key-été v1.2.3+build",
+      "parts": [
+        "path",
+        "to",
+        "résumé",
+        "md",
+        "key",
+        "été",
+        "v1",
+        "2",
+        "3",
+        "build"
+      ],
+      "text": "path/to/RÉSUMÉ.md KEY-ÉTÉ v1.2.3+build",
+      "whole": [
+        "path/to/résumé.md",
+        "key-été",
+        "v1.2.3+build"
+      ]
+    },
+    {
+      "normalized": "dždždž ǰ ι ι",
+      "parts": [
+        "dždždž",
+        "ǰ",
+        "ι",
+        "ι"
+      ],
+      "text": "Ǆǅǆ ǰ ͅͺ",
+      "whole": []
+    },
+    {
+      "normalized": "ᎠᎡ ᎠᎡ",
+      "parts": [
+        "ᎠᎡ",
+        "ᎠᎡ"
+      ],
+      "text": "ꭰꭱ ᎠᎡ",
+      "whole": []
+    },
+    {
+      "normalized": "ക്‍ഷ กิน",
+      "parts": [
+        "ക്",
+        "ഷ",
+        "กิน"
+      ],
+      "text": "ക്‍ഷ กิน",
+      "whole": []
+    }
+  ]
+}

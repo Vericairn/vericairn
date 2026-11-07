@@ -171,7 +171,7 @@
     }
   ],
   "format": "vericairn.search-selection/1",
-  "hash": "sha256:0c115e2e95f36ad691fd70e86a51de950f1f470cc0774c3240c83170a968eb73",
+  "hash": "sha256:2b638c4eaad088962041013b5520f4cd458cf3424eec18776d45a07c5498e68a",
   "index": {
     "asOf": "2026-11-01T12:00:10Z",
     "commit": "uncommitted",
@@ -197,7 +197,7 @@
   },
   "limit": 10,
   "method": {
-    "analyzer": "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming",
+    "analyzer": "nfkc-casefold unicode-16.0.0; letter-digit runs; connected identifiers also whole; no stemming",
     "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
     "name": "keyword",
     "version": "vericairn.search.keyword/1"

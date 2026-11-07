@@ -14,9 +14,10 @@ using Vericairn.Runtime.Workers;
 namespace Vericairn.Runtime.Search;
 
 /// <summary>
-/// The searches a run's MCP server served its agent. The server appends each selection to the run's own directory, machine-local
-/// and owner-only; settlement records them as <c>searchesObserved</c>, at most 100 in full and the digest of all. Searches made
-/// any other way are ordinary reads and are not recorded.
+/// The searches a run's MCP server served its agent, as that server logged them. The worker creates the run's empty log when the
+/// run starts; the server appends each selection to it, machine-local and owner-only; settlement records them as
+/// <c>searchesObserved</c>, at most 100 in full and the digest of all. The log is not tamper-evident: an agent whose harness does
+/// not sandbox it runs as the same user and could change it. Searches made any other way are ordinary reads and are not recorded.
 /// </summary>
 internal static class ObservedSearches
 {
@@ -47,16 +48,34 @@ internal static class ObservedSearches
         }
     }
 
+    /// <summary>Creates a run's empty log as the run starts, so settlement can tell a run that searched nothing from a log that went missing.</summary>
+    internal static void Start(RunDirectory directory)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.Read };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        try
+        {
+            using var created = new FileStream(directory.SearchesFile, options);
+        }
+        catch (IOException) when (File.Exists(directory.SearchesFile))
+        {
+            // Already started.
+        }
+    }
+
     /// <summary>
-    /// What settlement records, or null when the server served nothing: each valid selection as a record keeps it (omitting
-    /// candidates every record reader cannot read), at most 100 and within a byte budget, whether that is every observed search,
-    /// and the digest of all of them. A line that is not a valid selection makes the list incomplete.
+    /// What settlement records, or null when the run's log is empty (the server served nothing) or this machine does not hold the
+    /// run's directory: each valid selection as a record keeps it (omitting candidates and segments every record reader cannot
+    /// read), at most 100 and within a byte budget, whether that is every observed search, and the digest of all of them. A line
+    /// that cannot be read as a valid selection makes the list incomplete; so does a log missing from a directory that holds the run.
     /// </summary>
     internal static JsonObject? Read(RunDirectory directory)
     {
         ArgumentNullException.ThrowIfNull(directory);
+        if (!directory.Exists) return null;
         var info = new FileInfo(directory.SearchesFile);
-        if (!info.Exists) return null;
+        if (!info.Exists) return Incomplete();
         bool complete = info.LinkTarget is null && info.Length <= MaximumLogBytes;
         var hashes = new List<string>();
         var kept = new JsonArray();
@@ -74,7 +93,11 @@ internal static class ObservedSearches
                     SearchSelections.Validate(new BodyReader(document.RootElement, "selection", findings, RecordFormats.Current));
                     if (!findings.HasErrors) recorded = EstateService.ForRecord(document.RootElement);
                 }
-                catch (JsonException) { }
+                catch (Exception exception) when (exception is JsonException or CanonicalJsonException or InvalidOperationException or KeyNotFoundException
+                    or FormatException or ArgumentException)
+                {
+                    // Any line that cannot be read whole only makes the list incomplete; the run still settles.
+                }
 
                 if (recorded is null)
                 {
@@ -100,4 +123,12 @@ internal static class ObservedSearches
             ["selections"] = kept,
         };
     }
+
+    /// <summary>What settlement records when the log cannot be read at all: no selection, and a list that says it is incomplete.</summary>
+    internal static JsonObject Incomplete() => new()
+    {
+        ["complete"] = false,
+        ["digest"] = SearchSelections.ListDigest([]),
+        ["selections"] = new JsonArray(),
+    };
 }

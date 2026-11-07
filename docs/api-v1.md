@@ -359,7 +359,10 @@ that cannot read every segment: `Completeness cannot be confirmed.`, naming and 
 record's `key`, a `reason` for an excluded candidate or an index fault, and an `excerpt` of at most 320 bytes of the original,
 labelled untrusted. Refusals answer HTTP 200 with a typed problem: `search-query-empty`, `search-query-oversize`,
 `search-query-invalid`, `search-method-unavailable`, `search-index-unavailable`, `invalid`, or `denied` for a request device
-that lost admission. Restricted and nonexistent sources answer alike.
+that lost admission. Restricted and nonexistent sources answer alike. `SearchIndexResponse` leaves `indexBytes` and
+`sourceBytes` null, and its text omits update counts, for a caller that cannot read every segment; `rebuild` is `denied` to a
+device-signed request whose principal is not an operator. `SearchReplayResponse` replays at most 20 selections per request
+and answers the rest, and any selection it cannot read, with an `unavailable` outcome.
 
 A request's `principal` names who the search or package is for, and only narrows what the caller may read: a device-signed
 request may name its own principal or none (`RequestScope` refuses another), and the local socket's caller reads the whole

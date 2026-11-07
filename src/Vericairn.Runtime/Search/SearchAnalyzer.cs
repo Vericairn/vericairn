@@ -3,20 +3,22 @@
 
 using System.Buffers;
 using System.Globalization;
-using System.Text;
+using Vericairn.Records.Text;
 
 namespace Vericairn.Runtime.Search;
 
 /// <summary>
-/// The analyzer of <c>vericairn.search.keyword/1</c>: Unicode NFKC normalization and invariant case folding, then words split into
-/// their letter and digit runs. A word joined by connectors (an id, key, version, hash or path, such as <c>CONTEXT-02</c>,
+/// The analyzer of <c>vericairn.search.keyword/1</c>: Unicode NFKC normalization and full case folding, then words split into
+/// their letter and digit runs. Normalization, folding and the character categories come from the Unicode tables pinned in
+/// <see cref="UnicodeFolding"/>, never from the platform's ICU or the globalization mode, so the shipped invariant build and
+/// every platform analyze text identically and ranks repeat everywhere. A word joined by connectors (an id, key, version, hash or path, such as <c>CONTEXT-02</c>,
 /// <c>0.9.2</c> or <c>design/search.md</c>) is also kept whole. No language-specific stemming or stop words. The same analysis
 /// serves indexing and queries, so the engine only ever sees analyzer output, quoted.
 /// </summary>
 internal static class SearchAnalyzer
 {
     /// <summary>The analyzer's identity, recorded in every selection.</summary>
-    internal const string Identity = "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming";
+    internal const string Identity = "nfkc-casefold unicode-" + UnicodeFolding.UnicodeVersion + "; letter-digit runs; connected identifiers also whole; no stemming";
 
     /// <summary>Characters that join an identifier's parts. They never start or end a whole token.</summary>
     internal const string Connectors = "-_./:@#+";
@@ -29,15 +31,8 @@ internal static class SearchAnalyzer
 
     internal readonly record struct Analysis(IReadOnlyList<string> Parts, IReadOnlyList<string> Whole);
 
-    /// <summary>NFKC, then invariant lower case.</summary>
-    internal static string Normalize(string text)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-        string normalized;
-        try { normalized = text.IsNormalized(NormalizationForm.FormKC) ? text : text.Normalize(NormalizationForm.FormKC); }
-        catch (ArgumentException) { normalized = text; } // Invalid UTF-16 is analyzed as it is; queries refuse it earlier.
-        return normalized.ToLowerInvariant();
-    }
+    /// <summary>NFKC, full case folding and NFKC again, from the pinned tables; a lone surrogate is kept as it is (queries refuse it earlier).</summary>
+    internal static string Normalize(string text) => UnicodeFolding.NfkcCaseFold(text);
 
     /// <summary>Analyzes text into its parts, in order, and the whole connected identifiers it holds.</summary>
     internal static Analysis Analyze(string text)
@@ -98,12 +93,12 @@ internal static class SearchAnalyzer
         if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
         {
             width = 2;
-            return IsTokenCategory(CharUnicodeInfo.GetUnicodeCategory(text, index));
+            return IsTokenCategory(UnicodeFolding.GetCategory(text, index));
         }
 
         width = 1;
         char c = text[index];
-        return ConnectorValues.Contains(c) || IsTokenCategory(CharUnicodeInfo.GetUnicodeCategory(c));
+        return ConnectorValues.Contains(c) || IsTokenCategory(UnicodeFolding.GetCategory(c));
     }
 
     private static bool IsTokenCategory(UnicodeCategory category) => category is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter

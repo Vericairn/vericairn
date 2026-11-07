@@ -25,6 +25,11 @@ public sealed partial class EstateService
 {
     private const int DefaultSearchLimit = 10;
     private const int SearchSelectLimit = 3;
+    // One replay request rebuilds at most this many selections; the rest are named and left for a request of their own.
+    private const int MaxReplaySelections = 20;
+
+    /// <summary>The most selections one replay request replays; a test lowers it.</summary>
+    internal int ReplaySelectionLimit { get; set; } = MaxReplaySelections;
     private static readonly TimeSpan SearchBudget = TimeSpan.FromMilliseconds(250);
     private static readonly string[] IndexedDirectories = ["records", "design", "docs"];
     private readonly Dictionary<string, string> searchCommits = new(StringComparer.Ordinal);
@@ -43,6 +48,9 @@ public sealed partial class EstateService
 
     /// <summary>Test seam: the open index, created when needed.</summary>
     internal KeywordIndex SearchStoreForTests() { lock (gate) return SearchStore(); }
+
+    /// <summary>Test seam: what a failed index operation does, closing the index and deleting it only when no other process has it open.</summary>
+    internal void ResetSearchStoreForTests() { lock (gate) ResetSearchStore(); }
 
     /// <inheritdoc />
     public SearchResponse Search(SearchRequest request)
@@ -101,6 +109,10 @@ public sealed partial class EstateService
             (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadIdentities();
             Func<EstateModel> judged = Judged();
             if (DeviceRefusal(judged) is not null) return IndexRefusal("denied", ContextDenied);
+            // A full rebuild holds the estate's gate for as long as indexing everything takes, so it runs from this machine's own
+            // command line or for an operator; a paired device can bring the index up to date but not rebuild it.
+            if (request.Rebuild && requestDevice.Value is { Closed: false } && !(RequestPrincipal(judged()) is string requester && judged().HasRole(requester, Roles.Operator)))
+                return IndexRefusal("denied", "A full rebuild of the search index runs on this machine's own command line or for an operator; a paired device can bring the index up to date with vericairn search index.");
             var watch = Stopwatch.StartNew();
             for (int attempt = 0; ; attempt++)
             {
@@ -115,13 +127,19 @@ public sealed partial class EstateService
                     long elapsed = watch.ElapsedMilliseconds;
                     SearchReader reader = Reader(judged, index, null);
                     IReadOnlyList<KeywordIndex.SegmentBasis> bases = index.Bases(reader.Audiences);
-                    IReadOnlySet<string> indexed = index.IndexedDocuments();
-                    long sourceBytes = files.Values.Sum(f => f.Bytes.LongLength)
-                        + snapshot.Pins.Where(p => indexed.Contains(p.Path)).Sum(p => snapshot.Bytes(p)?.LongLength ?? 0);
-                    long size = index.Size();
+                    // The index's total size, its source bytes and the update's counts include every segment, so a reader of some
+                    // segments only is told none of them.
+                    long? sourceBytes = null, size = null;
+                    if (reader.Complete)
+                    {
+                        IReadOnlySet<string> indexed = index.IndexedDocuments();
+                        sourceBytes = files.Values.Sum(f => f.Bytes.LongLength) + snapshot.Pins.Where(p => indexed.Contains(p.Path)).Sum(p => snapshot.Bytes(p)?.LongLength ?? 0);
+                        size = index.Size();
+                    }
+
                     IReadOnlyList<string> unavailable = reader.Complete ? index.UnavailableDocuments() : [];
                     var segmentsSeen = bases.Select(b => new SearchSegment(b.Audience, b.Passages, b.Records, b.Documents)).ToList();
-                    string text = RenderIndex(result?.Current ?? true, KeywordIndex.Revision(bases), segmentsSeen, size, sourceBytes, elapsed, result, unavailable);
+                    string text = RenderIndex(result?.Current ?? true, KeywordIndex.Revision(bases), segmentsSeen, size, sourceBytes, elapsed, reader.Complete ? result : null, result is null, unavailable);
                     return new SearchIndexResponse(text, SearchSelections.KeywordMethod, KeywordIndex.Revision(bases), result?.Current ?? true, segmentsSeen, size, sourceBytes, elapsed, null)
                     { Unavailable = unavailable };
                 }
@@ -169,14 +187,34 @@ public sealed partial class EstateService
             }
 
             var outcomes = new List<SearchReplayOutcome>();
-            foreach (JsonElement selection in selections)
+            // Each earlier basis is rebuilt once per request, however many of its selections are replayed.
+            var rebuilt = new Dictionary<string, (KeywordIndex Index, SearchSnapshot Snapshot)?>(StringComparer.Ordinal);
+            try
             {
-                try { outcomes.Add(ReplayOne(model, files, judged, selection)); }
-                catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
+                foreach ((JsonElement selection, int position) in selections.Select((s, i) => (s, i)))
                 {
-                    ResetSearchStore();
-                    outcomes.Add(new(SelectionHash(selection), false, null, "unavailable", "The search index could not be read; nothing was replayed or approximated.", []));
+                    if (position >= ReplaySelectionLimit)
+                    {
+                        outcomes.Add(new(SelectionHash(selection), false, null, "unavailable", $"Not replayed: one request replays at most {ReplaySelectionLimit.ToString(CultureInfo.InvariantCulture)} selections; replay this one by its hash.", []));
+                        continue;
+                    }
+
+                    try { outcomes.Add(ReplayOne(model, files, judged, selection, rebuilt)); }
+                    catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
+                    {
+                        ResetSearchStore();
+                        outcomes.Add(new(SelectionHash(selection), false, null, "unavailable", "The search index could not be read; nothing was replayed or approximated.", []));
+                    }
+                    catch (Exception exception) when (exception is CanonicalJsonException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+                    {
+                        // A selection given whole is untrusted input: one that cannot be read is answered, never thrown.
+                        outcomes.Add(new(SelectionHash(selection), false, null, "unavailable", "Not a readable " + SearchSelections.Format + "; nothing was replayed or approximated.", []));
+                    }
                 }
+            }
+            finally
+            {
+                foreach (var built in rebuilt.Values) built?.Index.Dispose();
             }
 
             return new SearchReplayResponse(RenderReplay(outcomes), outcomes, null);
@@ -212,12 +250,14 @@ public sealed partial class EstateService
 
     private KeywordIndex SearchStore() => keywordIndex ??= KeywordIndex.Open(SearchIndexPath);
 
+    // A failed operation closes the index. Its files are deleted only when no other process (a run's MCP server, a command beside
+    // the daemon) has them open; otherwise the next open reuses or rebuilds the index in place.
     private void ResetSearchStore()
     {
         keywordIndex?.Dispose();
         keywordIndex = null;
         if (SearchIndexPath is not string path) return;
-        try { KeywordIndex.Delete(path); }
+        try { KeywordIndex.TryDelete(path); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The next open replaces what it cannot trust. */ }
     }
 
@@ -393,21 +433,46 @@ public sealed partial class EstateService
         return recorded;
     }
 
-    /// <summary>One selection as a record keeps it: the same search, with only candidates every reader of the record may read.</summary>
+    /// <summary>
+    /// One selection as a record keeps it: the same search, with only candidates every reader of the record may read, and the
+    /// reader's audiences and the index segments those readers cannot all read replaced by one opaque Restricted entry, so no
+    /// restricted audience's label, size or hash is recorded.
+    /// </summary>
     internal static JsonObject ForRecord(JsonElement selection)
     {
         JsonObject copy = JsonNode.Parse(selection.GetRawText())!.AsObject();
+        bool changed = false;
         JsonArray candidates = copy["candidates"]!.AsArray();
         var kept = new JsonArray(candidates.Where(c => SearchAudiences.CoversRecordReaders(c!["audience"]!.GetValue<string>())).Select(c => c!.DeepClone()).ToArray());
-        if (kept.Count == candidates.Count) return copy;
-        copy["candidates"] = kept;
-        copy["limited"] = SearchSelections.Limited;
+        if (kept.Count != candidates.Count)
+        {
+            copy["candidates"] = kept;
+            copy["limited"] = SearchSelections.Limited;
+            changed = true;
+        }
+
+        if (copy["reader"]?["audiences"] is JsonArray audiences && audiences.Any(a => !SearchAudiences.CoversRecordReaders(a!.GetValue<string>())))
+        {
+            copy["reader"]!["audiences"] = new JsonArray(audiences.Select(a => a!.GetValue<string>()).Where(SearchAudiences.CoversRecordReaders)
+                .Append(SearchSelections.RestrictedAudience).Select(a => (JsonNode)a).ToArray());
+            changed = true;
+        }
+
+        if (copy["index"]?["segments"] is JsonArray segments && segments.Any(s => !SearchAudiences.CoversRecordReaders(s!["audience"]!.GetValue<string>())))
+        {
+            copy["index"]!["segments"] = new JsonArray(segments.Where(s => SearchAudiences.CoversRecordReaders(s!["audience"]!.GetValue<string>())).Select(s => s!.DeepClone())
+                .Append(new JsonObject { ["audience"] = SearchSelections.RestrictedAudience }).ToArray());
+            changed = true;
+        }
+
+        if (!changed) return copy;
         copy.Remove("hash");
         copy["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(copy));
         return copy;
     }
 
-    private SearchReplayOutcome ReplayOne(EstateModel model, IReadOnlyDictionary<string, RecordFile> files, Func<EstateModel> judged, JsonElement selection)
+    private SearchReplayOutcome ReplayOne(EstateModel model, IReadOnlyDictionary<string, RecordFile> files, Func<EstateModel> judged, JsonElement selection,
+        Dictionary<string, (KeywordIndex Index, SearchSnapshot Snapshot)?> rebuilt)
     {
         string hash = SelectionHash(selection);
         var findings = new FindingList();
@@ -423,17 +488,26 @@ public sealed partial class EstateService
         SearchSnapshot snapshot = Snapshot(model, files);
         Freshen(index, snapshot, null);
         SearchReader caller = Reader(judged, index, null);
-        string[] audiences = selection.GetProperty("reader").GetProperty("audiences").EnumerateArray().Select(a => a.GetString()!).ToArray();
+        string[] recordedAudiences = selection.GetProperty("reader").GetProperty("audiences").EnumerateArray().Select(a => a.GetString()!).ToArray();
+        // A record's selection names only the segments all its readers may read and one opaque entry for the rest: those are
+        // searched again as they are now, by a reader of every segment, and only the named segments' bases can be confirmed.
+        bool opaque = recordedAudiences.Contains(SearchSelections.RestrictedAudience, StringComparer.Ordinal);
+        string[] audiences = recordedAudiences.Where(a => a != SearchSelections.RestrictedAudience).ToArray();
+        if (opaque && !caller.Complete)
+            return new(hash, false, null, "unavailable", "That selection's record omits restricted segments; only a reader of every segment can replay it.", []);
         if (!caller.Complete && audiences.Any(a => !caller.Audiences.Contains(a, StringComparer.Ordinal)))
             return new(hash, false, null, "unavailable", "This reader cannot replay that selection; completeness cannot be confirmed.", []);
         JsonElement principal = selection.GetProperty("reader").GetProperty("principal");
-        var reader = new SearchReader(principal.ValueKind == JsonValueKind.String ? principal.GetString() : null, audiences, true);
+        SearchReader ReaderOf(KeywordIndex from) => new(principal.ValueKind == JsonValueKind.String ? principal.GetString() : null, opaque
+            ? SearchAudiences.Ordered(audiences.Concat(from.Audiences().Concat(SearchAudiences.Standard).Where(a => !SearchAudiences.CoversRecordReaders(a)))).ToList()
+            : audiences, true);
         int limit = selection.GetProperty("limit").GetInt32();
         string[] recorded = selection.GetProperty("index").GetProperty("segments").EnumerateArray()
+            .Where(s => s.GetProperty("audience").GetString() != SearchSelections.RestrictedAudience)
             .Select(s => s.GetProperty("audience").GetString() + "\t" + s.GetProperty("records").GetString() + "\t" + s.GetProperty("documents").GetString()).ToArray();
         string[] Bases(KeywordIndex from) => from.Bases(audiences).Select(b => b.Audience + "\t" + b.Records + "\t" + b.Documents).ToArray();
         if (Bases(index).SequenceEqual(recorded, StringComparer.Ordinal))
-            return Compare(hash, "current", SearchRunner.Run(index, snapshot, query, reader, limit), selection);
+            return Compare(hash, "current", SearchRunner.Run(index, snapshot, query, ReaderOf(index), limit), selection, opaque);
 
         // This copy may still hold exactly the selection's basis under later records: every record up to the selection's time, with
         // the pins then current, read from the working tree or, by exact hash, from local history. The basis hashes decide.
@@ -443,32 +517,48 @@ public sealed partial class EstateService
             HashSet<string> kept = RecordsAsOf(model, asOf, selection.GetProperty("index").GetProperty("segments").EnumerateArray()
                 .Where(s => s.GetProperty("audience").GetString() == SearchAudiences.Internal).Select(s => s.GetProperty("records").GetString()).FirstOrDefault());
             var earlier = files.Values.Where(f => kept.Contains(f.Path)).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
-            EstateModel earlierModel = EstateLoader.Load(session.Root, earlier);
-            ISourceAdapter? history = Providers.Source("git");
-            var earlierSnapshot = new SearchSnapshot(earlierModel, earlier.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(earlierModel),
-                pin => ContextSelection.LocalOriginal(session.Root, pin.Path, pin.ByteHash, history, pin.HashMode));
-            using KeywordIndex rebuilt = KeywordIndex.Open(null);
-            Freshen(rebuilt, earlierSnapshot, null);
-            if (Bases(rebuilt).SequenceEqual(recorded, StringComparer.Ordinal))
-                return Compare(hash, "copy", SearchRunner.Run(rebuilt, earlierSnapshot, query, reader, limit), selection);
+            string key = "copy:" + ContentHash.Sha256(Encoding.UTF8.GetBytes(string.Join('\n', earlier.Select(f => f.Path))));
+            if (!rebuilt.TryGetValue(key, out var copyBasis))
+            {
+                EstateModel earlierModel = EstateLoader.Load(session.Root, earlier);
+                ISourceAdapter? history = Providers.Source("git");
+                var earlierSnapshot = new SearchSnapshot(earlierModel, earlier.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(earlierModel),
+                    pin => ContextSelection.LocalOriginal(session.Root, pin.Path, pin.ByteHash, history, pin.HashMode));
+                KeywordIndex built = KeywordIndex.Open(null);
+                rebuilt[key] = copyBasis = (built, earlierSnapshot);
+                Freshen(built, earlierSnapshot, null);
+            }
+
+            if (copyBasis is { } copy && Bases(copy.Index).SequenceEqual(recorded, StringComparer.Ordinal))
+                return Compare(hash, "copy", SearchRunner.Run(copy.Index, copy.Snapshot, query, ReaderOf(copy.Index), limit), selection, opaque);
         }
 
         string commit = selection.GetProperty("index").GetProperty("commit").GetString()!;
         if (commit == "uncommitted" || Providers.Source("git") is not ISourceAdapter git)
             return new(hash, false, null, "unavailable", "This copy holds neither the selection's basis nor its commit in local history; nothing was approximated.", []);
-        IReadOnlyList<SourceFile>? tree = git.ReadTreeAtCommit(session.Root, commit, IndexedDirectories);
-        if (tree is null)
+        if (!rebuilt.TryGetValue("commit:" + commit, out var commitBasis))
+        {
+            IReadOnlyList<SourceFile>? tree = git.ReadTreeAtCommit(session.Root, commit, IndexedDirectories);
+            if (tree is not null)
+            {
+                var recordFiles = tree.Where(f => f.Path.StartsWith("records/", StringComparison.Ordinal) && f.Path.EndsWith(".json", StringComparison.Ordinal))
+                    .Select(f => new RecordFile(f.Path, f.Bytes)).ToList();
+                var documents = tree.Where(f => !f.Path.StartsWith("records/", StringComparison.Ordinal)).ToDictionary(f => f.Path, f => f.Bytes, StringComparer.Ordinal);
+                EstateModel then = EstateLoader.Load(session.Root, recordFiles);
+                var thenSnapshot = new SearchSnapshot(then, recordFiles.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(then), pin => CommittedOriginal(documents, pin));
+                KeywordIndex past = KeywordIndex.Open(null);
+                commitBasis = (past, thenSnapshot);
+                rebuilt["commit:" + commit] = commitBasis;
+                Freshen(past, thenSnapshot, null);
+            }
+            else rebuilt["commit:" + commit] = null;
+        }
+
+        if (commitBasis is not { } atCommit)
             return new(hash, false, null, "unavailable", $"Local history does not hold commit {commit} of this estate, or cannot read it in full; nothing was approximated.", []);
-        var recordFiles = tree.Where(f => f.Path.StartsWith("records/", StringComparison.Ordinal) && f.Path.EndsWith(".json", StringComparison.Ordinal))
-            .Select(f => new RecordFile(f.Path, f.Bytes)).ToList();
-        var documents = tree.Where(f => !f.Path.StartsWith("records/", StringComparison.Ordinal)).ToDictionary(f => f.Path, f => f.Bytes, StringComparer.Ordinal);
-        EstateModel then = EstateLoader.Load(session.Root, recordFiles);
-        var thenSnapshot = new SearchSnapshot(then, recordFiles.ToDictionary(f => f.Path, StringComparer.Ordinal), SearchSnapshot.CurrentPins(then), pin => CommittedOriginal(documents, pin));
-        using KeywordIndex past = KeywordIndex.Open(null);
-        Freshen(past, thenSnapshot, null);
-        if (!Bases(past).SequenceEqual(recorded, StringComparer.Ordinal))
+        if (!Bases(atCommit.Index).SequenceEqual(recorded, StringComparer.Ordinal))
             return new(hash, false, null, "unavailable", $"The records and pins at commit {commit} do not reproduce the selection's basis; nothing was approximated.", []);
-        return Compare(hash, "commit", SearchRunner.Run(past, thenSnapshot, query, reader, limit), selection);
+        return Compare(hash, "commit", SearchRunner.Run(atCommit.Index, atCommit.Snapshot, query, ReaderOf(atCommit.Index), limit), selection, opaque);
     }
 
     // The record files of a basis as of a time: every record before it, and of the few recorded in that same second, the ones whose
@@ -504,9 +594,9 @@ public sealed partial class EstateService
         return ContentHash.Sha256(bytes) == pin.ByteHash ? bytes : null;
     }
 
-    private static SearchReplayOutcome Compare(string hash, string basis, SearchRunner.Found found, JsonElement selection)
+    private static SearchReplayOutcome Compare(string hash, string basis, SearchRunner.Found found, JsonElement selection, bool opaque)
     {
-        bool limited = selection.TryGetProperty("limited", out _);
+        bool limited = opaque || selection.TryGetProperty("limited", out _);
         var expected = selection.GetProperty("candidates").EnumerateArray()
             .ToDictionary(c => c.GetProperty("rank").GetInt32(), c => Describe(c.GetProperty("kind").GetString()!, c.GetProperty("source"), c.GetProperty("extent"), c.GetProperty("score").GetInt64()));
         var actual = new Dictionary<int, string>();
@@ -534,9 +624,10 @@ public sealed partial class EstateService
             "copy" => "on its exact basis, rebuilt from this copy's records up to its time",
             _ => "on its commit, read from local history",
         };
-        return new(hash, true, differences.Count == 0, basis, differences.Count == 0
+        string unconfirmed = opaque ? " The record does not name its restricted segments, so their basis was not confirmed." : string.Empty;
+        return new(hash, true, differences.Count == 0, basis, (differences.Count == 0
             ? $"Replayed {where}: the same ranked candidates."
-            : $"Replayed {where}: {differences.Count.ToString(CultureInfo.InvariantCulture)} difference(s).", differences);
+            : $"Replayed {where}: {differences.Count.ToString(CultureInfo.InvariantCulture)} difference(s).") + unconfirmed, differences);
     }
 
     private static string Describe(string kind, JsonElement source, JsonElement extent, long score)
@@ -599,20 +690,23 @@ public sealed partial class EstateService
         return text.ToString();
     }
 
-    private static string RenderIndex(bool current, string revision, IReadOnlyList<SearchSegment> segments, long size, long source, long elapsed, KeywordIndex.UpdateResult? result, IReadOnlyList<string> unavailable)
+    private static string RenderIndex(bool current, string revision, IReadOnlyList<SearchSegment> segments, long? size, long? source, long elapsed, KeywordIndex.UpdateResult? result,
+        bool alreadyCurrent, IReadOnlyList<string> unavailable)
     {
         var text = new StringBuilder();
         text.Append("Search index ").Append(SearchSelections.KeywordMethod).Append(": ").Append(current ? "current" : "not current").Append(" · revision ").Append(revision).Append('\n');
-        text.Append(size.ToString(CultureInfo.InvariantCulture)).Append(" index bytes for ").Append(source.ToString(CultureInfo.InvariantCulture)).Append(" indexed source bytes · ")
-            .Append(elapsed.ToString(CultureInfo.InvariantCulture)).Append(" ms");
-        if (result is null) text.Append(" (already current)");
-        else text.Append(" (records added ").Append(result.RecordsAdded.ToString(CultureInfo.InvariantCulture)).Append(", removed ").Append(result.RecordsRemoved.ToString(CultureInfo.InvariantCulture))
+        if (size is long bytes && source is long sourceBytes)
+            text.Append(bytes.ToString(CultureInfo.InvariantCulture)).Append(" index bytes for ").Append(sourceBytes.ToString(CultureInfo.InvariantCulture)).Append(" indexed source bytes · ");
+        else text.Append("Sizes and counts cover segments this reader cannot read, so they are omitted · ");
+        text.Append(elapsed.ToString(CultureInfo.InvariantCulture)).Append(" ms");
+        if (alreadyCurrent) text.Append(" (already current)");
+        else if (result is not null) text.Append(" (records added ").Append(result.RecordsAdded.ToString(CultureInfo.InvariantCulture)).Append(", removed ").Append(result.RecordsRemoved.ToString(CultureInfo.InvariantCulture))
             .Append("; documents indexed ").Append(result.DocumentsIndexed.ToString(CultureInfo.InvariantCulture)).Append(", removed ").Append(result.DocumentsRemoved.ToString(CultureInfo.InvariantCulture)).Append(')');
         text.Append('\n');
         foreach (SearchSegment segment in segments)
-            text.Append("  ").Append(segment.Audience).Append(": ").Append(segment.Passages.ToString(CultureInfo.InvariantCulture)).Append(" passages · records ").Append(segment.Records)
+            text.Append("  ").Append(SafeText(segment.Audience)).Append(": ").Append(segment.Passages.ToString(CultureInfo.InvariantCulture)).Append(" passages · records ").Append(segment.Records)
                 .Append(" · documents ").Append(segment.Documents).Append('\n');
-        foreach (string path in unavailable) text.Append("  unavailable here: ").Append(path).Append(" (its pinned bytes are not in this copy)\n");
+        foreach (string path in unavailable) text.Append("  unavailable here: ").Append(SafeText(path)).Append(" (its pinned bytes are not in this copy)\n");
         text.Append("The index is machine-local and derived: never committed, exported or served; deleting it loses nothing.\n");
         return text.ToString();
     }

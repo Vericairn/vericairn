@@ -149,6 +149,17 @@ public class SearchCommandTests
         finally { File.Delete(outside); }
     }
 
+    // The product runs with invariant globalization, where the platform's own normalization does nothing; the analyzer and the
+    // search goldens must give exactly the bytes Runtime.Tests gets with ICU loaded.
+    [Fact]
+    public void TheAnalyzerAndTheSearchGoldensAreIdenticalInTheProductsInvariantMode()
+    {
+        Assert.True(AppContext.TryGetSwitch("System.Globalization.Invariant", out bool invariant) && invariant);
+        Assert.Equal("\uFB01", "\uFB01".Normalize(System.Text.NormalizationForm.FormKC));
+        SearchGoldens.Analyzer();
+        SearchGoldens.SelectionAndManifest();
+    }
+
     [Fact]
     public void RefusalsExitTwoAndTheDoctorConfirmsTheFullTextModule()
     {

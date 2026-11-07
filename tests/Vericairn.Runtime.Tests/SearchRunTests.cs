@@ -89,6 +89,53 @@ public class SearchRunTests
         Assert.Null(replay.Problem);
         Assert.Equal(2, replay.Outcomes.Count);
         Assert.All(replay.Outcomes, o => Assert.True(o.Replayed && o.Matches == true, o.Message + " " + string.Join("; ", o.Differences)));
+        // The record names its restricted segments only as one opaque entry, so the replay says their basis was not confirmed.
+        Assert.All(replay.Outcomes, o => Assert.Contains("restricted segments", o.Message, StringComparison.Ordinal));
+
+        // One request replays a bounded number of selections and names the rest.
+        run.Service.ReplaySelectionLimit = 1;
+        SearchReplayResponse bounded = run.Service.SearchReplay(new SearchReplayRequest(Record: settled.Id));
+        Assert.True(bounded.Outcomes[0].Replayed);
+        Assert.False(bounded.Outcomes[1].Replayed);
+        Assert.Contains("at most 1 selections", bounded.Outcomes[1].Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnreadableLogLineMakesTheObservedListIncompleteAndAMissingLogIsToldApartFromNoSearches()
+    {
+        using var estate = new SearchEstate();
+        using EstateService service = estate.Open();
+        string selection = Records.Canonical.CanonicalJson.Serialize(service.Search(new SearchRequest("keyword index")).Selection!.Value);
+        var directory = new RunDirectory(Records.Identity.Ulid.NewUlid().Value, Records.Identity.Ulid.NewUlid().Value);
+        try
+        {
+            // A machine that does not hold the run's directory records nothing.
+            Assert.Null(ObservedSearches.Read(directory));
+            directory.Create();
+            // A run whose log is missing from its directory: the list says it is incomplete.
+            JsonObject missing = ObservedSearches.Read(directory)!;
+            Assert.False(missing["complete"]!.GetValue<bool>());
+            Assert.Empty(missing["selections"]!.AsArray());
+            // The log the worker creates as the run starts, still empty: no searches, so nothing is recorded.
+            ObservedSearches.Start(directory);
+            Assert.Null(ObservedSearches.Read(directory));
+
+            // A fraction or a duplicate member, which canonical JSON cannot hold, only makes the list incomplete.
+            File.AppendAllText(directory.SearchesFile, selection + "\n" + selection.Replace("\"limit\":10", "\"limit\":10.5", StringComparison.Ordinal) + "\n"
+                + "{\"more\":false," + selection[1..] + "\n" + "not json\n");
+            JsonObject read = ObservedSearches.Read(directory)!;
+            Assert.False(read["complete"]!.GetValue<bool>());
+            Assert.Single(read["selections"]!.AsArray());
+            var findings = new FindingList();
+            SearchSelections.ValidateObserved(new Records.Types.BodyReader(JsonSerializer.SerializeToElement(read), "searchesObserved", findings, 3));
+            Assert.False(findings.HasErrors, string.Join("; ", findings.Select(f => f.Message)));
+        }
+        finally
+        {
+            // The made-up estate's whole directory under the test home: estates/<estate>/runs/<run>.
+            string made = Path.GetDirectoryName(Path.GetDirectoryName(directory.Path)!)!;
+            if (Directory.Exists(made)) Directory.Delete(made, recursive: true);
+        }
     }
 
     [Fact]

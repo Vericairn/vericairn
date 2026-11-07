@@ -121,7 +121,7 @@
           }
         ],
         "format": "vericairn.search-selection/1",
-        "hash": "sha256:d0184cd158cf1dbafaa13b03950e92cd44dd07fbaf092cfd30bbbb1e0503971a",
+        "hash": "sha256:08ca421f4b4b13fc1c1af6f27c7b3bddae28941dd13cd220c3ec201beefab346",
         "index": {
           "asOf": "2026-11-01T12:00:10Z",
           "commit": "uncommitted",
@@ -147,7 +147,7 @@
         },
         "limit": 10,
         "method": {
-          "analyzer": "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming",
+          "analyzer": "nfkc-casefold unicode-16.0.0; letter-digit runs; connected identifiers also whole; no stemming",
           "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
           "name": "keyword",
           "version": "vericairn.search.keyword/1"
@@ -245,7 +245,7 @@
           }
         ],
         "format": "vericairn.search-selection/1",
-        "hash": "sha256:28b43d091454da9cb3c537a149089321b848706c28051af7c96103e6ac6648cb",
+        "hash": "sha256:8fe697570ed51a5203b822e925b2be0ddf1ee10542fac7c3b2ced8f33f849278",
         "index": {
           "asOf": "2026-11-01T12:00:10Z",
           "commit": "uncommitted",
@@ -271,7 +271,7 @@
         },
         "limit": 10,
         "method": {
-          "analyzer": "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming",
+          "analyzer": "nfkc-casefold unicode-16.0.0; letter-digit runs; connected identifiers also whole; no stemming",
           "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
           "name": "keyword",
           "version": "vericairn.search.keyword/1"

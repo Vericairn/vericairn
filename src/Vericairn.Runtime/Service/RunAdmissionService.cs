@@ -275,6 +275,8 @@ internal sealed class RunAdmissionService(
         try
         {
             directory.Create();
+            // The run's search log exists from the start, so settlement can tell a run that searched nothing from a missing log.
+            Search.ObservedSearches.Start(directory);
             directory.RetainContext(plan.Context, plan.Brief);
             var mcp = new JsonObject
             {

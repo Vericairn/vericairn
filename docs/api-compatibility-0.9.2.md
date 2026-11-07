@@ -325,20 +325,32 @@ zero, at a UTF-8 boundary. The human rendering of a package adds a section with 
 it has some.
 
 `Vericairn.Records` adds `Search.SearchSelections`: the selection format and keyword method identities, the candidate and
-selection limits, `Hash`, `ListDigest`, `Validate` and `ValidateObserved`. Record format remains 3; the additive
-`execution.contextSelections` and `searchesObserved` of `agent-run` operations are in
-[record format 3](record-format-v3.md#search-selections-in-agent-runs-092). The operation type's field descriptions change,
-so the generic record reader advances its implementation identity to `vericairn.records/readers/9`. Its hash changes;
-declarations pinned to an earlier implementation need the ordinary explicit generator update before regeneration, and earlier
-golden fixtures remain. The generator id and contract version 1 are unchanged.
+selection limits, `Hash`, `ListDigest`, `Validate` and `ValidateObserved`. `Validate` reports a selection canonical JSON
+cannot hold as a finding rather than throwing, and for a record refuses a restricted audience or segment named in
+`reader.audiences` or `index.segments`; a record names those only as one opaque `Restricted` entry. Record format remains 3;
+the additive `execution.contextSelections` and `searchesObserved` of `agent-run` operations are in
+[record format 3](record-format-v3.md#search-selections-in-agent-runs-092). The operation type's field descriptions change
+within `vericairn.records/readers/8`, the implementation identity this release already advances to, so its hash and golden
+fixtures are this release's final ones; neither has shipped. The generator id and contract version 1 are unchanged.
+
+`Vericairn.Records` also adds an internal `Text.UnicodeFolding`: NFC, NFD, NFKC and NFKD normalization, full case folding and
+general categories from Unicode 16.0.0 tables generated into the assembly by `tools/generate-unicode-folding.py`, so they
+never depend on the platform's ICU or the invariant-globalization mode the product ships in (where `string.Normalize` does
+nothing). Search's analyzer uses it, and its identity names the Unicode version; no other caller changes in this release.
+The index layout becomes `vericairn.search-index/3`, and an index from an earlier layout, method or analyzer is rebuilt in
+place.
 
 `Vericairn.Runtime` adds `SourceFile` and the `ISourceAdapter.ReadTreeAtCommit` member, whose default implementation returns
 null; `GitCommandAdapter` implements it, reading an exact commit's files from local history without checkout or fetch.
-`RunDirectory` adds `SearchesFile`. A run's MCP server is now configured as `mcp serve --as <agent> --run <run id>`; `mcp serve`
-adds `--run`, and with it keeps each served search in the run's directory for settlement. `Vericairn.Mcp` adds
+`RunDirectory` adds `SearchesFile`, which the worker creates empty as a run starts. A run's MCP server is now configured as
+`mcp serve --as <agent> --run <run id>`; `mcp serve` adds `--run`, and with it keeps each served search in the run's directory
+for settlement, as logged, not tamper-evident under a harness that does not sandbox the agent. `Vericairn.Mcp` adds
 `ToolCallResult.Meta`, sent as a tool result's `_meta`, and `ToolRegistry.SearchObserved`; the server lists the `search` read
 tool, and `context_prepare` and `work_brief` take an optional `search` argument.
 
 The command line adds `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`,
 `work brief`, `worker run` and `goal step`. `doctor` adds a `search` line. The index, `search.db` beside the live store, is
-machine-local derived state: no export, push, record or generated document contains it.
+machine-local derived state: no export, push, record or generated document contains it. Processes sharing it hold a shared
+lock on `search.db.lock`, and a failed process deletes the index only when no other has it open. `SearchIndex` with `rebuild`
+is `denied` to a device-signed request whose principal is not an operator, and for a caller that cannot read every segment
+answers null `indexBytes` and `sourceBytes`. `SearchReplay` replays at most 20 selections per request.

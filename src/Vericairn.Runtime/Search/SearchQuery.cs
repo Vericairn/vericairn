@@ -103,7 +103,7 @@ internal sealed record SearchQuery(string Text, IReadOnlyList<SearchQuery.Term> 
                     case "type": Add(types, value.ToLowerInvariant()); break;
                     case "kind": Add(kinds, value.ToLowerInvariant()); break;
                     case "path": Add(paths, value); break;
-                    case "key": Add(keys, value.ToLowerInvariant()); break;
+                    case "key": Add(keys, SearchAnalyzer.Normalize(value)); break;
                     case "since": if (since is not null && since != value) return (null, Repeated(name)); since = value; break;
                     case "before": if (before is not null && before != value) return (null, Repeated(name)); before = value; break;
                 }

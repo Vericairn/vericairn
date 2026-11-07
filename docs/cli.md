@@ -491,9 +491,13 @@ vericairn context read <vc1_ pin from a candidate> --original
 ```
 
 `vericairn search index` brings the index up to date and shows each audience segment the caller may read, with its
-passages and its record-set and document-set hashes, the index's size against the indexed source bytes and the time taken.
-`--rebuild` discards every passage first. The index is derived, owner-only and machine-local; it is never committed,
-exported or served, and deleting it loses nothing.
+passages and its record-set and document-set hashes, the index's size against the indexed source bytes and the time taken; a
+caller that cannot read every segment is shown no total size, source bytes or update counts. `--rebuild` discards every
+passage first; it runs from this machine's own command line or for an operator, and a paired device's request is refused. The
+index is derived, owner-only and machine-local; it is never committed, exported or served, and deleting it loses nothing.
+Several processes on one machine (a worker and its run's MCP server) share it, and one never deletes it while another has it
+open. The analyzer normalizes (NFKC) and folds case with Unicode 16.0.0 tables built into Vericairn, so results never depend
+on the operating system.
 
 `--search <query>` on `context prepare`, `work brief`, `worker run` and `goal step`, repeatable up to five times, searches
 after the work's explicit selection. The top three new candidates of each query become optional sources pinned by exact
@@ -512,8 +516,10 @@ vericairn worker run <assignment id> --launcher claude-code --agent <principal> 
 `vericairn search replay <file>` replays every selection a file holds (a selection, a context package or its manifest),
 and `--record <operation id>` replays those an agent-run operation records, optionally only the one `--selection <hash>`
 names. A selection is rerun only on exactly its basis: this copy's index, this copy's records up to the selection's time,
-or its commit read from local Git history. Otherwise it says so and approximates nothing. Exit 0 means every selection was
-replayed and matched; 2 otherwise.
+or its commit read from local Git history. Otherwise it says so and approximates nothing. One request replays at most 20
+selections and names the rest; a selection a record keeps names its restricted segments only as one opaque `Restricted`
+entry, and replaying it says their basis was not confirmed. A selection that cannot be read is answered as unavailable. Exit 0
+means every selection was replayed and matched; 2 otherwise.
 
 `vericairn search measure <questions>` runs a question set and reports recall at 5 and 10, mean reciprocal rank, the
 index's size against its source bytes and query times; `--rebuild` adds the full build time. A question set is JSON

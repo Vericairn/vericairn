@@ -18,13 +18,19 @@ namespace Vericairn.Runtime.Search;
 /// exported, shared or served, and derived entirely from the records, pinned documents and knowledge drafts, so deleting it loses
 /// nothing. Each audience's passages form their own full-text segment with its own ranking statistics, so a search ranks, counts
 /// and excerpts only the segments its reader may read. A read-only runtime keeps the index in memory instead.
+/// <para>
+/// Several processes may share one index: a worker and its run's MCP server, or a daemon and a command. Each holds a shared lock
+/// on the index's lock file while it has the index open, so the files are deleted only when no other process has them open; every
+/// update runs under the database's write lock and every operation reads the segments afresh, so one process never answers from
+/// another's stale view.
+/// </para>
 /// </summary>
 internal sealed class KeywordIndex : IDisposable
 {
     internal const string FileName = "search.db";
 
-    // The storage layout. The method's version is kept beside it; a change to either rebuilds the index.
-    private const string Layout = "vericairn.search-index/2";
+    // The storage layout. The method's version and the analyzer's identity are kept beside it; a change to any of them rebuilds the index.
+    private const string Layout = "vericairn.search-index/3";
 
     /// <summary>
     /// The fixed column weights of the method, in column order: text 1, titles and headings 4, whole identifiers 10. Text is the first
@@ -41,11 +47,14 @@ internal sealed class KeywordIndex : IDisposable
     private static readonly string[] KindNames = ["record", "document", "knowledge"];
 
     private readonly SqliteConnection connection;
+    private readonly FileStream? openLock;
     private readonly Dictionary<string, (long Id, string Suffix)> segments = new(StringComparer.Ordinal);
+    private SqliteTransaction? active;
 
-    private KeywordIndex(SqliteConnection connection, string? path)
+    private KeywordIndex(SqliteConnection connection, string? path, FileStream? openLock)
     {
         this.connection = connection;
+        this.openLock = openLock;
         Path = path;
     }
 
@@ -53,19 +62,22 @@ internal sealed class KeywordIndex : IDisposable
     internal string? Path { get; }
 
     /// <summary>
-    /// Opens the index at a path, creating it owner-only, or in memory when the path is null. An index from another layout or
-    /// method, or one failing its integrity check, is deleted and rebuilt: it is derived, so nothing is lost.
+    /// Opens the index at a path, creating it owner-only, or in memory when the path is null. An index from another layout, method
+    /// or analyzer is cleared and rebuilt in place; one failing its integrity check is deleted and rebuilt when no other process has
+    /// it open. It is derived, so nothing is lost.
     /// </summary>
     internal static KeywordIndex Open(string? path)
     {
-        if (path is null) return Initialize(Connect(":memory:", memory: true), null);
+        if (path is null) return Initialize(Connect(":memory:", memory: true), null, null);
         path = System.IO.Path.GetFullPath(path);
         for (int attempt = 0; ; attempt++)
         {
             SqliteConnection? connection = null;
+            FileStream? shared = null;
             try
             {
                 OwnerOnlyFile(path);
+                shared = ShareLock(path);
                 connection = Connect(path, memory: false);
                 using (SqliteCommand check = connection.CreateCommand())
                 {
@@ -73,28 +85,55 @@ internal sealed class KeywordIndex : IDisposable
                     if (check.ExecuteScalar() as string != "ok") throw new InvalidDataException("The search index failed its integrity check.");
                 }
 
-                return Initialize(connection, path);
+                return Initialize(connection, path, shared);
             }
             catch (Exception exception) when (attempt == 0 && exception is SqliteException or InvalidDataException)
             {
                 connection?.Dispose();
-                Delete(path);
+                shared?.Dispose();
+                if (!TryDelete(path)) throw new IOException("The search index could not be read, and another process has it open, so it was not replaced.", exception);
             }
             catch
             {
                 connection?.Dispose();
+                shared?.Dispose();
                 throw;
             }
         }
     }
 
-    /// <summary>Deletes an index's files; the next search rebuilds it.</summary>
-    internal static void Delete(string path)
+    /// <summary>
+    /// Deletes an index's files, so the next search rebuilds it, unless another process has the index open: then nothing is deleted
+    /// and the answer is false.
+    /// </summary>
+    internal static bool TryDelete(string path)
     {
+        using FileStream? exclusive = ExclusiveLock(path);
+        if (exclusive is null) return false;
         foreach (string file in new[] { path, path + "-wal", path + "-shm", path + "-journal" })
         {
             if (File.Exists(file)) File.Delete(file);
         }
+
+        return true;
+    }
+
+    // The lock file beside the index: shared by every process with the index open, exclusive only to delete it. It is never deleted.
+    private static string LockPath(string path) => path + ".lock";
+
+    private static FileStream ShareLock(string path) => new(LockPath(path), LockOptions(FileShare.ReadWrite | FileShare.Delete));
+
+    private static FileStream? ExclusiveLock(string path)
+    {
+        try { return new FileStream(LockPath(path), LockOptions(FileShare.None)); }
+        catch (IOException exception) when (exception is not FileNotFoundException and not DirectoryNotFoundException) { return null; }
+    }
+
+    private static FileStreamOptions LockOptions(FileShare share)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = share };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        return options;
     }
 
     // The database is created as an empty owner-only file before SQLite opens it, so it is never readable by others, even for
@@ -112,7 +151,7 @@ internal sealed class KeywordIndex : IDisposable
         var info = new FileInfo(path);
         if (info.Exists && (info.LinkTarget is not null || (!OperatingSystem.IsWindows() && (info.UnixFileMode & ~(UnixFileMode.UserRead | UnixFileMode.UserWrite)) != 0)))
         {
-            Delete(path);
+            if (!TryDelete(path)) throw new IOException("The search index is not owner-only, and another process has it open, so it was not replaced.");
             info.Refresh();
         }
 
@@ -153,35 +192,81 @@ internal sealed class KeywordIndex : IDisposable
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS segments (id INTEGER PRIMARY KEY, audience TEXT NOT NULL UNIQUE, suffix TEXT NOT NULL UNIQUE, records TEXT, documents TEXT);
-        CREATE TABLE IF NOT EXISTS docs (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, revision TEXT NOT NULL, rev_hash BLOB NOT NULL, byte_hash BLOB NOT NULL, hash_mode TEXT, seg INTEGER, state INTEGER NOT NULL, size INTEGER, mtime INTEGER, at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS docs (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, fpath TEXT NOT NULL, revision TEXT NOT NULL, rev_hash BLOB NOT NULL, byte_hash BLOB NOT NULL, hash_mode TEXT, seg INTEGER, state INTEGER NOT NULL, size INTEGER, mtime INTEGER, at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS passages (rowid INTEGER PRIMARY KEY, seg INTEGER NOT NULL, kind INTEGER NOT NULL, rid TEXT, rhash BLOB, doc INTEGER, start INTEGER, length INTEGER, type TEXT, key TEXT, at INTEGER NOT NULL, superseded INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS passages_key ON passages (key) WHERE key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS passages_doc ON passages (doc) WHERE doc IS NOT NULL;
         """;
 
-    private static KeywordIndex Initialize(SqliteConnection connection, string? path)
+    private static KeywordIndex Initialize(SqliteConnection connection, string? path, FileStream? openLock)
     {
         try
         {
-            if (Scalar(connection, "SELECT value FROM meta WHERE key = 'layout';", tolerateMissing: true) is string layout && layout != Layout)
-                DropEverything(connection);
-            Execute(connection, Schema);
-            var index = new KeywordIndex(connection, path);
-            if (index.Meta("layout") != Layout || index.Meta("method") != Records.Search.SearchSelections.KeywordMethod)
+            var index = new KeywordIndex(connection, path, openLock);
+            bool dropped = false;
+            // Under the write lock, so two processes opening an old index together clear it once.
+            using (Scope scope = index.Begin(write: true))
             {
-                if (index.Meta("layout") is not null) index.Clear();
-                index.SetMeta("layout", Layout);
-                index.SetMeta("method", Records.Search.SearchSelections.KeywordMethod);
+                if (Scalar(connection, "SELECT value FROM meta WHERE key = 'layout';", tolerateMissing: true) is string layout && layout != Layout)
+                {
+                    DropEverything(connection);
+                    dropped = true;
+                }
+
+                Execute(connection, Schema);
+                if (index.Meta("layout") != Layout || index.Meta("method") != Records.Search.SearchSelections.KeywordMethod || index.Meta("analyzer") != SearchAnalyzer.Identity)
+                {
+                    if (index.Meta("layout") is not null) index.Clear();
+                    index.SetIdentity();
+                }
+
+                scope.Commit();
             }
 
+            if (dropped) index.Vacuum();
             index.LoadSegments();
             return index;
         }
         catch
         {
             connection.Dispose();
+            openLock?.Dispose();
             throw;
         }
+    }
+
+    private void SetIdentity()
+    {
+        SetMeta("layout", Layout);
+        SetMeta("method", Records.Search.SearchSelections.KeywordMethod);
+        SetMeta("analyzer", SearchAnalyzer.Identity);
+    }
+
+    /// <summary>A transaction, or nothing when one is already open: reads see one state, and a write holds the write lock from its start.</summary>
+    private Scope Begin(bool write)
+    {
+        if (active is not null) return new Scope(this, null);
+        active = connection.BeginTransaction(deferred: !write);
+        return new Scope(this, active);
+    }
+
+    private sealed class Scope(KeywordIndex owner, SqliteTransaction? transaction) : IDisposable
+    {
+        internal void Commit() => transaction?.Commit();
+
+        public void Dispose()
+        {
+            if (transaction is null) return;
+            transaction.Dispose();
+            owner.active = null;
+        }
+    }
+
+    // Compaction is opportunistic: another process reading the index defers it to a later update.
+    private void Vacuum()
+    {
+        try { Execute(connection, "VACUUM;"); }
+        catch (SqliteException exception) when (exception.SqliteErrorCode is 5 or 6) { }
     }
 
     // Another layout's index is derived and disposable: every table and index goes, and the file is compacted before it is rebuilt.
@@ -202,7 +287,6 @@ internal sealed class KeywordIndex : IDisposable
                 Execute(connection, $"DROP {type.ToUpperInvariant()} IF EXISTS \"{name.Replace("\"", "\"\"", StringComparison.Ordinal)}\";");
         }
 
-        Execute(connection, "VACUUM;");
     }
 
     private static object? Scalar(SqliteConnection connection, string sql, bool tolerateMissing)
@@ -229,15 +313,15 @@ internal sealed class KeywordIndex : IDisposable
     /// <summary>Removes every passage so the next update builds the index afresh.</summary>
     internal void Rebuild()
     {
-        using (SqliteTransaction transaction = connection.BeginTransaction())
+        using (Scope scope = Begin(write: true))
         {
+            LoadSegments();
             Clear();
-            SetMeta("layout", Layout);
-            SetMeta("method", Records.Search.SearchSelections.KeywordMethod);
-            transaction.Commit();
+            SetIdentity();
+            scope.Commit();
         }
 
-        Execute(connection, "VACUUM;");
+        Vacuum();
     }
 
     private void LoadSegments()
@@ -256,13 +340,14 @@ internal sealed class KeywordIndex : IDisposable
         return list;
     }
 
+    // Called under the write lock with the segments just read, so another process's segment is already known here.
     private (long Id, string Suffix) Segment(string audience)
     {
         if (segments.TryGetValue(audience, out var known)) return known;
         string suffix = SearchAudiences.Suffix(audience);
         Execute(connection, $"CREATE VIRTUAL TABLE IF NOT EXISTS f_{suffix} USING fts5(body, title, ident, content='', contentless_delete=1, tokenize=\"{Tokenizer}\");");
         using SqliteCommand insert = connection.CreateCommand();
-        insert.CommandText = "INSERT INTO segments (audience, suffix) VALUES ($audience, $suffix) RETURNING id;";
+        insert.CommandText = "INSERT INTO segments (audience, suffix) VALUES ($audience, $suffix) ON CONFLICT(audience) DO NOTHING; SELECT id FROM segments WHERE audience = $audience;";
         insert.Parameters.AddWithValue("$audience", audience);
         insert.Parameters.AddWithValue("$suffix", suffix);
         long id = (long)insert.ExecuteScalar()!;
@@ -327,8 +412,9 @@ internal sealed class KeywordIndex : IDisposable
         var unavailable = new List<string>();
         bool complete = true;
         bool Overdue(int count) => deadline is { } limit && count % 64 == 0 && DateTimeOffset.UtcNow > limit;
-        using (SqliteTransaction transaction = connection.BeginTransaction())
+        using (Scope scope = Begin(write: true))
         {
+            LoadSegments();
             // Records: remove what is gone or changed, add what is new, then correct supersession flags.
             var stored = new Dictionary<string, (long Row, byte[] Hash, bool Superseded, long Segment)>(StringComparer.Ordinal);
             using (SqliteCommand command = connection.CreateCommand())
@@ -426,7 +512,7 @@ internal sealed class KeywordIndex : IDisposable
             UpdateBases();
             if (complete) SetMeta("fingerprint", fingerprint);
             else SetMeta("fingerprint", "partial");
-            transaction.Commit();
+            scope.Commit();
         }
 
         Compact();
@@ -505,8 +591,10 @@ internal sealed class KeywordIndex : IDisposable
     private long InsertDocument(Pin pin, long? segment, int state, (long? Size, long? Mtime)? stat)
     {
         using SqliteCommand insert = connection.CreateCommand();
-        insert.CommandText = "INSERT INTO docs (path, revision, rev_hash, byte_hash, hash_mode, seg, state, size, mtime, at) VALUES ($path, $revision, $revHash, $byteHash, $mode, $seg, $state, $size, $mtime, $at) RETURNING id;";
+        insert.CommandText = "INSERT INTO docs (path, fpath, revision, rev_hash, byte_hash, hash_mode, seg, state, size, mtime, at) VALUES ($path, $fpath, $revision, $revHash, $byteHash, $mode, $seg, $state, $size, $mtime, $at) RETURNING id;";
         insert.Parameters.AddWithValue("$path", pin.Path);
+        // The path as the analyzer folds it, so an exact path match is exact for any script, not only ASCII.
+        insert.Parameters.AddWithValue("$fpath", SearchAnalyzer.Normalize(pin.Path));
         insert.Parameters.AddWithValue("$revision", pin.Revision);
         insert.Parameters.AddWithValue("$revHash", HashBytes(pin.RevisionHash));
         insert.Parameters.AddWithValue("$byteHash", HashBytes(pin.ByteHash));
@@ -589,6 +677,7 @@ internal sealed class KeywordIndex : IDisposable
     /// <summary>The bases of the segments a reader may read, in the fixed audience order; a segment with no passages yet has the empty sets' hashes.</summary>
     internal IReadOnlyList<SegmentBasis> Bases(IEnumerable<string> audiences)
     {
+        LoadSegments();
         string emptyRecords = RecordSetHash([]);
         string emptyDocuments = DocumentSetHash([]);
         var result = new List<SegmentBasis>();
@@ -633,6 +722,9 @@ internal sealed class KeywordIndex : IDisposable
     /// </summary>
     internal (IReadOnlyList<Hit> Hits, bool More) Search(SearchQuery query, IReadOnlyList<string> audiences, int limit)
     {
+        // One read transaction: the segments, matches and passages all come from one state of the index.
+        using Scope scope = Begin(write: false);
+        LoadSegments();
         string expression = query.Expression();
         var found = new Dictionary<long, (string Audience, long Score, bool Exact, string Order)>();
         string[] exact = query.Exact.ToArray();
@@ -673,7 +765,7 @@ internal sealed class KeywordIndex : IDisposable
                 }
 
                 string list = string.Join(", ", names);
-                command.CommandText = $"SELECT p.rowid, p.rid, d.path, p.start FROM passages AS p LEFT JOIN docs AS d ON d.id = p.doc WHERE p.seg = $seg AND (lower(p.rid) IN ({list}) OR p.key IN ({list}) OR lower(d.path) IN ({list})){where};";
+                command.CommandText = $"SELECT p.rowid, p.rid, d.path, p.start FROM passages AS p LEFT JOIN docs AS d ON d.id = p.doc WHERE p.seg = $seg AND (lower(p.rid) IN ({list}) OR p.key IN ({list}) OR d.fpath IN ({list})){where};";
                 command.Parameters.AddWithValue("$seg", segment.Id);
                 using SqliteDataReader reader = command.ExecuteReader();
                 while (reader.Read())
@@ -772,6 +864,7 @@ internal sealed class KeywordIndex : IDisposable
     internal string? AsOf(IEnumerable<string> audiences)
     {
         // Only the reader's own segments: a restricted record's time changes nothing another reader sees.
+        LoadSegments();
         long? latest = null;
         foreach (string audience in audiences)
         {
@@ -786,7 +879,11 @@ internal sealed class KeywordIndex : IDisposable
     }
 
     /// <summary>The audiences of every segment the index holds.</summary>
-    internal IReadOnlyList<string> Audiences() => segments.Keys.ToList();
+    internal IReadOnlyList<string> Audiences()
+    {
+        LoadSegments();
+        return segments.Keys.ToList();
+    }
 
     /// <summary>The paths of the documents whose pinned bytes are indexed.</summary>
     internal IReadOnlySet<string> IndexedDocuments() => DocumentPaths(StateIndexed).ToHashSet(StringComparer.Ordinal);
@@ -829,7 +926,7 @@ internal sealed class KeywordIndex : IDisposable
             if (!reader.Read() || reader.GetInt64(0) < 256 || reader.GetInt64(0) * 10 < reader.GetInt64(1)) return;
         }
 
-        Execute(connection, "VACUUM;");
+        Vacuum();
     }
 
     /// <summary>Moves the write-ahead log into the database, so its size is measured where it lives.</summary>
@@ -850,7 +947,7 @@ internal sealed class KeywordIndex : IDisposable
     /// <summary>Exercises the full-text module exactly as the index uses it: a segment, a contentless passage, a ranked match and a delete.</summary>
     internal bool SelfTest()
     {
-        using SqliteTransaction transaction = connection.BeginTransaction();
+        using Scope scope = Begin(write: true);
         // Three passages, so the matching one's term is rare enough to score above zero.
         InsertPassage(new SearchPassage(SearchAudiences.Internal, "record", 0, 0, "probe", "probe-1", "context-02 01m6hrm89g55req0qrdvpjwqfz", "keyword search", "a probe passage"),
             KindRecord, "01M6HRM89G55REQ0QRDVPJWQFZ", new byte[32], null, 0, false);
@@ -860,7 +957,7 @@ internal sealed class KeywordIndex : IDisposable
         (IReadOnlyList<Hit> hits, _) = Search(query!, [SearchAudiences.Internal], 10);
         bool ok = hits.Count == 1 && hits[0].Score > 0 && !hits[0].Exact && hits[0].Record == "01M6HRM89G55REQ0QRDVPJWQFZ";
         DeletePassage(hits.Count == 1 ? hits[0].Row : 0, Segment(SearchAudiences.Internal).Id);
-        transaction.Rollback();
+        scope.Dispose();
         LoadSegments();
         return ok;
     }
@@ -873,7 +970,11 @@ internal sealed class KeywordIndex : IDisposable
         return (string)command.ExecuteScalar()!;
     }
 
-    public void Dispose() => connection.Dispose();
+    public void Dispose()
+    {
+        connection.Dispose();
+        openLock?.Dispose();
+    }
 
     private static void Execute(SqliteConnection connection, string sql)
     {

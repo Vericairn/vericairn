@@ -12,6 +12,8 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Search;
+using Vericairn.Records.Types;
+using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Search;
 using Vericairn.Runtime.Service;
 
@@ -54,13 +56,13 @@ public class SearchTests
             CanonicalJson.Serialize(JsonSerializer.SerializeToElement(filtered.ToJson())));
     }
 
+    // Runtime.Tests loads ICU; Cli.Tests runs the same goldens in the product's invariant mode, so both modes must give the same bytes.
     [Fact]
-    public void TheAnalyzerFoldsCaseAndCompatibilityFormsKeepsIdentifiersWholeAndSplitAndDoesNotStem()
+    public void TheAnalyzerFoldsCaseAndCompatibilityFormsKeepsIdentifiersWholeAndSplitAndDoesNotStemWithIcuLoaded()
     {
-        SearchAnalyzer.Analysis analysis = SearchAnalyzer.Analyze("CONTEXT-02 design/search.md 0.9.2 sha256:ABC1 Running ÉCOLE ﬁle end.");
-        Assert.Equal(["context", "02", "design", "search", "md", "0", "9", "2", "sha256", "abc1", "running", "école", "file", "end"], analysis.Parts);
-        Assert.Equal(["context-02", "design/search.md", "0.9.2", "sha256:abc1"], analysis.Whole);
-        Assert.Equal("\"a\"\"b\"", SearchAnalyzer.Quote("a\"b"));
+        Assert.False(AppContext.TryGetSwitch("System.Globalization.Invariant", out bool invariant) && invariant);
+        Assert.Equal("fi", "\uFB01".Normalize(NormalizationForm.FormKC));
+        SearchGoldens.Analyzer();
     }
 
     [Fact]
@@ -244,6 +246,29 @@ public class SearchTests
         JsonObject recorded = EstateService.ForRecord(wide.Selection.Value);
         Assert.Empty(recorded["candidates"]!.AsArray());
         Assert.Equal(SearchSelections.Limited, recorded["limited"]!.GetValue<string>());
+        // Nor its label or its segment's hashes: the reader's audiences and the index segments name only what every record
+        // reader may read, and one opaque Restricted entry, without hashes, for the rest (Members only among them).
+        string text = recorded.ToJsonString();
+        Assert.DoesNotContain("partners", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(SearchAudiences.Members, text, StringComparison.Ordinal);
+        Assert.Equal(["Internal", "Public", "Restricted"], recorded["reader"]!["audiences"]!.AsArray().Select(a => a!.GetValue<string>()));
+        JsonArray segments = recorded["index"]!["segments"]!.AsArray();
+        Assert.Equal(["Internal", "Public", "Restricted"], segments.Select(s => s!["audience"]!.GetValue<string>()));
+        Assert.Equal(["audience"], segments[2]!.AsObject().Select(p => p.Key));
+        foreach (KeyValuePair<string, JsonElement> restricted in wide.Selection.Value.GetProperty("index").GetProperty("segments").EnumerateArray()
+            .Where(s => !SearchAudiences.CoversRecordReaders(s.GetProperty("audience").GetString()!))
+            .SelectMany(s => new[] { KeyValuePair.Create("records", s.GetProperty("records")), KeyValuePair.Create("documents", s.GetProperty("documents")) })
+            .Where(h => h.Value.GetString() != KeywordIndex.RecordSetHash([]) && h.Value.GetString() != KeywordIndex.DocumentSetHash([])))
+            Assert.DoesNotContain(restricted.Value.GetString()!, text, StringComparison.Ordinal);
+        Assert.Equal(recorded.ToJsonString(), EstateService.ForRecord(JsonSerializer.SerializeToElement(recorded)).ToJsonString());
+        var findings = new FindingList();
+        SearchSelections.Validate(new BodyReader(JsonSerializer.SerializeToElement(recorded), "selection", findings, 3), recordReaders: true);
+        Assert.False(findings.HasErrors, string.Join("; ", findings.Select(f => f.Message)));
+        // The live selection names a restricted audience, which a record may not carry.
+        findings = new FindingList();
+        SearchSelections.Validate(new BodyReader(wide.Selection.Value, "selection", findings, 3), recordReaders: true);
+        Assert.Contains(findings, f => f.Code == "search.selection-audience" && f.Location.Contains("audiences", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "search.selection-audience" && f.Location.Contains("segments", StringComparison.Ordinal));
 
         // A reader of the standard audiences alone never sees it, and is told completeness cannot be confirmed.
         service.SearchAudienceRule = (_, principal) => principal == Reader ? SearchAudiences.Standard : null;
@@ -401,6 +426,115 @@ public class SearchTests
         Assert.StartsWith("rank 1:", Assert.Single(differs.Differences), StringComparison.Ordinal);
         altered["more"] = !altered["more"]!.GetValue<bool>();
         Assert.Contains("Not a valid", Assert.Single(service.SearchReplay(new SearchReplayRequest(JsonSerializer.SerializeToElement(altered))).Outcomes).Message, StringComparison.Ordinal);
+
+        // A selection canonical JSON cannot hold, a fraction or a duplicate member, is answered as unavailable, never thrown.
+        string canonical = CanonicalJson.Serialize(committed.Selection.Value);
+        foreach (string unreadable in new[] { canonical.Replace("\"limit\":10", "\"limit\":10.5", StringComparison.Ordinal), "{\"more\":false," + canonical[1..] })
+        {
+            using JsonDocument given = JsonDocument.Parse(unreadable);
+            SearchReplayOutcome refused = Assert.Single(service.SearchReplay(new SearchReplayRequest(given.RootElement)).Outcomes);
+            Assert.False(refused.Replayed);
+            Assert.Equal("unavailable", refused.Basis);
+            Assert.Contains("Not a valid", refused.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ACommitWithAFileNameThatIsNotUtf8IsReadWithoutThatFile()
+    {
+        TestPrerequisites.RequireGit();
+        using var estate = new SearchEstate();
+        foreach (string[] arguments in new string[][] { ["init", "-q", "-b", "main"], ["add", "."] })
+            RunEstate.Git(estate.Root, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", .. arguments]);
+        string blob = RunEstate.Git(estate.Root, "hash-object", "-w", "design/search-notes.md");
+        // A name no UTF-8 decoder accepts can only reach the index through plumbing, as a quoted path with an octal escape.
+        var info = new System.Diagnostics.ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardError = true, WorkingDirectory = estate.Root };
+        foreach (string argument in new[] { "update-index", "--index-info" }) info.ArgumentList.Add(argument);
+        using (var process = System.Diagnostics.Process.Start(info)!)
+        {
+            process.StandardInput.Write("100644 " + blob + "\t\"docs/\\377bad.md\"\n");
+            process.StandardInput.Close();
+            Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds));
+            Assert.True(process.ExitCode == 0, process.StandardError.ReadToEnd());
+        }
+
+        RunEstate.Git(estate.Root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "The estate");
+        string head = RunEstate.Git(estate.Root, "rev-parse", "HEAD");
+        Assert.Contains("bad.md", RunEstate.Git(estate.Root, "ls-tree", "-r", "--name-only", head, "--", "docs"), StringComparison.Ordinal);
+        IReadOnlyList<SourceFile>? tree = new Adapters.Git.GitCommandAdapter().ReadTreeAtCommit(estate.Root, head, ["records", "design", "docs"]);
+        Assert.NotNull(tree);
+        Assert.Contains(tree, f => f.Path == "design/search-notes.md");
+        Assert.DoesNotContain(tree, f => f.Path.Contains("bad.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TwoProcessesSharingTheIndexSeeEachOthersSegmentsAndNeitherDeletesItFromUnderTheOther()
+    {
+        using var estate = new SearchEstate();
+        using EstateService worker = estate.Open();
+        Assert.NotEmpty(worker.Search(new SearchRequest("keyword index")).Candidates);
+        // The run's embedded MCP server: a second runtime on the same estate and index.
+        using EstateService server = estate.Open();
+        estate.Document("docs/knowledge/article/acme.md", "Acme", "---\nkind: article\nid: acme\ntitle: \"Zebra crossings\"\naudience: \"acquisition target acme\"\n---\n\n# Zebra crossings\n\nZebra crossings are striped.\n");
+        SearchResponse first = server.Search(new SearchRequest("zebra crossings"));
+        Assert.NotEmpty(first.Candidates);
+
+        // The worker answers from the index the server brought up to date, with the segment the server added.
+        SearchResponse seen = worker.Search(new SearchRequest("zebra crossings"));
+        Assert.True(seen.Current);
+        Assert.Equal(first.Candidates.Select(c => c.Pin), seen.Candidates.Select(c => c.Pin));
+
+        // A second draft for the same audience: the worker indexes it into the segment the server created, without a conflict.
+        estate.Document("docs/knowledge/article/acme-herds.md", "Acme herds", "---\nkind: article\nid: acme-herds\ntitle: \"Zebra herds\"\naudience: \"acquisition target acme\"\n---\n\n# Zebra herds\n\nZebra herds graze.\n");
+        SearchResponse added = worker.Search(new SearchRequest("zebra herds"));
+        Assert.Null(added.Problem);
+        Assert.NotEmpty(added.Candidates);
+        Assert.Equal(added.Candidates.Select(c => c.Pin), server.Search(new SearchRequest("zebra herds")).Candidates.Select(c => c.Pin));
+
+        // A failure in one closes its index but never deletes the file the other has open; both keep answering from it.
+        string path = worker.SearchIndexPath!;
+        worker.ResetSearchStoreForTests();
+        Assert.True(File.Exists(path));
+        Assert.False(KeywordIndex.TryDelete(path));
+        Assert.NotEmpty(server.Search(new SearchRequest("zebra herds")).Candidates);
+        Assert.NotEmpty(worker.Search(new SearchRequest("zebra herds")).Candidates);
+        worker.ResetSearchStoreForTests();
+        server.ResetSearchStoreForTests();
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void AnExactPathMatchFoldsNonAsciiPathsInAnyCaseOrNormalizationForm()
+    {
+        // Pinned paths are ASCII today; the folded path column keeps exact matches exact for any script the index is given.
+        using var estate = new SearchEstate(content: false);
+        using KeywordIndex index = KeywordIndex.Open(null);
+        byte[] bytes = Encoding.UTF8.GetBytes("# Notes\n\nPlain words only.\n");
+        var pin = new KeywordIndex.Pin("docs/R\u00C9SUM\u00C9-notes.md", "01M6S000000000000000000099", ContentHash.Sha256(bytes), ContentHash.Sha256(bytes), null, "Notes", 0, false);
+        index.Update(EstateLoader.LoadIdentities(estate.Root, [], null), new Dictionary<string, RecordFile>(StringComparer.Ordinal), [pin], "f", _ => bytes, null);
+        foreach (string asked in new[] { "docs/r\u00E9sum\u00E9-notes.md", "DOCS/RE\u0301SUME\u0301-NOTES.MD" })
+        {
+            (IReadOnlyList<KeywordIndex.Hit> hits, _) = index.Search(SearchQuery.Parse(asked).Query!, SearchAudiences.Standard, 10);
+            Assert.Contains(hits, h => h.Exact && h.Path == pin.Path);
+        }
+    }
+
+    [Fact]
+    public void AReaderOfSomeSegmentsIsToldNoTotalSizeSourceBytesOrCounts()
+    {
+        using var estate = new SearchEstate();
+        using EstateService service = estate.Open();
+        SearchIndexResponse whole = service.SearchIndex(new SearchIndexRequest());
+        Assert.NotNull(whole.IndexBytes);
+        Assert.NotNull(whole.SourceBytes);
+        service.SearchAudienceRule = (_, _) => [SearchAudiences.Internal];
+        SearchIndexResponse narrow = service.SearchIndex(new SearchIndexRequest());
+        Assert.Null(narrow.Problem);
+        Assert.Null(narrow.IndexBytes);
+        Assert.Null(narrow.SourceBytes);
+        Assert.Equal([SearchAudiences.Internal], narrow.Segments.Select(s => s.Audience));
+        Assert.Contains("Sizes and counts cover segments this reader cannot read, so they are omitted", narrow.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("index bytes", narrow.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -460,7 +594,15 @@ public class SearchTests
             SearchResponse allowed = service.Search(new SearchRequest("keyword index"));
             Assert.Null(allowed.Problem);
             Assert.Equal(SearchEstate.Builder, allowed.Selection!.Value.GetProperty("reader").GetProperty("principal").GetString());
+            // A paired device brings the index up to date, but only an operator, or this machine's own caller, rebuilds it whole.
+            Assert.Null(service.SearchIndex(new SearchIndexRequest()).Problem);
+            Assert.Equal("denied", service.SearchIndex(new SearchIndexRequest(Rebuild: true)).Problem!.Code);
         }
+
+        DeviceStanding operatorStanding = service.Standing(operatorDevice.Id)!;
+        using (EstateService.RequestDeviceScope request = service.ForDeviceRequest(operatorStanding.Identity, operatorStanding.PublicKey))
+            Assert.Null(service.SearchIndex(new SearchIndexRequest(Rebuild: true)).Problem);
+        Assert.Null(service.SearchIndex(new SearchIndexRequest(Rebuild: true)).Problem);
 
         Assert.True(service.DeviceRevoke(new RevokeRequest(builderDevice.Id, SearchEstate.Operator, "Withdraw the builder's device.")).Ok);
         using (EstateService.RequestDeviceScope request = service.ForDeviceRequest(standing.Identity, standing.PublicKey))
@@ -484,34 +626,7 @@ public class SearchTests
     }
 
     [Fact]
-    public void TheSelectionAndTheSearchManifestMatchTheirGoldenBytesOnEveryPlatform()
-    {
-        // The deterministic estate gives the same records, hashes and pins everywhere, so ranks, rounded scores, the selection's
-        // hash and the manifest's selections must be byte-identical on every platform the suites run on.
-        using var estate = new SearchEstate();
-        using EstateService service = estate.Open();
-        SearchResponse search = service.Search(new SearchRequest("keyword index originals catalog"));
-        Golden("selection-1.json", CanonicalJson.SerializePrettyUtf8(search.Selection!.Value));
-        ContextResponse package = service.Context(new ContextRequest("W-1", null, ["original bytes", "heron catalog"]));
-        Golden("manifest-2.json", CanonicalJson.SerializePrettyUtf8(package.Package!.Payload.GetProperty("manifest").GetProperty("content")));
-    }
-
-    private static void Golden(string name, byte[] actual)
-    {
-        string? directory = AppContext.BaseDirectory;
-        while (directory is not null && !File.Exists(Path.Combine(directory, "Vericairn.slnx"))) directory = Path.GetDirectoryName(directory);
-        string path = Path.Combine(directory ?? throw new InvalidOperationException("The test repository is unavailable."), "tests", "fixtures", "search", name);
-        // Fixture maintenance only: a missing golden is written once for review, never an existing one replaced.
-        if (!File.Exists(path) && Environment.GetEnvironmentVariable("VERICAIRN_WRITE_SEARCH_GOLDENS") == "1")
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            using var created = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
-            created.Write(actual);
-        }
-
-        Assert.True(File.Exists(path), "The golden " + name + " is missing.");
-        Assert.True(File.ReadAllBytes(path).AsSpan().SequenceEqual(actual), "The golden " + name + " changed:\n" + Encoding.UTF8.GetString(actual));
-    }
+    public void TheSelectionAndTheSearchManifestMatchTheirGoldenBytesOnEveryPlatformWithIcuLoaded() => SearchGoldens.SelectionAndManifest();
 
     [Fact]
     public void TheEngineProbeRanksAPassageWithTheFullTextModule()
