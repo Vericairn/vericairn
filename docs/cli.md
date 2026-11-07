@@ -378,7 +378,16 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 ```
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
-per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
+per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused.
+
+From PROC-10 (0.9.2), `goal next` also routes each review before hand-off as `<step> review`, and each step's required
+attention as route state `attention`. For a review, `goal step` records an assignment whose `step.review` names the items and
+the exact subject, with an agent's run or a person's ask. For required attention, `goal step` records one ask to the sponsor
+about the record that raised it and dispatches nothing for it. The run's own required attention, consecutive failed steps or an
+evaluation of impossible, is asked first and holds every dispatch until a decision answers it. With `--json`, `goal next`
+gains `attention`, `held` and each step's `review` and `attention`, and `goal show`'s flow gains each step's `attempts`,
+`attemptsUsed`, `attemptsAllowed`, `reviews`, `attention`, `failed`, `failure` and `rerun`, and the run's `attention`. See
+[hand-offs, reviews and failure routes](operator-guide.md#hand-offs-reviews-and-failure-routes-092). See the
 [operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
 
 ## `vericairn estate cache rebuild` (0.9.2)
