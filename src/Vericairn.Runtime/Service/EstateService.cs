@@ -86,11 +86,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var service = new EstateService(EstateSession.Open(root));
-        if (workerOptions is not null) service.WorkerOptions = workerOptions;
-        service.JudgeInterruptedBatches();
-        service.runDispatch.RecoverSettlements();
-        service.ReconcileRunAttention();
-        return service;
+        try
+        {
+            if (workerOptions is not null) service.WorkerOptions = workerOptions;
+            service.JudgeInterruptedBatches();
+            service.runDispatch.RecoverSettlements();
+            service.ReconcileRunAttention();
+            return service;
+        }
+        // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.
+        catch { service.Dispose(); throw; }
     }
 
     // Kept separate from retained-observation recovery: existing settlements need only their records.
@@ -312,18 +317,22 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
-        if (IsPolicyWrite(draft) || request.Type is "result" or "review")
+        if (request.Type is "result" or "review")
+        {
+            lock (gate)
+            {
+                return NewEvidenceLocked(request, draft, session.Load());
+            }
+        }
+
+        if (IsPolicyWrite(draft))
         {
             lock (gate)
             {
                 EstateModel model = session.Load();
-                bool dutyEvidence = IsDutyEvidence(draft, model);
-                if (request.Type is "result" or "review" && !dutyEvidence) return WriteLocked(draft, model);
                 if (request.At is not null || request.Id is not null) return Refuse("Policy and duty evidence authoring uses the runtime's fresh time and record identity.");
-                if (dutyEvidence && (subject is null || !model.ById.TryGetValue(subject.Id, out RecordEnvelope? evidenceSubject) ||
-                    !model.IsCurrent(evidenceSubject) || subject != evidenceSubject.Reference)) return PolicyConflict();
                 string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
-                    : request.Type == "policy-exception" || dutyEvidence ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
+                    : request.Type == "policy-exception" ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
                 if (expected is null || request.Expected != expected) return PolicyConflict();
                 return SignedPolicyWrite(draft, model);
             }
@@ -2541,8 +2550,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, a decision dated after its own record, and a result whose output no longer has the bytes it claims. Records not
-    /// stored yet get the content checks a stored file gets, on their canonical bytes, since the checks of stored files cannot see them.
+    /// themselves, a decision dated after its own record, an acceptance by a principal other than the operator on a review that did
+    /// not pass, and a result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored
+    /// file gets, on their canonical bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
@@ -2569,6 +2579,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new acceptance by a principal other than the operator rests only on reviews that passed (FIX-85).
+        foreach (Finding finding in model.Findings.Where(f => f.Code == AcceptanceType.BasisOutcomeCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.basis")))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

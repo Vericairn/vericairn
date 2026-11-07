@@ -21,7 +21,7 @@ internal sealed class RecordsNewCommand : Command
         var supersedesOption = new Option<string?>("--supersedes") { Description = "Id of the record this one replaces." };
         var atOption = new Option<string?>("--at") { Description = "Authoring time, for example 2026-10-13T14:00:00Z (default: now)." };
         var idOption = new Option<string?>("--id") { Description = "Explicit record id; only the root operator principal needs this." };
-        var expectedOption = new Option<string?>("--expected") { Description = "Required for policy or placement authoring: expected predecessor or policy hash, or the canonical body hash for a creation." };
+        var expectedOption = new Option<string?>("--expected") { Description = "Required for policy or placement authoring and for duty evidence, a result with duties or a review of one, which also needs an admitted device whose key this runtime holds: the expected predecessor, policy or current subject hash, or the canonical body hash for a creation. Optional for another result or review, which needs no device; when given, it holds the current subject." };
         Arguments.Add(typeArgument);
         Options.Add(byOption);
         Options.Add(bodyOption);

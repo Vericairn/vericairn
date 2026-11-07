@@ -53,4 +53,45 @@ public sealed class DutyTransportCommandsTests
         }
         finally { Directory.Delete(scratch, true); }
     }
+
+    [Fact]
+    public void AnOrdinaryReviewWithReadNeedsNoDutyPrerequisitesAndADutyReviewNamesWhatItLacks()
+    {
+        // The estate report's cases (#299), on an estate whose runtime holds no device key.
+        Assert.Contains("admitted device", CliHarness.Ok("records", "new", "--help").Out, StringComparison.Ordinal);
+        Assert.Contains("admitted device", CliHarness.Ok("work", "review", "--help").Out, StringComparison.Ordinal);
+        Assert.Contains("needs neither", CliHarness.Ok("records", "describe", "review").Out, StringComparison.Ordinal);
+        using var fixture = new PolicyFixture();
+        var policy = fixture.Policy();
+        var ordinary = fixture.Result(sign: false);
+        fixture.Estate.SetClock(new DateTimeOffset(2026, 10, 13, 14, 0, 0, TimeSpan.Zero));
+        var duty = fixture.Result(fixture.DutyLink(policy));
+        string scratch = CliHarness.TempDirectory("review-read");
+        try
+        {
+            string root = fixture.Estate.Root;
+            string operatorId = fixture.Estate.OperatorId;
+            string plain = CliHarness.WriteJson(scratch, "plain.json", """{"independence":"operator","outcome":"pass","summary":"Reviewed the exact result.","findings":[]}""");
+            string read = CliHarness.WriteJson(scratch, "read.json", $$"""{"independence":"operator","outcome":"pass","summary":"Reviewed the exact result.","findings":[],"read":[{"type":"result","id":"{{ordinary.Id}}","hash":"{{ordinary.ComputedHash}}"}]}""");
+            string ordinarySubject = $"result:{ordinary.Id}:{ordinary.ComputedHash}";
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "review", "--by", operatorId, "--subject", ordinarySubject, "--body", plain);
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "review", "--by", operatorId, "--subject", ordinarySubject, "--body", read);
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "review", "--by", operatorId, "--subject", ordinarySubject, "--body", read, "--expected", ordinary.ComputedHash);
+            string dutySubject = $"result:{duty.Id}:{duty.ComputedHash}";
+            using var api = EstateService.Open(root);
+            int before = api.Session.Load().Records.Count;
+            CliHarness.Outcome unexpected = CliHarness.Run("--estate", root, "records", "new", "review", "--by", operatorId, "--subject", dutySubject, "--body", plain);
+            Assert.Equal(2, unexpected.Code);
+            Assert.Contains("A review of a result with duties is signed duty evidence", unexpected.Err, StringComparison.Ordinal);
+            Assert.Contains("--expected", unexpected.Err, StringComparison.Ordinal);
+            Assert.Contains("admitted device", unexpected.Err, StringComparison.Ordinal);
+            CliHarness.Outcome deviceless = CliHarness.Run("--estate", root, "records", "new", "review", "--by", operatorId, "--subject", dutySubject, "--body", plain, "--expected", duty.ComputedHash);
+            Assert.Equal(2, deviceless.Code);
+            Assert.Contains("admitted device", deviceless.Err, StringComparison.Ordinal);
+            Assert.DoesNotContain("expected hash", deviceless.Err, StringComparison.Ordinal);
+            Assert.Equal(before, api.Session.Load().Records.Count);
+            Assert.False(api.Session.Load().Findings.HasErrors, string.Join('\n', api.Session.Load().Findings));
+        }
+        finally { Directory.Delete(scratch, true); }
+    }
 }

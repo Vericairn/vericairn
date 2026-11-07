@@ -324,6 +324,8 @@ vericairn records new review --by <reviewer id> --subject result:<result id>:<re
 
 `independence` must match the facts: `self` when the reviewer authored the subject, `independent-agent` for a different agent principal, `operator` for the operator; the tool refuses a mislabeled review. Outcomes are `pass`, `findings` or `fail`.
 
+A result review may also list the exact records it read in `read` (`[{"type": "result", "id": "...", "hash": "sha256:..."}]`). From 0.9.2 (FIX-94), what a review needs depends only on its result. A review of a result without duties needs no `--expected` and no device, with or without `read`. Given `--expected`, the review is refused unless that is the result's current hash. A review of a result with duties is signed duty evidence, with or without `read`. It needs `--expected` with the current result hash and an admitted device of the reviewer whose key this runtime holds. A missing hash or device is refused by name, while a stale hash is a conflict. `work review` always records a signed review, so it always needs both. [Inspecting estate policies](policies.md) describes duty evidence.
+
 An acceptance closes a result or a work order, pinned to its exact hash:
 
 ```sh
@@ -335,6 +337,8 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 ```
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
+
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews that passed: a new one whose basis names a review with outcome `findings` or `fail` is refused (`acceptance.basis-outcome`), whatever authority scope it holds. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none, on the operator's own judgment. The rule is prospective. Acceptances already in the estate keep their reading and still accept their subject; `estate check` and `records validate` report each one that names such a review as information, with the review and its outcome.
 
 ### Closing finished steps (0.8.4)
 
@@ -534,6 +538,14 @@ The API returns this same response with HTTP 200 and the SDK preserves it. Unkno
 hashes retain HTTP 404 and SDK null. Check the identifier for the latter; for a resolution problem,
 use the named references to recover the exact retained bytes. Replacing them with current source
 bytes does not restore the historical basis. Reading a recovered basis grants no submission authority.
+
+From 0.9.2 (FIX-95), a basis keeps the files of a repository read at an exact commit, such as an
+evidence repository a duty result names, by path and hash alone, and `release basis` reads them from
+that repository's Git objects at the commit, through its registered clone. A source finding whose
+revision is a commit means no clone registered here holds that commit at that path and hash; register one
+with `vericairn sources clone <path> --resource <id>`. Submission writes only the estate's own working-tree
+files beside the basis object; commit them with it. Copies of exact-commit files that 0.9.1 and earlier
+wrote are no longer needed to read their bases. See [estate policies](policies.md) for the retention bound.
 
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
@@ -761,6 +773,25 @@ A readable interrupted batch still reports `batch.incomplete` under its existing
 the unreadable journal's write hold. This is local recovery state, not a new record format.
 
 Objects are content-addressed bytes beside the records: `objects put <file>`, `objects list`, `objects verify` reads every object and checks its bytes against its name.
+
+### A damaged live store (0.9.2)
+
+Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
+
+From 0.9.2 (FIX-93), a live store that SQLite cannot use, such as a malformed database, stops the command with a diagnostic instead of an unhandled exception. The diagnostic quotes SQLite's error, names the profile and the store's path, and gives the profile's recovery route. A store that another runtime holds says so, and the route is to let that command finish or stop the daemon.
+
+For a repository-synced estate, rebuild the cache from the repository's record files:
+
+```sh
+vericairn runtime status
+vericairn runtime stop
+vericairn estate cache rebuild
+vericairn estate check
+```
+
+`estate cache rebuild` moves `live.db` and its `-wal`, `-shm` and any `-journal` file together, unchanged, into a new `failed-cache/<UTC time>` directory beside the cache, for diagnosis. It then reads every record file in the repository into a new cache and reports how many it read. The record files are not changed. It refuses while a daemon answers for the estate, and while another command of 0.9.2 or later has the estate open. Every writable session holds the estate's writer lock, `live.lock`, shared, and the rebuild holds it alone. A command that starts during a rebuild is refused until it finishes. A daemon of an earlier release takes no such lock, so stop it first. The cache also keeps notes that exist only on this machine: interim progress notes, attention acknowledgments and an unfinished operator action's checkpoint. The rebuilt cache starts without them, and they stay in the kept files. Finish an operator action before rebuilding where you can. Delete a kept directory once it is no longer needed.
+
+A local-only estate's database is never moved, deleted or rebuilt as a cache, and `estate cache rebuild` refuses it without changing anything. Stop every daemon and command that uses it, and keep `live.db` with its `-wal` and `-shm` files together. Then recover from a backup of that directory or from an earlier `estate export`. `estate restore` restores an export as a repository-synced estate.
 
 ## 11. The daemon
 
@@ -1574,6 +1605,18 @@ member publication recovers from its original journal when the estate reopens.
 The queue and one-step command are not MCP tools.
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
+
+From 0.9.2, an action that stopped after its merge, for example while main's
+check was still running, is finished from its own records. Once the merge is
+recorded, resuming observes only the target run at the merge commit; it never
+recreates the deleted branch, signs or commits again, and leaves the clone on
+whatever branch it is on, usually main. `operator unfinished` shows the clone's
+unfinished action: its record id, type and subject, branch, head, pull request,
+stage, and what finishing it needs. `operator unfinished --finish --by <operator>`
+finishes it once the target checks pass. Starting the next `operator record`
+does the same first, then proceeds; that next action tolerates the finished
+action's own uncommitted receipts. An action that has not merged still refuses
+a new one, and the refusal names its record id, type and subject.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or

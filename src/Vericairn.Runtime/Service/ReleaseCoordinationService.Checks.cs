@@ -73,6 +73,7 @@ internal sealed partial class ReleaseCoordinationService
             "release.clone-dirty" => "Commit, stash or remove the changes in every registered clone read by the gate, then check again.",
             "release.clone" or "release.clones" or "release.repository" => "Register a readable clone of the destination repository resource and install its source adapter, then check again.",
             "release.basis-size" or "release.basis-file-size" => "Reduce the retained source selection to fit each object within the estate's object limit, then check again.",
+            "release.basis-retained" => "Reduce the files the basis reads from working trees, the estate's own documents and any selected repository read without an exact commit, then check again.",
             "release.signature" => "Admit and make available a signing device for the submitting principal before submission. The check itself never signs or requests presence.",
             "signature.before-admission" or "signature.revoked" or "signature.unadmitted" => "Verify the authoring clock and use a device admitted at the proposed record's time, then check again.",
             "signature.recovery-scope" => "Use an admitted ordinary signing device for submission; a recovery device cannot sign release records.",

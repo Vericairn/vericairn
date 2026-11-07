@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 8, November 6, 2026. Add `worker configure --setup-variable` and the setup command's filtered environment in the development build.
+Revision 9, November 7, 2026. Add `worker configure --setup-variable` and the setup command's filtered environment in the development build.
+
+Revision 8, November 6, 2026. Add `estate cache rebuild` in the development build.
 
 Revision 7, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
 
@@ -334,6 +336,24 @@ workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
 that follow setup and what the run records.
 
+## `vericairn operator unfinished` (0.9.2)
+
+Shows this clone's unfinished operator action, or says there is none: its record id, type and
+subject, branch, head, pull request and stage, the merge commit and latest target-check verdict once
+merged, and what finishing it needs. Reading writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--finish` | Finish an action whose merge is recorded, from its own records, once its target checks pass. Nothing is signed, branched or committed. |
+| `--by <operator-id>` | Required with `--finish`: the action's own operator, on their admitted device. |
+| `--wait-seconds <n>` | With `--finish`, the longest wait for pending target checks, 0 to 240; 120 when omitted. |
+| `--json` | Print one typed response. |
+
+Exit 0 means a valid read or a finished action (or nothing to finish), 1 a refused, stopped or
+waiting action, and 2 invalid arguments or a client failure. `operator record` finishes a merged
+action the same way before it starts the next one. See [Operator
+actions](operator-actions.md#finishing-an-action-after-its-merge-092).
+
 ## Runs of a flow (0.9.2)
 
 `vericairn templates list` includes flows, templates of kind `flow`. `goal propose --flow <id>@<version>` proposes a run of
@@ -356,3 +376,18 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
 [operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
+
+## `vericairn estate cache rebuild` (0.9.2)
+
+`vericairn estate cache rebuild` rebuilds this clone's derived cache of a repository-synced estate from the repository's
+record files (FIX-93). It moves the failed `live.db` with its `-wal`, `-shm` and any `-journal` file, unchanged, into a new
+`failed-cache/<UTC time>` directory beside the cache. It refuses a local-only estate, whose database is canonical, and
+changes nothing there. It also refuses while a daemon answers for the estate or another command has it open. With `--json`
+it prints `estate`, `cache`, `records` (the record files read), `retained` (the kept directory, or null when no cache
+existed) and `retainedFiles`. See the [operator's guide](operator-guide.md#a-damaged-live-store-092).
+
+```sh
+vericairn runtime stop
+vericairn estate cache rebuild --json
+vericairn estate check
+```

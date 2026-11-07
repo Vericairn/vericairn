@@ -246,6 +246,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/operator/requests/{id}/done"] = typeof(OperatorRequestCloseRequest),
         ["POST /v1/operator/requests/{id}/dismiss"] = typeof(OperatorRequestCloseRequest),
         ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
+        ["GET /v1/operator/unfinished"] = null,
+        ["POST /v1/operator/unfinished"] = typeof(OperatorFinishRequest),
         ["GET /v1/operator/close"] = null,
         ["POST /v1/operator/close"] = typeof(OperatorCloseRequest),
         ["GET /v1/goals"] = null,
@@ -342,6 +344,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         // device it names (a phone's presence device) to an admitted device of the same principal that needs its owner's presence.
         [typeof(SignedRecordRequest)] = (scope, r, d) => scope.OwnDevice(((SignedRecordRequest)r).Device, d),
         [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
+        [typeof(OperatorFinishRequest)] = (_, r, d) => Acting(((OperatorFinishRequest)r).By, d),
         [typeof(OperatorCloseRequest)] = (_, r, d) => Acting(((OperatorCloseRequest)r).By, d),
         [typeof(OperatorRequestWriteRequest)] = (_, r, d) => Acting(((OperatorRequestWriteRequest)r).By, d),
         [typeof(OperatorRequestCarryRequest)] = (_, r, d) => Acting(((OperatorRequestCarryRequest)r).By, d),
