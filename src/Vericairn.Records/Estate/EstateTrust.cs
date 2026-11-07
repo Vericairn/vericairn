@@ -351,12 +351,12 @@ internal sealed class EstateTrust
         return admission.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? named) && named.Type == "device" && IdentityOf(named) == identity);
     }
 
-    /// <summary>True when the id names a recovery device, by the purpose its latest revision states.</summary>
+    /// <summary>True when the id names a recovery device, by the purpose its latest revision that counts states.</summary>
     internal bool Recovers(string? deviceId)
     {
         if (deviceId is null || !model.ById.TryGetValue(deviceId, out RecordEnvelope? device) || device.Type != "device") return false;
-        List<string> chain = RawChain(device.Id);
-        return chain.Count > 0 && EstateModel.BodyString(model.ById[chain[^1]], "purpose") == "recovery";
+        IReadOnlyList<RecordEnvelope> chain = DeviceChain(IdentityOf(device));
+        return chain.Count > 0 && EstateModel.BodyString(chain[^1], "purpose") == "recovery";
     }
 
     /// <summary>What a signature proves by itself, before admission is judged: a problem, or the device identity it names and how.</summary>
@@ -544,26 +544,33 @@ internal sealed class EstateTrust
     {
         if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
         if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        if (PersonAt(checkpoint.By, checkpoint.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+        if (PrincipalAt(checkpoint.By, checkpoint.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
         DateTimeOffset at = checkpoint.AtTime;
+        // Only grant revisions that rest on signatures and were written by a trusted operator decide: a revision anyone else writes
+        // neither grants nor withdraws administer.
         return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == checkpoint.By &&
             grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
             scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) &&
-            !EstateModel.Expired(grant, at) && AuthenticBySignatures(grant) && TrustedOperator(grant.By, grant.At) &&
-            !successors[grant.Id].Any(s => s.Type == "authority" && AuthenticBySignatures(s)));
+            !EstateModel.Expired(grant, at) && TrustedRevision(grant) &&
+            !successors[grant.Id].Any(s => s.Type == "authority" && TrustedRevision(s)));
     }
 
+    /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>
+    private bool TrustedRevision(RecordEnvelope revision) =>
+        (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null) ||
+        (AuthenticBySignatures(revision) && TrustedOperator(revision.By, revision.At));
+
     /// <summary>
-    /// The principal record that describes a person at a time, when it rests on signatures: the single latest revision of the line dated
-    /// at or before the time, signed by devices admitted through signed admissions and authored by a trusted operator.
+    /// The principal record that describes a principal at a time: among the revisions of its line dated at or before the time that rest on
+    /// signatures and were written by a trusted operator, the single one no other of them supersedes. Revisions anyone else wrote, signed
+    /// or not, are not read.
     /// </summary>
-    private RecordEnvelope? PersonAt(string principal, string at)
+    private RecordEnvelope? PrincipalAt(string principal, string at)
     {
-        List<RecordEnvelope> revisions = model.OfType("principal").Where(p => PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0).ToList();
+        List<RecordEnvelope> revisions = model.OfType("principal")
+            .Where(p => PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p)).ToList();
         List<RecordEnvelope> heads = revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id)).ToList();
-        if (heads.Count != 1) return null;
-        RecordEnvelope head = heads[0];
-        return AuthenticBySignatures(head) && TrustedOperator(head.By, head.At) ? head : null;
+        return heads.Count == 1 ? heads[0] : null;
     }
 
     /// <summary>Whether a principal is the root operator, or held the operator role at a time through revisions that rest on signatures.</summary>
@@ -575,12 +582,10 @@ internal sealed class EstateTrust
         {
             if (trustedOperators.TryGetValue(key, out bool known)) return known;
             if (!checkingOperators.Add(key)) return false;
-            List<RecordEnvelope> revisions = model.OfType("principal").Where(p => PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0).ToList();
-            List<RecordEnvelope> heads = revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id)).ToList();
-            bool value = heads.Count == 1 && EstateModel.BodyString(heads[0], "kind") == "human" &&
-                heads[0].Body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array &&
-                roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator) &&
-                AuthenticBySignatures(heads[0]) && TrustedOperator(heads[0].By, heads[0].At);
+            RecordEnvelope? head = PrincipalAt(principal, at);
+            bool value = head is not null && EstateModel.BodyString(head, "kind") == "human" &&
+                head.Body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array &&
+                roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
             checkingOperators.Remove(key);
             trustedOperators[key] = value;
             return value;

@@ -192,7 +192,7 @@ public sealed class EstateModel
         return ids;
     }
 
-    /// <summary>The latest principal record describing a principal (principals are referenced by their first record's id).</summary>
+    /// <summary>The latest counting principal record describing a principal (principals are referenced by their first record's id); null when none counts.</summary>
     public RecordEnvelope? CurrentPrincipal(string? id)
     {
         if (id is null || !ById.TryGetValue(id, out RecordEnvelope? record) || record.Type != "principal")
@@ -200,7 +200,9 @@ public sealed class EstateModel
             return null;
         }
 
-        return Latest(record);
+        // The newest revision of the line that counts; a line none of whose revisions counts describes no principal.
+        RecordEnvelope latest = Latest(record);
+        return notCounting.Contains(latest.Id) ? null : latest;
     }
 
     /// <summary>Roles the principal currently holds.</summary>
