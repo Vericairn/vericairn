@@ -122,6 +122,38 @@ public class NetworkMcpThreatTests
     }
 
     [Fact]
+    public async Task AWriteInFlightIsRefusedWhenItsDeviceIsRevokedBeforeItsRecordIsStored()
+    {
+        (LocalNetworkHarness harness, string assignment) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        DeviceRequestSigner signer = harness.Signer(paired);
+        using McpWire client = NetworkMcp.Wire(harness, paired);
+        await client.InitializeAsync();
+        JsonObject arguments = NetworkMcp.Args(("assignment", assignment), ("workspace", "widget repository"), ("note", "Build it."));
+        JsonObject prepared = await client.CallAsync("work_attempt", (JsonObject)arguments.DeepClone(), new JsonObject { ["vericairn/prepare"] = true });
+        JsonObject plan = prepared["_meta"]!["vericairn/plan"]!["prepared"]!.AsObject();
+        int records = harness.Estate.Load().Records.Count;
+
+        // Authenticated and in flight, the signed write meets its device's revocation before the write lock: nothing is stored.
+        harness.Host.BeforeDeviceWrite = () =>
+        {
+            harness.Host.BeforeDeviceWrite = null;
+            Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(paired.Device, harness.Estate.OperatorId, "Revoked while the write was in flight.")).Ok);
+        };
+        JsonObject refused = await client.CallAsync("work_attempt", (JsonObject)arguments.DeepClone(), new JsonObject
+        {
+            ["vericairn/plan"] = plan["plan"]!.GetValue<string>(), ["vericairn/signature"] = McpWire.Sign(signer, plan["hash"]!.GetValue<string>()),
+        });
+        Assert.True(refused["isError"]!.GetValue<bool>());
+        Assert.Contains("revoked", McpWire.Text(refused), StringComparison.Ordinal);
+        Assert.Equal(records + 1, harness.Estate.Load().Records.Count);
+        Assert.DoesNotContain(harness.Estate.Load().Records, r => r.Id == plan["id"]!.GetValue<string>());
+        LocalNetworkWrite kept = Assert.Single(LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!));
+        Assert.Equal(("POST /v1/work/attempt", "failed"), (kept.Operation, kept.State));
+    }
+
+    [Fact]
     public async Task ACallOutsideTheDevicesScopeIsRefusedExactlyAsTheApiRefusesIt()
     {
         (LocalNetworkHarness harness, string assignment) = await NetworkMcp.StartAsync();

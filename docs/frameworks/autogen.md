@@ -108,5 +108,5 @@ The agent sees only what its principal may do: the estate's reads and the five c
 ## What was run, and what was not
 
 - **Run:** connecting over stdio, listing the tools, reading a brief, and recording an attempt and a result signed by the agent's admitted device, on macOS against Vericairn 0.8.4 and the 0.9.0 development build.
-- **Not run:** a model driving the tools, multi-step agent loops, Windows and Linux, and any HTTP transport (Vericairn's MCP server serves stdio only). AutoGen is a non-claim in the agent matrix that `vericairn mcp orientation` writes until an estate records a qualification of `AutoGen over MCP`.
+- **Not run:** a model driving the tools, multi-step agent loops, Windows and Linux, and any HTTP transport (these steps use stdio; from 0.9.2 the daemon also serves network MCP in signed mode, reached through `vericairn mcp serve --connection`, which they do not exercise). AutoGen is a non-claim in the agent matrix that `vericairn mcp orientation` writes until an estate records a qualification of `AutoGen over MCP`.
 - **Not a launcher:** Vericairn's worker does not start AutoGen agents; your code does. The worker's command audit, budget and settlement apply only to its own runs.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -41,10 +42,8 @@ public interface IMcpNetworkSession
 public sealed partial class ToolRegistry
 {
     /// <summary>The writes section 8 of the network design offers a contributor; every other write is absent over the network.</summary>
-    public static readonly IReadOnlySet<string> NetworkWrites = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "work_attempt", "work_progress", "work_result", "work_amend", "document_review",
-    };
+    public static IReadOnlySet<string> NetworkWrites { get; } =
+        new[] { "work_attempt", "work_progress", "work_result", "work_amend", "document_review" }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>The _meta key a client sets true to have a write prepared for its device's signature.</summary>
     public const string PrepareMeta = "vericairn/prepare";

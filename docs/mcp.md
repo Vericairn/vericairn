@@ -251,7 +251,8 @@ loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `v
 with the same freshness, replay and body rules. The device must be admitted now, permitted the
 profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
 person connects an MCP client as an agent principal of their own, so its writes are never attributed
-to them. A revoked device is refused at its next request, its sessions end and its server stream
+to them. On loopback the device needs the `loopback` profile (`vericairn devices create --profile embedded
+--profile loopback`), which the API's own loopback requests do not ask for. A revoked device is refused at its next request, its sessions end and its server stream
 closes. Before anything is authenticated, the request's `Host` must name the listener it reached, its
 IP address and port (or `localhost` on loopback), and an `Origin` it names must be one the operator
 allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
