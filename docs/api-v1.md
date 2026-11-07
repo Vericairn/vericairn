@@ -185,6 +185,13 @@ through commit; it is not a cross-instance or cross-process writer lease. Route 
 runtime and do not overlap embedded commands, daemon startup or repository synchronization.
 Grouped storage remains sequential and can be interrupted.
 
+From 0.9.2 (FIX-99), every write also takes the working tree's exclusive write lock in `.vericairn/write-lock/`,
+whatever the runtime's Vericairn home, from judgment until its records are stored. A second service instance or
+process judges against the records the first stored, and is refused by the ordinary rules before it writes. One
+that cannot take the lock within 30 seconds answers with a `conflict` problem (HTTP 409) naming the holder's
+process id, host, home digest and the time it took the lock. The lock covers one working tree on one machine; it
+does not coordinate clones or repository synchronization.
+
 Status, check and reconciliation expose malformed, incomplete or unreadable local journals as
 `batch.unreadable`, with a safe `batch-journal:<ULID>` or filename-digest identifier, never a machine
 path or parser error. The journal is retained and retried. Its unknown contents hold all further record
@@ -1010,7 +1017,7 @@ and `findings` when a record was rejected:
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; a receiptless intent may already have been revised to uncertain before that provider call. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
 | `reconcile-required` | With `written`, the record was stored but companion publication stopped; the batch journal retains pending outputs. Reopen the estate or run `docs regenerate` to recover those outputs without repeating the record write. Without `written`, an unreadable local batch journal or unresolved generated outputs hold further record writes until reconciliation; reads remain available | 200 with `written`; 422 without `written` on `WriteOutcome` routes; inside the response on composite routes |
-| `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting | 409 |
+| `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting. From 0.9.2 (FIX-99), also another writer held the working tree's write lock past the 30-second wait; the message names the holder, and nothing was written | 409 |
 
 The release routes (`POST /v1/releases/check`, `POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
 they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there

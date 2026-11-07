@@ -92,3 +92,17 @@ so do the `records new --expected` and `work review` help. Because the field des
 reader's schema explanation, that reader advances to `vericairn.records/readers/7`. Its hash changes, and declarations
 pinned to an earlier implementation need the ordinary explicit generator update before regeneration. Earlier golden
 fixtures remain. The generator id and contract version 1 are unchanged.
+
+## One writer at a time per working tree (FIX-99)
+
+No route, interface member or protocol type is added or changed. Every record write of a writable `EstateSession`, through
+`EstateService` in the daemon or an embedded command, now takes an exclusive write lock in the working tree's
+`.vericairn/write-lock/` directory, whatever the runtime's Vericairn home, and holds it from judging the proposed records
+until they and their companions are stored. A write that cannot take the lock within 30 seconds fails with a `conflict`
+problem whose message names the holder's process id, host, home digest and the time it took the lock; the daemon answers
+it with HTTP 409 on `WriteOutcome` routes, and a composite response carries it as its problem. The public
+`EstateSession.Write` and `EstateSession.Discard` take the same lock when their caller does not hold it, and throw an
+`IOException` naming the holder after the wait. A local-only estate, whose records live in the live store, takes the
+same lock in `write-lock/` beside that store. Read-only sessions take no lock. The lock is separate from FIX-93's
+per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
+record. No record type, record format or generated document changes.

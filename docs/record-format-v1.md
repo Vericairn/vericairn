@@ -115,6 +115,12 @@ supersede one predecessor: the loader reports `reconcile.successors`, `status` l
 results). A **reconciliation** record about the predecessor keeps one successor and withdraws the others, which
 then count as superseded by the kept one; nothing is merged silently and nothing is deleted.
 
+From 0.9.2, one writer at a time writes a working tree: every runtime takes the tree's exclusive write lock in
+`.vericairn/write-lock/` from judging a write until it is stored, so two runtimes on one tree no longer both write
+records the estate then finds invalid together. Duplicates written before that, or met at a merge, are never repaired
+automatically; the [operator guide](operator-guide.md#one-writer-per-working-tree-092) gives the recovery: inspect
+both, keep one, and supersede the other under its record type's rules where they allow it.
+
 ## Export and restore
 
 `vericairn estate export` writes a zip holding the records, objects, manifest and documents with an inventory of every

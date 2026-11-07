@@ -244,6 +244,11 @@ through a separate service can reconcile and remove a batch journal, so it must 
 Do not overlap daemon startup, embedded commands or repository synchronization. Neither the instance gate
 nor an atomic file rename makes the whole estate a multi-process transaction; grouped writes can still
 stop between records, and independent repository readers can observe a partly committed batch.
+From 0.9.2 (FIX-99), every writer, whatever its Vericairn home, also takes the working tree's exclusive write lock
+in `.vericairn/write-lock/` from judgment until its records are stored, so a second writer on the same working tree
+judges against what the first stored and is refused by the ordinary rules, or with a `conflict` naming the holder
+when it cannot take the lock within 30 seconds. The lock covers one working tree on one machine; the rest of this
+paragraph still holds for readers, repository synchronization and other clones.
 
 `status`, `check` and `estate reconcile` report an unreadable, malformed or incomplete journal as
 `batch.unreadable`. Its location is a safe local identifier: `batch-journal:<ULID>` for a generated filename,
