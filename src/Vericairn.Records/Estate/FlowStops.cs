@@ -405,7 +405,8 @@ public static class FlowStops
     /// <summary>
     /// A stop for a reserved act (design/release-procedure.md § 6): an operator request put to the operator, carrying the step's exact
     /// command as the records give it now. Delivered while a due request carries it; closed once a request carrying that same command was
-    /// closed, which is not asked again while the command holds; due otherwise, for goal step to record.
+    /// closed, which is not asked again while the command holds; due otherwise, for goal step to record. For a step completed by the
+    /// operator's own close of its request, only the addressed operator's close counts as closing it.
     /// </summary>
     private static RunStop Reserved(EstateModel model, FlowPosition.Position position, FlowPosition.StepInstance instance)
     {
@@ -416,7 +417,11 @@ public static class FlowStops
             return new RunStop("reserved", instance.Name, instance.Step.Title, instance.Ref, EstateModel.BodyString(due.Request, "to"), reason, "delivered", due.Request, instance.Command, act);
         }
 
-        if (Requests(model, position.Goal, instance.Ref).LastOrDefault(r => OperatorRequests.Closures(model, r).Any() && CommandOf(r) == instance.Command) is RecordEnvelope closed)
+        // A step whose done predicate is the operator's own close of its request, such as a draft's deletion or an announcement, is
+        // not left closed by an agent's close citing the operator's words: that close completes nothing, so the step is asked again.
+        bool closesByRequest = instance.Step.Done.Any(p => TJson.Text(p, "subject") == "{request}");
+        if (Requests(model, position.Goal, instance.Ref).LastOrDefault(r => OperatorRequests.Closures(model, r).Any(c => !closesByRequest || c.By == EstateModel.BodyString(r, "to"))
+            && CommandOf(r) == instance.Command) is RecordEnvelope closed)
         {
             return new RunStop("reserved", instance.Name, instance.Step.Title, instance.Ref, EstateModel.BodyString(closed, "to"),
                 $"{reason}; operator request {closed.Id} carrying this command was closed, and it is not made again while the command holds: the step is done once the operator's act is recorded", "closed", closed, instance.Command, act);
