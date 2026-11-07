@@ -11,12 +11,16 @@ namespace Vericairn.Records.Estate;
 public static class EstateLocations
 {
     /// <summary>The live store of an estate on this machine: per user, never inside the repository; a local-only estate has one, a repository-synced one has one per clone.</summary>
-    public static string LiveStorePath(string root, string estateId, string profile)
+    public static string LiveStorePath(string root, string estateId, string profile) => LiveStorePath(root, estateId, profile, VericairnHome.Path());
+
+    /// <summary>The live store of an estate under a given Vericairn home: a test runs two homes on one working tree in one process.</summary>
+    internal static string LiveStorePath(string root, string estateId, string profile, string home)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(estateId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
         string key = profile == "local-only" ? "local" : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(root))))[..16];
-        return Path.Combine(VericairnHome.Path(), "estates", estateId, key, "live.db");
+        return Path.Combine(home, "estates", estateId, key, "live.db");
     }
 
     /// <summary>The clones of an estate's repositories registered on this machine, shared by every clone of the estate here: machine configuration, never a record.</summary>

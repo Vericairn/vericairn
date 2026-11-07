@@ -129,11 +129,15 @@ public sealed class GeneratedRevisionPinTests
         RevisionPinFixture.Pin(service, estate.OperatorId, "Initial history.", convert: true);
         estate.WriteFile(RevisionPinFixture.Document, Encoding.UTF8.GetString(RevisionPinFixture.Bytes(estate)).Replace("Original body.", "Revised body.", StringComparison.Ordinal));
         RecordEnvelope? concurrent = null;
+        // The concurrent revision arrives by a sync while this pin is judged: a runtime on this tree would wait for its write lock instead.
         service.BeforeValidatingRecords = _ =>
         {
             service.BeforeValidatingRecords = null;
-            using EstateService other = EstateService.Open(estate.Root);
-            concurrent = RevisionPinFixture.Pin(other, estate.OperatorId, "Concurrent revision.");
+            concurrent = UnlockedWriter.Sync(estate.Root, clone =>
+            {
+                using EstateService other = EstateService.Open(clone);
+                return RevisionPinFixture.Pin(other, estate.OperatorId, "Concurrent revision.");
+            });
         };
         DocumentPinResponse result = service.DocumentPin(new(RevisionPinFixture.Document, estate.OperatorId, "Losing revision."));
         Assert.False(result.Ok);

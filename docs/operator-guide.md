@@ -795,6 +795,20 @@ vericairn estate check
 
 A local-only estate's database is never moved, deleted or rebuilt as a cache, and `estate cache rebuild` refuses it without changing anything. Stop every daemon and command that uses it, and keep `live.db` with its `-wal` and `-shm` files together. Then recover from a backup of that directory or from an earlier `estate export`. `estate restore` restores an export as a repository-synced estate.
 
+### One writer per working tree (0.9.2)
+
+From 0.9.2 (FIX-99), one writer at a time writes a working tree. Every runtime that writes records takes an exclusive write lock in the working tree's own `.vericairn/write-lock/` directory, whether it is a daemon or an embedded command and whatever its Vericairn home. It holds the lock from judging the write against the tree's current record files until the records and their companions are stored. A second writer therefore judges against the records the first one stored, and the ordinary rules refuse it before it writes anything, for example with `operation.duplicate-identity`. A writer that cannot take the lock within 30 seconds is refused with a `conflict` that names the holder: its process id, host, a digest of its Vericairn home and when it took the lock. The holder records these beside the lock in `holder.json`, never as a path. The operating system releases the lock when its process ends, so a stopped command leaves no lock behind. A local-only estate keeps its records in the live store under the Vericairn home, so its writers take the same lock beside that store instead.
+
+The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of an earlier release takes no lock, so do not run one beside 0.9.2 on the same tree.
+
+Duplicates written before this rule, by two writers of an earlier release or by two merged clones, are never repaired automatically. While such an error stands, the runtime refuses further writes. To recover:
+
+1. Stop the extra writer. Run `vericairn records validate` or `vericairn estate reconcile` to list the conflicting records, and read both files and any records that cite them. Dispatch nothing under a duplicated operation identity until it is settled.
+2. Keep one: the one later records already cite, or else the earlier one.
+3. Supersede the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key.
+
+Some record types have no revision that clears the conflict. In 0.9.2 that includes two current operations under one identity: a revision keeps its identity, and a reconciliation settles only revisions of one record. Leave both files unchanged and report the case to Vericairn's maintainer; no record settles it in this release.
+
 ## 11. The daemon
 
 Commands run an embedded runtime unless a daemon serves the estate on this machine; ordinary estate operations are clients of it, so that one owner holds the live state. Restore creates another copy directly. `recover compare`, `docs notes` and `docs regenerate` read the files and live store directly, even when a daemon serves this estate.

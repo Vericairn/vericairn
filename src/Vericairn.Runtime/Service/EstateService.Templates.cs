@@ -93,6 +93,9 @@ public sealed partial class EstateService
         {
             EstateModel model = session.Load();
             if (RequestDeviceRefusal(model) is { } denied) return new(null, null, null, denied);
+            // The destination's absence, the judgment and the stores all happen under the working tree's write lock (FIX-99).
+            if (EnterWriteLock(out WorkingTreeLock.Hold? tree) is { } busy) return new(null, null, null, busy);
+            using WorkingTreeLock.Hold? held = tree;
             BatchJournal? journal = null;
             AuthoredRecord? record = null;
             bool stored = false;

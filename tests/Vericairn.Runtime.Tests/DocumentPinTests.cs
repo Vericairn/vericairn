@@ -184,12 +184,14 @@ public sealed class DocumentPinTests
         Assert.True(first.Ok, first.Problem?.Message);
         estate.WriteFile(Document, "# Second\n");
         DocumentPinResponse? competing = null;
-        service.BeforeValidatingRecords = _ =>
+        // The competing pin arrives by a sync while this one is judged: a runtime on this tree would wait for its write lock instead.
+        service.BeforeValidatingRecords = _ => competing = UnlockedWriter.Sync(estate.Root, clone =>
         {
-            using EstateService other = EstateService.Open(estate.Root);
-            competing = other.DocumentPin(new(Document, estate.OperatorId, "Competing pin.", Expected: first.Written!.Id));
-            Assert.True(competing.Ok, competing.Problem?.Message);
-        };
+            using EstateService other = EstateService.Open(clone);
+            DocumentPinResponse pinned = other.DocumentPin(new(Document, estate.OperatorId, "Competing pin.", Expected: first.Written!.Id));
+            Assert.True(pinned.Ok, pinned.Problem?.Message);
+            return pinned;
+        });
         DocumentPinResponse refused = service.DocumentPin(new(Document, estate.OperatorId, "Losing pin.", Expected: first.Written!.Id));
         Assert.False(refused.Ok);
         Assert.Null(refused.Written);
