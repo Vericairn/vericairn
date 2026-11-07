@@ -3,6 +3,7 @@
 
 using Microsoft.Data.Sqlite;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Objects;
@@ -19,7 +20,13 @@ public sealed class SqliteObjectStore : IObjectStore
     internal SqliteObjectStore(string databasePath, bool readOnly)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        if (!readOnly) Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        if (!readOnly)
+        {
+            // Owner-only from its first byte, as the live store beside it is: it holds the estate's objects.
+            OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+            OwnerOnlyState.PrepareDatabase(Path.GetFullPath(databasePath));
+        }
+
         readSnapshot = readOnly ? new SqliteReadSnapshot(databasePath) : null;
         connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = readSnapshot?.Path ?? databasePath, Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
         try { connection.Open(); }

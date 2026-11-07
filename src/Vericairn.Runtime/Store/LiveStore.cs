@@ -3,6 +3,7 @@
 
 using Microsoft.Data.Sqlite;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Runtime.Store;
 
@@ -31,7 +32,14 @@ public sealed class LiveStore : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         Path = System.IO.Path.GetFullPath(databasePath);
         this.profile = profile;
-        if (!readOnly) Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        if (!readOnly)
+        {
+            // Owner-only whichever process creates it, with or without a daemon: the directory, the database and, since SQLite gives
+            // them the database's mode, its -wal and -shm files. Ones an earlier build left wider are narrowed here.
+            OwnerOnlyState.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+            OwnerOnlyState.PrepareDatabase(Path);
+        }
+
         readSnapshot = readOnly && !transient ? new SqliteReadSnapshot(Path) : null;
         connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = transient ? ":memory:" : readSnapshot?.Path ?? Path, Mode = transient ? SqliteOpenMode.Memory : readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
         try

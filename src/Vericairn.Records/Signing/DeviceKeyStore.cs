@@ -160,11 +160,8 @@ public sealed class FileKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public byte[] Create(string deviceId)
     {
-        Directory.CreateDirectory(directory);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        // The home holding the keys is made owner-only too, as every opening of an estate makes it.
+        OwnerOnlyState.CreateDirectory(directory, Path.GetDirectoryName(directory));
 
         string path = PathOf(deviceId);
         if (File.Exists(path))

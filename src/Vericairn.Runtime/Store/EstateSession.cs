@@ -98,6 +98,9 @@ public sealed class EstateSession : IDisposable
         }
 
         string databasePath = EstateLocations.LiveStorePath(root, manifest.Estate, manifest.Profile, home);
+        // The home and every directory down to the live store's are owner-only whichever process opens the estate first, a daemon or a
+        // command without one. A read-only opening creates and changes nothing here.
+        if (!readOnly) OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(databasePath)!, home);
         // The writer lock is taken before the store opens, so no session opens a cache while it is being rebuilt.
         FileStream? writerLock = readOnly ? null : LiveStoreRecovery.ShareWriterLock(databasePath);
         LiveStore? live = null;
