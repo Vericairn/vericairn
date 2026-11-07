@@ -20,11 +20,27 @@ namespace Vericairn.Runtime.Service;
 public sealed partial class EstateService
 {
     private bool operatorRecordRunning;
+    private const string OperatorActive = "operator-record:active";
+    // The action last finished from its own records, whose receipts may still be uncommitted; the next new action tolerates them.
+    private const string OperatorFinished = "operator-record:finished";
 
     // A local recovery checkpoint contains identities and hashes only, never a key or the operator's input body.
     // Records and MERGE-01's operations establish what happened; this checkpoint never establishes authority or a successful effect.
+    // Type, Subject and By name the action in a refusal; Follows names the finished action whose receipts this one tolerates.
     private sealed record OperatorCheckpoint(string Product, string ProductHash, string RepositoryHash, string Id, string At,
-        RecordCommitBasis Basis, string Branch, string Hash, string? Head = null, ChangeResponse? Completed = null);
+        RecordCommitBasis Basis, string Branch, string Hash, string? Head = null, ChangeResponse? Completed = null,
+        string? Type = null, string? Subject = null, string? By = null, string? Follows = null);
+
+    // How far an action went, from its checkpoint and its records: the signed record, the pull request and, once merged, its target run.
+    private sealed record OperatorProgress(string Identity, OperatorCheckpoint Checkpoint, RecordEnvelope? Record, string Stage,
+        string? PullRequest = null, RecordEnvelope? Merge = null, RecordEnvelope? Target = null, string? CheckStatus = null, RecordEnvelope? Ask = null)
+    {
+        internal string? Type => Record?.Type ?? Checkpoint.Type;
+        internal string? Subject => Record?.Subject is RecordReference subject ? subject.Type + ":" + subject.Id + (subject.Hash is null ? string.Empty : ":" + subject.Hash) : Checkpoint.Subject;
+        internal string? By => Record?.By ?? Checkpoint.By;
+        internal string? MergeCommit => Merge is null ? null : ChangeText(Merge.Body.GetProperty("target"), "mergeCommit");
+        internal bool Finishable => Stage == "merged" && Record is not null;
+    }
 
     /// <inheritdoc />
     public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => OperatorRecord(request, CancellationToken.None);
@@ -43,6 +59,7 @@ public sealed partial class EstateService
         OperatorCheckpoint? checkpoint = null;
         RecordWritten? written = null;
         ChangeResponse? change = null;
+        string? active = null;
         string stage = "prepare";
         lock (gate)
         {
@@ -76,12 +93,33 @@ public sealed partial class EstateService
                 })))[7..];
                 string? saved = session.Live.Meta(identity);
                 checkpoint = saved is null ? null : JsonSerializer.Deserialize<OperatorCheckpoint>(saved, ProtocolJson.Options);
-                string? active = session.Live.Meta("operator-record:active");
-                if (!string.IsNullOrEmpty(active) && active != identity)
-                    throw new ProviderRefusedException("An earlier operator action is unfinished. Rerun its original type, author, subject and JSON body before starting another.");
+                active = session.Live.Meta(OperatorActive);
+            }
+
+            // An earlier action whose merge is recorded is finished from its own records first, when its target checks pass.
+            // Any other earlier action is truly unfinished and still refuses a new one.
+            if (!string.IsNullOrEmpty(active) && active != identity)
+            {
+                OperatorCheckpoint? earlier;
+                lock (gate) earlier = OperatorCheckpointLocked(active);
+                if (earlier is null) throw new ProviderRefusedException("An earlier operator action is unfinished and its local checkpoint is unavailable. Rerun its original type, author, subject and JSON body before starting another.");
+                OperatorRecordResponse finished = FinishMerged(active, earlier, request.By, request.WaitSeconds, cancellationToken);
+                if (!finished.Ok)
+                    return new(identity, "refused", "An earlier operator action is unfinished: " + finished.Message, false, finished.NextStep, Change: finished.Change);
+            }
+
+            bool merged;
+            lock (gate)
+            {
+                RequireOperatorRecord(request.By);
+                RecordReference? subject = null;
+                if (request.Subject is not null && !TryParseSubject(request.Subject, out subject))
+                    throw new ProviderRefusedException("The subject must be type:id or type:id:hash.");
                 if (checkpoint is null)
                 {
-                    RecordCommitBasis basis = adapter.Prepare(Root);
+                    string? follows = session.Live.Meta(OperatorFinished);
+                    OperatorCheckpoint? followed = string.IsNullOrEmpty(follows) ? null : OperatorCheckpointLocked(follows);
+                    RecordCommitBasis basis = adapter.Prepare(Root, followed is null ? new HashSet<string>(StringComparer.Ordinal) : OperatorReceiptsLocked(followed));
                     string id = Ulid.NewUlid().Value;
                     string at = Now();
                     var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(at), id);
@@ -90,12 +128,12 @@ public sealed partial class EstateService
                     if (JudgeProposedLocked([authored]) is Problem rejected)
                         return new(identity, "refused", "The proposed signed record did not pass validation.", false, "Correct the JSON body and " + resume, Problem: rejected);
                     checkpoint = new(configuration.Product.Id, configuration.Product.ComputedHash, configuration.Repository.ComputedHash,
-                        id, at, basis, "operator/" + id, authored.Envelope.ComputedHash);
+                        id, at, basis, "operator/" + id, authored.Envelope.ComputedHash, Type: request.Type, Subject: request.Subject, By: request.By,
+                        Follows: followed is null ? null : follows);
                     SaveOperatorCheckpoint(identity, checkpoint);
-                    session.Live.SetMeta("operator-record:active", identity);
+                    session.Live.SetMeta(OperatorActive, identity);
+                    if (followed is not null) session.Live.SetMeta(OperatorFinished, string.Empty);
                 }
-                if (checkpoint.ProductHash != configuration.Product.ComputedHash || checkpoint.RepositoryHash != configuration.Repository.ComputedHash)
-                    throw new ProviderRefusedException("The recorded product or repository declaration changed; reconcile the original action before continuing.");
                 if (session.Load().ById.TryGetValue(checkpoint.Id, out RecordEnvelope? existing))
                 {
                     if (existing.ComputedHash != checkpoint.Hash || existing.By != request.By || existing.Type != request.Type || existing.Signatures.Count == 0
@@ -106,13 +144,19 @@ public sealed partial class EstateService
                 }
                 if (checkpoint.Completed is ChangeResponse completed)
                 {
-                    if (written is null || !OperatorCompletionRecorded(checkpoint, completed, configuration))
+                    if (written is null || !OperatorCompletionRecorded(checkpoint, completed, ChangeConfigurationFor(checkpoint.Product, currentDeclaration: false)))
                         throw new ProviderRefusedException("The completed action's recorded evidence is unavailable; restore it before resuming.");
                     adapter.Verify(Root, checkpoint.Head!, checkpoint.Basis.Head, OperatorRecordFiles(written));
-                    if (active == identity) session.Live.SetMeta("operator-record:active", string.Empty);
+                    if (session.Live.Meta(OperatorActive) == identity) session.Live.SetMeta(OperatorActive, string.Empty);
                     return Answer("completed", completed.Message, true, "The signed record and checked merge are complete.", completed);
                 }
+                // Once its merge is recorded, an action is finished from its records alone: no signature, branch, commit, push, opening or
+                // merge again, whatever branch the clone is on now.
+                merged = checkpoint.Head is not null && OperatorProgressLocked(identity, checkpoint).Stage == "merged";
+                if (!merged && (checkpoint.ProductHash != configuration.Product.ComputedHash || checkpoint.RepositoryHash != configuration.Repository.ComputedHash))
+                    throw new ProviderRefusedException("The recorded product or repository declaration changed; reconcile the original action before continuing.");
             }
+            if (merged) return FinishMerged(identity, checkpoint, request.By, request.WaitSeconds, cancellationToken);
 
             stage = "record";
             lock (gate)
@@ -121,7 +165,7 @@ public sealed partial class EstateService
                 RequireOperatorRecord(request.By);
                 if (written is null)
                 {
-                    adapter.Check(Root, checkpoint.Basis.Branch, checkpoint.Basis.Head, new HashSet<string>(StringComparer.Ordinal));
+                    adapter.Check(Root, checkpoint.Basis.Branch, checkpoint.Basis.Head, Receipts());
                     // A crash before publication can require presence again, but never creates a second record identity.
                     if (authored is null)
                     {
@@ -147,7 +191,7 @@ public sealed partial class EstateService
             // A branch failure can then resume from those bytes without another signing prompt.
             stage = "branch";
             cancellationToken.ThrowIfCancellationRequested();
-            adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files);
+            adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files, Receipts());
             stage = "commit";
             string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts());
             if (checkpoint.Head is not null && checkpoint.Head != head) throw new ProviderRefusedException("The recorded commit changed; reconcile it before continuing.");
@@ -205,7 +249,7 @@ public sealed partial class EstateService
             lock (gate)
             {
                 SaveOperatorCheckpoint(identity, checkpoint with { Completed = change });
-                session.Live.SetMeta("operator-record:active", string.Empty);
+                session.Live.SetMeta(OperatorActive, string.Empty);
             }
             return Answer("completed", change.Message, true, "The signed record and checked merge are complete.", change);
 
@@ -274,33 +318,266 @@ public sealed partial class EstateService
             return Answer("stopped", latest.Message, false, next, latest);
         }
 
+        // This action's own receipts, and those of the finished action it follows, whose receipts may still be uncommitted.
         HashSet<string> Receipts()
         {
             lock (gate)
             {
-                EstateModel model = session.Load();
-                HashSet<string> pulls = model.OfType("operation").Where(o => o.By == request.By && EstateModel.BodyString(o, "action") == "change-open"
-                    && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint!.Product
-                    && ChangeText(t, "head") == checkpoint.Head && ChangeText(t, "branch") == checkpoint.Branch)
-                    .Select(o => ChangeText(o.Body.GetProperty("target"), "pullRequest")).OfType<string>().ToHashSet(StringComparer.Ordinal);
-                HashSet<string> owned = model.OfType("operation").Where(o => o.By == request.By
-                    && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint!.Product
-                    && ChangeText(t, "head") == checkpoint.Head && (ChangeText(t, "branch") == checkpoint.Branch
-                        || EstateModel.BodyString(o, "action") == "change-merge" && pulls.Contains(ChangeText(t, "pullRequest") ?? string.Empty))
-                    && EstateModel.BodyString(o, "action") is "change-push" or "change-open" or "change-merge").Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
-                // Include every revision and the observations and asks that point to those original operation records.
-                bool added;
-                do
-                {
-                    added = false;
-                    foreach (RecordEnvelope record in model.Records)
-                        if (record.By == request.By && (record.Supersedes is not null && owned.Contains(record.Supersedes)
-                            || record.Subject is not null && owned.Contains(record.Subject.Id) && record.Type is "operation" or "ask"))
-                            added |= owned.Add(record.Id);
-                } while (added);
-                return model.Records.Where(r => owned.Contains(r.Id)).Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
+                HashSet<string> receipts = OperatorReceiptsLocked(checkpoint!);
+                if (checkpoint!.Follows is string follows && OperatorCheckpointLocked(follows) is OperatorCheckpoint followed)
+                    receipts.UnionWith(OperatorReceiptsLocked(followed));
+                return receipts;
             }
         }
+    }
+
+    // An action's receipts: its own push, opening and merge operations with every revision, and the observations and asks that point
+    // to them, all authored by the action's own principal. Caller holds the gate.
+    private HashSet<string> OperatorReceiptsLocked(OperatorCheckpoint checkpoint)
+    {
+        EstateModel model = session.Load();
+        string? by = checkpoint.By ?? (model.ById.TryGetValue(checkpoint.Id, out RecordEnvelope? signed) ? signed.By : null);
+        if (by is null || checkpoint.Head is null) return new(StringComparer.Ordinal);
+        HashSet<string> pulls = model.OfType("operation").Where(o => o.By == by && EstateModel.BodyString(o, "action") == "change-open"
+            && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint.Product
+            && ChangeText(t, "head") == checkpoint.Head && ChangeText(t, "branch") == checkpoint.Branch)
+            .Select(o => ChangeText(o.Body.GetProperty("target"), "pullRequest")).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        HashSet<string> owned = model.OfType("operation").Where(o => o.By == by
+            && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint.Product
+            && ChangeText(t, "head") == checkpoint.Head && (ChangeText(t, "branch") == checkpoint.Branch
+                || EstateModel.BodyString(o, "action") == "change-merge" && pulls.Contains(ChangeText(t, "pullRequest") ?? string.Empty))
+            && EstateModel.BodyString(o, "action") is "change-push" or "change-open" or "change-merge").Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
+        // Include every revision and the observations and asks that point to those original operation records.
+        bool added;
+        do
+        {
+            added = false;
+            foreach (RecordEnvelope record in model.Records)
+                if (record.By == by && (record.Supersedes is not null && owned.Contains(record.Supersedes)
+                    || record.Subject is not null && owned.Contains(record.Subject.Id) && record.Type is "operation" or "ask"))
+                    added |= owned.Add(record.Id);
+        } while (added);
+        return model.Records.Where(r => owned.Contains(r.Id)).Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public OperatorUnfinishedResponse OperatorUnfinished()
+    {
+        lock (gate)
+        {
+            string? active = session.Live.Meta(OperatorActive);
+            if (string.IsNullOrEmpty(active)) return new(null);
+            if (OperatorCheckpointLocked(active) is not OperatorCheckpoint checkpoint)
+                return new(null, new("unavailable", "This clone marks an operator action unfinished, but its local checkpoint is unavailable.", []));
+            OperatorProgress progress = OperatorProgressLocked(active, checkpoint);
+            return new(new(active, checkpoint.Id, progress.Type, progress.Subject, progress.By,
+                progress.Record is null ? null : new(progress.Record.ExpectedPath, progress.Record.Id, progress.Record.ComputedHash),
+                checkpoint.Branch, checkpoint.Head, progress.Stage, progress.PullRequest, Written(progress.Merge), progress.MergeCommit,
+                progress.CheckStatus, Written(progress.Target), Written(progress.Ask), progress.Finishable, OperatorDescription(progress), OperatorNextStep(progress)));
+        }
+
+        static RecordWritten? Written(RecordEnvelope? record) => record is null ? null : new(record.ExpectedPath, record.Id, record.ComputedHash);
+    }
+
+    /// <inheritdoc />
+    public OperatorRecordResponse OperatorFinish(OperatorFinishRequest request) => OperatorFinish(request, CancellationToken.None);
+
+    /// <inheritdoc />
+    /// <remarks>The token also reaches the observation, which stops at its next recorded step; the same request resumes it.</remarks>
+    public Task<OperatorRecordResponse> OperatorFinishAsync(OperatorFinishRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(OperatorFinish), () => OperatorFinish(request, cancellationToken), true, this, cancellationToken);
+
+    /// <summary>Finishes this clone's unfinished operator action from its own records once its recorded merge's target checks pass.</summary>
+    public OperatorRecordResponse OperatorFinish(OperatorFinishRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        const string identity = "operator-record";
+        lock (gate)
+        {
+            if (operatorRecordRunning) return new(identity, "busy", "Another operator record command is in progress.", false, "Wait for it to stop, then finish again.");
+            operatorRecordRunning = true;
+        }
+        try
+        {
+            string? active;
+            OperatorCheckpoint? checkpoint;
+            lock (gate)
+            {
+                RequireOperatorRecord(request.By);
+                if (request.WaitSeconds is < 0 or > 240) throw new ProviderRefusedException("Wait seconds must be between 0 and 240.");
+                active = session.Live.Meta(OperatorActive);
+                if (string.IsNullOrEmpty(active)) return new(identity, "none", "This clone has no unfinished operator action.", true, "Nothing waits to be finished.");
+                checkpoint = OperatorCheckpointLocked(active) ?? throw new ProviderRefusedException("The unfinished action's local checkpoint is unavailable; rerun its original operator record command.");
+            }
+            return FinishMerged(active, checkpoint, request.By, request.WaitSeconds, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new(identity, "stopped", "The request was interrupted after its current step; no further effect was requested.", false,
+                "Wait for the current observation to settle, then finish again.");
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException or IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or ArgumentException or KeyNotFoundException or System.Data.Common.DbException or System.Security.Cryptography.CryptographicException)
+        {
+            return new(identity, "stopped", exception is ProviderRefusedException ? exception.Message : "The action could not be finished; it is retained as it was.", false,
+                "Resolve this failure, then finish again.");
+        }
+        finally { lock (gate) operatorRecordRunning = false; }
+    }
+
+    // Finishes an action whose merge is recorded from its own records: a passing target run at the merge commit, already recorded or
+    // observed now under the merge's original identity, completes it. Nothing is branched, committed, pushed, opened or merged, and the
+    // clone's branch and files stay as they are. Any other action is truly unfinished and is described with what finishing it needs.
+    private OperatorRecordResponse FinishMerged(string identity, OperatorCheckpoint checkpoint, string by, int waitSeconds, CancellationToken cancellationToken)
+    {
+        OperatorProgress progress;
+        ChangeConfiguration configuration;
+        lock (gate)
+        {
+            RequireOperatorRecord(by);
+            progress = OperatorProgressLocked(identity, checkpoint);
+            if (!progress.Finishable) return Answer(false, "refused", OperatorDescription(progress) + ".", OperatorNextStep(progress));
+            if (progress.By != by)
+                return Answer(false, "refused", OperatorDescription(progress) + $"; it is {progress.By}'s action, and only that operator finishes it.", OperatorNextStep(progress));
+            configuration = ChangeConfigurationFor(checkpoint.Product, currentDeclaration: false);
+            if (configuration.Product.ComputedHash != checkpoint.ProductHash || configuration.Repository.ComputedHash != checkpoint.RepositoryHash)
+                return Answer(false, "refused", OperatorDescription(progress) + "; its recorded product or repository declaration is unavailable.", "Restore the declaration it was merged under, then finish it again.");
+        }
+        RecordEnvelope merge = progress.Merge!;
+        ChangeResponse change = progress.CheckStatus == "passed"
+            ? new(EstateModel.BodyString(merge, "identity")!, "observed-success", "The pinned merge and its target checks are recorded as successful.", true,
+                new(merge.ExpectedPath, merge.Id, merge.ComputedHash), new(progress.Target!.ExpectedPath, progress.Target.Id, progress.Target.ComputedHash),
+                PullRequest: progress.PullRequest, Head: checkpoint.Head, MergeCommit: progress.MergeCommit, CheckStatus: "passed")
+            : ChangesObserve(new(merge.Id, by));
+        var watch = Stopwatch.StartNew();
+        while (!change.Ok && change.Status == "observed-success" && change.CheckStatus == "pending" && change.Operation is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TimeSpan left = TimeSpan.FromSeconds(waitSeconds) - watch.Elapsed;
+            if (left <= TimeSpan.Zero) break;
+            if (cancellationToken.WaitHandle.WaitOne(left < TimeSpan.FromSeconds(2) ? left : TimeSpan.FromSeconds(2))) cancellationToken.ThrowIfCancellationRequested();
+            change = ChangesObserve(new(change.Operation.Id, by));
+        }
+        if (!change.Ok || change.CheckStatus != "passed")
+        {
+            lock (gate) progress = OperatorProgressLocked(identity, checkpoint);
+            return Answer(false, change.CheckStatus == "pending" ? "waiting" : "stopped", OperatorDescription(progress) + ". " + change.Message, OperatorNextStep(progress), change);
+        }
+        lock (gate)
+        {
+            if (!OperatorCompletionRecorded(checkpoint, change, configuration))
+                return Answer(false, "stopped", "The finishing evidence is incomplete; the action is retained as it was.", OperatorNextStep(progress), change);
+            SaveOperatorCheckpoint(identity, checkpoint with { Completed = change });
+            if (session.Live.Meta(OperatorActive) == identity) session.Live.SetMeta(OperatorActive, string.Empty);
+            session.Live.SetMeta(OperatorFinished, identity);
+        }
+        return Answer(true, "completed", $"Finished from its records: {progress.Type} {checkpoint.Id}, merged in pull request {progress.PullRequest} at {progress.MergeCommit}, with its target checks passed.",
+            "The signed record and checked merge are complete. Nothing was branched or committed; the clone stays on its current branch, and the next operator action tolerates this action's uncommitted receipts.", change);
+
+        OperatorRecordResponse Answer(bool ok, string status, string message, string next, ChangeResponse? latest = null) =>
+            new(identity, status, message, ok, next, progress.Record is null ? null : new(progress.Record.ExpectedPath, progress.Record.Id, progress.Record.ComputedHash),
+                checkpoint.Branch, checkpoint.Head, latest);
+    }
+
+    private OperatorCheckpoint? OperatorCheckpointLocked(string identity) =>
+        session.Live.Meta(identity) is string saved && saved.Length > 0 ? JsonSerializer.Deserialize<OperatorCheckpoint>(saved, ProtocolJson.Options) : null;
+
+    // The stage an action reached, read from its records under the checkpoint's pins. Caller holds the gate.
+    private OperatorProgress OperatorProgressLocked(string identity, OperatorCheckpoint checkpoint)
+    {
+        EstateModel model = session.Load();
+        RecordEnvelope? record = model.ById.TryGetValue(checkpoint.Id, out RecordEnvelope? found) && found.ComputedHash == checkpoint.Hash ? found : null;
+        if (checkpoint.Head is null) return new(identity, checkpoint, record, record is null ? "prepared" : "recorded");
+        RecordEnvelope[] operations = model.Current("operation").Where(o => o.Body.TryGetProperty("target", out JsonElement t)
+            && ChangeText(t, "head") == checkpoint.Head && ChangeText(t, "productHash") == checkpoint.ProductHash
+            && ChangeText(t, "repositoryHash") == checkpoint.RepositoryHash).ToArray();
+        RecordEnvelope? push = Operation("change-push", "branch", checkpoint.Branch);
+        RecordEnvelope? open = Operation("change-open", "branch", checkpoint.Branch);
+        string? pull = open is not null && EstateModel.BodyString(open, "status") == "observed-success" ? ChangeText(open.Body.GetProperty("target"), "pullRequest") : null;
+        RecordEnvelope? merge = pull is null ? null : Operation("change-merge", "pullRequest", pull);
+        string? status = merge is null ? null : EstateModel.BodyString(merge, "status");
+        string stage = push is null || EstateModel.BodyString(push, "status") != "observed-success" ? "committed" : pull is null ? "pushed"
+            : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed" : "merge-uncertain";
+        if (stage != "merged") return new(identity, checkpoint, record, stage, pull, merge);
+        HashSet<string> revisions = model.Chain(merge!).ToHashSet(StringComparer.Ordinal);
+        RecordEnvelope? target = model.Current("operation").Where(o => EstateModel.BodyString(o, "action") == "change-observe"
+            && EstateModel.BodyString(o, "status") == "observed-success" && o.Body.TryGetProperty("target", out JsonElement t)
+            && ChangeText(t, "observation") == "target-run" && revisions.Contains(ChangeText(t, "operation") ?? string.Empty))
+            .OrderBy(o => o.At, StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).LastOrDefault();
+        RecordEnvelope? ask = model.Current("ask").Where(a => a.Subject is not null && revisions.Contains(a.Subject.Id)).OrderBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+        return new(identity, checkpoint, record, stage, pull, merge, target, target is null ? null : TargetVerdict(merge!, target), ask);
+
+        RecordEnvelope? Operation(string action, string field, string value) => operations.Where(o => EstateModel.BodyString(o, "action") == action
+            && ChangeText(o.Body.GetProperty("target"), field) == value).OrderBy(o => o.At, StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    // A recorded target-run observation's verdict, by the rules the merge observation applies: passed, failed, pending or uncertain.
+    private static string TargetVerdict(RecordEnvelope merge, RecordEnvelope observation)
+    {
+        JsonElement merged = merge.Body.GetProperty("target");
+        JsonElement observed = observation.Body.GetProperty("target");
+        string? commit = ChangeText(merged, "mergeCommit");
+        ChangeCheck[] checks = observation.Body.TryGetProperty("checks", out JsonElement recorded) && recorded.ValueKind == JsonValueKind.Array
+            ? JsonSerializer.Deserialize<ChangeCheck[]>(recorded, ProtocolJson.Options) ?? [] : [];
+        string[] required = merge.Body.TryGetProperty("requiredChecks", out JsonElement names) && names.ValueKind == JsonValueKind.Array
+            ? names.EnumerateArray().Select(n => n.GetString()).OfType<string>().ToArray() : [];
+        bool exact = commit is not null && ChangeText(observed, "observedHead") == commit && ChangeText(observed, "observedTarget") == ChangeText(merged, "target")
+            && ChangeText(observed, "complete") == "true";
+        if (exact && ChangeGate.Refusals(commit!, required, checks, true).Count == 0) return "passed";
+        if (exact && checks.Any(c => c.Head == commit && c.Status == "completed"
+            && c.Conclusion is "failure" or "cancelled" or "timed_out" or "action_required" or "stale" or "startup_failure")) return "failed";
+        return !exact || checks.Any(c => c.Head != commit || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
+    }
+
+    // Names the action by its record id, type and subject, and where it stopped.
+    private static string OperatorDescription(OperatorProgress progress)
+    {
+        string named = $"{progress.Type ?? "record"} {progress.Checkpoint.Id}" + (progress.Subject is null ? string.Empty : " of " + progress.Subject);
+        string where = progress.Stage switch
+        {
+            "prepared" => "prepared, with its signed record not yet stored",
+            "recorded" => "stored and not yet committed",
+            "committed" => $"committed on {progress.Checkpoint.Branch} and not yet pushed",
+            "pushed" => $"pushed on {progress.Checkpoint.Branch}, with no pull request open",
+            "opened" => $"open as pull request {progress.PullRequest} and not merged",
+            "merge-failed" => $"open as pull request {progress.PullRequest}, whose merge failed",
+            "merge-uncertain" => $"open as pull request {progress.PullRequest}, whose merge is unconfirmed",
+            _ => $"merged in pull request {progress.PullRequest} at {progress.MergeCommit}, with its target checks " + progress.CheckStatus switch
+            {
+                "passed" => "recorded as passed",
+                "failed" => "failed",
+                "pending" => "pending",
+                "uncertain" => "incompletely observed",
+                _ => "not yet observed",
+            },
+        };
+        return named + ", " + where + (progress.Record is null && progress.Stage != "prepared" ? "; its signed record is missing from this clone" : string.Empty);
+    }
+
+    // What finishing an action needs, as commands built only from validated identities.
+    private static string OperatorNextStep(OperatorProgress progress)
+    {
+        string by = progress.By is string principal && Ulid.IsValid(principal) ? principal : "<operator-id>";
+        string finish = $"vericairn operator unfinished --finish --by {by}";
+        if (progress.Finishable)
+        {
+            return progress.CheckStatus switch
+            {
+                "failed" => $"Rerun or correct the failed target run at {progress.MergeCommit} on the host"
+                    + (progress.Ask is null ? string.Empty : $" (ask {progress.Ask.Id} records it)") + $"; once it passes, run {finish}, or start the next operator action, which finishes this one first.",
+                "passed" => $"Run {finish}, or start the next operator action, which finishes this one first.",
+                _ => $"Once its target checks pass, run {finish}, or start the next operator action, which finishes this one first.",
+            };
+        }
+        if (progress.Stage == "merged") return $"Restore its signed record {progress.Checkpoint.Id} in this clone (update the clone from the target branch), then run {finish}.";
+        if (progress.Stage == "merge-uncertain" && progress.Merge is not null)
+            return $"Observe the merge under its original identity with vericairn changes observe --operation {progress.Merge.Id} --by {by}, then run vericairn operator unfinished again.";
+        string resume = progress.Type is string type && RecordTypeRegistry.Find(type) is not null && Ulid.IsValid(by)
+            ? OperatorResume(new(type, by, default, progress.Subject, progress.Record?.Supersedes, progress.Checkpoint.Product))
+            : "the original vericairn operator record command";
+        string body = progress.Record is null ? "its original JSON body" : $"the body of its stored record (vericairn records show {progress.Checkpoint.Id})";
+        return progress.Stage == "merge-failed"
+            ? $"Resolve the merge failure, then rerun {resume} with {body} and --reconciliation <explanation>."
+            : $"Rerun {resume} with {body} to resume it.";
     }
 
     // Derive membership and bytes from the same versioned generators used by record writes and estate checks.

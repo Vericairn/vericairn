@@ -1596,6 +1596,18 @@ The queue and one-step command are not MCP tools.
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
 
+From 0.9.2, an action that stopped after its merge, for example while main's
+check was still running, is finished from its own records. Once the merge is
+recorded, resuming observes only the target run at the merge commit; it never
+recreates the deleted branch, signs or commits again, and leaves the clone on
+whatever branch it is on, usually main. `operator unfinished` shows the clone's
+unfinished action: its record id, type and subject, branch, head, pull request,
+stage, and what finishing it needs. `operator unfinished --finish --by <operator>`
+finishes it once the target checks pass. Starting the next `operator record`
+does the same first, then proceeds; that next action tolerates the finished
+action's own uncommitted receipts. An action that has not merged still refuses
+a new one, and the refusal names its record id, type and subject.
+
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
 later and Vericairn's own rules, which keep none of gitleaks' built-in allowlists;

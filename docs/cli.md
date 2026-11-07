@@ -331,6 +331,24 @@ workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
 that follow setup and what the run records.
 
+## `vericairn operator unfinished` (0.9.2)
+
+Shows this clone's unfinished operator action, or says there is none: its record id, type and
+subject, branch, head, pull request and stage, the merge commit and latest target-check verdict once
+merged, and what finishing it needs. Reading writes nothing.
+
+| Option | Meaning |
+|---|---|
+| `--finish` | Finish an action whose merge is recorded, from its own records, once its target checks pass. Nothing is signed, branched or committed. |
+| `--by <operator-id>` | Required with `--finish`: the action's own operator, on their admitted device. |
+| `--wait-seconds <n>` | With `--finish`, the longest wait for pending target checks, 0 to 240; 120 when omitted. |
+| `--json` | Print one typed response. |
+
+Exit 0 means a valid read or a finished action (or nothing to finish), 1 a refused, stopped or
+waiting action, and 2 invalid arguments or a client failure. `operator record` finishes a merged
+action the same way before it starts the next one. See [Operator
+actions](operator-actions.md#finishing-an-action-after-its-merge-092).
+
 ## Runs of a flow (0.9.2)
 
 `vericairn templates list` includes flows, templates of kind `flow`. `goal propose --flow <id>@<version>` proposes a run of

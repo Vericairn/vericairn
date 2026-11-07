@@ -19,6 +19,7 @@ public sealed class OperatorRecordTests
     private static readonly string Head = new('a', 40);
     private static readonly string Merged = new('b', 40);
     private static readonly string Basis = new('c', 40);
+    private static readonly string Next = new('d', 40);
     private static readonly string[] Required = ["tests (linux)", "tests (macos)", "tests (windows)"];
 
     [Theory]
@@ -332,6 +333,127 @@ public sealed class OperatorRecordTests
         Assert.Equal(2, f.Remote.Memory.Effects);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnActionStoppedAtTargetChecksIsFinishedFromItsRecordsAfterTheyPassLeavingTheCloneOnMain(bool command)
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.SetTarget("Example/widget", new("main", Merged, [new(Required[0], Merged, "in_progress", null)]));
+        OperatorRecordResponse stopped = f.Run();
+        Assert.False(stopped.Ok);
+        Assert.Equal("pending", stopped.Change!.CheckStatus);
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(stopped.Record!.Id, shown.RecordId);
+        Assert.Equal(stopped.Record, shown.Record);
+        Assert.Equal("acceptance", shown.Type);
+        Assert.Equal(f.Request.Subject, shown.Subject);
+        Assert.Equal(("merged", "1", "pending", Merged, true), (shown.Stage, shown.PullRequest, shown.CheckStatus, shown.MergeCommit, shown.Finishable));
+        Assert.Contains("operator unfinished --finish --by " + f.Estate.OperatorId, shown.NextStep, StringComparison.Ordinal);
+
+        // The pull request's branch is gone and the operator moved the clone to main before main's run passed.
+        f.Local.Switch("main", Merged);
+        f.Remote.Memory.SetTarget("Example/widget", new("main", Merged, Checks(Merged)));
+        f.Reopen();
+        int events = f.Events.Count;
+        OperatorRecordResponse finished = command
+            ? f.Service.OperatorFinish(new(f.Estate.OperatorId, 0), TestContext.Current.CancellationToken)
+            : f.Run();
+        Assert.True(finished.Ok, finished.Message + " " + finished.NextStep);
+        Assert.Equal("completed", finished.Status);
+        Assert.Equal(stopped.Record, finished.Record);
+        Assert.Equal(["target"], f.Events.Skip(events));
+        Assert.Equal("main", f.Local.Current);
+        Assert.Equal(Merged, f.Local.Head);
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        Assert.Equal("none", f.Service.OperatorFinish(new(f.Estate.OperatorId, 0), TestContext.Current.CancellationToken).Status);
+        Assert.Equal(0, f.Service.Validate().Errors);
+        // The original input now reads its completed, recorded outcome.
+        OperatorRecordResponse repeated = f.Run();
+        Assert.True(repeated.Ok, repeated.Message);
+        Assert.Equal(["target"], f.Events.Skip(events));
+    }
+
+    [Fact]
+    public void TheNextActionFinishesAMergedActionWhoseTargetRunLaterPassedAndThenProceeds()
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.SetTarget("Example/widget", new("main", Merged, [new(Required[0], Merged, "completed", "failure")]));
+        OperatorRecordResponse first = f.Run();
+        Assert.False(first.Ok);
+        Assert.Equal("failed", first.Change!.CheckStatus);
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, """{"key":"M-2","kind":"milestone","title":"The next milestone","intent":"Finish.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
+        f.Estate.Add("work-status", f.Estate.OperatorId, """{"status":"submitted","note":"Ready."}""", order.Reference);
+        f.Local.Switch("main", Merged);
+        f.Reopen();
+        OperatorRecordRequest next = f.Request with { Subject = $"work-order:{order.Id}:{order.ComputedHash}" };
+
+        // While main's run at the merge commit still fails, the earlier action stays unfinished and the next one is refused by name.
+        OperatorRecordResponse refused = f.Service.OperatorRecord(next, TestContext.Current.CancellationToken);
+        Assert.False(refused.Ok);
+        Assert.Equal("refused", refused.Status);
+        Assert.Contains("An earlier operator action is unfinished: acceptance " + first.Record!.Id + " of " + f.Request.Subject, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("failed", refused.NextStep, StringComparison.Ordinal);
+        Assert.Single(f.Service.Session.Load().Current("ask"));
+        Assert.Single(f.Service.Session.Load().OfType("acceptance"));
+
+        // The failed run is rerun on the host and passes; starting the next action finishes the earlier one first and then proceeds.
+        f.Remote.Memory.SetTarget("Example/widget", new("main", Merged, Checks(Merged)));
+        f.Remote.Memory.Checks = Checks(Next);
+        f.Local.NextHead = Next;
+        int events = f.Events.Count;
+        OperatorRecordResponse proceeded = f.Service.OperatorRecord(next, TestContext.Current.CancellationToken);
+        Assert.True(proceeded.Ok, proceeded.Message + " " + proceeded.NextStep);
+        Assert.Equal(["target", "branch", "commit", "scan", "push", "open", "pull", "pull", "merge", "target"], f.Events.Skip(events));
+        Assert.Equal(2, f.Service.Session.Load().OfType("acceptance").Count());
+        Assert.Equal((2, 2, 4), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        // The new action started from main and tolerated only the earlier action's own, still uncommitted receipts.
+        JsonObject saved = JsonNode.Parse(f.Service.Session.Live.Meta(proceeded.Identity)!)!.AsObject();
+        Assert.Equal(("main", Merged, first.Identity), (saved["basis"]!["branch"]!.GetValue<string>(), saved["basis"]!["head"]!.GetValue<string>(), saved["follows"]!.GetValue<string>()));
+        Assert.NotNull(f.Local.Tolerated);
+        Assert.NotEmpty(f.Local.Tolerated);
+        Assert.All(f.Local.Tolerated, path => Assert.StartsWith("records/", path, StringComparison.Ordinal));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        Assert.True(f.Run().Ok);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AnActionWhoseMergeFailedStaysUnfinishedAndRefusesAnotherByItsRecordTypeAndSubject()
+    {
+        using var f = new Fixture();
+        f.Fail = "merge";
+        OperatorRecordResponse first = f.Run();
+        Assert.False(first.Ok);
+        Assert.Equal("known-failure", first.Change!.Status);
+        f.Fail = null;
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(("merge-failed", "1", false), (shown.Stage, shown.PullRequest, shown.Finishable));
+        Assert.Equal(first.Record!.Id, shown.RecordId);
+        Assert.Contains("--reconciliation", shown.NextStep, StringComparison.Ordinal);
+        Assert.Contains("vericairn operator record acceptance --by " + f.Estate.OperatorId, shown.NextStep, StringComparison.Ordinal);
+        Assert.Contains("records show " + first.Record.Id, shown.NextStep, StringComparison.Ordinal);
+        int effects = f.Remote.Memory.Effects;
+        int events = f.Events.Count;
+
+        OperatorRecordResponse finish = f.Service.OperatorFinish(new(f.Estate.OperatorId, 0), TestContext.Current.CancellationToken);
+        Assert.False(finish.Ok);
+        Assert.Equal("refused", finish.Status);
+        OperatorRecordRequest other = f.Request with { Body = JsonSerializer.SerializeToElement(new { statement = "A different judgment.", basis = Array.Empty<string>(), self = true }) };
+        OperatorRecordResponse refused = f.Service.OperatorRecord(other, TestContext.Current.CancellationToken);
+        Assert.False(refused.Ok);
+        Assert.Contains($"acceptance {first.Record.Id} of {f.Request.Subject}", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("whose merge failed", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(effects, f.Remote.Memory.Effects);
+        Assert.Empty(f.Events.Skip(events));
+        Assert.Single(f.Service.Session.Load().OfType("acceptance"));
+
+        OperatorRecordResponse resumed = f.Run("The merge refusal was resolved; nothing was merged.");
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+    }
+
     private static ChangeCheck[] Checks(string head) => Required.Select(n => new ChangeCheck(n, head, "completed", "success")).ToArray();
 
     private sealed class Fixture : IDisposable
@@ -399,11 +521,30 @@ public sealed class OperatorRecordTests
         internal bool CommitAvailable { get; set; } = true;
         internal int Commits { get; private set; }
         internal string Head { get; set; } = Basis;
+        internal string NextHead { get; set; } = OperatorRecordTests.Head;
         internal string? CommittedPath { get; private set; }
+        internal string Current => branch;
+        internal IReadOnlySet<string>? Tolerated { get; private set; }
         private string branch = "main";
-        public RecordCommitBasis Prepare(string directory) { Clean(); return new(branch, Head); }
-        public void Branch(string directory, RecordCommitBasis basis, string next, IReadOnlyDictionary<string, string> files)
-        { if (branch != next) { fixture.Step("branch"); branch = next; } }
+        private readonly Dictionary<string, (string Head, string Basis, string Path)> committed = new(StringComparer.Ordinal);
+        public RecordCommitBasis Prepare(string directory) => Prepare(directory, new HashSet<string>(StringComparer.Ordinal));
+        public RecordCommitBasis Prepare(string directory, IReadOnlySet<string> receipts)
+        {
+            Clean();
+            // Like the repository adapter, a new action starts only with no receipts present except those it was told to tolerate.
+            Tolerated = receipts;
+            if (Receipts().Any(path => !receipts.Contains(path))) throw new ProviderRefusedException("Other changes remain.");
+            return new(branch, Head);
+        }
+        public void Branch(string directory, RecordCommitBasis basis, string next, IReadOnlyDictionary<string, string> files) =>
+            Branch(directory, basis, next, files, new HashSet<string>(StringComparer.Ordinal));
+        public void Branch(string directory, RecordCommitBasis basis, string next, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
+        {
+            if (branch == next) return;
+            if (Receipts().Any(path => !receipts.Contains(path))) throw new ProviderRefusedException("Other changes remain.");
+            fixture.Step("branch");
+            branch = next;
+        }
         public string Commit(string directory, string name, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
         {
             Clean();
@@ -411,15 +552,16 @@ public sealed class OperatorRecordTests
             KeyValuePair<string, string> file = Assert.Single(files);
             string path = file.Key;
             Assert.Equal(file.Value, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
-            if (CommittedPath is not null)
+            if (committed.TryGetValue(name, out (string Head, string Basis, string Path) done))
             {
-                if (Head != OperatorRecordTests.Head) throw new ProviderRefusedException("The commit moved.");
-                Assert.Equal(CommittedPath, path);
+                if (Head != done.Head) throw new ProviderRefusedException("The commit moved.");
+                Assert.Equal(done.Path, path);
                 return Head;
             }
             fixture.Step("commit");
-            Head = OperatorRecordTests.Head;
+            Head = NextHead;
             CommittedPath = path;
+            committed[name] = (Head, basis, path);
             Commits++;
             if (LoseReceipt) throw new IOException("The local receipt was lost.");
             return Head;
@@ -429,18 +571,21 @@ public sealed class OperatorRecordTests
             Clean();
             if (branch != name || Head != head) throw new ProviderRefusedException("The branch moved.");
             // Every generated receipt is accounted for on recovery, including failed merge intents and target asks.
-            Assert.All(fixture.Service.Session.Load().Records.Where(r => r.Type is "operation" or "ask"), r => Assert.Contains(r.ExpectedPath, receipts));
+            Assert.All(Receipts(), path => Assert.Contains(path, receipts));
         }
         public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files)
         {
             if (!CommitAvailable) throw new ProviderRefusedException("The original commit is unavailable.");
-            Assert.Equal(OperatorRecordTests.Head, head);
-            Assert.Equal(Basis, basis);
+            (string Head, string Basis, string Path) done = Assert.Single(committed.Values, c => c.Head == head);
+            Assert.Equal(done.Basis, basis);
             KeyValuePair<string, string> file = Assert.Single(files);
-            Assert.Equal(CommittedPath, file.Key);
+            Assert.Equal(done.Path, file.Key);
             string path = file.Key;
             Assert.Equal(file.Value, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
         }
+        // The operator returns the clone to another branch, for example main after the pull request merged.
+        internal void Switch(string name, string head) { branch = name; Head = head; }
+        private IEnumerable<string> Receipts() => fixture.Service.Session.Load().Records.Where(r => r.Type is "operation" or "ask").Select(r => r.ExpectedPath);
         private void Clean() { if (Dirty) throw new ProviderRefusedException("Other changes remain."); }
     }
 
@@ -472,7 +617,7 @@ public sealed class OperatorRecordTests
         public PullRequestObservation? Observe(string destination, string numberOrBranch)
         { fixture.Step("pull"); PullRequestObservation? pull = Memory.Observe(destination, numberOrBranch); return pull is null ? null : Read?.Invoke(pull) ?? pull; }
         public ChangeReceipt Merge(string destination, string number, string head)
-        { fixture.Step("merge"); Assert.Equal(Head, head); ChangeReceipt receipt = Memory.Merge(destination, number, head); Receipt("merge"); return receipt; }
+        { fixture.Step("merge"); Assert.Equal(fixture.Local.Head, head); ChangeReceipt receipt = Memory.Merge(destination, number, head); Receipt("merge"); return receipt; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveTarget(destination, branch, commit); }
         private void Receipt(string step) { if (LoseReceipt == step) throw new ProviderUncertainException("The receipt was lost."); }
