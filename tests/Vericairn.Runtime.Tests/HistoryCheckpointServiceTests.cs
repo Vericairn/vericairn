@@ -145,6 +145,44 @@ public class HistoryCheckpointServiceTests
         }
     }
 
+    [Fact]
+    public void InventoryObjectsAreReadWithinTheObjectLimitAndNeverThroughALink()
+    {
+        using var f = new Fixture();
+        Ok(f.Checkpoint(f.Records.Estate.OperatorId, "adoption", f.Unsigned()));
+        RecordEnvelope adoption = f.Api.Session.Load().OfType("history-checkpoint").Single();
+        string hash = adoption.Body.GetProperty("inventory")[0].GetString()!;
+        string objects = Path.Combine(f.Records.Estate.Root, EstateLayout.ObjectsDirectory);
+        string path = Path.Combine(objects, hash["sha256:".Length..]);
+        string outside = Path.Combine(Path.GetTempPath(), "vericairn-history-outside-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(outside);
+        try
+        {
+            // An object reached through a link is not read, even when the bytes it leads to are the right ones.
+            string target = Path.Combine(outside, Path.GetFileName(path));
+            File.Move(path, target);
+            bool linked = true;
+            try { File.CreateSymbolicLink(path, target); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { linked = false; }
+            if (linked)
+                Assert.Contains(f.Api.Session.Load().Findings, x => x.Code == "history.checkpoint-missing" && x.Message.Contains(hash, StringComparison.Ordinal));
+            File.Delete(path);
+            File.Move(target, path);
+            Assert.DoesNotContain(f.Api.Session.Load().Findings, x => x.Code == "history.checkpoint-missing");
+
+            // An object over the limit is not read either.
+            byte[] large = new byte[EstateLayout.MaxObjectBytes + 1];
+            Array.Fill(large, (byte)'a');
+            string largeHash = Records.Hashing.ContentHash.Sha256(large);
+            File.WriteAllBytes(Path.Combine(objects, largeHash["sha256:".Length..]), large);
+            JsonObject body = JsonNode.Parse(f.Prepare("interval").Body.GetRawText())!.AsObject();
+            body["inventory"] = new JsonArray(largeHash);
+            f.Records.Add("history-checkpoint", body);
+            Assert.Contains(f.Api.Session.Load().Findings, x => x.Code == "history.checkpoint-missing" && x.Message.Contains(largeHash, StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(outside, recursive: true); }
+    }
+
     private static RecordWritten Ok(WriteOutcome outcome)
     {
         Assert.True(outcome.Ok, JsonSerializer.Serialize(outcome.Problem, ProtocolJson.Options));

@@ -457,8 +457,12 @@ optional charter, as policy records are; an unsigned one is `signature.required`
 and witnesses nothing. Any admitted device, an agent's included, may sign one
 without `anchored` or `removed`: witnessing grants nothing.
 
-**The graph.** A checkpoint that counts witnesses what its inventory lists and,
-through hashes that match, what every checkpoint it follows lists. Two clones that
+**The graph.** A checkpoint counts when its signatures verify and it is either an
+adoption checkpoint by an author who may anchor (below) or follows, through hashes
+that match, only checkpoints that count. A checkpoint whose predecessor is missing,
+altered or does not count witnesses nothing (`history.checkpoint-missing`,
+`history.altered` or `history.checkpoint-invalid`). A checkpoint that counts
+witnesses what its inventory lists and what every checkpoint it follows lists. Two clones that
 each write one after the same head leave two heads after git merges them; the
 next checkpoint names both, and what it witnesses is the union, with no
 reconciliation. The heads, and the records and set hash each head states, are
@@ -470,18 +474,27 @@ checkpoints listing it with different hashes is `history.altered`, and a missing
 predecessor or inventory object is `history.checkpoint-missing`; each is an error
 naming the path and the witnessing checkpoint, and an altered record counts for
 nothing. Restoring the witnessed bytes settles it, and so does an anchoring
-checkpoint's `removed` entry for that id and hash. `history.checkpoint-invalid`
+checkpoint's `removed` entry for that id and hash; only the removals an author who
+may anchor lists count. A record re-added after its removal was acknowledged is part
+of the tail until a checkpoint lists it. When the only listings that disagree with a
+present record are by authors who may not anchor, and the record is signed and
+verifies or is anchored with its present hash, it keeps counting and the estate
+check warns `history.listing-mismatch`, naming each such listing's checkpoint and
+author. `history.checkpoint-invalid`
 reports a malformed inventory, a checkpoint that lists itself, and a head whose
 `records` or `recordSetHash` differ from what it witnesses.
 
 **Anchoring.** Only the root operator, or a human principal holding `administer`
 through a signed grant from the root operator or an operator whose role rests on
-signatures, anchors or acknowledges, never an agent, and only with devices whose
+signatures, whose own principal record rests on signatures and was written by such
+an operator, and whose grant no such operator has since revised away, anchors or acknowledges, never an agent, and only with devices whose
 own admissions rest on signed admissions; another author's lists are
 `history.anchor-author` and count for nothing, while its checkpoint still witnesses.
 An estate's first checkpoint, its adoption, counts only when one who may anchor signs
-it; another author's is `history.adoption-author` and adopts nothing. An estate that
-holds a counting checkpoint has adopted checkpoints. There, while the
+it; another author's is `history.adoption-author` and adopts nothing. An estate has
+adopted checkpoints when it holds a counting checkpoint, that is, when the graph of
+counting checkpoints reaches a present adoption checkpoint by an author who may
+anchor; a checkpoint that does not reach one adopts nothing. There, while the
 charter requires signatures, an unsigned record counts only when an anchoring
 checkpoint lists its exact id and hash, whatever its date; one that is not anchored
 is `history.unanchored`, or `signature.required` when dated after the current charter

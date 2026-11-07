@@ -316,13 +316,19 @@ a device-prepared record included, refuses a checkpoint that does not follow exa
 records no head witnesses in objects held here, and state their count and set hash, or that anchors a record not present
 unsigned with that hash or acknowledges the removal of a record that is not witnessed and absent. New findings, each an
 error unless stated: `history.removed`, `history.altered`, `history.checkpoint-missing`, `history.checkpoint-invalid`,
-`history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`, `record.subject-not-counting` and
+`history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`,
+`history.listing-mismatch` (a warning), `record.subject-not-counting` and
 `record.reference-not-counting`; `history.deleted-in-git` is a warning and `history.expected` information.
-`signature.required` now also reports an unsigned history checkpoint or device revision.
+`signature.required` now also reports an unsigned history checkpoint or device revision. Status lists the history errors,
+`history.unanchored`, and, once the estate has adopted checkpoints, `signature.required`, first. `estate check --expect`
+accepts a record id, a full content hash or at least sixteen hexadecimal digits of it. A device's recovery purpose is
+read from its latest revision that counts.
 
 What counts changes in every estate, without a format step. `EstateModel.OfType`, `Current`, `About`, `IsCurrent`,
-`Latest`, `SupersededBy`, `CurrentPrincipal`, `RolesOf`, `HasRole` and `HasScope` read only records that count;
-`Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
+`SupersededBy`, `RolesOf`, `HasRole` and `HasScope` read only records that count. `Latest` follows only counting
+successors and returns the record it starts from when none follows it, which may itself not count; `CurrentPrincipal`
+returns the newest counting revision of a principal's line, or null when none of its revisions counts, so a principal
+record that does not count grants no role. `Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
 policy refuses (after adoption, any unanchored unsigned record under required signatures), an unsigned policy record,
 checkpoint or device revision, or a witnessed record present with another hash. `SignatureChecks.Anchored` includes anchoring checkpoints'
 anchors; a device revision changes the device's key or name only when its device signed it. A policy basis

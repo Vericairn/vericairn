@@ -235,17 +235,22 @@ public class HistoryCheckpointTests
         RecordEnvelope first = f.Adopt();
         f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("HIS-8"), signer: f.OperatorSigner);
         RecordEnvelope second = f.Checkpoint();
-        f.Remove(first);
-        EstateModel model = f.Load();
-        Assert.Contains(model.Findings, x => x.Code == "history.checkpoint-missing" && x.Location.StartsWith(second.ExpectedPath, StringComparison.Ordinal) && x.Message.Contains(first.Id, StringComparison.Ordinal));
-        Assert.Contains(model.Findings, x => x.Code == "history.removed" && x.Location == first.ExpectedPath);
-        // The adoption checkpoint's absence does not undo adoption: a later checkpoint still counts.
-        Assert.True(SignedHistory.Adopted(model));
 
         string inventory = second.Body.GetProperty("inventory")[0].GetString()!;
+        byte[] bytes = File.ReadAllBytes(f.ObjectPath(inventory));
         File.Delete(f.ObjectPath(inventory));
-        model = f.Load();
+        EstateModel model = f.Load();
         Assert.Contains(model.Findings, x => x.Code == "history.checkpoint-missing" && x.Message.Contains(inventory, StringComparison.Ordinal));
+        File.WriteAllBytes(f.ObjectPath(inventory), bytes);
+
+        // Without its predecessor a checkpoint is on no path back to the adoption checkpoint, so it witnesses nothing and adopts nothing;
+        // the removal is the error that holds writes and release submission.
+        f.Remove(first);
+        model = f.Load();
+        Assert.Contains(model.Findings, x => x.Code == "history.checkpoint-missing" && x.Location.StartsWith(second.ExpectedPath, StringComparison.Ordinal) && x.Message.Contains(first.Id, StringComparison.Ordinal));
+        Assert.False(model.Counts(second));
+        Assert.False(SignedHistory.Adopted(model));
+        Assert.True(model.Findings.HasErrors);
     }
 
     [Fact]
@@ -313,7 +318,8 @@ public class HistoryCheckpointTests
             RecordAuthor.Write(clone, version);
             CheckpointDraft draft = SignedHistory.Prepare(EstateLoader.Load(clone), "interval");
             foreach (byte[] bytes in draft.Objects) WriteObject(f.Root, bytes);
-            f.Estate.Add("history-checkpoint", f.Estate.BuilderId, draft.Body.GetRawText(), signer: f.BuilderSigner);
+            // The other clone's checkpoint is the root operator's, whose listing can make the record here count for nothing.
+            f.Estate.Add("history-checkpoint", f.Estate.OperatorId, draft.Body.GetRawText(), signer: f.OperatorSigner);
             EstateModel model = f.Load();
             Assert.Contains(model.Findings, x => x.Code == "history.altered" && x.Location == order.ExpectedPath && x.Message.Contains("different hashes", StringComparison.Ordinal));
             Assert.False(model.Counts(model.ById[order.Id]));
@@ -359,7 +365,8 @@ public class HistoryCheckpointTests
         EstateModel model = f.Load();
         Assert.Null(SignedHistory.Expect(model, newest.Id));
         Assert.Null(SignedHistory.Expect(model, newest.ComputedHash));
-        Assert.Null(SignedHistory.Expect(model, newest.ComputedHash[ContentHash.Prefix.Length..][..12]));
+        Assert.Null(SignedHistory.Expect(model, newest.ComputedHash[ContentHash.Prefix.Length..][..16]));
+        Assert.Equal("history.expected-missing", SignedHistory.Expect(model, newest.ComputedHash[ContentHash.Prefix.Length..][..12])!.Code);
         Assert.Null(SignedHistory.Expect(model, adoption.Id));
         Assert.Equal("history.expected-missing", SignedHistory.Expect(model, "abc")!.Code);
 
@@ -371,7 +378,7 @@ public class HistoryCheckpointTests
         Finding missing = SignedHistory.Expect(model, newest.Id)!;
         Assert.Equal("history.expected-missing", missing.Code);
         Assert.Equal(Severity.Error, missing.Severity);
-        Assert.Equal("history.expected-missing", SignedHistory.Expect(model, newest.ComputedHash[ContentHash.Prefix.Length..][..12])!.Code);
+        Assert.Equal("history.expected-missing", SignedHistory.Expect(model, newest.ComputedHash[ContentHash.Prefix.Length..][..16])!.Code);
     }
 
     [Fact]

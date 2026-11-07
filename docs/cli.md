@@ -469,14 +469,15 @@ A script that follows `events watch` and runs `goal step` acts with its own prin
 `vericairn estate check --expect <checkpoint>` refuses a copy of the estate that lacks a history checkpoint known
 elsewhere, such as the head another clone shows. A fresh machine cannot tell from the records alone whether the newest
 checkpoints were removed together with the records written after them, so it checks against a head it was told
-([signed history](operator-guide.md#history-checkpoints-092)). The checkpoint is named by its record id, its content
-hash or at least eight hexadecimal digits of that hash. The check adds `history.expected`, information, when the copy
+([signed history](operator-guide.md#history-checkpoints-092)). The checkpoint is named by its record id or its full content
+hash, `sha256:` and 64 hexadecimal digits; at least sixteen hexadecimal digits of the hash are accepted, and anything shorter
+is refused. The check adds `history.expected`, information, when the copy
 holds it, signed and counting; otherwise `history.expected-missing`, an error, says whether it is absent, here but not
 counting, or named ambiguously, and the command exits 1. Without `--expect` the check is unchanged.
 
 ```sh
 vericairn estate check --expect <checkpoint id>
-vericairn estate check --expect <first twelve hex digits of its hash>
+vericairn estate check --expect sha256:<64 hex digits of its hash>
 ./bootstrap --expect <checkpoint id>
 ./bootstrap.ps1 --expect <checkpoint id> status
 ```

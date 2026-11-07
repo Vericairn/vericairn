@@ -23,7 +23,7 @@ public sealed class HistoryExpectCommandTests
         CliHarness.Outcome held = CliHarness.Run("--estate", f.Root, "estate", "check", "--expect", newest.Id);
         Assert.True(held.Code == 0, held.Out + held.Err);
         Assert.Contains("history.expected", held.Out, StringComparison.Ordinal);
-        CliHarness.Outcome byHash = CliHarness.Run("--estate", f.Root, "--json", "estate", "check", "--expect", newest.ComputedHash[ContentHash.Prefix.Length..][..12]);
+        CliHarness.Outcome byHash = CliHarness.Run("--estate", f.Root, "--json", "estate", "check", "--expect", newest.ComputedHash[ContentHash.Prefix.Length..][..16]);
         Assert.True(byHash.Code == 0, byHash.Out + byHash.Err);
         FindingsResponse findings = byHash.Json.Deserialize<FindingsResponse>(ProtocolJson.Options)!;
         Assert.Equal("info", Assert.Single(findings.Findings, x => x.Code == "history.expected").Severity);
@@ -40,6 +40,7 @@ public sealed class HistoryExpectCommandTests
             FindingDto missing = Assert.Single(refused.Json.Deserialize<FindingsResponse>(ProtocolJson.Options)!.Findings, x => x.Code == "history.expected-missing");
             Assert.Equal("error", missing.Severity);
             Assert.Equal(1, CliHarness.Run("--estate", copy, "estate", "check", "--expect", "not-a-checkpoint").Code);
+            Assert.Equal(1, CliHarness.Run("--estate", f.Root, "estate", "check", "--expect", newest.ComputedHash[ContentHash.Prefix.Length..][..12]).Code);
         }
         finally { CliHarness.Delete(copy); }
     }
