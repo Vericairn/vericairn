@@ -287,26 +287,31 @@ person's observation pins. Canonical status reads no clock: a run, its stops, an
 `operatorRequests` and in status's attention are derived as of the newest record (`asOf`), so the document is byte-identical
 whenever and wherever it is read. Human status, `GET /v1/goals/{id}`, `/next`, `GET /v1/operator/requests`, `GET /v1/attention`
 and progress's attention read a run now, so a due time, backoff or watch limit shows there at once, and in canonical status once a
-later record is written. A hand-over package derives a run's position as of the newest record too. `request` events follow the
-queue's delivery: a run's request is `open` while it is delivered, `withdrawn` or `settled` otherwise, with category
+later record is written. A hand-over package derives a run's position as of the newest record too. Canonical status and a
+hand-over package trust each record's claimed time, so their stops and steps carry `command` null; only the live reads show a
+reserved step's command. A step request's text in the queue, in `operator list` and in attention shows its checked command first
+and labels its recommendation and other prose as the requester's, not checked; a client that cannot read the queue, from an older
+runtime, shows no step request as open. `operator list` (`GET /v1/operator/actions`) reads the runtime's clock, and its
+operator-request items add `stepCommand` for a run's step request. `request` events follow the queue's delivery: a run's request is `open` while it is delivered, `withdrawn` or `settled` otherwise, with category
 `information` once it is not delivered. Older clients ignore the
 added members and values; older servers omit them, which is not evidence that a run has no stops. The SDK's and the MCP
 server's goal, next, status and request reads carry the same JSON; no tool is added and no description changes.
 
 The state language's `step-route` vocabulary adds `request`, `requested`, `closed` and `queued`, and it adds the `flow-stop`
 and `flow-delivery` vocabularies. `Vericairn.Presentation` adds `StopRow` and `FlowRunRow`, `GoalPresentation.Stops`, and
-`EstateView.Runs` and `Stops`. Workbench's `ShellViewModel` and `GoalsWorkspace` add `Stops` and `HasStops`, and so does
-Remote's `RemoteViewModel`. `Vericairn.Protocol`'s attention derivation reads the request queue when the API offers it, and
+`EstateView.Runs`, `Stops` and `StopsAsOf`, and `FlowRunRow.AsOf`. Workbench's `ShellViewModel` adds `Stops`, `HasStops` and
+`StopsAsOf`, its `GoalsWorkspace` `Stops` and `HasStops`, and Remote's `RemoteViewModel` `Stops`, `HasStops` and `StopsAsOf`. `Vericairn.Protocol`'s attention derivation reads the request queue when the API offers it, and
 derives it from the records otherwise.
 
 `Vericairn.Records` adds public types and members:
 
 - `Estate.FlowStops`: `Kinds`, `Deliveries`, `RequestStates` and `PerDelivery`; the records `RunStop`, `FlowStepReference` and
-  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `RecordedTime`, `Of`, `Runs`,
-  `RenderJson`, `AppendText`, `RunsJson` and `RunsText`.
-- `Estate.FlowPosition.HoldsReservedAct`; `StepInstance.Stop` and `Command`; and `Position.Stops` and `At`. `FlowPosition` is
-  now `partial`.
-- `Estate.EstateStatus.Render` and `Estate.GoalView.RenderText` and `RenderJson` overloads at a time.
+  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `RecordedTime`, `Of`, `Deliver`,
+  `Runs`, `RenderJson` and `AppendText` (each with an optional `commands`), `RunsJson` and `RunsText`.
+- `Estate.FlowPosition.HoldsReservedAct` and `IsReservedAct`; `StepInstance.Stop` and `Command`; `Position.Stops`, `At` and
+  `Reaching`; and an optional `commands` on `RenderText` and `RenderJson`. `FlowPosition` is now `partial`.
+- `Estate.EstateStatus.Render` and `Estate.GoalView.RenderText` and `RenderJson` overloads at a time, the goal view's with an
+  optional `commands`; `Estate.OperatorActions.Derive` at a time.
 - `Estate.GoalPredicates.EvaluatePredicate` and `Matching` overloads taking the records a rule admits.
 - `Estate.OperatorRequests.Held`, `Waiting`, `WaitingOf`, and `Derive` and `RenderText` overloads at a time; `Open` now
   leaves out a run's request that is not due.
@@ -316,12 +321,17 @@ derives it from the records otherwise.
 
 Behavior changes to the runs that PROC-05 and PROC-10 add, each within record format 3. A flow's reserved step must declare its
 `action`, the exact command the operator runs, and its `done` predicates (`flow.reserved`), and the command's placeholders must
-be bindings of the run (`flow.binding`); a flow content that lacks them no longer validates. A reserved step's done predicates
-and record items count only records a person with the operator role recorded, and a result counts only when one recorded it:
-a reserved step that an agent's record satisfied under PROC-05 is no longer done, and an agent's attestation item of a reserved
-step is `missing` rather than `unproven`. A reserved step whose input changed after it was done shows `stopped`, waiting on the
+be bindings of the run (`flow.binding`), and its done predicates name no `state` (`flow.reserved`); a flow content that lacks
+them no longer validates. A reserved step's done predicates and record items count a record only when its signatures are
+authentic and its author was a person with the operator role when it was made (`FlowPosition.IsReservedAct`), and a result only
+on the same terms: a reserved step that an agent's record, an unsigned record or a record made before its author became an
+operator satisfied under PROC-05 is no longer done, and an agent's attestation item of a reserved step is `missing` rather than
+`unproven`. A predicate evaluated with a rule that admits records never holds by a `state`. `Patterns.Slug` and the predicate
+binding pattern now end at the value's last character, refusing a value with a final newline. A reserved step whose input changed after it was done shows `stopped`, waiting on the
 operator again, rather than `stale`. A reserved step whose command cannot be bound from the records shows `blocked`. `goal step`
-records a reserved step's operator request instead of answering `none`, and queues a fourth stop to one person. Record format
+records a reserved step's operator request instead of answering `none`, and queues a fourth stop to one person across every run.
+A request counts as closed only when its addressed operator's own authentic close closes it, and is delivered only when its
+author takes the run's steps and it is put to a person who holds the act. Record format
 remains 3; its addition, an operator request's `flowStep`, is in
 [record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
 explanation of `operator-request` now includes `flowStep`.

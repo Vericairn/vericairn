@@ -106,8 +106,9 @@ public static class FlowStops
 
     /// <summary>
     /// The open requests for a step of a run, each with its state: due when the step is a reserved act stopped for the operator now, the
-    /// request carries exactly the command the records give now, it was recorded by a principal who takes the run's steps, and no earlier
-    /// request is due; settled once the step is done; withdrawn otherwise. A request with a stale or altered command is never delivered.
+    /// request carries exactly the command the records give now, it is put to a person who holds the act and was recorded by a principal
+    /// who takes the run's steps, and no earlier request is due; settled once the step is done; withdrawn otherwise. A request with a
+    /// stale or altered command is never delivered, and its prose is shown as the requester's, unchecked; it grants nothing.
     /// </summary>
     public static IReadOnlyList<StepRequest> Classify(EstateModel model, FlowPosition.Position position, FlowRuns.StepRef step)
     {
@@ -126,7 +127,7 @@ public static class FlowStops
                 : instance.State == "done" ? ("settled", $"step {step} is done: {instance.Reasons[0]}")
                 : instance.State != "stopped" || instance.Stop != "reserved" || instance.Command is null ? ("withdrawn", $"step {step} is {instance.State} now: {instance.Reasons[0]}")
                 : CommandOf(request) != instance.Command ? ("withdrawn", $"its command is not the one the records give now for step {step}")
-                : !Routing.MayTakeStep(model, position.Goal, request.By, request.AtTime) ? ("withdrawn", $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps")
+                : Unproven(model, position.Goal, request) is string why ? ("withdrawn", why)
                 : carried ? ("withdrawn", $"an earlier request carries step {step}")
                 : ("due", $"it carries step {step}'s command as the records give it now");
             carried |= state == "due";
@@ -135,6 +136,25 @@ public static class FlowStops
 
         return states;
     }
+
+    /// <summary>
+    /// Why a request for a reserved step is not one to deliver, or null when it is: its author takes the run's steps, and it is put to a
+    /// person who holds the act. Its command is checked apart, against the records.
+    /// </summary>
+    private static string? Unproven(EstateModel model, RecordEnvelope goal, RecordEnvelope request) =>
+        !Routing.MayTakeStep(model, goal, request.By, request.AtTime) ? $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps"
+        : !FlowPosition.HoldsReservedAct(model, EstateModel.BodyString(request, "to")) ? "it is put to no person who holds the act"
+        : null;
+
+    /// <summary>
+    /// The request for a reserved step that was closed and is not made again while its command holds: one that would have been due,
+    /// carrying the command the records give now, recorded by a principal who takes the run's steps and put to a person who holds the act,
+    /// whose close is that addressed operator's own authentic record. Any other close, an agent's citing the operator's words among them,
+    /// leaves the step's request due again.
+    /// </summary>
+    private static RecordEnvelope? Closed(EstateModel model, FlowPosition.Position position, FlowPosition.StepInstance instance) =>
+        Requests(model, position.Goal, instance.Ref).LastOrDefault(r => CommandOf(r) == instance.Command && Unproven(model, position.Goal, r) is null
+            && OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && SignatureChecks.IsAuthentic(model, c)));
 
     /// <summary>
     /// Who a reserved step's operator request is put to: the first person with the operator role its role names, through the goal's
@@ -182,8 +202,8 @@ public static class FlowStops
     /// <summary>
     /// A run's stops from its position and the records, in the order the flow reaches them: the run's own required attention first, then
     /// each stopped step and each review of a step in review that a person holds, then the goal's acceptance once the run is complete and
-    /// the goal is ready for it. At most three of them reach one person at a time; the rest are queued in order. A run that is not
-    /// active, paused, budget-limited or blocked has none.
+    /// the goal is ready for it; each as it reaches its person before the limit across runs (<see cref="Deliver"/>) queues any. A run that
+    /// is not active, paused, budget-limited or blocked has none.
     /// </summary>
     public static IReadOnlyList<RunStop> Of(EstateModel model, FlowPosition.Position position, DateTimeOffset at)
     {
@@ -235,7 +255,58 @@ public static class FlowStops
                 $"the run is complete and the goal is ready for its acceptance by {accepter.Description}: vericairn goal accept {goal.Id} --by <id> --statement <text>", "outside", null));
         }
 
-        return Queue(stops);
+        return stops;
+    }
+
+    /// <summary>
+    /// A run's stops delivered across every run (design/cohesion-contract.md § 5): at most <see cref="PerDelivery"/> reach one person at a
+    /// time, whichever runs they belong to. Those already delivered count first; then each due one in the flows' order, the earliest
+    /// position in its flow first and, at the same position, the older run first; the rest are queued. Returns the run's stops and how
+    /// many reach each person.
+    /// </summary>
+    public static (IReadOnlyList<RunStop> Stops, IReadOnlyDictionary<string, int> Reaching) Deliver(EstateModel model, FlowPosition.Position position, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(position);
+        string own = model.Chain(position.Goal)[0];
+        var runs = new List<(string Root, IReadOnlyList<RunStop> Stops)>();
+        foreach (RecordEnvelope goal in Active(model))
+        {
+            string root = model.Chain(goal)[0];
+            runs.Add((root, root == own ? position.Stops : FlowPosition.Derive(model, goal, at, deliver: false).Stops));
+        }
+
+        if (runs.All(r => r.Root != own))
+        {
+            runs.Add((own, position.Stops));
+        }
+
+        var reaching = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (RunStop delivered in runs.SelectMany(r => r.Stops).Where(s => s.Delivery == "delivered" && s.Principal is not null))
+        {
+            reaching[delivered.Principal!] = reaching.GetValueOrDefault(delivered.Principal!) + 1;
+        }
+
+        List<RunStop> result = [.. position.Stops];
+        var due = runs.SelectMany((run, order) => run.Stops.Select((stop, index) => (Stop: stop, Index: index, Order: order, Own: run.Root == own)))
+            .Where(s => s.Stop is { Delivery: "due", Principal: not null }).OrderBy(s => s.Index).ThenBy(s => s.Order).ToList();
+        foreach ((RunStop stop, int index, int _, bool mine) in due)
+        {
+            int count = reaching.GetValueOrDefault(stop.Principal!);
+            if (count >= PerDelivery)
+            {
+                if (mine)
+                {
+                    result[index] = stop with { Delivery = "queued" };
+                }
+            }
+            else
+            {
+                reaching[stop.Principal!] = count + 1;
+            }
+        }
+
+        return (result, reaching);
     }
 
     /// <summary>
@@ -254,12 +325,20 @@ public static class FlowStops
     public static IReadOnlyList<FlowPosition.Position> Runs(EstateModel model, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.Current("goal").Where(FlowRuns.IsRun).Where(g => GoalRules.Status(model, g) is "active" or "paused" or "budget-limited" or "blocked")
-            .OrderBy(g => g.At, StringComparer.Ordinal).ThenBy(g => g.Id, StringComparer.Ordinal).Select(g => FlowPosition.Derive(model, g, at)).ToList();
+        return Active(model).Select(g => FlowPosition.Derive(model, g, at)).ToList();
     }
 
-    /// <summary>A run's stops as JSON, the same in status, goal show, goal next and every client.</summary>
-    public static JsonArray RenderJson(EstateModel model, IReadOnlyList<RunStop> stops)
+    /// <summary>Every current goal that is a run and is active, paused, budget-limited or blocked, the oldest run first by its first revision.</summary>
+    private static List<RecordEnvelope> Active(EstateModel model) =>
+        model.Current("goal").Where(FlowRuns.IsRun).Where(g => GoalRules.Status(model, g) is "active" or "paused" or "budget-limited" or "blocked")
+            .OrderBy(g => model.ById[model.Chain(g)[0]].At, StringComparer.Ordinal).ThenBy(g => model.Chain(g)[0], StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// A run's stops as JSON, the same in status, goal show, goal next and every client. A record-derived document, canonical status or a
+    /// hand-over package, passes <paramref name="commands"/> false: it trusts each record's claimed time, so a reserved step's command,
+    /// which a live read derives at the real time, is left out of it.
+    /// </summary>
+    public static JsonArray RenderJson(EstateModel model, IReadOnlyList<RunStop> stops, bool commands = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(stops);
@@ -275,12 +354,15 @@ public static class FlowStops
             ["delivery"] = s.Delivery,
             ["record"] = s.Record is null ? null : new JsonObject { ["type"] = s.Record.Type, ["id"] = s.Record.Id, ["hash"] = s.Record.ComputedHash },
             ["act"] = s.Act,
-            ["command"] = s.Command,
+            ["command"] = commands ? s.Command : null,
         }).ToArray());
     }
 
-    /// <summary>A run's stops as text: each with why it waits, on whom, how it reaches them and, for a reserved act that is next, its exact command.</summary>
-    public static void AppendText(StringBuilder text, EstateModel model, IReadOnlyList<RunStop> stops, string indent)
+    /// <summary>
+    /// A run's stops as text: each with why it waits, on whom, how it reaches them and, for a reserved act that is next and a live read,
+    /// its exact command.
+    /// </summary>
+    public static void AppendText(StringBuilder text, EstateModel model, IReadOnlyList<RunStop> stops, string indent, bool commands = true)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(model);
@@ -301,9 +383,13 @@ public static class FlowStops
                 .Append(stop.Principal is null ? "a person the records do not name" : $"{Routing.NameOf(model, stop.Principal)} [principal {stop.Principal}]")
                 .Append(": ").Append(stop.Delivery).Append(stop.Record is null ? string.Empty : $" ({stop.Record.Type} {stop.Record.Id})").Append('\n');
             text.Append(indent).Append("    ").Append(stop.Reason).Append('\n');
-            if (stop.Command is not null)
+            if (stop.Command is not null && commands)
             {
                 text.Append(indent).Append("    command: ").Append(stop.Command).Append('\n');
+            }
+            else if (stop.Command is not null)
+            {
+                text.Append(indent).Append("    command: shown by a live read, vericairn goal next or goal show\n");
             }
         }
     }
@@ -328,7 +414,7 @@ public static class FlowStops
                 ["steps"] = running.Count,
                 ["complete"] = run.Complete,
                 ["next"] = new JsonArray(run.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray()),
-                ["stops"] = RenderJson(model, run.Stops),
+                ["stops"] = RenderJson(model, run.Stops, commands: false),
             };
         }).ToArray());
     }
@@ -416,7 +502,7 @@ public static class FlowStops
             return new RunStop("reserved", instance.Name, instance.Step.Title, instance.Ref, EstateModel.BodyString(due.Request, "to"), reason, "delivered", due.Request, instance.Command, act);
         }
 
-        if (Requests(model, position.Goal, instance.Ref).LastOrDefault(r => OperatorRequests.Closures(model, r).Any() && CommandOf(r) == instance.Command) is RecordEnvelope closed)
+        if (Closed(model, position, instance) is RecordEnvelope closed)
         {
             return new RunStop("reserved", instance.Name, instance.Step.Title, instance.Ref, EstateModel.BodyString(closed, "to"),
                 $"{reason}; operator request {closed.Id} carrying this command was closed, and it is not made again while the command holds: the step is done once the operator's act is recorded", "closed", closed, instance.Command, act);
@@ -452,31 +538,5 @@ public static class FlowStops
         return first is not null && GoalRules.IsPerson(model, first)
             ? new RunStop("person", name, title, step, first, $"a person holds the {review.Role} role for its {review.Requirement.Independence} review: {Routing.NameOf(model, first)}", "due", null)
             : null;
-    }
-
-    /// <summary>At most <see cref="PerDelivery"/> stops reach one person at a time: those already delivered count first, then each due one in order; the rest are queued.</summary>
-    private static List<RunStop> Queue(List<RunStop> stops)
-    {
-        Dictionary<string, int> reaching = stops.Where(s => s.Delivery == "delivered" && s.Principal is not null).GroupBy(s => s.Principal!, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        for (int index = 0; index < stops.Count; index++)
-        {
-            if (stops[index] is not { Delivery: "due", Principal: string principal })
-            {
-                continue;
-            }
-
-            int count = reaching.GetValueOrDefault(principal);
-            if (count >= PerDelivery)
-            {
-                stops[index] = stops[index] with { Delivery = "queued" };
-            }
-            else
-            {
-                reaching[principal] = count + 1;
-            }
-        }
-
-        return stops;
     }
 }

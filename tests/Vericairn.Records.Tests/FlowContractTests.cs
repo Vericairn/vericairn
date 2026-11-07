@@ -68,6 +68,7 @@ public class FlowContractTests
         { "command-binds-an-instance-outside-each", "flow.binding" },
         { "command-binds-an-undeclared-input", "flow.binding" },
         { "command-binds-an-input-part-it-lacks", "flow.binding" },
+        { "reserved-done-names-a-state", "flow.reserved" },
     };
 
     [Theory]
@@ -113,6 +114,7 @@ public class FlowContractTests
             case "command-binds-an-instance-outside-each": Step("publish")["action"] = "example-provider publish --track {instance}"; break;
             case "command-binds-an-undeclared-input": Step("publish")["action"] = "example-provider publish --master {input.master.hash}"; break;
             case "command-binds-an-input-part-it-lacks": Step("accept")["inputs"] = new JsonArray(FlowFixture.Input("master", "master", "master")); Step("accept")["action"] = "example-provider accept --size {input.master.size}"; break;
+            case "reserved-done-names-a-state": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SONG-1" }, ["state"] = "accepted" }); break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 

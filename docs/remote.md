@@ -18,8 +18,8 @@ store, and no real-device qualification is recorded for it.
     Each notice shows its subject, reason, work state, attention state, freshness and next action. Policy conditions and recurring
     duties retain their policy, rule, subject, level, owner and evaluation basis; each duty occurrence remains separate. From
     0.9.2, below the notices, the stops of the estate's runs: each step that waits on a person, why, on whom and how it reaches
-    them, and for the operator's next reserved step its exact command, as canonical status gives them, as of the estate's
-    newest record. Remote carries none of them out;
+    them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
+    without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
   - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
     the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.

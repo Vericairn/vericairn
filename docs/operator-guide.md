@@ -1468,12 +1468,19 @@ command when the same principal recorded it; otherwise a new request carries the
 `withdrawn` name each open request that is not delivered, as `withdrawn` or `settled`, with why. Each stays open until its
 operator closes it with `operator done` or `dismiss`.
 
-The step is done only from the records of the operator's own act. Its done predicates and any record item count only records
-an operator recorded, and a result counts only when an operator recorded it. Closing the request does not complete the step,
-and neither does an agent's record of the act nor an agent's close citing the operator's words; the step's reasons name each
-record that does not count. Once the operator's act is recorded, the request is `settled` and no longer delivered. A request
-closed while its command still holds is not made again (route `closed`), and the step waits for the act's record. A reserved
-step whose input changed after it was done waits on the operator again, with the command the records give now.
+The step is done only from the records of the operator's own act. Its done predicates and any record item count a record only
+when its signatures are authentic and its author was a person with the operator role when it was made; a result counts only
+on the same terms. A record's claimed author, an unsigned or altered record, and an act made before its author became an
+operator never count, while a past act of an operator whose role was later revoked still does. Under a charter where
+signatures are optional, the operator therefore signs a reserved act. A reserved step's done predicates name no `state`, which
+other records decide. Closing the request does not complete the step, and neither does an agent's record of the act nor an
+agent's close citing the operator's words; the step's reasons name each record that does not count. Once the operator's act
+is recorded, the request is `settled` and no longer delivered. A request the addressed operator closed with their own signed
+close, while its command still holds, is not made again (route `closed`), and the step waits for the act's record. Any other
+close, an agent's among them, leaves the step's request due again. A request recorded by a principal who does not take the
+run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
+command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
+status and attention show the checked command first and label that prose as not checked.
 
 Every surface shows a run's stops the same way, from the records:
 
@@ -1481,24 +1488,27 @@ Every surface shows a run's stops the same way, from the records:
   next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
 - `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
 - the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
-- Workbench's home and its Goals workspace;
-- Remote's Attention.
+- Workbench's home, from canonical status with its as-of time, and its Goals workspace, read now;
+- Remote's Attention, from canonical status with its as-of time.
 
 Each stop names the step, or `<step> review` for an item's review, `the run` for the run's own attention and `the goal` for its
 acceptance. It says why it waits (`person`, `reserved`, `attention` or `accept`), who it waits on, how it reaches them, and for
-a reserved step that is next its exact command. It reaches its person in one of these ways:
+a reserved step that is next its exact command. Only a live read shows that command: human status, `goal show`, `goal next`,
+the Goals workspace, `operator list` and attention, which read the real clock. Canonical status and a hand-over package, which
+trust each record's claimed time, show the stop without it. A stop reaches its person in one of these ways:
 
 - `due`: the next `goal step` delivers it, as an assignment and an ask, an ask, or an operator request;
 - `delivered`: its assignment, ask or request waits on the person;
 - `closed`: its ask was answered or its request closed, and it is not asked again while that holds;
-- `queued`: three stops of the run already reach that person;
+- `queued`: three stops of the estate's runs already reach that person;
 - `outside`: `goal step` does not carry it, so nothing is recorded to reach the person in this build. That is an effect or an
   exchange a person carries, a watch past its limit, a step no one is named for, or the goal's acceptance.
 
-At most three stops of a run reach one person at a time, in the order the flow reaches them. `goal next` routes a fourth as
-`queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it, or its
-request is settled or withdrawn. Remote shows the stops and each reserved step's command. It answers asks as before, and it
-carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
+At most three stops reach one person at a time across every run. Those already delivered count first; then each due stop in
+the flows' order, the earliest position in its flow first and, at the same position, the older run first. `goal next` routes a
+fourth as `queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it,
+or its request is settled or withdrawn. Remote shows the stops as canonical status gives them. It answers asks as before, and
+it carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
 
 ## 19. Pairing, local-network connections and revocation
 

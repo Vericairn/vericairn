@@ -40,7 +40,7 @@ internal static class HandoffAssembly
         var lead = new StringBuilder(ProgressReport.Render(model, null));
         foreach (RecordEnvelope goal in model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal))
         {
-            lead.Append('\n').Append(GoalView.RenderText(model, goal, recorded));
+            lead.Append('\n').Append(GoalView.RenderText(model, goal, recorded, commands: false));
         }
 
         foreach (RecordEnvelope order in model.Current("work-order").OrderBy(r => r.Id, StringComparer.Ordinal))
@@ -97,7 +97,7 @@ internal static class HandoffAssembly
     internal static JsonObject State(EstateModel model) => new()
     {
         ["status"] = JsonNode.Parse(EstateStatus.RenderJson(model, new FindingList())),
-        ["goals"] = new JsonArray(model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(GoalView.RenderJson(model, r, FlowStops.RecordedTime(model)))).ToArray()),
+        ["goals"] = new JsonArray(model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(GoalView.RenderJson(model, r, FlowStops.RecordedTime(model), commands: false))).ToArray()),
         ["work"] = new JsonArray(model.Current("work-order").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(WorkView.RenderBriefJson(model, r))).ToArray()),
         ["asks"] = JsonNode.Parse(Asks.RenderJson(model)),
         ["decisions"] = Current(model, "decision"),

@@ -227,6 +227,10 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>True while a run in the last observation has a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
+    public string StopsAsOf { get => stopsAsOf; private set => Set(ref stopsAsOf, value); }
+    private string stopsAsOf = string.Empty;
+
     /// <summary>The runtime this phone reaches.</summary>
     public NodeView? Node { get => node; private set => Set(ref node, value); }
 
@@ -374,6 +378,7 @@ public sealed partial class RemoteViewModel : Observable
         SelectedAssignment = Assignments.FirstOrDefault(a => a.Id == assignmentId);
         Products = observation?.Products ?? [];
         Stops = view?.Stops ?? [];
+        StopsAsOf = view?.StopsAsOf ?? string.Empty;
         Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";
         ObservationAge = observation is null ? "age unknown" : RemoteFreshness.Age(observation.AsOf, clock);
         Communication = observation is null ? "Communication settings have not been observed." :

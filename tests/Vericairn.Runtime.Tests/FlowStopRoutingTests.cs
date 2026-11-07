@@ -24,7 +24,7 @@ public class FlowStopRoutingTests
     [Fact]
     public void GoalStepPutsAReservedStepToTheOperatorWithItsExactCommandOnlyWhenItIsNext()
     {
-        using var run = new RunEstate(recordFormat: 3);
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         string op = run.Estate.OperatorId;
         string goal = FlowStepRoutingTests.Run(run, change: Options);
         string work = WorkOf(run, goal);
@@ -76,12 +76,22 @@ public class FlowStopRoutingTests
         // The request is delivered on the operator's queue, in status and in required attention; goal step records nothing more for it.
         OperatorRequestsResponse queue = run.Service.OperatorRequests();
         Assert.Equal(request.Id, Assert.Single(queue.Json.GetProperty("delivered").EnumerateArray()).GetProperty("revision").GetString());
-        Assert.Contains("Command, the step's as the records give it now: " + accept, queue.Text, StringComparison.Ordinal);
+        Assert.Contains("A run's reserved step; its command, checked against the records: " + accept + "\n  The requester's words, not checked:\n", queue.Text, StringComparison.Ordinal);
+
+        // operator list shows the checked command first and labels the requester's prose, read with the runtime's clock.
+        OperatorActionsResponse actions = run.Service.OperatorActions();
+        Assert.Contains("A run's reserved step; its command, checked against the records: " + accept, actions.Text, StringComparison.Ordinal);
         StatusResponse status = run.Service.Status();
         JsonElement stop = Assert.Single(Assert.Single(status.Json.GetProperty("runs").EnumerateArray()).GetProperty("stops").EnumerateArray());
-        Assert.Equal(("reserved", "delivered", request.Id, accept), (stop.GetProperty("kind").GetString(), stop.GetProperty("delivery").GetString(), stop.GetProperty("record").GetProperty("id").GetString(), stop.GetProperty("command").GetString()));
+        Assert.Equal(("reserved", "delivered", request.Id, JsonValueKind.Null), (stop.GetProperty("kind").GetString(), stop.GetProperty("delivery").GetString(), stop.GetProperty("record").GetProperty("id").GetString(), stop.GetProperty("command").ValueKind));
         Assert.Contains("    command: " + accept, status.Text, StringComparison.Ordinal);
-        Assert.Contains(status.Json.GetProperty("attention").EnumerateArray(), a => a.TryGetProperty("record", out JsonElement id) && id.GetString() == request.Id);
+        JsonElement noticed = Assert.Single(status.Json.GetProperty("attention").EnumerateArray(), a => a.TryGetProperty("record", out JsonElement id) && id.GetString() == request.Id);
+        Assert.StartsWith("A run's reserved step; its command, checked against the records: " + accept + "\n  The requester's words, not checked:\n", noticed.GetProperty("text").GetString(), StringComparison.Ordinal);
+
+        // A client that cannot read the runtime's queue cannot check a step's request against the records, so it never shows one open.
+        EstateService api = run.Service;
+        var fallback = new AttentionDerivation(api.Records, api.Record, () => api.Progress(), api.Asks, api.Goals, () => api.Runs());
+        Assert.DoesNotContain(fallback.AskItems(null), a => a.Record == request.Id);
         AssertTheSameStops(run, goal);
         GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
         Assert.Equal("none", again.Outcome);
@@ -104,7 +114,7 @@ public class FlowStopRoutingTests
     [Fact]
     public void AReservedStepsRequestIsWithdrawnWhenTheRecordsChangeAndRevisedByTheNextStep()
     {
-        using var run = new RunEstate(recordFormat: 3);
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         string op = run.Estate.OperatorId;
         JsonObject song = FlowFixture.Song();
         JsonObject acceptStep = song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "accept");
@@ -149,7 +159,7 @@ public class FlowStopRoutingTests
     [Fact]
     public void NoAgentCompletesAReservedStepOrStandsInForTheOperatorsAct()
     {
-        using var run = new RunEstate(recordFormat: 3);
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         string op = run.Estate.OperatorId;
         string builder = run.Estate.BuilderId;
         string goal = FlowStepRoutingTests.Run(run, change: Options);
@@ -162,14 +172,22 @@ public class FlowStopRoutingTests
         GoalStepResponse taken = run.Service.GoalStep(goal, new GoalStepRequest(op));
         RecordEnvelope request = run.Estate.Load().ById[taken.Request!.Id];
 
-        // An agent closes the request citing the operator's words: the request is closed, and acceptance still waits on the act.
+        // An agent closes the request citing the operator's words: the request is closed, acceptance still waits on the act, and since
+        // the close is not the addressed operator's own, the step's request is due again.
         WriteOutcome closed = run.Service.OperatorRequestDone(request.Id, new OperatorRequestCloseRequest(builder, request.ComputedHash,
             OperatorWords: new OperatorRequestWords(op, "I have done it.", "Operator conversation, message 4", request.At)));
         Assert.True(closed.Ok, closed.Problem?.Message);
         JsonElement accept = Step(run.Service.Goal(goal)!, "accept");
         Assert.Equal(("stopped", "reserved"), (accept.GetProperty("state").GetString(), accept.GetProperty("stop").GetString()));
         JsonElement stop = Assert.Single(Stops(run.Service.Status().Json));
-        Assert.Equal(("closed", request.Id), (stop.GetProperty("delivery").GetString(), stop.GetProperty("record").GetProperty("id").GetString()));
+        Assert.Equal(("due", JsonValueKind.Null), (stop.GetProperty("delivery").GetString(), stop.GetProperty("record").ValueKind));
+        Assert.Equal("request", Route(run.Service.GoalNext(goal)!, "accept").GetProperty("state").GetString());
+
+        // The addressed operator's own dismissal is not asked again while the command holds.
+        GoalStepResponse again = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        Assert.Equal("request", again.Outcome);
+        RecordEnvelope renewed = run.Estate.Load().ById[again.Request!.Id];
+        Assert.True(run.Service.OperatorRequestDismiss(renewed.Id, new OperatorRequestCloseRequest(op, renewed.ComputedHash, Reason: "Not now.")).Ok);
         Assert.Equal("closed", Route(run.Service.GoalNext(goal)!, "accept").GetProperty("state").GetString());
         Assert.Equal("none", run.Service.GoalStep(goal, new GoalStepRequest(op)).Outcome);
 
@@ -184,7 +202,7 @@ public class FlowStopRoutingTests
     [Fact]
     public void AtMostThreeStopsOfARunReachOnePersonAtATime()
     {
-        using var run = new RunEstate(recordFormat: 3);
+        using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         string op = run.Estate.OperatorId;
         JsonObject flow = new()
         {
@@ -318,14 +336,23 @@ public class FlowStopRoutingTests
         string.Join("\n", run.Service.Goal(goal)!.Text, run.Service.Goal(goal)!.Json.GetRawText(), run.Service.GoalNext(goal)!.Text, run.Service.GoalNext(goal)!.Json.GetRawText(),
             run.Service.Status().Text, run.Service.Status().Json.GetRawText(), run.Service.OperatorRequests().Text);
 
-    /// <summary>Status, goal show and goal next show one run's stops identically.</summary>
+    /// <summary>
+    /// Status, goal show and goal next show one run's stops identically, but that canonical status, which trusts each record's claimed
+    /// time, leaves a reserved step's command to the live reads.
+    /// </summary>
     private static void AssertTheSameStops(RunEstate run, string goal)
     {
         JsonNode? status = JsonNode.Parse(Assert.Single(run.Service.Status().Json.GetProperty("runs").EnumerateArray()).GetProperty("stops").GetRawText());
         JsonNode? shown = JsonNode.Parse(run.Service.Goal(goal)!.Json.GetProperty("flow").GetProperty("stops").GetRawText());
         JsonNode? routed = JsonNode.Parse(run.Service.GoalNext(goal)!.Json.GetProperty("flow").GetProperty("stops").GetRawText());
+        Assert.True(JsonNode.DeepEquals(shown, routed), $"{shown}\n{routed}");
+        Assert.All(status!.AsArray(), s => Assert.Null(s!["command"]));
+        foreach (JsonNode? live in shown!.AsArray())
+        {
+            live!["command"] = null;
+        }
+
         Assert.True(JsonNode.DeepEquals(status, shown), $"{status}\n{shown}");
-        Assert.True(JsonNode.DeepEquals(status, routed), $"{status}\n{routed}");
     }
 
     private static List<JsonElement> Stops(JsonElement status) =>

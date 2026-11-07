@@ -398,7 +398,8 @@ response's `request` names the record. The command is computed only for a reserv
 request waits, `goal next` shows the route as `requested` and `goal step` records nothing more; once a request carrying that
 command was closed, the route is `closed`. `goal show`, `goal next` and `status` list the run's stops, each with why it waits,
 on whom and how it reaches them, and for a reserved step that is next its command; with `--json`, the position's `stops`, each
-step's `stop` and `command`, and status's `runs`. At most three stops of a run reach one person at a time: a fourth routes as
+step's `stop` and `command`, and status's `runs`, whose stops carry no command. At most three stops of the estate's runs reach
+one person at a time: a fourth routes as
 `queued`, and `goal step` dispatches nothing for it. `operator list` delivers a run's request only while it carries the command
 the records give now, and lists each open request a run no longer waits on, `withdrawn` or `settled`, under `withdrawn` in its
 JSON. See [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).

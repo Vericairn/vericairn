@@ -516,9 +516,11 @@ every template.
   literal text. The command is bound only when the step is next, from the records
   as they stand, and a value with characters outside letters, digits and
   `. _ : / @ + = , -`, or one starting with a dash, holds the step as `blocked`
-  rather than being put in. Its done predicates and record items count only
-  records an operator recorded, and a result only when an operator recorded it,
-  so no agent's record or claim closes a reserved step. The
+  rather than being put in. Its done predicates name no `state`, and they and
+  its record items count only an authentic record whose author was an operator
+  when it was made, and a result only on the same terms, so no agent's record
+  or claim, and no record that only claims the operator as its author, closes a
+  reserved step. The
   [operator guide](operator-guide.md#stops-and-their-surfaces-092) shows the
   request that carries it.
 - `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a

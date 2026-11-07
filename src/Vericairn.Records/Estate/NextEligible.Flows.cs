@@ -142,25 +142,36 @@ public static partial class NextEligible
             steps.Add(new FlowStepRoute(instance, route));
         }
 
-        // At most three stops of a run reach one person at a time (design/cohesion-contract.md § 5): those already delivered count first,
-        // then each route that would deliver one, in the flow's order; the rest wait queued until one settles.
-        Dictionary<string, int> reaching = position.Stops.Where(s => s.Delivery == "delivered" && s.Principal is not null).GroupBy(s => s.Principal!, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        // At most three stops reach one person at a time, across every run (design/cohesion-contract.md § 5): a route whose stop the
+        // delivery across runs queued waits queued, one it lets through goes on, and a route to a person this machine reaches that no stop
+        // foresaw counts against every stop already reaching that person.
+        var reaching = new Dictionary<string, int>(position.Reaching, StringComparer.Ordinal);
+        Dictionary<FlowRuns.StepRef, FlowStops.RunStop> foreseen = position.Stops.Where(s => s.Step is not null).GroupBy(s => s.Step!).ToDictionary(g => g.Key, g => g.First());
         for (int index = 0; index < steps.Count; index++)
         {
-            if (steps[index] is not { Dispatches: true, Route: { State: not "agent", Principal: string principal } route })
+            if (steps[index] is not { Dispatches: true, Route: { State: not "agent", Principal: string principal } route } step)
             {
                 continue;
             }
 
-            int count = reaching.GetValueOrDefault(principal);
-            if (count >= FlowStops.PerDelivery)
+            FlowRuns.StepRef key = step.Review is null ? step.Step.Ref : step.Step.Ref with { Review = true };
+            bool queued;
+            if (foreseen.TryGetValue(key, out FlowStops.RunStop? stop) && stop.Principal == principal && stop.Delivery is "due" or "queued")
             {
-                steps[index] = steps[index] with { Route = route with { State = "queued", Reason = $"{route.Reason}; {Routing.NameOf(model, principal)} already has {count.ToString(System.Globalization.CultureInfo.InvariantCulture)} stops of this run delivered, at most {FlowStops.PerDelivery.ToString(System.Globalization.CultureInfo.InvariantCulture)} at a time, so it waits queued and is delivered in order as one settles" } };
+                queued = stop.Delivery == "queued";
             }
             else
             {
-                reaching[principal] = count + 1;
+                queued = reaching.GetValueOrDefault(principal) >= FlowStops.PerDelivery;
+                if (!queued)
+                {
+                    reaching[principal] = reaching.GetValueOrDefault(principal) + 1;
+                }
+            }
+
+            if (queued)
+            {
+                steps[index] = steps[index] with { Route = route with { State = "queued", Reason = $"{route.Reason}; {FlowStops.PerDelivery.ToString(System.Globalization.CultureInfo.InvariantCulture)} stops of the estate's runs already reach {Routing.NameOf(model, principal)}, at most {FlowStops.PerDelivery.ToString(System.Globalization.CultureInfo.InvariantCulture)} at a time, so it waits queued and is delivered in order as one settles" } };
             }
         }
 
