@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using Vericairn.Records.Estate;
@@ -154,6 +155,38 @@ public sealed partial class GitFileSource : IDocumentSource
 
     private static int Run(string clone, out byte[] output, bool isolated, string[] arguments)
     {
+        ProcessStartInfo info = StartInfo(clone, isolated, arguments);
+        try
+        {
+            using Process process = Start(info);
+            using var buffer = new MemoryStream();
+            Task copy = CopyBounded(process.StandardOutput.BaseStream, buffer);
+            Task<string> error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(30_000))
+            {
+                process.Kill(entireProcessTree: true);
+                output = [];
+                return -1;
+            }
+
+            try { copy.GetAwaiter().GetResult(); }
+            catch (IOException) { output = []; return -1; }
+            _ = error.Result;
+            output = buffer.ToArray();
+            return process.ExitCode;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            output = [];
+            return -1;
+        }
+    }
+
+    // Every git process of this adapter starts from these exact arguments and environment: no shell, no replacement objects,
+    // no lazy fetch and no optional locks; an isolated start also ignores ambient routing, system, global and command-line
+    // configuration and refuses every transport.
+    internal static ProcessStartInfo StartInfo(string clone, bool isolated, IEnumerable<string> arguments)
+    {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
         info.ArgumentList.Add("--no-replace-objects");
         info.ArgumentList.Add("-c");
@@ -177,30 +210,17 @@ public sealed partial class GitFileSource : IDocumentSource
 
         info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         info.Environment["GIT_NO_LAZY_FETCH"] = "1";
-        try
-        {
-            using Process process = Process.Start(info) ?? throw new InvalidOperationException("git did not start.");
-            using var buffer = new MemoryStream();
-            Task copy = CopyBounded(process.StandardOutput.BaseStream, buffer);
-            Task<string> error = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(30_000))
-            {
-                process.Kill(entireProcessTree: true);
-                output = [];
-                return -1;
-            }
+        return info;
+    }
 
-            try { copy.GetAwaiter().GetResult(); }
-            catch (IOException) { output = []; return -1; }
-            _ = error.Result;
-            output = buffer.ToArray();
-            return process.ExitCode;
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            output = [];
-            return -1;
-        }
+    /// <summary>Counts the git processes started in the current asynchronous flow while a test observes it; null otherwise.</summary>
+    internal static readonly AsyncLocal<StrongBox<int>?> StartedProcesses = new();
+
+    internal static Process Start(ProcessStartInfo info)
+    {
+        Process process = Process.Start(info) ?? throw new InvalidOperationException("git did not start.");
+        if (StartedProcesses.Value is { } started) Interlocked.Increment(ref started.Value);
+        return process;
     }
 
     private static async Task CopyBounded(Stream input, Stream output)

@@ -142,19 +142,45 @@ public sealed class RunDirectory
     public static IReadOnlyList<string> TemporaryVariables => OperatingSystem.IsWindows() ? ["TMPDIR", "TEMP", "TMP"] : ["TMPDIR"];
 
     /// <summary>
-    /// Gives the harness <paramref name="temporary"/> in place of the user's temporary directory, and keeps the user's for Vericairn's MCP
-    /// server, which runs outside the harness's sandbox and must not keep its files where the agent can write. Dispatch and qualification
-    /// both use it, so their probes see the same environment names.
+    /// Gives the harness <paramref name="temporary"/> in place of the user's temporary directory, and names the user's for Vericairn's MCP
+    /// server, which runs outside the harness's sandbox and must not keep its files where the agent can write. The server's variables are
+    /// always set, from the worker's environment or else the worker's resolved temporary directory, so a harness that passes its own
+    /// environment to the servers it starts can never hand the server the run's. Dispatch and qualification both use it, so their probes
+    /// see the same environment names.
     /// </summary>
     public static void UseTemporary(IDictionary<string, string> harness, IDictionary<string, string> server, string temporary)
     {
         ArgumentNullException.ThrowIfNull(harness);
         ArgumentNullException.ThrowIfNull(server);
+        ArgumentException.ThrowIfNullOrEmpty(temporary);
+        string resolved = WorkerTemporary(harness, temporary);
         foreach (string name in TemporaryVariables)
         {
-            if (harness.TryGetValue(name, out string? shared)) server[name] = shared;
+            server[name] = harness.TryGetValue(name, out string? shared) && Outside(shared, temporary) ? shared! : resolved;
             harness[name] = temporary;
         }
+    }
+
+    /// <summary>The worker's own temporary directory: its environment's, else the process's; never the run's or inside it.</summary>
+    private static string WorkerTemporary(IDictionary<string, string> harness, string temporary)
+    {
+        string[] names = OperatingSystem.IsWindows() ? ["TMP", "TEMP", "TMPDIR"] : ["TMPDIR"];
+        IEnumerable<string?> named = names.Select(name => harness.TryGetValue(name, out string? value) ? value : null);
+        foreach (string? candidate in named.Append(System.IO.Path.GetTempPath()))
+        {
+            if (Outside(candidate, temporary)) return System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(candidate!));
+        }
+
+        throw new InvalidOperationException("No temporary directory outside the run's own is available for Vericairn's MCP server.");
+    }
+
+    private static bool Outside(string? candidate, string temporary)
+    {
+        if (string.IsNullOrEmpty(candidate) || !System.IO.Path.IsPathFullyQualified(candidate)) return false;
+        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string path = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(candidate));
+        string run = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(temporary));
+        return !path.Equals(run, comparison) && !path.StartsWith(run + System.IO.Path.DirectorySeparatorChar, comparison);
     }
 
     /// <summary>The MCP configuration the harness was given.</summary>

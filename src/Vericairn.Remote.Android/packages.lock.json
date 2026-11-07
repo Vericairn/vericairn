@@ -18,9 +18,9 @@
       },
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
-        "requested": "[10.0.11, )",
-        "resolved": "10.0.11",
-        "contentHash": "IBf7lbovvjGWVWXZX5cJ/cO0WXbId0Zq4BuSeT94mGZuOAP66oMeH9PTBZ9Jpp3Jb6jtK0qm/NyUbPRo1gC/wQ=="
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "YlTamXppEQls6DYWt7RdUuwWDb0lyw/vXCaGeQpLCpsLmfwGuCkOz/vIGgMTV7ECsJcavkCOkxZXv9s8rdAHkQ=="
       },
       "Avalonia.BuildServices": {
         "type": "Transitive",
@@ -762,8 +762,8 @@
       "vericairn.presentation": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.4-dev, )",
-          "Vericairn.Sdk": "[0.8.4-dev, )"
+          "Vericairn.Protocol": "[0.9.0-dev, )",
+          "Vericairn.Sdk": "[0.9.0-dev, )"
         }
       },
       "vericairn.protocol": {
@@ -777,17 +777,17 @@
         "dependencies": {
           "Avalonia": "[12.1.4, )",
           "Avalonia.Themes.Fluent": "[12.1.4, )",
-          "Vericairn.Presentation": "[0.8.4-dev, )",
-          "Vericairn.Protocol": "[0.8.4-dev, )",
-          "Vericairn.Records": "[0.8.4-dev, )",
-          "Vericairn.Sdk": "[0.8.4-dev, )"
+          "Vericairn.Presentation": "[0.9.0-dev, )",
+          "Vericairn.Protocol": "[0.9.0-dev, )",
+          "Vericairn.Records": "[0.9.0-dev, )",
+          "Vericairn.Sdk": "[0.9.0-dev, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.4-dev, )",
-          "Vericairn.Records": "[0.8.4-dev, )"
+          "Vericairn.Protocol": "[0.9.0-dev, )",
+          "Vericairn.Records": "[0.9.0-dev, )"
         }
       },
       "Avalonia": {

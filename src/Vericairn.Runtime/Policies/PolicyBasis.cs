@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Canonical;
@@ -54,10 +55,9 @@ internal sealed class PolicyBasis
             Repository = manifest.Repository, Commit = manifest.Commit, Version = manifest.Version,
             Artifacts = manifest.Artifacts?.ToImmutableSortedDictionary(StringComparer.Ordinal),
         };
-        Repositories = (repositories ?? []).Select(r => r with { TreeComparisons = r.TreeComparisons.OrderBy(Canonical, StringComparer.Ordinal).ToImmutableArray(), Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
-                .ThenBy(f => f.Available).ThenBy(f => f.IsLink).ThenBy(f => ContentHash.Sha256(f.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray() })
-            .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ThenBy(r => r.Contract, StringComparer.Ordinal).ThenBy(r => r.Complete)
-            .ThenBy(r => r.Evidence).ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ThenBy(r => Hash(r.TreeComparisons), StringComparer.Ordinal).ToImmutableArray();
+        var order = new SourceOrder();
+        Repositories = (repositories ?? []).Select(r => r with { TreeComparisons = r.TreeComparisons.OrderBy(Canonical, StringComparer.Ordinal).ToImmutableArray(), Files = r.Files.OrderBy(f => f, order).ToImmutableArray() })
+            .OrderBy(r => r, order).ToImmutableArray();
         Objects = (objects ?? []).OrderBy(o => o.Hash, StringComparer.Ordinal).ThenBy(o => o.Available).ThenBy(o => ContentHash.Sha256(o.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray();
         Implementations = (implementations ?? []).OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Version).ThenBy(i => i.Digest, StringComparer.Ordinal).ToImmutableArray();
         AsOf = asOf;
@@ -114,6 +114,51 @@ internal sealed class PolicyBasis
             return "Submission evaluation requires the exact proposed release, product, version and commit; a recorded-time view cannot select a candidate.";
         if (Findings.Any(f => f.Severity == Severity.Error) || Records.GroupBy(r => r.Id, StringComparer.Ordinal).Any(g => g.Count() != 1)) return "Invalid or conflicting record prerequisites remain in the basis.";
         return null;
+    }
+
+    // Sources are ordered by path, hash, availability and link for a file, and by identity, revision, contract, completeness and
+    // evidence for a repository; content hashes, and a repository's canonical file and tree hashes, break only the ties that
+    // remain. Each is computed only when every earlier key ties, so a large inventory is not serialized just to be ordered.
+    private sealed class SourceOrder : IComparer<PolicyFile>, IComparer<PolicyRepository>
+    {
+        private readonly Dictionary<object, string> computed = new(ReferenceEqualityComparer.Instance);
+
+        public int Compare(PolicyFile? x, PolicyFile? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null || y is null) return x is null ? -1 : 1;
+            int order = string.CompareOrdinal(x.Path, y.Path);
+            if (order == 0) order = string.CompareOrdinal(x.Hash, y.Hash);
+            if (order == 0) order = x.Available.CompareTo(y.Available);
+            if (order == 0) order = x.IsLink.CompareTo(y.IsLink);
+            return order != 0 ? order : string.CompareOrdinal(Content(x), Content(y));
+        }
+
+        public int Compare(PolicyRepository? x, PolicyRepository? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null || y is null) return x is null ? -1 : 1;
+            int order = string.CompareOrdinal(x.Identity, y.Identity);
+            if (order == 0) order = string.CompareOrdinal(x.Revision, y.Revision);
+            if (order == 0) order = string.CompareOrdinal(x.Contract, y.Contract);
+            if (order == 0) order = x.Complete.CompareTo(y.Complete);
+            if (order == 0) order = x.Evidence.CompareTo(y.Evidence);
+            if (order == 0) order = string.CompareOrdinal(Files(x), Files(y));
+            return order != 0 ? order : string.CompareOrdinal(Trees(x), Trees(y));
+        }
+
+        private string Content(PolicyFile file) => Once(file, () => ContentHash.Sha256(file.Bytes.AsSpan()));
+
+        // Keyed by the immutable array itself, so equal inventories held by different records are hashed once.
+        private string Files(PolicyRepository repository) => Once(ImmutableCollectionsMarshal.AsArray(repository.Files)!, () => Hash(repository.Files));
+
+        private string Trees(PolicyRepository repository) => Once(ImmutableCollectionsMarshal.AsArray(repository.TreeComparisons)!, () => Hash(repository.TreeComparisons));
+
+        private string Once(object source, Func<string> compute)
+        {
+            if (!computed.TryGetValue(source, out string? key)) computed[source] = key = compute();
+            return key;
+        }
     }
 
     internal static string Canonical<T>(T value) => CanonicalJson.Serialize(JsonSerializer.SerializeToElement(value));

@@ -49,7 +49,7 @@ historical context is labeled, including when the current work view does not est
 
 **Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
 freshness and a preview using the same presentation as Workbench. These settings remain read-only in this step;
-clarifications to running attempts arrive with PROMPT-02 in 0.9.1.
+clarifications to running attempts arrive with PROMPT-02, planned for 0.9.2.
 
 ## Decisions and acceptances
 
@@ -236,9 +236,10 @@ revoke the old devices.
 
 The phone heads are in `src/Vericairn.Mobile.slnx`, not in `Vericairn.slnx`, because each needs its platform's workload:
 
-- iOS: the .NET `ios` workload (workload set `10.0.303.1`) and Xcode 26.5 or later on macOS.
+- iOS: the .NET `ios` workload (workload set `10.0.401`) and exactly Xcode 26.6 on macOS. Later sets of the band carry the iOS
+  27.1 bindings, which Avalonia.iOS does not build against yet.
   `dotnet build src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj` builds for the Apple-silicon simulator.
-- Android: the .NET `android` workload (workload set `10.0.303.1`), an Android SDK and JDK 17.
+- Android: the .NET `android` workload (workload set `10.0.403`), an Android SDK and JDK 17.
   `dotnet build src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj -p:AndroidSdkDirectory=<sdk> -p:JavaSdkDirectory=<jdk>`.
 
 Continuous integration builds both heads on every change: iOS on macOS, Android on Linux. Installing on a real iPhone needs

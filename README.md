@@ -152,7 +152,7 @@ release and pins the one it runs on.
 
 ## What is here
 
-The following capabilities are in 0.9.0.
+The following capabilities are in 0.9.1.
 
 - `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in

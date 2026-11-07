@@ -124,9 +124,10 @@ public sealed partial class EstateService
     private PolicyBasis PolicySnapshot(EstateModel model, PolicyKindRegistry registry, string? asOf = null, PolicySubmission? submission = null, bool preview = false, bool live = false)
     {
         List<PolicyRepository> repositories = [PolicySources.Estate(model)];
-        // Only explicit repository relations select another repository. No network or provider lookup is involved.
+        // Only explicit repository relations select another repository. No network or provider lookup is involved. A result's
+        // duty scope is not such a relation: its exact commits are loaded below as evidence, never as current writing.
         HashSet<string> selected = [];
-        foreach (RecordEnvelope record in model.Current("estate-policy").Concat(model.Current("writing-exception")).Concat(model.OfType("result"))) SelectRepositories(record.Body);
+        foreach (RecordEnvelope record in model.Current("estate-policy").Concat(model.Current("writing-exception"))) SelectRepositories(record.Body);
         foreach (RecordEnvelope resource in model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository"))
         {
             if (!model.Chain(resource).Any(selected.Contains)) continue;
