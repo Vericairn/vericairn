@@ -682,10 +682,13 @@ and [checked changes](changes.md).
 ## Security reports before a release (OPS-11)
 
 From 0.9.2 the `github-security-advisories` reader lists a declared repository's security advisories through the runtime
-user's own `gh` login, read-only, with the same bounded runner as the release provider: one minute per gh command and
-4,194,304 characters per stream, so a listing larger than that is refused rather than truncated. It reads only as an
-administrator of the repository, since GitHub hides drafts and private reports from other logins, and only while GitHub's
-core allowance keeps a fifth of its limit, and at least 100 requests, for the person's own use. GitHub keeps repository advisories only for
+user's own `gh` login, read-only, with the same bounded runner as the release provider: one minute per gh command. It reads
+the listing page by page, 100 advisories a page and at most 30 pages, each page's answer at most 16,777,216 characters and all
+of them at most 100,663,296, so a page or listing larger than that is refused rather than truncated. It reads only as an
+administrator of the repository through a token whose `repo` or `repository_advisories:read` scope it can confirm, since GitHub
+hides drafts and private reports from other logins; a fine-grained or app token shows no scopes and is refused. It reads only
+while GitHub's core allowance keeps a fifth of its limit, and at least 100 requests, for the person's own use, and stops
+before a further page once a page leaves no more than that. GitHub keeps repository advisories only for
 public repositories, so a declared private repository's listing is refused and holds releases. It does not use
 conditional requests or webhooks, and it reads `github.com` through the host `gh` is logged in to. A repository whose
 listing cannot be completed holds every release until it can; there is no override other than the operator's product
@@ -695,9 +698,11 @@ Observations stay on the machine that read them, in its live store: another mach
 and reads again before a release. An advisory absent from a later complete listing is no longer observed and no longer
 holds. The daemon reads every 5 minutes, and an embedded command only when it polls or checks a release, so attention on a
 machine without a running daemon is as fresh as its last read and says when that was. Each advisory revision is told apart
-by a hash of the whole response, so any edit to a report, its text or credits included, needs a new triage. Only reports, in
-`triage` or `draft` state or a state this release does not know, hold a release; a published, closed or withdrawn advisory is
-information for a week and holds nothing, whoever changed it. Triage is the
+by a hash of the whole response, so any edit to a report, its text or credits included, needs a new triage. Reports, in
+`triage` or `draft` state or a state this release does not know, hold a release until triaged at their current revision, and a
+closed or withdrawn advisory until triaged at any revision; a published advisory, or a closed one already triaged, is
+information for a week and holds nothing, whoever changed it. A non-operator learns from a refusal only whether releases are
+held. Triage is the
 operator's alone until a security role exists; agents and other principals cannot record one, see one, or learn from a
 refusal whether a report exists. A triage record names the advisory's identifier and repository, so an estate whose records
 are public should not declare security reports. The estate's GitHub App replaces this reader in a later release, with the

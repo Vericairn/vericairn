@@ -468,8 +468,9 @@ A script that follows `events watch` and runs `goal step` acts with its own prin
 
 Reads the security advisories of the repositories a product's `securityReports` declaration names, drafts and private
 reports included, and records the operator's triage of one observed revision (OPS-11). While a declared repository cannot be
-read completely, or a report (an advisory in `triage` or `draft` state, or an unknown state) is untriaged at its current
-revision, `release submit` and its `--check` refuse. A published, closed or withdrawn advisory holds nothing and needs no triage. Both commands are the
+read completely, or an advisory holds, `release submit` and its `--check` refuse. A report (an advisory in `triage` or `draft`
+state, or an unknown state) holds until a triage names its current revision, and a closed or withdrawn advisory until a triage
+names it at any revision; a published advisory holds nothing and needs no triage. Both commands are the
 operator's alone; any other principal is refused with the same answer whatever exists. See the
 [operator's guide](operator-guide.md#security-reports-hold-a-release-092).
 

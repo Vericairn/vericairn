@@ -93,8 +93,8 @@ snapshot; the added attention projection does not alter that record contract.
 From 0.9.2 (OPS-11), a principal's attention (`AttentionGet`, which human status,
 Workbench and Remote show) also carries, for the operator only, an `incident` for
 each security report (an advisory in `triage` or `draft` state) not yet triaged
-at its current revision, `information` for a week about each new or changed
-published, closed or withdrawn advisory, and a `failed check` for each declared
+at its current revision and each closed or withdrawn advisory never triaged,
+`information` for a week about each other new or changed advisory, and a `failed check` for each declared
 repository whose reports could not be read completely. Through the event journal
 they reach the operator alone, their subjects named by an opaque key. They come from
 this machine's observations, so they never appear in status or progress JSON,

@@ -302,24 +302,30 @@ Two routes are added, each with its protocol types and an `IEstateApi` member wi
 implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
 `POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
 `disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
-of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether it is a report, an advisory in
-`triage` or `draft` state or an unknown state, which holds every release until triaged; a published, closed or withdrawn
-advisory holds nothing. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether the advisory holds every release now:
+a report (in `triage` or `draft` state, or an unknown state) untriaged at its current revision, or a closed or withdrawn
+advisory no operator triage names at any revision; a published advisory never holds. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
 which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
 `CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
 acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
 `ClientOperation.Deadline` gives `SecurityReportsPoll` and `ReleaseCheck` three minutes, since a check may now read GitHub;
 `ReleaseCheck` had the 30-second default.
 
-`release submit`, `POST /v1/releases/check` and `release_submit_check` are unchanged in shape. While a current product
+`ReleaseSubmitRequest` adds the init-only `SecurityReportsUnread` (JSON `securityReportsUnread`, default false): when true,
+declared security reports are not read and a declaration alone answers with the single `release.security-reports`
+objection. It only ever narrows what a caller learns. The MCP server's `release_submit_check` now checks the submission of
+the principal its connection acts as, falling back to the `by` argument only on a connection that acts as none, and sets
+`SecurityReportsUnread` unless that principal is the operator, so no other connection starts a read or sees which reports
+hold. `release submit`, `POST /v1/releases/check` and `release_submit_check` are otherwise unchanged in shape. While a current product
 declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
-minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (a report untriaged at its current revision, named) and
-`release.security-reports-unavailable` (a repository that could not be read completely), or, for any principal other than
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an advisory that holds, named) and
+`release.security-reports-unavailable` (a repository that could not be read completely, or a declared resource that is no
+longer a repository on GitHub), or, for any principal other than
 the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
 intent. Without a declaration, nothing is read and no objection is added.
 
-`AttentionGet` adds, for the operator only, notices of kind `incident` (an untriaged report) or `information` (a new or
-changed published, closed or withdrawn advisory, for seven days) with subject type `security-report` (subject id
+`AttentionGet` adds, for the operator only, notices of kind `incident` (an advisory that holds) or `information` (any other new or
+changed advisory, for seven days) with subject type `security-report` (subject id
 `<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
 `security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
 and `GET /v1/status` are unchanged. Through WATCH-05's event journal they become attention events for the operator alone,
@@ -332,9 +338,14 @@ stored read asks the journal to derive at once. `GET /v1/providers` adds rows of
 `SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
 `SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.
 `Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
-the command line. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+the command line. It runs `gh api -i rate_limit` to confirm the token's `X-OAuth-Scopes` (`repo` or `repository_advisories:read`)
+and the allowance, then reads the listing page by page with `gh api -i`, following each `Link` header's `after` cursor, each
+page and the whole listing bounded. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
 `TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
-`ObservationType.Kinds` adds `triage`, and `ProductType.Fields` adds `securityReports`. Record format remains 3; the record
+`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` refuses a
+change of a repository resource's kind, as well as its location, by any author but the operator or an `administer` grant
+(`resource.location-author`), and by any author but the operator while a security-reports declaration names it
+(`resource.security-reports-author`). `SecurityReportRules` also adds `Declares`. Record format remains 3; the record
 additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
 `vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
 fixtures include it. The command line adds `security-reports poll` and `security-reports triage`

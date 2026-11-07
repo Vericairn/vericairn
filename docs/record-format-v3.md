@@ -426,18 +426,21 @@ advances to `vericairn.records/readers/8`.
 
 ## Security reports (0.9.2)
 
-OPS-11 adds one optional product field and one observation kind within format 3, and no record type. A product without
+OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a
+repository resource's kind. A product without
 `securityReports` behaves as before, and no migration rewrites a record. What the reader observes about each advisory
 (identifier, state, severity and content hash) is machine-local state in the live store, not a record.
 
 | Record | Additive contract |
 | --- | --- |
-| `product` | Optional `securityReports: {provider, repositories}`. `provider` is a provider id (a lower-case slug; the shipped reader is `github-security-advisories`), and `repositories` lists one to eight distinct `resource` ids, each a `repository` with a `github` location. Declaring, changing or removing it is the operator's alone: any other author's revision that changes it is refused (`product.security-reports-author`). While any current product declares it, release submission reads those repositories and refuses while one cannot be read completely or a report (an advisory in `triage` or `draft` state, or an unknown state) has no triage of its current revision. A published, closed or withdrawn advisory holds nothing. |
-| `observation` | Kind `triage`, by the operator only (`triage.author`). Its subject pins the exact `repository` resource on GitHub whose advisory it names (`triage.subject`), and its `facts` carry exactly `advisory` (a GHSA identifier), `repository` (owner/name, matching the subject's location), `contentHash` (the reader's hash of the provider's response for that advisory), `disposition` (`security`, `duplicate` or `no-action`) and `reason` (at most 500 characters, required for `no-action`). Any other fact is refused (`triage.facts`), so an advisory's summary, description, reporter and credits cannot enter it. |
+| `product` | Optional `securityReports: {provider, repositories}`. `provider` is a provider id (a lower-case slug; the shipped reader is `github-security-advisories`), and `repositories` lists one to eight distinct `resource` ids, each a `repository` with a `github` location. Declaring, changing or removing it is the operator's alone: any other author's revision that changes it is refused (`product.security-reports-author`). While any current product declares it, release submission reads those repositories and refuses while one cannot be read completely, while a declared resource is no longer a repository on GitHub, or while an advisory holds: a report (in `triage` or `draft` state, or an unknown state) with no triage of its current revision, or a closed or withdrawn advisory no triage names at any revision. A published advisory holds nothing. |
+| `resource` | A revision that changes the `kind` or `location` of a resource whose earlier or new kind is `repository` is refused unless the operator or a principal with the `administer` scope records it (`resource.location-author`, which before named only a repository's location), and unless the operator records it when a current product's `securityReports` names the resource (`resource.security-reports-author`). Other fields stay open to their usual authors. |
+| `observation` | Kind `security-triage`, by the operator only (`security-triage.author`). Its subject pins the exact `repository` resource on GitHub whose advisory it names (`security-triage.subject`), and its `facts` carry exactly `advisory` (a GHSA identifier), `repository` (owner/name, matching the subject's location), `contentHash` (the reader's hash of the provider's response for that advisory), `disposition` (`security`, `duplicate` or `no-action`) and `reason` (at most 500 characters, required for `no-action`). Any other fact is refused (`security-triage.facts`), and `no-action` without a reason is refused (`security-triage.reason`), so an advisory's summary, description, reporter and credits cannot enter it. |
 
 A triage names one revision: it clears a report's hold and its attention notice only while the report's observed content hash
-is the one it names, so a later change of its severity or text needs another triage, while publishing, closing or withdrawing
-it ends the hold without one. A triage the estate check refuses, or
+is the one it names, so a later change of its severity or text needs another triage. For a closed or withdrawn advisory, a triage
+of any of its revisions ends the hold, and publishing a report ends it without a triage. The kind is named `security-triage`
+so that it stays apart from the conversation triage that conversation intake plans. A triage the estate check refuses, or
 one by any principal other than the operator, clears nothing. A reader that lacks the kind refuses the record, and a
 product's `securityReports` in an earlier format is refused as a later format's field. `records describe product` and
 `records describe observation` include these contracts, and `vericairn.records/readers/8` explains the product's new field.
