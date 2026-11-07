@@ -1560,7 +1560,8 @@ time, or the estate commit it equalled, read from local Git history) and otherwi
 **Measures.** `vericairn search measure <questions>` runs a question set and reports recall at 5 and 10, mean reciprocal rank,
 the index's size against its source bytes and query times, against the budgets of the search design: recall at 10 of at least
 0.8, an index at most half its source bytes, a full build within 30 seconds, an update after a record write within 100
-milliseconds and 95 percent of queries within 250 milliseconds. Each release's `verification` record reports them.
+milliseconds and 95 percent of queries within 250 milliseconds. Each release's `verification` record reports them. A
+question set kept in the estate as a pinned document is skipped as a candidate for its own questions.
 
 ## 21. Hand-over, resume and explicit observation
 

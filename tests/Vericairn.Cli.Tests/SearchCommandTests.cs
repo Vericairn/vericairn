@@ -107,6 +107,49 @@ public class SearchCommandTests
     }
 
     [Fact]
+    public void AQuestionSetPinnedInTheEstateIsNeverACandidateForItsOwnQuestions()
+    {
+        using var estate = new SearchEstate();
+        const string table = """
+            # Search questions
+
+            | Query | Expected |
+            | --- | --- |
+            | heron catalog entry | design/search-notes.md |
+            | lighthouse lamp | docs/knowledge/article/public-note.md |
+            """;
+        estate.Document("docs/search-questions.md", "Search questions", table);
+        string inside = Path.Combine(estate.Root, "docs", "search-questions.md");
+
+        // Pinned and indexed, the question set's own row outranks the real source for its query.
+        SearchResponse plain = JsonSerializer.Deserialize<SearchResponse>(CliHarness.Ok("--estate", estate.Root, "--json", "search", "lighthouse lamp").Out, ProtocolJson.Options)!;
+        Assert.Equal("docs/search-questions.md", plain.Candidates.OrderBy(c => c.Rank).First().Source.GetProperty("path").GetString());
+
+        using (JsonDocument report = JsonDocument.Parse(CliHarness.Ok("--estate", estate.Root, "--json", "search", "measure", inside).Out))
+        {
+            Assert.Equal("docs/search-questions.md", report.RootElement.GetProperty("skipped").GetString());
+            Assert.Equal(1.0, report.RootElement.GetProperty("recallAt10").GetDouble(), 3);
+            Assert.Equal(1.0, report.RootElement.GetProperty("meanReciprocalRank").GetDouble(), 3);
+        }
+
+        Assert.Contains("skipped: candidates from the question set itself, docs/search-questions.md",
+            CliHarness.Ok("--estate", estate.Root, "search", "measure", inside).Out, StringComparison.Ordinal);
+        Assert.Equal("docs/search-questions.md", SearchMeasures.EstatePath(estate.Root, inside));
+
+        // The same questions read from outside the estate skip nothing, so the pinned copy's rows outrank the real sources.
+        string outside = Path.Combine(estate.Root, "..", "vericairn-search-questions-" + Records.Identity.Ulid.NewUlid().Value + ".md");
+        try
+        {
+            File.Copy(inside, outside);
+            Assert.Null(SearchMeasures.EstatePath(estate.Root, outside));
+            using JsonDocument report = JsonDocument.Parse(CliHarness.Ok("--estate", estate.Root, "--json", "search", "measure", outside).Out);
+            Assert.False(report.RootElement.TryGetProperty("skipped", out JsonElement skipped) && skipped.ValueKind != JsonValueKind.Null);
+            Assert.Equal(0.75, report.RootElement.GetProperty("meanReciprocalRank").GetDouble(), 3);
+        }
+        finally { File.Delete(outside); }
+    }
+
+    [Fact]
     public void RefusalsExitTwoAndTheDoctorConfirmsTheFullTextModule()
     {
         using var estate = new SearchEstate();

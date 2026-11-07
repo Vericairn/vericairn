@@ -519,7 +519,9 @@ replayed and matched; 2 otherwise.
 index's size against its source bytes and query times; `--rebuild` adds the full build time. A question set is JSON
 (`{"format": "vericairn.search-questions/1", "questions": [{"query": "...", "expected": ["..."]}]}`) or Markdown whose first
 table has `Query` (or `Question`) and `Expected` columns. An expected source is a record id or key, a document revision id,
-or a document path (a prefix when it ends in `/`). It records nothing. See the
+or a document path (a prefix when it ends in `/`). When the question set lies inside the estate (for example a pinned
+`docs/search-questions.md`), candidates from that file itself are skipped, since each of its rows would match its own query
+and outrank the real sources; the report names the skipped path. It records nothing. See the
 [operator's guide](operator-guide.md#searching-for-context-092).
 
 `vericairn doctor` adds a `search` line confirming that this build's SQLite has the full-text module the index uses.
