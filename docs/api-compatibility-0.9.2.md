@@ -296,6 +296,20 @@ owner-only from creation, and runs the derivation for as long as it serves. A st
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
 
+## Preparing a documentation set (DOCS-11)
+
+No route, interface member, protocol type, shipped command or record type is added or changed. `vericairn-docs`, the build
+tooling that no distributable ships, adds `assemble`, `insert`, `freeze`, `index` and `prepare`. `generate` and `compare` keep
+their options, outputs and refusals: `generate` still writes into any directory. Each new command takes a set whose
+directory is named for its version, and `assemble`, unless it keeps the references, refuses one that is not the build's.
+
+A set's manifest, references and notes keep their formats. `freeze` writes `docs/releases/frozen-sha256.json` in its existing
+format, `vericairn.frozen-docs/1`, indented by two spaces with one final line break. It adds a set's entries after the
+earlier sets and changes none of them. `index` changes `docs/releases/README.md` only by adding a paragraph under its
+documentation sets heading. The frozen-set test in the command line's suite no longer lists the frozen versions. It
+requires every set the release index links, every set directory except the build's own version until it is frozen, and
+each set before 0.6.0 to stay indexed, so freezing a set no longer edits the test.
+
 ## Security reports before a release (OPS-11)
 
 Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
