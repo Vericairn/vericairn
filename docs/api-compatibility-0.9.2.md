@@ -137,3 +137,17 @@ Release admission, through `release submit --check`, `POST /v1/releases/check` a
 `release.basis-retained` with its next action when a basis would retain more than 4,096 files or 67,108,864 bytes;
 `release.basis-file-size` now applies only to files the basis retains. Bases of formats 1 and 2 read as before, and a format-2
 basis whose exact-commit copies are absent from the estate reads those files, and any evidence object of the same hash, from Git.
+
+## A workspace setup command runs with a filtered environment (FIX-96)
+
+No route or protocol type changes. `Vericairn.Runtime.Workers.WorkspaceSetupConfiguration` adds `Variables`, an optional list of
+variable names (null when none), and the constant `MaximumVariables` (64). A setup file holds `variables` only when it names some,
+so files without them keep 0.9.1's shape and read in either version; a file naming `variables` is refused by 0.9.1 as an unknown
+field. `WorkerConfigurationStore.WriteSetup` and `ReadSetup` refuse a list of more than 64 names, a name given twice, a name that is
+not a portable variable name, or one starting with `VERICAIRN_`.
+
+The setup command's environment changes: it is the one `WorkerEnvironment.Build` gives a harness, without launcher names, plus the
+worker's variables the configuration names, and never a `VERICAIRN_` variable. In 0.9.1 it was the worker's whole environment less
+the `VERICAIRN_` variables, so a setup command that relied on another ambient variable needs it named. The command line adds
+`worker configure --setup-variable <name>`, repeatable and given with `--setup-command`; `worker configure --json` adds `variables` to
+each setup entry, an empty array when the command names none and null when its file cannot be read.

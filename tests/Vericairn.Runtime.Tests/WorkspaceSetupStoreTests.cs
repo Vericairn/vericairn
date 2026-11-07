@@ -78,14 +78,57 @@ public sealed class WorkspaceSetupStoreTests : IDisposable
     }
 
     [Fact]
-    public void SetupRunsWithThePersonsEnvironmentLessVericairnsBindings()
+    public void SetupRunsWithAHarnesssFilteredEnvironmentPlusOnlyTheVariablesItNames()
     {
+        // Credential-shaped names are assembled here, so no literal credential name or value sits in the source.
+        string token = "NPM_" + "TOKEN", key = "ANTHROPIC_" + "API_KEY", value = "registry-" + Ulid.NewUlid().Value;
         var source = new Dictionary<string, string>(WorkerEnvironment.Names)
         {
-            ["PATH"] = "/usr/bin", ["NPM_TOKEN"] = "registry-" + Ulid.NewUlid().Value, ["DOTNET_ROOT"] = "/opt/dotnet",
+            ["PATH"] = "/usr/bin", ["HOME"] = "/home/person", ["LC_ALL"] = "C", ["DOTNET_ROOT"] = "/opt/dotnet", [token] = value, [key] = value,
+            ["NODE_OPTIONS"] = "--require ./hook.js", ["DYLD_INSERT_LIBRARIES"] = "hook.dylib", ["PERSON_SETTING"] = "on", ["NPM_CONFIG_REGISTRY"] = "https://registry.example.invalid",
             ["VERICAIRN_HOME"] = "/home", ["vericairn_run"] = "run", ["VERICAIRN_ENCLAVE_HELPER"] = "helper",
         };
-        Dictionary<string, string> environment = WorkspaceSetup.Environment(source);
-        Assert.Equal(["DOTNET_ROOT", "NPM_TOKEN", "PATH"], environment.Keys.Order(StringComparer.Ordinal));
+
+        // Without names, it receives what a harness would: no credential, no loader directive, nothing outside the allowlist.
+        Assert.Equal(["DOTNET_ROOT", "HOME", "LC_ALL", "PATH"], WorkspaceSetup.Environment(source, []).Keys.Order(StringComparer.Ordinal));
+
+        // A named variable passes as the person holds it, even a credential or a loader directive; an absent name adds nothing.
+        Dictionary<string, string> named = WorkspaceSetup.Environment(source, [token, "NODE_OPTIONS", "NPM_CONFIG_REGISTRY", "ABSENT_SETTING"]);
+        Assert.Equal(["DOTNET_ROOT", "HOME", "LC_ALL", "NODE_OPTIONS", "NPM_CONFIG_REGISTRY", token, "PATH"], named.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(value, named[token]);
+
+        // Vericairn's own bindings never pass, even when the source holds them under an allowed name.
+        Assert.DoesNotContain(WorkspaceSetup.Environment(source, ["vericairn_run"]).Keys, name => name.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void TheVariablesASetupNamesAreStoredValidatedAndOptional()
+    {
+        var store = new WorkerConfigurationStore(home);
+        string repository = Ulid.NewUlid().Value;
+        string file = Path.Combine(home, "worker", "setup-repository-" + repository + ".json");
+
+        // Without names, the file is what 0.9.1 wrote and read.
+        store.WriteSetup(null, repository, new() { Command = ["npm", "ci"] });
+        Assert.DoesNotContain("variables", File.ReadAllText(file), StringComparison.Ordinal);
+        Assert.Null(store.ReadSetup("codex", [repository])!.Variables);
+        File.WriteAllText(file, "{\"command\":[\"npm\",\"ci\"],\"timeoutSeconds\":120}");
+        Assert.Equal(120, store.ReadSetup("codex", [repository])!.TimeoutSeconds);
+
+        store.WriteSetup(null, repository, new() { Command = ["npm", "ci"], Variables = ["NPM_CONFIG_REGISTRY", "ProgramFiles(x86)"] });
+        Assert.Equal(["NPM_CONFIG_REGISTRY", "ProgramFiles(x86)"], store.ReadSetup("codex", [repository])!.Variables);
+        Assert.Equal(["NPM_CONFIG_REGISTRY", "ProgramFiles(x86)"], Assert.Single(store.ListSetup()).Setup!.Variables);
+
+        foreach (IReadOnlyList<string> invalid in new IReadOnlyList<string>[]
+        {
+            ["VERICAIRN_HOME"], ["vericairn_run"], ["NAME=VALUE"], [""], ["A B"], [new string('A', 161)], ["SAME", "SAME"],
+            [.. Enumerable.Range(0, WorkspaceSetupConfiguration.MaximumVariables + 1).Select(i => "NAME_" + i.ToString(System.Globalization.CultureInfo.InvariantCulture))],
+        })
+            Assert.Throws<ProviderRefusedException>(() => store.WriteSetup(null, repository, new() { Command = ["tool"], Variables = invalid }));
+        Assert.Equal(["NPM_CONFIG_REGISTRY", "ProgramFiles(x86)"], store.ReadSetup("codex", [repository])!.Variables);
+
+        // A file edited by hand to name one refuses, as any invalid file does.
+        File.WriteAllText(file, "{\"command\":[\"tool\"],\"variables\":[\"VERICAIRN_HOME\"]}");
+        Assert.Throws<ProviderRefusedException>(() => store.ReadSetup("codex", [repository]));
     }
 }

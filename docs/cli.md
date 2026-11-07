@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 9, November 7, 2026. Add `worker configure --setup-variable` and the setup command's filtered environment in the development build.
+
 Revision 8, November 6, 2026. Add `estate cache rebuild` in the development build.
 
 Revision 7, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
@@ -325,7 +327,10 @@ changed since.
 array>` (or `--launcher <id>` in place of `--repository`) sets a command the
 worker runs in the workspace before each such run, outside the agent's sandbox.
 `--setup-timeout <seconds>` sets its deadline, 1 through 600 and 300 when
-omitted; `--clear-setup` removes it; `--repository` alone shows it, and
+omitted. The command runs work-branch content as you; from 0.9.2 it receives
+the environment a harness would, without credential or loader variables, and
+`--setup-variable <name>`, repeatable, passes a named variable besides.
+`--clear-setup` removes it; `--repository` alone shows it, and
 `worker configure` with no choices shows every setup command beside the
 workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
