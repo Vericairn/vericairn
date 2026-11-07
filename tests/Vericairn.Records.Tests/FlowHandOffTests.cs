@@ -312,24 +312,28 @@ public class FlowHandOffTests
     public void ARoleBriefDueAtRefuseHoldsTheStepsItBriefs()
     {
         JsonObject flow = FlowFixture.Song();
-        flow["roles"]![0]!["document"] = "roles/writer.md";
+        flow["roles"]![0]!["document"] = "docs/roles/writer.md";
         using var run = new FlowFixture(flow);
-        Directory.CreateDirectory(Path.Combine(run.Estate.Root, "roles"));
-        File.WriteAllText(Path.Combine(run.Estate.Root, "roles", "writer.md"), "# Writer\n\nWrite the song's material.\n");
+        Directory.CreateDirectory(Path.Combine(run.Estate.Root, "docs", "roles"));
+        File.WriteAllText(Path.Combine(run.Estate.Root, "docs", "roles", "writer.md"), "# Writer\n\nWrite the song's material.\n");
         Assert.Equal("next", run.Step("draft").State);
         RecordEnvelope declaration = run.Add("living-document", new JsonObject
         {
-            ["path"] = "roles/writer.md", ["title"] = "The writer's brief", ["kind"] = "authored", ["source"] = "estate-file",
-            ["triggers"] = new JsonArray(new JsonObject { ["on"] = "covers", ["level"] = "refuse", ["paths"] = new JsonArray("roles/writer.md") }), ["summary"] = "How the writer works here.",
+            ["path"] = "docs/roles/writer.md", ["title"] = "The writer's brief", ["kind"] = "authored", ["source"] = "estate-file",
+            ["triggers"] = new JsonArray(new JsonObject { ["on"] = "covers", ["level"] = "refuse", ["paths"] = new JsonArray("docs/roles/writer.md") }), ["summary"] = "How the writer works here.",
         });
-        Assert.True(Assert.Single(LivingDocuments.Derive(run.Estate.Load()), d => d.Path == "roles/writer.md").Closes);
+        Assert.True(Assert.Single(LivingDocuments.Derive(run.Estate.Load()), d => d.Path == "docs/roles/writer.md").Closes);
 
         // Due at refuse, the brief holds every step of its role, and the steps of other roles go on as before.
         FlowPosition.StepInstance draft = run.Step("draft");
         Assert.Equal("blocked", draft.State);
-        Assert.StartsWith("its role brief, roles/writer.md: due at refuse", draft.Reasons[0], StringComparison.Ordinal);
+        Assert.StartsWith("its role brief, docs/roles/writer.md: due at refuse", draft.Reasons[0], StringComparison.Ordinal);
         Assert.EndsWith("a revision of it, or a review that clears it, comes before the writer role is briefed from it", draft.Reasons[0], StringComparison.Ordinal);
-        Assert.Equal("roles/writer.md", run.Position().Flow!.Role("writer")!.Document);
+        Assert.Equal("docs/roles/writer.md", run.Position().Flow!.Role("writer")!.Document);
+
+        // A holder already briefed goes on with it.
+        run.Assign("draft", run.Estate.BuilderId);
+        Assert.Equal("next", run.Step("draft").State);
         Assert.Equal("living-document", declaration.Type);
     }
 
@@ -361,7 +365,7 @@ public class FlowHandOffTests
 
         JsonObject valid = FlowFixture.Song();
         Step(valid, "master")["failure"] = new JsonObject { ["route"] = "step", ["step"] = "draft" };
-        valid["roles"]![0]!["document"] = "roles/writer.md";
+        valid["roles"]![0]!["document"] = "docs/roles/writer.md";
         FlowDefinition resolved = FlowDefinition.Resolve(TemplateDefinition.Read(FlowFixture.Element(valid)), _ => throw new InvalidOperationException("No base."));
         Assert.Equal(new FlowFailure("step", null, "draft"), resolved.Step("master")!.Failure);
         Assert.Equal("stop", resolved.Step("draft")!.FailureRoute.Route);

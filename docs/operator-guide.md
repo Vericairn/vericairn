@@ -1329,7 +1329,8 @@ decision answers the ask.
 
 A role may name the estate's own copy of its brief, a file such as `docs/roles/writer.md`, in the flow's `document`. Each
 brief for the role then names that file and its content hash and says whether a living document declares it and whether it is
-due. Declared and due at level `refuse`, it holds every step of the role as `blocked` until a revision or a review clears it.
+due. Declared and due at level `refuse`, it holds as `blocked` each step of the role that is still to be briefed, unassigned or
+to rerun from a fresh assignment, until a revision or a review clears it; a holder already briefed goes on.
 
 `goal show` and `goal next` show all of this. Each step lists its attempts under every assignment, with their results, and how
 many runs of its attempts per step it has used. They also show its reviews before hand-off, its required attention, the

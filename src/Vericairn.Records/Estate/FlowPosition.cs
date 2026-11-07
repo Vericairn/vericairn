@@ -461,9 +461,12 @@ public static class FlowPosition
                 }
             }
 
-            if (step.IsRouted && RoleBriefDue(step) is string brief)
+            // A role brief due at refuse holds a step before it is briefed: unassigned, or to rerun from a fresh assignment; a holder already
+            // briefed goes on.
+            string? briefDue = step.IsRouted ? RoleBriefDue(step) : null;
+            if (briefDue is not null && (holder is null || stale))
             {
-                blocked.Add(brief);
+                blocked.Add(briefDue);
             }
 
             if (stale)
@@ -607,6 +610,11 @@ public static class FlowPosition
             // Held afresh: a routed step reruns from a fresh assignment, within the attempts its work has had; any other kind is carried again.
             StepInstance Fresh(string why, RecordEnvelope trigger)
             {
+                if (briefDue is not null)
+                {
+                    return Shaped(new StepInstance(step, item, "blocked", [why, briefDue], Who(holder), holder, result, review, outputs, items, inputs, done, null));
+                }
+
                 if (Spent(trigger) is StepInstance spent)
                 {
                     return spent with { Reasons = [why, .. spent.Reasons] };

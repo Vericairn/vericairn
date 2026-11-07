@@ -463,7 +463,8 @@ every template.
   of its brief, such as `docs/roles/writer.md`, kept as a
   [living document](living-documents.md) (0.9.2). The brief then names that
   file and its exact content hash, and a declaration of it due at level
-  `refuse` holds every step of the role until a revision or a review clears it.
+  `refuse` holds each step of the role still to be briefed until a revision or
+  a review clears it.
   The path is portable, outside hidden directories, `records` and `objects`.
 - Each step has `key`, `title`, `kind` (`work`, `review`, `operation`, `effect`,
   `decision`, `exchange` or `flow`), `role`, either `required: true` or
