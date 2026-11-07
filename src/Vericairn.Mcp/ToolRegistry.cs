@@ -13,6 +13,9 @@ public sealed record ToolCallResult(string Text, bool IsError, bool Unknown = fa
 {
     /// <summary>A serving daemon release warning, separate from the tool's unchanged result text.</summary>
     public string? Warning { get; init; }
+
+    /// <summary>The result's _meta, from 0.9.2: a network write's prepared record (MCP-03); null for every other result.</summary>
+    public JsonObject? Meta { get; init; }
 }
 
 /// <summary>One tool: a name, a description that describes and never directs, an input schema, and the call it makes through the API.</summary>
@@ -45,10 +48,20 @@ public sealed partial class ToolRegistry
 
     /// <summary>A registry over an open estate for an acting principal (null for a read-only connection).</summary>
     public ToolRegistry(IEstateApi api, string? actingPrincipal)
+        : this(api, actingPrincipal, null)
+    {
+    }
+
+    private ToolRegistry(IEstateApi api, string? actingPrincipal, IMcpNetworkSession? network)
     {
         this.api = api ?? throw new ArgumentNullException(nameof(api));
         this.actingPrincipal = string.IsNullOrWhiteSpace(actingPrincipal) ? null : actingPrincipal;
+        this.network = network;
         tools = Define();
+        if (network is not null)
+        {
+            OfferOverNetwork();
+        }
     }
 
     /// <summary>The principal writes are authored by, or null for a read-only connection.</summary>
@@ -86,6 +99,13 @@ public sealed partial class ToolRegistry
     /// <summary>The tools this connection may use, after a cancellable admission check.</summary>
     public async Task<IReadOnlyList<ToolDefinition>> VisibleAsync(CancellationToken cancellationToken = default)
     {
+        if (network is not null)
+        {
+            // Section 8's set over the network: the device's admission is checked on every request, and the runtime judges each call.
+            cancellationToken.ThrowIfCancellationRequested();
+            return tools.Where(OfferedOverNetwork).ToList();
+        }
+
         bool writes = await WritesVisibleAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<string> policyActions = writes ? await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false) : [];
         bool isOperator = writes && await IsOperatorAsync(cancellationToken).ConfigureAwait(false);
@@ -96,12 +116,25 @@ public sealed partial class ToolRegistry
     public ToolCallResult Call(string name, JsonObject? arguments) => CallAsync(name, arguments).GetAwaiter().GetResult();
 
     /// <summary>Calls a tool through the asynchronous API, preserving timeout, cancellation and uncertain effects.</summary>
-    public async Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default)
+    public Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default) =>
+        CallAsync(name, arguments, null, cancellationToken);
+
+    /// <summary>
+    /// Calls a tool with the request's _meta, which a network session's writes read for their two signed steps (MCP-03); over the
+    /// standard streams it is not read.
+    /// </summary>
+    public async Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, JsonObject? meta, CancellationToken cancellationToken = default)
     {
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             ToolDefinition? tool = tools.FirstOrDefault(t => t.Name == name);
+            if (network is not null)
+            {
+                ToolCallResult answered = await CallOverNetworkAsync(network, tool, arguments, meta, cancellationToken).ConfigureAwait(false);
+                return answered.Unknown ? answered : answered with { Warning = (api as IDaemonVersion)?.DaemonVersionWarning };
+            }
+
             if (tool is null || (tool.Writes && (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) ||
                 tool.OperatorOnly && !await IsOperatorAsync(cancellationToken).ConfigureAwait(false) ||
                 tool.PolicyAction is { } action && !(await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false)).Contains(action, StringComparer.Ordinal))))

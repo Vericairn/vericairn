@@ -47,32 +47,8 @@ public sealed partial class EstateService
 
             var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, now, Ulid.NewUlid(now).Value,
                 Math.Min(model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat, RecordFormats.Current));
-            if (IsPolicyWrite(draft) || IsDutyEvidence(draft, model))
-                return Unprepared("refused", "Policy writes and duty evidence are authored on the runtime's machine, with their expected hashes; they are not prepared for a device's signature.");
-            // A device cannot observe the estate's repository: a change set it states must be the one the runtime observes now.
-            if (DecisionBasisRefusal(draft) is string basis) return Unprepared("refused", basis);
-
-            // The same authoring path as every write, with no signature: the exact record the device will sign, or why there is none.
-            (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, model, []);
-            if (record is null) return Unprepared("refused", refusal!);
-            if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
-                record.Envelope.At, record.RelativePath) is { } timeProblem)
-                return new(false, Problem: timeProblem);
-            if (record.Envelope.Type == "acceptance" && AcceptanceType.BasisOutcomeFinding(model, record.Envelope, record.RelativePath) is { } outcome)
-                return new(false, Problem: new("rejected", outcome.Message, [new FindingDto("error", outcome.Code, outcome.Location, outcome.Message)]));
-            if (record.Envelope.Type == "result" && ResultType.OutputSchemeFinding(record.Envelope, record.RelativePath) is { } scheme)
-                return new(false, Problem: new("rejected", scheme.Message, [new FindingDto("error", scheme.Code, scheme.Location, scheme.Message)]));
-            if (RecordAuthorship.Unresolved(model, record.Envelope) is { } author)
-                return new(false, Problem: new("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
-            draft = draft with { At = record.Envelope.AtTime };
-
-            foreach ((string id, PreparedRecord lapsed) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray()) preparedRecords.TryRemove(id, out _);
-            if (preparedRecords.Count >= PreparedLimit) return Unprepared("unavailable", "Too many records await their devices' signatures; sign or let some lapse first.");
-            string plan = Ulid.NewUlid(now).Value;
-            DateTimeOffset expires = now + PreparedLifetime;
-            preparedRecords[plan] = new PreparedRecord(device.Device, draft, record.Envelope.ComputedHash, expires);
-            using JsonDocument unsigned = JsonDocument.Parse(record.Bytes);
-            return new(true, new RecordPrepared(plan, record.Envelope.Id, record.Envelope.At, record.Envelope.ComputedHash, RecordParser.FormatTimestamp(expires), unsigned.RootElement.Clone()));
+            (RecordPrepared? prepared, Problem? problem) = PrepareDraftLocked(model, device.Device, draft, now);
+            return prepared is null ? new(false, Problem: problem) : new(true, prepared);
         }
     }
 

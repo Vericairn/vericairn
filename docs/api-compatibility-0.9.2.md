@@ -295,3 +295,38 @@ beside the live store, and the key that names subjects that are not records in `
 owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
+
+## Network MCP over Streamable HTTP (MCP-03)
+
+No route, OpenAPI operation, request or response type of API version 1 is added or changed. The daemon serves the Model
+Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners when the operator turned it on,
+outside the API's route table; each tool call runs the API's own route in the daemon's process for the requesting device,
+with that route's request scope. `DaemonEndpoint` gains the optional `Mcp`, serialized as `mcp` (the path served) only
+while it is on; older clients ignore it and older daemons omit it.
+
+`Vericairn.Daemon` now depends on `Vericairn.Mcp`. `DaemonOptions` adds `Mcp` and `McpAllowedOrigins`, which override the
+runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `AllowedOrigins` and the static
+`TryNormalizeOrigin`; `runtime.json` gains `mcp` and `allowedOrigins`, written on every save, and an older build ignores
+them. A file whose `allowedOrigins` names something other than an origin is refused as unreadable settings.
+
+`Vericairn.Runtime` adds `DeviceSigning` and `DeviceSigningMode` (`Read`, `Prepare`, `Sign`), the overload
+`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.PrincipalKind(principal)`. Under a
+`DeviceSigning`, no key on the runtime's machine signs and no record is written unsigned: an operation writes nothing,
+prepares the one record it authors for the requesting device, or writes that record only with the device's signature over
+the plan's exact record, re-authored from the same request with the plan's id and time; every other store is refused.
+An attempt's `startedAt` and a completed progress phase's `completedAt` state the plan's time in both steps. Prepared
+records share one store with `POST /v1/records/prepare`, and from 0.9.2 one device holds at most 32 of them at once,
+answered `unavailable` beyond that; the store's limit of 256 is unchanged. `PrepareRecord` otherwise behaves as before.
+
+`Vericairn.Mcp` adds, each additive: `McpServer.ProtocolVersions` and `McpServer.Instructions` (init-only),
+`McpServer.NetworkDescription` and `McpServer.RespondAsync(id, method, parameters, cancellationToken)`;
+`ToolRegistry.ForNetwork(api, network)`, `ToolRegistry.Network`, `ToolRegistry.NetworkWrites`,
+`ToolRegistry.OfferedOverNetwork(tool)`, `ToolRegistry.Describe(tool)`, the `CallAsync(name, arguments, meta,
+cancellationToken)` overload and the constants `PrepareMeta`, `PlanMeta` and `SignatureMeta`; `ToolCallResult.Meta`;
+and the types `IMcpNetworkSession` and `McpSigning`. `tools/call` now refuses a `_meta` that is not an object and returns
+a result's `_meta` when it has one; over standard input and output `_meta` is not read, and every stdio answer is unchanged.
+
+The command line adds `runtime configure --mcp on|off` and `--mcp-origin`, whose `--json` output adds `mcp`,
+`allowedOrigins` and `mcpServed`, and keeps the other settings when one changes; `runtime status` adds the `mcp` line and,
+in `--json`, `mcp`; and `mcp serve --connection`. The SDK's additions for the bridge are internal. Record format remains 3;
+no record type changes. `AGENTS.md` gains one paragraph on reaching the estate from another machine.

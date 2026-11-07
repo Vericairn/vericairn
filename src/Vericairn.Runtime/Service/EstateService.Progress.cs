@@ -72,11 +72,13 @@ public sealed partial class EstateService
                     return new WorkProgressResponse(null, Problem: Refuse("The effective progress request requires statusText with each claim.").Problem);
             }
 
-            string at = RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow());
+            // Under device signing a completed phase states its plan's time in both steps, so the record signed is the one written.
+            DateTimeOffset claimed = DeviceSigningTime() ?? WorkerOptions.Clock.GetUtcNow();
+            string at = RecordParser.FormatTimestamp(claimed);
             var body = new JsonObject { ["phase"] = request.Phase, ["note"] = request.Note, ["completedAt"] = at };
             if (request.Progress is JsonElement progress) body["progress"] = JsonNode.Parse(progress.GetRawText());
             if (request.StatusText is not null) body["statusText"] = request.StatusText;
-            var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference, At: WorkerOptions.Clock.GetUtcNow());
+            var draft = new RecordDraft("work-progress", request.By, Element(body), attempt.Reference, At: claimed);
             // Interim notes pass the same author, shape and portable-content checks, without storing the candidate record.
             (AuthoredRecord? candidate, string? refusal) = AuthorLocked(draft, model);
             if (candidate is null)
@@ -85,6 +87,13 @@ public sealed partial class EstateService
             }
 
             FindingList findings = Invalid(LoadWith([candidate]), [candidate]);
+            if (CurrentDeviceSigning is not null)
+            {
+                // Under device signing the candidate carries no signature, since nothing here signs and it is never stored; the
+                // request itself was signed by its device. Only its missing signature is set aside, never another finding.
+                findings = WithoutCandidateSignature(findings, candidate);
+            }
+
             if (findings.HasErrors)
             {
                 return new WorkProgressResponse(null, Problem: new Problem("rejected", "The progress claim was not stored.", ToFindings(findings, "rejected").Findings));

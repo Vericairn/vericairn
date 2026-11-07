@@ -54,6 +54,16 @@ public sealed record DaemonOptions
     /// </summary>
     public int ReplayCapacity { get; init; } = 10_000;
 
+    /// <summary>
+    /// From 0.9.2 (MCP-03): whether the daemon serves network MCP at /mcp on its loopback and local-network listeners. When null,
+    /// the runtime settings beside the live store say, and it is off unless the operator turned it on with 'vericairn runtime
+    /// configure --mcp on'.
+    /// </summary>
+    public bool? Mcp { get; init; }
+
+    /// <summary>From 0.9.2 (MCP-03): the origins a request to /mcp may name; when null, the runtime settings say, and none by default.</summary>
+    public IReadOnlyList<string>? McpAllowedOrigins { get; init; }
+
     /// <summary>How often the event journal derives what time changed while a reader listens (0.9.2); tests shorten it.</summary>
     internal TimeSpan EventTick { get; init; } = TimeSpan.FromSeconds(10);
 
@@ -88,6 +98,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private WebApplication? app;
     private Task? scheduled;
     private Task? deriving;
+    private Task? sweeping;
     private Task? stopping;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
@@ -124,6 +135,12 @@ public sealed class DaemonHost : IAsyncDisposable
     internal RequestAuthenticator Authenticator { get; }
 
     internal TimeProvider Time { get; }
+
+    /// <summary>Network MCP at /mcp (MCP-03): served when the operator turned it on, on the loopback and local-network listeners.</summary>
+    internal McpEndpoint Mcp { get; private set; } = null!;
+
+    /// <summary>The services of the running application, for the routes network MCP runs in this process.</summary>
+    internal IServiceProvider Services => App.Services;
 
     /// <summary>The event streams and long polls held now, by device and in all.</summary>
     internal EventStreamSlots EventStreams { get; } = new();
@@ -225,9 +242,11 @@ public sealed class DaemonHost : IAsyncDisposable
         RuntimeCertificates? certificates = null;
         RuntimeIdentity? identity = null;
         IPEndPoint? localNetwork;
+        RuntimeSettings settings;
         try
         {
-            localNetwork = options.LocalNetwork ?? RuntimeSettings.Load(directory).LocalNetworkEndPoint();
+            settings = RuntimeSettings.Load(directory);
+            localNetwork = options.LocalNetwork ?? settings.LocalNetworkEndPoint();
             certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
             identity = localNetwork is null ? null : RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log);
         }
@@ -239,6 +258,7 @@ public sealed class DaemonHost : IAsyncDisposable
         }
 
         var host = new DaemonHost(service, file, directory, options, certificates, identity);
+        host.Mcp = new McpEndpoint(host, options.Mcp ?? settings.Mcp, options.McpAllowedOrigins ?? settings.AllowedOrigins);
         try
         {
             // The event journal is machine state beside the live store, in the directory just made owner-only.
@@ -338,6 +358,8 @@ public sealed class DaemonHost : IAsyncDisposable
         WebApplication app = builder.Build();
         host.app = app;
         app.Use(host.HandleRequestAsync);
+        // Network MCP (MCP-03) is served once its request is authenticated; it runs each tool's operation through the routes below.
+        app.Use(host.Mcp.InvokeAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
@@ -376,13 +398,21 @@ public sealed class DaemonHost : IAsyncDisposable
         LocalNetworkEndpoint? localNetworkEndpoint = host.localNetworkListener?.IPEndPoint is IPEndPoint served
             ? new LocalNetworkEndpoint(served.Address.ToString(), served.Port, identity!.Fingerprint)
             : null;
-        host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint));
+        host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint)
+        {
+            Mcp = host.Mcp.Enabled && (loopbackEndpoint is not null || localNetworkEndpoint is not null) ? McpEndpoint.Path : null,
+        });
         if (certificates is not null)
         {
             host.scheduled = Task.Run(() => host.RunScheduleAsync(host.schedule.Token), CancellationToken.None);
         }
 
         host.deriving = Task.Run(() => service.RunEventDerivationAsync(options.EventTick, host.Log, host.schedule.Token), CancellationToken.None);
+        if (host.Mcp.Enabled)
+        {
+            host.sweeping = Task.Run(() => host.SweepMcpAsync(host.schedule.Token), CancellationToken.None);
+        }
+
         return host;
     }
 
@@ -401,6 +431,9 @@ public sealed class DaemonHost : IAsyncDisposable
 
         return routes;
     }
+
+    /// <summary>The route endpoints the daemon maps, which network MCP runs its tools' operations through.</summary>
+    internal IEnumerable<RouteEndpoint> RouteEndpoints() => App.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
 
     /// <summary>Every address the daemon listens on, as the server reports them: the local socket, loopback, and the local network when configured.</summary>
     public IReadOnlyList<string> Addresses() =>
@@ -499,6 +532,10 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Whether a request came over the local-network profile.</summary>
     internal static bool OnLocalNetwork(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(LocalNetworkMarker) == true;
 
+    /// <summary>Whether a request came over a profile whose requests are device-signed: loopback or the local network, never the local socket.</summary>
+    internal static bool OnSignedProfile(HttpContext context) =>
+        context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker));
+
     /// <summary>The fingerprint of the certificate the runtime presented on a request's connection; the current one for a connection without TLS.</summary>
     internal string CertificateOf(HttpContext context) =>
         context.Features.Get<IConnectionItemsFeature>()?.Items.TryGetValue(CertificateMarker, out object? presented) == true && presented is X509Certificate2 certificate
@@ -588,6 +625,13 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Authenticates every request by the profile it came over: device-signed on loopback; on the local network a paired device by its certificate and its signature; the local socket by operating-system identity.</summary>
     private async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
     {
+        // Network MCP's Host and Origin are judged before anything is authenticated, so a rebinding page runs nothing (MCP-03).
+        if (Mcp.Screen(context) is (int status, Problem screened))
+        {
+            await WriteProblemAsync(context, status, screened, close: true).ConfigureAwait(false);
+            return;
+        }
+
         IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
         bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
         Problem? denied = localNetwork
@@ -597,6 +641,13 @@ public sealed class DaemonHost : IAsyncDisposable
                 : null;
         if (denied is not null)
         {
+            if (Mcp.Enabled && Mcp.Sessions.Count > 0 && context.Request.Headers[RequestSigning.DeviceHeader].ToString() is { Length: > 0 } named)
+            {
+                // The device a refused request names, on any route, may hold network MCP sessions: if the records say it no longer
+                // stands, they end now, streams included. A device that stands keeps them, whoever named it.
+                Mcp.Sessions.Sweep(Service, named);
+            }
+
             await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
             return;
         }
@@ -732,6 +783,27 @@ public sealed class DaemonHost : IAsyncDisposable
         }
     }
 
+    /// <summary>Ends idle network MCP sessions, and those of devices no longer standing, every half minute while the daemon serves.</summary>
+    private async Task SweepMcpAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+                Mcp.Sessions.Sweep(Service);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping.
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            Log($"network MCP sessions are no longer swept: {exception.Message}");
+        }
+    }
+
     private async Task RunScheduleAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(ScheduleCheck, Time);
@@ -760,7 +832,13 @@ public sealed class DaemonHost : IAsyncDisposable
         await schedule.CancelAsync().ConfigureAwait(false);
         try
         {
+            Mcp.Stop();
             await App.StopAsync().ConfigureAwait(false);
+            if (sweeping is not null)
+            {
+                await sweeping.ConfigureAwait(false);
+            }
+
             if (scheduled is not null)
             {
                 await scheduled.ConfigureAwait(false);
