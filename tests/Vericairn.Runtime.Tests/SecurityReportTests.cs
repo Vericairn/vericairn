@@ -33,7 +33,8 @@ public sealed class SecurityReportTests
         f.Api.SecurityReportsScheduled();
 
         AttentionNotice[] notices = f.Api.AttentionGet(f.Operator).Items.Where(n => n.SubjectType == "security-report").ToArray();
-        Assert.Equal(3, notices.Length);
+        Assert.Equal(["incident", "incident", "information"], notices.Select(n => n.Kind).Order(StringComparer.Ordinal));
+        Assert.Equal("published", Assert.Single(notices, n => n.Kind == "information").State);
         AttentionNotice triage = Assert.Single(notices, n => n.SubjectId == FakeGh.Repository + ":" + FakeGh.Triaged);
         Assert.Equal("incident", triage.Kind);
         Assert.Equal("triage", triage.State);
@@ -45,7 +46,8 @@ public sealed class SecurityReportTests
         ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
         Assert.False(check.Ok);
         string[] held = check.Check!.Objections.Where(o => o.Code == "release.security-report").Select(o => o.Message).ToArray();
-        Assert.Equal(3, held.Length);
+        Assert.Equal(2, held.Length);
+        Assert.DoesNotContain(held, m => m.Contains(FakeGh.Published, StringComparison.Ordinal));
         Assert.Contains(held, m => m.Contains(FakeGh.Triaged, StringComparison.Ordinal) && m.Contains("state triage, severity high", StringComparison.Ordinal));
         ReleaseResponse refused = f.Api.ReleaseSubmit(f.Request);
         Assert.False(refused.Ok);
@@ -54,14 +56,15 @@ public sealed class SecurityReportTests
         Assert.Empty(f.Api.Records("operation"));
 
         f.TriageAll();
-        Assert.DoesNotContain(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report");
+        // The published advisory needed no triage and stays information; nothing holds.
+        Assert.Equal("information", Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report").Kind);
         ReleaseResponse passed = f.Api.ReleaseCheck(f.Request);
         Assert.True(passed.Ok, passed.Message);
         Assert.Equal(0, f.Api.Validate().Errors);
     }
 
     [Fact]
-    public void AChangedStateOrSeverityAfterTriageNeedsTriageAgain()
+    public void AChangedReportNeedsTriageAgainAndPublishingATriagedDraftClearsTheHold()
     {
         using var f = new SecurityReportFixture();
         f.TriageAll();
@@ -70,17 +73,104 @@ public sealed class SecurityReportTests
         f.Gh.Advisories[0]["severity"] = "critical";
         f.Clock.Now = f.Clock.Now.AddMinutes(5);
         f.Api.SecurityReportsScheduled();
-        AttentionNotice raised = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report");
+        AttentionNotice raised = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report" && n.Kind == "incident");
         Assert.Contains("severity critical", raised.Why, StringComparison.Ordinal);
         ReleaseObjection objection = Assert.Single(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Code == "release.security-report");
         Assert.Contains(FakeGh.Triaged, objection.Message, StringComparison.Ordinal);
+        f.Gh.Advisories[1]["description"] = FakeGh.Description + " with a new detail";
+        f.Clock.Now = f.Clock.Now.AddMinutes(5);
+        Assert.Equal(2, f.Api.ReleaseCheck(f.Request).Check!.Objections.Count(o => o.Code == "release.security-report"));
 
         Assert.True(f.Triage(FakeGh.Triaged).Ok);
+        Assert.True(f.Triage(FakeGh.Drafted).Ok);
+        // The operator publishes the triaged draft: a new revision in a settled state, which holds nothing and needs no triage.
         f.Gh.Advisories[1]["state"] = "published";
         f.Clock.Now = f.Clock.Now.AddMinutes(5);
-        Assert.Contains(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Code == "release.security-report" && o.Message.Contains(FakeGh.Drafted, StringComparison.Ordinal));
-        Assert.True(f.Triage(FakeGh.Drafted, "no-action", reason: "Published after the fix shipped.").Ok);
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        Assert.True(check.Ok, check.Message);
+        f.Api.SecurityReportsScheduled();
+        AttentionNotice published = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectId == FakeGh.Repository + ":" + FakeGh.Drafted);
+        Assert.Equal(("information", "published"), (published.Kind, published.State));
+        Assert.False(f.Api.SecurityReportsPoll(new(f.Operator)).Held);
+    }
+
+    [Theory]
+    [InlineData("published")]
+    [InlineData("closed")]
+    [InlineData("withdrawn")]
+    public void AnAdvisoryTheEstateSettledIsInformationForAWeekAndHoldsNothing(string state)
+    {
+        using var f = new SecurityReportFixture();
+        f.Gh.Advisories.Clear();
+        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Published, state, "critical"));
+        f.Api.SecurityReportsScheduled();
+        AttentionNotice notice = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report");
+        Assert.Equal(("information", state), (notice.Kind, notice.State));
+        Assert.Contains($"{FakeGh.Published} on {FakeGh.Repository}, state {state}, severity critical", notice.Why, StringComparison.Ordinal);
+        Assert.Contains("needs no triage", notice.Why, StringComparison.Ordinal);
+        Assert.Equal("information", Vericairn.Runtime.Service.EstateService.Category(notice.Kind));
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        Assert.True(check.Ok, check.Message);
+        SecurityReportsResponse poll = f.Api.SecurityReportsPoll(new(f.Operator));
+        Assert.False(poll.Held);
+        Assert.False(Assert.Single(poll.Reports).Holds);
+
+        f.Clock.Now = f.Clock.Now.AddDays(8);
+        f.Api.SecurityReportsScheduled();
+        Assert.DoesNotContain(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType is "security-report" or "security-reports");
+    }
+
+    [Fact]
+    public void AnUnknownStateHoldsAsAReport()
+    {
+        using var f = new SecurityReportFixture();
+        f.Gh.Advisories.Clear();
+        f.Gh.Advisories.Add(FakeGh.Advisory(FakeGh.Triaged, "a-state-from-a-later-api", "low"));
+        f.Api.SecurityReportsScheduled();
+        AttentionNotice notice = Assert.Single(f.Api.AttentionGet(f.Operator).Items, n => n.SubjectType == "security-report");
+        Assert.Equal(("incident", "unknown"), (notice.Kind, notice.State));
+        Assert.Contains(f.Api.ReleaseCheck(f.Request).Check!.Objections, o => o.Code == "release.security-report" && o.Message.Contains("state unknown", StringComparison.Ordinal));
+        Assert.True(f.Api.SecurityReportsPoll(new(f.Operator)).Reports.Single().Holds);
+        f.TriageAll();
         Assert.True(f.Api.ReleaseCheck(f.Request).Ok);
+    }
+
+    [Fact]
+    public void SecurityReportAttentionReachesOnlyTheOperatorAsEventsWithOpaqueSubjectsAndNoText()
+    {
+        using var f = new SecurityReportFixture();
+        string journal = Path.Combine(Path.GetTempPath(), "vericairn-security-events-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(journal);
+        try
+        {
+            f.Api.EnableEvents(journal);
+            var attention = new EventFilter(Kinds: ["attention"]);
+            string operatorCursor = f.Api.AttentionGet(f.Operator).EventsCursor!;
+            string builderCursor = f.Api.AttentionGet(f.Builder).EventsCursor!;
+            f.Api.SecurityReportsScheduled();
+            f.Api.AttentionGet(f.Operator);
+            f.Api.AttentionGet(f.Builder);
+
+            EventEnvelope[] reports = [.. f.Api.Events(after: operatorCursor, filter: attention, principal: f.Operator).Events.Where(e => e.Subject.Type == "security-report")];
+            Assert.Equal(["incident", "incident", "information"], reports.Select(e => e.Category!).Order(StringComparer.Ordinal));
+            Assert.All(reports, e => Assert.StartsWith("hmac-sha256:", e.Subject.Id, StringComparison.Ordinal));
+            Assert.All(reports, e => Assert.Equal(("raised", f.Operator), (e.Change, e.To)));
+            Assert.Contains(reports, e => e.Sources.Contains(new EventReference("resource", f.Resource.Id, f.Resource.ComputedHash)));
+            string json = JsonSerializer.Serialize(reports, ProtocolJson.Options);
+            string[] hashes = [.. f.Api.SecurityReportsPoll(new(f.Operator)).Reports.Select(r => r.ContentHash)];
+            foreach (string text in FakeGh.OutsideText.Concat([FakeGh.Triaged, FakeGh.Drafted, FakeGh.Published, FakeGh.Repository]).Concat(hashes))
+                Assert.DoesNotContain(text, json, StringComparison.Ordinal);
+
+            Assert.DoesNotContain(f.Api.Events(after: builderCursor, filter: attention, principal: f.Builder).Events,
+                e => e.Subject.Type is "security-report" or "security-reports");
+        }
+        finally
+        {
+            f.Api.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(journal, recursive: true); }
+            catch (IOException) { }
+        }
     }
 
     [Fact]

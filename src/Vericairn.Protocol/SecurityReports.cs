@@ -15,13 +15,17 @@ public sealed record SecurityReportTriageRequest(string By, string Advisory, str
 /// <summary>One declared repository's latest read on this machine: when, by which reader, and whether its listing was complete.</summary>
 public sealed record SecurityReportRead(string Repository, string Provider, string? At, bool Complete, string? Problem);
 
-/// <summary>One observed advisory revision: identity, state, severity and content hash only, and the triage that names it, if any.</summary>
+/// <summary>
+/// One observed advisory revision: identity, state, severity and content hash only, and the triage that names it, if any. Holds is
+/// true for a report, an advisory in triage or draft state or an unknown state, which holds every release until it is triaged; a
+/// published, closed or withdrawn advisory holds nothing and needs no triage.
+/// </summary>
 public sealed record SecurityReportRow(string Advisory, string Repository, string State, string Severity, string ContentHash,
-    string FirstSeen, string ChangedAt, string? Triage);
+    string FirstSeen, string ChangedAt, string? Triage, bool Holds = true);
 
 /// <summary>
 /// The security reports this machine observed, for the operator only. Held is true while any declared repository is unconfirmed or
-/// any observed revision is untriaged, which holds every release submission.
+/// any report that holds is untriaged at its current revision, which holds every release submission.
 /// </summary>
 public sealed record SecurityReportsResponse(bool Ok, string Message, IReadOnlyList<SecurityReportRead> Reads, IReadOnlyList<SecurityReportRow> Reports,
     bool Held = false, RecordWritten? Triage = null, Problem? Problem = null);

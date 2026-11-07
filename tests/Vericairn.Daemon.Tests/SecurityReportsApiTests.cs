@@ -42,6 +42,46 @@ public sealed class SecurityReportsApiTests
         }
     }
 
+    [Fact]
+    public async Task ThePollRouteReadsAndTheEventStreamCarriesTheIncidentToTheOperatorAloneWithAnOpaqueSubject()
+    {
+        (TestEstate estate, MemorySecurityAdvisoryReader reader) = Seed();
+        using (estate)
+        {
+            await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false,
+                options: new DaemonOptions { SecurityReportsFirstRead = TimeSpan.FromHours(1) }, cancellationToken: TestContext.Current.CancellationToken);
+            using var client = new Sdk.VericairnClient(host.Endpoint);
+            var attention = new EventFilter(Kinds: ["attention"]);
+            string operatorCursor = client.AttentionGet(estate.OperatorId).EventsCursor!;
+            string builderCursor = client.AttentionGet(estate.BuilderId).EventsCursor!;
+
+            SecurityReportsResponse poll = await client.SecurityReportsPollAsync(new(estate.OperatorId), TestContext.Current.CancellationToken);
+            Assert.True(poll.Ok, poll.Message);
+            Assert.True(poll.Held);
+            Assert.Equal(1, reader.Reads);
+            Assert.False(client.SecurityReportsPoll(new(estate.BuilderId)).Ok);
+
+            EventEnvelope? incident = null;
+            DateTime deadline = DateTime.UtcNow + TestTiming.HangTimeout;
+            while (incident is null && DateTime.UtcNow < deadline)
+            {
+                EventsResponse events = await client.EventsAsync(after: operatorCursor, filter: attention, principal: estate.OperatorId, wait: EventVocabulary.MaxWaitSeconds,
+                    cancellationToken: TestContext.Current.CancellationToken);
+                incident = events.Events.FirstOrDefault(e => e.Subject.Type == "security-report");
+                operatorCursor = events.Cursor;
+            }
+
+            Assert.NotNull(incident);
+            Assert.Equal(("raised", estate.OperatorId, "incident"), (incident.Change, incident.To, incident.Category));
+            Assert.StartsWith("hmac-sha256:", incident.Subject.Id, StringComparison.Ordinal);
+            string json = System.Text.Json.JsonSerializer.Serialize(incident, ProtocolJson.Options);
+            foreach (string text in new[] { Advisory, "Example/widget", "sha256:" + new string('c', 64) })
+                Assert.DoesNotContain(text, json, StringComparison.Ordinal);
+            Assert.DoesNotContain(client.Events(after: builderCursor, filter: attention, principal: estate.BuilderId, wait: 2).Events,
+                e => e.Subject.Type is "security-report" or "security-reports");
+        }
+    }
+
     [Theory]
     [InlineData("poll")]
     [InlineData("triage")]

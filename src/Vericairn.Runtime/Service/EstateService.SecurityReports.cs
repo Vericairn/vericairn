@@ -19,8 +19,10 @@ namespace Vericairn.Runtime.Service;
 /// Security reports read before every release (OPS-11). A product's <c>securityReports</c> declaration names repositories; their
 /// advisories, drafts and private reports included, are read through the declared reader on a schedule the daemon keeps and on
 /// demand. Each observation keeps an advisory's identifier, state, severity and response hash in this machine's live store,
-/// under the user's own Vericairn home, never its text. A new or changed revision is incident attention for the operator until the operator's triage names it,
-/// and while any revision is untriaged, or any declared repository cannot be read completely, release submission refuses.
+/// under the user's own Vericairn home, never its text. A report (an advisory in triage or draft state, or an unknown state) is
+/// incident attention for the operator until the operator's triage names its current revision, and while one is untriaged, or a
+/// declared repository cannot be read completely, release submission refuses. A new or changed advisory the estate has already
+/// published, closed or withdrawn is information for a week and holds nothing.
 /// </summary>
 public sealed partial class EstateService
 {
@@ -35,6 +37,9 @@ public sealed partial class EstateService
 
     // Without a complete read younger than three intervals, a declared repository's reports are unconfirmed.
     internal static readonly TimeSpan SecurityReportsStale = TimeSpan.FromMinutes(15);
+
+    // How long a new or changed advisory that holds nothing stays information in the operator's attention.
+    internal static readonly TimeSpan SecurityReportsNews = TimeSpan.FromDays(7);
 
     private const string SecurityHeldMessage = "Release submission is held until the operator confirms that every security report on the declared repositories is read and triaged.";
 
@@ -145,7 +150,7 @@ public sealed partial class EstateService
                     findings.Add(new("error", "release.security-reports-unavailable", "security-reports:" + declaration.Repository,
                         $"Security reports on {declaration.Repository} are unconfirmed: {read?.Problem ?? "no complete read is recent enough"}."));
             }
-            foreach (SecurityObservation advisory in Untriaged(model, state, declared))
+            foreach (SecurityObservation advisory in Holding(model, state, declared))
                 findings.Add(new("error", "release.security-report", "security-report:" + advisory.Repository + ":" + advisory.Identifier,
                     $"Security report {advisory.Identifier} on {advisory.Repository} (state {advisory.State}, severity {advisory.Severity}) has no triage of its current revision {advisory.ContentHash}."
                     + $" Next: review it on GitHub, then run vericairn security-reports triage {advisory.Identifier} --repository {advisory.Repository} --expected {advisory.ContentHash} --disposition <security|duplicate|no-action> --by <operator>, and check again."));
@@ -177,11 +182,20 @@ public sealed partial class EstateService
         foreach (SecurityObservation advisory in Untriaged(model, state, declared))
         {
             RecordEnvelope? resource = model.ById.TryGetValue(advisory.Resource, out RecordEnvelope? named) ? model.Latest(named) : null;
+            AttentionReference? target = resource is null ? null : new AttentionReference(resource.Type, resource.Id, resource.ComputedHash);
+            if (!Holds(advisory))
+            {
+                if (!ReadAt(advisory.ChangedAt, out DateTimeOffset changed) || now - changed >= SecurityReportsNews) continue;
+                yield return ("information", "security advisory " + advisory.Identifier + " on " + advisory.Repository,
+                    $"A security advisory the estate has disclosed or settled is new or changed: {advisory.Identifier} on {advisory.Repository}, state {advisory.State}, severity {advisory.Severity}. It holds no release and needs no triage.",
+                    advisory.State, "Review it on GitHub if it is not the change you expected.", "security-report", advisory.Repository + ":" + advisory.Identifier,
+                    advisory.ContentHash, advisory.ChangedAt, target, advisory.ContentHash);
+                continue;
+            }
             yield return ("incident", "security report " + advisory.Identifier + " on " + advisory.Repository,
                 $"A security report is new or changed and awaits the operator's triage: {advisory.Identifier} on {advisory.Repository}, state {advisory.State}, severity {advisory.Severity}. Its text stays on GitHub; every release waits until it is triaged.",
                 advisory.State, $"Review it on GitHub, then vericairn security-reports triage {advisory.Identifier} --repository {advisory.Repository} --expected {advisory.ContentHash} --disposition <security|duplicate|no-action> --by <operator>",
-                "security-report", advisory.Repository + ":" + advisory.Identifier, advisory.ContentHash, advisory.ChangedAt,
-                resource is null ? null : new AttentionReference(resource.Type, resource.Id, resource.ComputedHash), advisory.ContentHash);
+                "security-report", advisory.Repository + ":" + advisory.Identifier, advisory.ContentHash, advisory.ChangedAt, target, advisory.ContentHash);
         }
     }
 
@@ -258,7 +272,12 @@ public sealed partial class EstateService
                     reads.Concat(current.Reads.Where(r => !reads.Any(n => n.Resource == r.Resource && n.Provider == r.Provider)
                         && declared.Any(d => d.Resource == r.Resource && d.Provider == r.Provider))).ToArray(),
                     advisories.OrderBy(a => a.Repository, StringComparer.OrdinalIgnoreCase).ThenBy(a => a.Identifier, StringComparer.Ordinal).ToArray());
-                if (store && !session.IsReadOnly) session.Live.SetMeta(SecurityReportsKey, JsonSerializer.Serialize(stored, ProtocolJson.Options));
+                if (store && !session.IsReadOnly)
+                {
+                    session.Live.SetMeta(SecurityReportsKey, JsonSerializer.Serialize(stored, ProtocolJson.Options));
+                    // The operator's attention changes with no record written; ask the event journal to derive it now.
+                    MarkEventsDirty();
+                }
                 checkedState = store ? null : stored;
                 SecurityReportsRead?.Invoke(scheduled);
                 return stored;
@@ -328,6 +347,13 @@ public sealed partial class EstateService
     private static IEnumerable<SecurityObservation> Untriaged(EstateModel model, SecurityState state, IReadOnlyList<SecurityDeclaration> declared) =>
         state.Advisories.Where(a => declared.Any(d => d.Resource == a.Resource) && TriageOf(model, a) is null);
 
+    // Untriaged reports: what holds a release. A published, closed or withdrawn advisory is the estate's own and holds nothing.
+    private static IEnumerable<SecurityObservation> Holding(EstateModel model, SecurityState state, IReadOnlyList<SecurityDeclaration> declared) =>
+        Untriaged(model, state, declared).Where(Holds);
+
+    // A report in triage or draft state holds, and so does a state this build does not know, the conservative reading.
+    private static bool Holds(SecurityObservation advisory) => !SecurityAdvisory.SettledStates.Contains(advisory.State, StringComparer.Ordinal);
+
     private static RecordEnvelope? TriageOf(EstateModel model, SecurityObservation advisory) =>
         model.Current("observation").Where(o => EstateModel.BodyString(o, "kind") == SecurityReportRules.TriageKind && model.HasRole(o.By, Roles.Operator)
             && o.Subject is { Type: "resource" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? resource) && model.Chain(model.Latest(resource))[0] == advisory.Resource
@@ -354,11 +380,11 @@ public sealed partial class EstateService
             ? new SecurityReportRead(d.Repository, d.Provider, read.At, read.Complete && !Stale(read, now), read.Problem ?? (read.Complete && Stale(read, now) ? "no read is recent enough" : null))
             : new SecurityReportRead(d.Repository, d.Provider, null, false, "not read on this machine yet")).ToArray();
         var reports = state.Advisories.Where(a => declared.Any(d => d.Resource == a.Resource))
-            .Select(a => new SecurityReportRow(a.Identifier, a.Repository, a.State, a.Severity, a.ContentHash, a.FirstSeen, a.ChangedAt, TriageOf(model, a)?.Id)).ToArray();
-        bool held = reads.Any(r => !r.Complete) || reports.Any(r => r.Triage is null);
+            .Select(a => new SecurityReportRow(a.Identifier, a.Repository, a.State, a.Severity, a.ContentHash, a.FirstSeen, a.ChangedAt, TriageOf(model, a)?.Id, Holds(a))).ToArray();
+        bool held = reads.Any(r => !r.Complete) || reports.Any(r => r.Holds && r.Triage is null);
         string summary = declared.Count == 0 ? "No product declares security reports, so none are read and no release waits for them."
             : held ? message + " Releases are held: " + (reads.Any(r => !r.Complete) ? "a declared repository is unconfirmed" : "a report awaits triage") + "."
-            : message + " Every observed report is triaged; no release waits for security reports.";
+            : message + " Every report in triage or draft state is triaged; no release waits for security reports.";
         return new(true, summary, reads, reports, held);
     }
 

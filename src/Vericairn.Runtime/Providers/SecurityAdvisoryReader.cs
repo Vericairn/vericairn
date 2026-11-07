@@ -19,6 +19,9 @@ public sealed record SecurityAdvisory(string Identifier, string State, string Se
     /// <summary>The states a reader names; any other value is reported as unknown.</summary>
     public static readonly ImmutableArray<string> States = ["triage", "draft", "published", "closed", "withdrawn"];
 
+    /// <summary>The states of an advisory its estate has disclosed or settled: they hold no release. Every other state, unknown included, is a report that holds.</summary>
+    public static readonly ImmutableArray<string> SettledStates = ["published", "closed", "withdrawn"];
+
     /// <summary>The severities a reader names; none or any other value is reported as unknown.</summary>
     public static readonly ImmutableArray<string> Severities = ["critical", "high", "medium", "low"];
 

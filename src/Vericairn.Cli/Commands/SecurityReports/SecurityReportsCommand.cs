@@ -56,7 +56,7 @@ internal sealed class SecurityReportsCommand : Command
             context.Output.WriteLine($"{read.Repository} through {read.Provider}: " + (read.Complete ? "read completely at " + read.At : "unconfirmed, " + read.Problem + (read.At is null ? "" : " (last attempt " + read.At + ")")));
         foreach (SecurityReportRow report in response.Reports)
             context.Output.WriteLine($"  {report.Advisory} on {report.Repository}: state {report.State}, severity {report.Severity}, revision {report.ContentHash}, "
-                + (report.Triage is null ? "untriaged since " + report.ChangedAt : "triaged by " + report.Triage));
+                + (report.Triage is not null ? "triaged by " + report.Triage : report.Holds ? "untriaged since " + report.ChangedAt + ", holding every release" : "holds nothing and needs no triage"));
         context.Output.WriteLine(response.Message);
         return response.Ok ? CommandContext.Clean : CommandContext.HasErrors;
     }

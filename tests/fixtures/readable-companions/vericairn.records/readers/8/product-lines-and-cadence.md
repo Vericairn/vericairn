@@ -94,6 +94,6 @@ Recurring&#45;duty reference&#58; policy &#40;exact type&#44; id&#44; hash of an
 
 ## Security Reports
 
-Security reports read before every release&#58; provider &#40;a provider id&#59; github&#45;security&#45;advisories reads through the operator&#39;s own gh login&#41; and repositories &#40;one to eight distinct repository resource ids located on GitHub&#41;&#46; While any product declares it&#44; every release of the estate waits until each declared repository&#39;s advisories&#44; drafts and private reports included&#44; are read completely and each one&#39;s current revision is triaged by the operator&#46; Declared&#44; changed or removed only by the operator&#46;
+Security reports read before every release&#58; provider &#40;a provider id&#59; github&#45;security&#45;advisories reads through the operator&#39;s own gh login&#41; and repositories &#40;one to eight distinct repository resource ids located on GitHub&#41;&#46; While any product declares it&#44; every release of the estate waits until each declared repository&#39;s advisories&#44; drafts and private reports included&#44; are read completely and each report in triage or draft state&#44; or an unknown state&#44; is triaged by the operator at its current revision&#59; a published&#44; closed or withdrawn advisory holds nothing&#46; Declared&#44; changed or removed only by the operator&#46;
 
 Not recorded in this revision. Absence supplies no inferred value or permission.

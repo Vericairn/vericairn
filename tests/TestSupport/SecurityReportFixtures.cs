@@ -154,7 +154,7 @@ internal sealed class SecurityReportFixture : IDisposable
 
     internal void TriageAll()
     {
-        foreach (SecurityReportRow report in Api.SecurityReportsPoll(new(Operator)).Reports.Where(r => r.Triage is null))
+        foreach (SecurityReportRow report in Api.SecurityReportsPoll(new(Operator)).Reports.Where(r => r.Holds && r.Triage is null))
             Assert.True(Api.SecurityReportsTriage(new(Operator, report.Advisory, report.Repository, report.ContentHash, "no-action", "Handled before this estate read its reports.")).Ok);
     }
 

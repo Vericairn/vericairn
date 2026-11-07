@@ -533,6 +533,11 @@
     "qualified",
     "available"
   ],
+  "Vericairn.Runtime.Providers.SecurityAdvisory.SettledStates": [
+    "published",
+    "closed",
+    "withdrawn"
+  ],
   "Vericairn.Runtime.Providers.SecurityAdvisory.Severities": [
     "critical",
     "high",
