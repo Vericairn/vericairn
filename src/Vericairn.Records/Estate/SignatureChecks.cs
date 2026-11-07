@@ -161,7 +161,7 @@ public static class SignatureChecks
     /// signatures optional, as format 1 has it. Once the estate is at record format 2 an unsigned admission counts only when the signed
     /// migration that moved the estate lists it, or an anchoring history checkpoint does (<see cref="Anchored"/>), whatever format or
     /// date the admission states: a format and a date are what the record's author wrote, and only a signature is something an author
-    /// without an admitted key cannot write. Every other record counts here.
+    /// without an admitted key cannot write. A signed admission counts only when its signatures verify. Every other record counts here.
     /// </summary>
     public static bool Counts(EstateModel model, RecordEnvelope record)
     {

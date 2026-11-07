@@ -17,16 +17,17 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 /// <remarks>
 /// Everything here reads the records as loaded, never the model's counting indexes, so the judgment cannot depend on itself. The root
-/// operator is read from the first charter. Signatures are judged in two modes: without anchors, where only signed admissions count,
-/// which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count; and with
-/// anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are judged
-/// before anything else, in checkpoint order, and every later judgment reads the closings that act (EstateTrust.Closings.cs).
+/// operator is read from the first charter, and admissions count from the root operator's first self-signed admission outward. Signatures
+/// are judged in two modes: without anchors, where an admission counts only when signed by a device whose own admission rests on
+/// signatures, which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count;
+/// and with anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are
+/// judged before anything else, in checkpoint order, and every later judgment reads the closings that act (EstateTrust.Closings.cs).
 /// </remarks>
 internal sealed partial class EstateTrust
 {
     internal enum Mode
     {
-        /// <summary>No anchor keeps an unsigned admission counting.</summary>
+        /// <summary>Admissions count only when signed, by devices whose own admissions rest on signatures.</summary>
         Signatures,
 
         /// <summary>Unsigned admissions also count when anchored.</summary>
@@ -45,6 +46,8 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<(string Record, int Index), SignatureProof> proofs = [];
     private readonly Dictionary<(string Key, string Hash, string Signature), bool> keyVerdicts = [];
     private readonly IReadOnlyDictionary<string, string> rawSupersededBy;
+    private readonly HashSet<string>?[] admittedActing = new HashSet<string>?[2];
+    private readonly Dictionary<string, HashSet<string>>[] admittedByClosings = [new(StringComparer.Ordinal), new(StringComparer.Ordinal)];
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
@@ -336,26 +339,97 @@ internal sealed partial class EstateTrust
     private IEnumerable<RecordEnvelope> AdmissionsAbout(string deviceId) => RawChain(deviceId).SelectMany(id => admissionsBySubject[id]);
 
     /// <summary>
-    /// Whether an admission can admit or revoke. A signed one does. An unsigned one does at record format 1, and otherwise only with
-    /// anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a closing refuses neither admits
-    /// nor revokes.
+    /// Whether an admission can admit or revoke. The root operator's first self-signed admission does. A signed one does when every
+    /// signature verifies by a device admitted when it was signed, through admissions that count in turn. An unsigned one does at record
+    /// format 1, and otherwise only with anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a
+    /// closing refuses neither admits nor revokes.
     /// </summary>
     internal bool AdmissionCounts(RecordEnvelope admission, Mode mode) => AdmissionCounts(admission, mode, Acting);
 
-    private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound)
+    private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound) => CountingAdmissions(mode, bound).Contains(admission.Id);
+
+    /// <summary>
+    /// The admissions that count in a mode, against the closings given. Starting from the root operator's first self-signed admission and,
+    /// with anchors, from the unsigned admissions anchored or read under record format 1, every signed admission whose signatures verify by
+    /// devices those admissions admit at its time joins, until none does; then any whose signer a later-joined revocation ended is dropped,
+    /// until every one verifies. Each step judges every admission against the same set, so the result does not depend on the order records
+    /// are read in. An admission one of the closings refuses never joins. The result is kept for each set of closings.
+    /// </summary>
+    private HashSet<string> CountingAdmissions(Mode mode, IReadOnlyList<Closing> bound)
     {
-        if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
-        bool counts = admission.Signatures.Count > 0 || Format < 2 || (mode == Mode.Anchors && anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)));
-        return counts && (bound.Count == 0 || Refuser(admission, bound, mode) is null);
+        lock (gate)
+        {
+            if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
+            bool acting = ReferenceEquals(bound, Acting);
+            if (acting && admittedActing[(int)mode] is { } settled) return settled;
+            string key = bound.Count == 0 ? "" : string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+            if (!admittedByClosings[(int)mode].TryGetValue(key, out HashSet<string>? judged))
+            {
+                judged = Judge();
+                admittedByClosings[(int)mode][key] = judged;
+            }
+
+            if (acting) admittedActing[(int)mode] = judged;
+            return judged;
+        }
+
+        HashSet<string> Judge()
+        {
+            List<RecordEnvelope> all = [.. model.OfType("admission").Where(Open)];
+            var known = new HashSet<string>(StringComparer.Ordinal);
+            if (FirstAuthority is { } first && Open(first)) known.Add(first.Id);
+            foreach (RecordEnvelope admission in all.Where(a => a.Signatures.Count == 0))
+            {
+                if (mode == Mode.Anchors && (Format < 2 || anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)))) known.Add(admission.Id);
+            }
+
+            List<RecordEnvelope> undecided = [.. all.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash)];
+            while (true)
+            {
+                List<RecordEnvelope> joined = [.. undecided.Where(a => VerifiesAgainst(a, known))];
+                if (joined.Count == 0) break;
+                foreach (RecordEnvelope admission in joined) known.Add(admission.Id);
+                undecided.RemoveAll(joined.Contains);
+            }
+
+            while (true)
+            {
+                List<RecordEnvelope> failed = [.. all.Where(a => known.Contains(a.Id) && a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && !VerifiesAgainst(a, known))];
+                if (failed.Count == 0) break;
+                foreach (RecordEnvelope admission in failed) known.Remove(admission.Id);
+            }
+
+            return known;
+        }
+
+        bool Open(RecordEnvelope admission) => bound.Count == 0 || Refuser(admission, bound, mode) is null;
+    }
+
+    /// <summary>Whether every signature of a record verifies by devices that a set of admissions admits at its time.</summary>
+    private bool VerifiesAgainst(RecordEnvelope record, HashSet<string> counting)
+    {
+        var findings = new FindingList();
+        for (int i = 0; i < record.Signatures.Count; i++) Verify(record, i, (deviceId, at) => StateFrom(deviceId, at, counting), findings);
+        return !findings.HasErrors;
+    }
+
+    /// <summary>Forgets which admissions count, which reads proofs, anchors and closings that are judged afresh.</summary>
+    private void ForgetAdmissions()
+    {
+        Array.Clear(admittedActing);
+        foreach (Dictionary<string, HashSet<string>> judged in admittedByClosings) judged.Clear();
     }
 
     /// <summary>The admission state of a device at a time, from the admissions about its line that count in the mode.</summary>
     internal SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode) => AdmissionStateAt(deviceId, at, mode, Acting);
 
-    private SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode, IReadOnlyList<Closing> bound)
+    private SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode, IReadOnlyList<Closing> bound) =>
+        StateFrom(deviceId, at, CountingAdmissions(mode, bound));
+
+    private SignatureChecks.AdmissionState StateFrom(string deviceId, string at, HashSet<string> counting)
     {
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => AdmissionCounts(a, mode, bound)))
+        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => counting.Contains(a.Id)))
         {
             if (admission.Id != FirstAuthority?.Id && SelfSigned(admission)) continue;
             string? status = EstateModel.BodyString(admission, "status");

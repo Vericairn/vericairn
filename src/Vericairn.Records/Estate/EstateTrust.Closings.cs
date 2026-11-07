@@ -124,6 +124,7 @@ internal sealed partial class EstateTrust
         proofs.Clear();
         verified.Clear();
         counts.Clear();
+        ForgetAdmissions();
         ForgetStrictViews();
         anchors = NoAnchors;
         anchorsKnown = false;
