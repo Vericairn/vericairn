@@ -514,6 +514,11 @@ The product's CLI test suite checks every file of each frozen set against
 sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
 editable until frozen and indexed. The reference generator also refuses a destination inside an indexed set.
 `docs notes` still relies on the test guard: run it only against a set that has not been frozen.
+From 0.9.2 (DOCS-11) the build tooling assembles, freezes and indexes a set itself: `vericairn-docs assemble`, `insert`,
+`freeze`, `index` and `prepare`, which refuse to change a frozen set
+([operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092)). The guard requires every set the release
+index links, every set directory except the build's own version until it is frozen, and each set before 0.6.0 to stay
+indexed, so freezing a set no longer edits the test.
 
 Generated API parameter rows omit the description separator when there is no description and carry no trailing
 spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no

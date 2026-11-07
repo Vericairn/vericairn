@@ -999,6 +999,62 @@ Classification uses current estate state, not a snapshot at the window's end; wo
 not accept each result. Later imports with older timestamps can require another explicit widening.
 Earlier sets and their checksums remain unchanged.
 
+### Preparing a set with the build tooling (0.9.2)
+
+From 0.9.2 (DOCS-11) the build tooling prepares a set in the steps a release's builder took by hand. Each step writes only
+the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`. Running a step again changes nothing,
+and a step refuses rather than overwrite what a person wrote or what a frozen set holds. The version comes first: set
+`VersionPrefix` in `Directory.Build.props` to the release's version, declare any new document in
+`docs/releases/documents.json`, commit, and build the tooling in Release at that commit. The tooling refuses build sources
+that differ from its commit, as `generate` always has, and a set whose directory does not name its build's version.
+
+```sh
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.2 --documents docs/releases/documents.json --overview overview.md
+vericairn --estate <root> docs notes --from 0.9.1 --to 0.9.2 --out docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.2 --section security.md --expected-hash sha256:<hex>
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- freeze docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- index docs/releases/0.9.2 --paragraph paragraph.md
+```
+
+- `assemble` generates the references and the manifest as `generate` does. It copies every declared maintained guide byte
+  for byte from `docs/` (`--guides` names another directory) and writes `api.md` as a copy of `api-v1.md`. A maintained
+  file never replaces one the tooling generated, such as `cli-client-outcomes.md`. The set's `README.md` is the overview a
+  person writes for the release, never the repository's README. `--overview` copies a file there once, when the set has
+  none. The set's own overview is kept, and an `--overview` that differs from it is refused. The command names what is still
+  pending, the overview or the notes. `--keep-references` keeps references generated earlier, at the reference build
+  commit, and only copies.
+- `vericairn docs notes` renders the notes and records their window, as before.
+- `insert` places the operator's approved section, byte for byte, before `## What the release contains`; `--before` and
+  `--document` name another anchor line or document. It refuses a missing or repeated anchor, carriage returns, a section
+  without its heading line and another section under the same heading. `--expected-hash` refuses any bytes but the
+  approved ones. Inserting the same bytes again changes nothing.
+- `freeze` holds the set to `docs check` against the declaration, and refuses a file that is neither declared nor
+  generated, such as `.DS_Store`, and a manifest of another version. It then adds every file's `sha256:` to
+  `frozen-sha256.json` under the version, in path order, leaving every earlier entry as it was. Freezing a frozen set
+  confirms it. A frozen set whose files differ is refused with each difference: a correction goes into the next set.
+- `index` adds the set's paragraph to `docs/releases/README.md`, newest first under "Documentation sets", byte for byte from
+  a file that links the set as `[<version> set](<version>/README.md)`. It describes only a frozen set, and it refuses a set
+  the index already describes in other words, since the index's living-document pass revises that paragraph.
+
+The overview, the approved section and the paragraph are a person's text; the commands only place them. `prepare` runs the
+steps in order for a version, stopping at the first refusal. It runs `assemble`, then `docs notes` when the set has no notes,
+`insert` with `--security`, `compare`, `freeze`, and `index` with `--index-paragraph`. For a frozen set it only confirms the
+freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
+`freeze` reports it from `docs check`, or differs from the build, as `compare` reports it; 2 means a step refused.
+
+```sh
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- prepare --out docs/releases/0.9.2 \
+  --documents docs/releases/documents.json --estate <root> --from 0.9.1 --overview overview.md \
+  --security security.md --security-hash sha256:<hex> --index-paragraph paragraph.md
+```
+
+`prepare` renders the notes with its own build, the release's. A release's builder who runs `docs notes` with the
+estate's installed `vericairn` instead runs it first, since `prepare` keeps notes the set already has; the 0.8.4 notes, for
+example, were rendered by 0.8.3, before FIX-64's one entry per supersession chain. The frozen-set test no longer lists the
+frozen versions. Every set the release index links, every set directory except the build's own version until it is
+frozen, and each set before 0.6.0 must stay indexed.
+
 Documents that follow changing facts remain living documents (section 16).
 
 ## 16. Living documents
