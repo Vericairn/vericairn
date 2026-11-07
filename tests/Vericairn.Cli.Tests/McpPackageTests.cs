@@ -15,7 +15,7 @@ namespace Vericairn.Cli.Tests;
 public class McpPackageTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
-    private const string Marker = "<!-- mcp-name: io.github.vericairn/vericairn -->";
+    private const string Marker = "<!-- mcp-name: io.github.Vericairn/vericairn -->";
 
     [Theory]
     [InlineData("0.8.1", "0.8.1")]
@@ -41,7 +41,7 @@ public class McpPackageTests
 
             JsonObject manifest = JsonNode.Parse(Read(archive, ".mcp/server.json"))!.AsObject();
             Assert.Equal(expected, manifest["version"]!.GetValue<string>());
-            Assert.Equal("io.github.vericairn/vericairn", manifest["name"]!.GetValue<string>());
+            Assert.Equal("io.github.Vericairn/vericairn", manifest["name"]!.GetValue<string>());
             Assert.Equal("https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json", manifest["$schema"]!.GetValue<string>());
             // The registry's schema bounds a server's description to between 1 and 100 characters.
             Assert.InRange(manifest["description"]!.GetValue<string>().Length, 1, 100);

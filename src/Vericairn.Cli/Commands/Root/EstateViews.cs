@@ -31,7 +31,7 @@ internal sealed class EstateViews(CommandContext context)
 
                 StatusResponse observed = api.Status();
                 context.ReleaseNoticePin = observed.Json.TryGetProperty("vericairn", out JsonElement pin) ? pin.Clone() : default(JsonElement);
-                context.Output.Write(json ? CanonicalJson.SerializePretty(observed.Json) : CommandPresentation.Status(api, observed, presentation));
+                WriteStatus(api, observed, json, presentation);
                 return observed.HasErrors ? HasErrors : Clean;
             });
         }
@@ -50,9 +50,31 @@ internal sealed class EstateViews(CommandContext context)
         {
             StatusResponse status = api.Status();
             context.ReleaseNoticePin = status.Json.TryGetProperty("vericairn", out JsonElement pin) ? pin.Clone() : default(JsonElement);
-            context.Output.Write(json ? CanonicalJson.SerializePretty(status.Json) : CommandPresentation.Status(api, status, presentation));
+            WriteStatus(api, status, json, presentation);
             return status.HasErrors ? HasErrors : Clean;
         });
+    }
+
+    /// <summary>
+    /// Status as the runtime derived it. When a daemon served it, human status ends with that daemon's release against the estate's
+    /// pin and any mismatch (OPS-05), labelled as this machine's; JSON stays the canonical document, with a mismatch on stderr.
+    /// </summary>
+    private void WriteStatus(IEstateApi api, StatusResponse status, bool json, CommunicationSelection? presentation)
+    {
+        ServingRuntime? serving = context.Serving();
+        if (json)
+        {
+            context.Output.Write(CanonicalJson.SerializePretty(status.Json));
+            if (serving?.Mismatch() is { } mismatch) context.Error.WriteLine("warning: " + mismatch);
+            return;
+        }
+
+        string text = CommandPresentation.Status(api, status, presentation);
+        context.Output.Write(text);
+        if (serving is null) return;
+        context.Output.Write(text.Length == 0 || text.EndsWith('\n') ? "\n" : "\n\n");
+        context.Output.WriteLine($"Serving runtime (this machine): {serving.Describe()}.");
+        if (serving.Mismatch() is { } line) context.Output.WriteLine("Mismatch: " + line);
     }
 
     /// <summary>Recorded progress with labelled local claims and worker observations, through the API; exit 1 when the check it shows found errors, as status does.</summary>

@@ -192,6 +192,21 @@ vericairn estate upgrade --to <published-version> --check
 vericairn estate upgrade --to <published-version> --by <your principal id>
 ```
 
+From 0.9.2 (OPS-05), applying an upgrade, or running it again once applied, ends with a runtime step.
+When a daemon of a release older than the new pin serves the estate on this machine, the upgrade
+stops it and, when its own command line is the pinned release's build (its version and the source
+commit the pinned release names), starts that release's daemon in its place; a `runtime:` line names
+both. It never touches a daemon of the pinned release or a newer one, another estate's daemon or a
+daemon serving another root, and it starts none where none served. When it cannot stop the older
+daemon, for example because another user started it, or when its command line is not the pinned
+release, it warns with exactly what to run:
+`vericairn --estate <root> runtime stop`, then `./bootstrap runtime start` in the estate's directory
+(`.\bootstrap.ps1 runtime start` on Windows), which runs the pinned release. The upgrade's records
+and pin stand either way, and `--check` leaves the runtime alone. The restart before the upgrade
+remains where the estate has no recorded Vericairn release, because the serving daemon verifies the
+published dependency. `vericairn runtime status` and `vericairn status` show the serving daemon's
+release against the estate's pin, with a mismatch line and its commands while they differ.
+
 The command uses a recorded Vericairn release when one exists. Otherwise it anonymously
 reads the target's GitHub release, its tag and `SHA256SUMS`, downloads this machine's platform archive
 and verifies its SHA-256. It checks the tag's commit against the target build's full source commit
@@ -524,7 +539,7 @@ NuGet Trusted Publishing uploads exactly the package assets the operator publish
 
 From 0.8.2, the tool package carries both `DotnetTool` and `McpServer` package types for
 [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
-Its embedded `.mcp/server.json` describes `io.github.vericairn/vericairn` for the
+Its embedded `.mcp/server.json` describes `io.github.Vericairn/vericairn` for the
 [official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
 package publication; from 0.9.2 the registry listing follows the release's publication through
 the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)). These are publication targets,

@@ -359,6 +359,12 @@ failed destination and preserve it as needed before choosing another empty direc
 does not establish who produced an export or grant authority. Record signatures are checked separately,
 and no private keys travel with the export.
 
+An export carries the estate repository only: records, native objects and documents. A payload held in an
+external store, and a release's files, are not in it, and the export doesn't list their references. Restored
+records name such a payload; they don't recover its bytes. From 0.9.2, [Large private artifacts](large-artifacts.md)
+describes the store's own backup and the readback verification that a cold recovery needs. A typed custody
+descriptor and an export list of external references are planned (DESIGN-42).
+
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
 outside the published tree and renamed only after judgment. The gate belongs to one `EstateService`

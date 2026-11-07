@@ -177,6 +177,35 @@ same lock in `write-lock/` beside that store. Read-only sessions take no lock. T
 per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
 record. No record type, record format or generated document changes.
 
+## A new record names a known principal as its author (FIX-98)
+
+No route, interface member, protocol type or public member is added or changed. A new record whose envelope `by` names no
+record, or names a record of a type other than `principal`, is now refused at every write surface (`NewRecord` and the typed
+operations, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP) with the finding
+`record.author` at severity `error` in the response's problem. The check is made when the record is written, whatever `at`
+it states. Before, any well-formed ULID was accepted for a record type with no author check of its own, such as a resource.
+The root operator's self-authored principal record is unchanged. Validation and the estate check report a record already in
+the estate whose author does not resolve under the same code at severity `info`; it adds no error and the record keeps its
+reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
+changes.
+
+## An upgrade replaces an older runtime (OPS-05)
+
+No route, interface member, protocol type or public member is added, removed or changed. `GET /v1/health` keeps its
+`HealthResponse`, whose `vericairn` the command line now compares, without build metadata, with the release the estate's
+manifest pins. Comparison follows SemVer precedence, so a prerelease of the pinned version is older than it.
+
+The command line changes. `estate upgrade`, when it applies an upgrade or runs again once applied, ends with a runtime step:
+a daemon serving the estate on this machine whose release is older than the new pin is asked to stop through the existing
+`POST /v1/shutdown`, and when the command line is the pinned release's build, by version and by the source commit the
+pinned release record or dependency observation names, it starts that release's daemon as `runtime start` does. A daemon of the pinned or a newer release, of another estate or root, or one that refuses the connection is not
+stopped, and none is started where none served. Its `--json` output, the `UpgradeResponse` as before, adds `runtime` with
+`outcome`, `served`, `started`, `done` and `warning`; `--check` adds nothing. `runtime status --json` adds
+`servingRelease`, `pin`, `pinnedRelease` and `mismatch`. Human `status` adds a final `Serving runtime (this machine):` line,
+and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, with a mismatch on stderr. Older clients
+ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
+No record type, record format or generated document changes.
+
 ## Hand-offs, reviews and failure routes (PROC-10)
 
 No route, interface member or protocol type is added or changed. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds the
