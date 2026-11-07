@@ -538,7 +538,8 @@ internal sealed class EstateTrust
     /// <summary>
     /// Whether the author of a checkpoint may anchor records and acknowledge removals in it (design/signed-history.md § 6): the root
     /// operator, or a person holding administer through a grant that rests on signatures, never an agent; and the checkpoint signed by
-    /// devices whose own admissions rest on signatures, none of them a recovery device.
+    /// devices whose own admissions rest on signatures, none of them a recovery device. The same test tells whether any other record was
+    /// signed by one who may anchor.
     /// </summary>
     internal bool MayAnchor(RecordEnvelope checkpoint)
     {

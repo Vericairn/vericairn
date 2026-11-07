@@ -331,7 +331,9 @@ records no head witnesses in objects held here, and state their count and set ha
 unsigned with that hash or acknowledges the removal of a record that is not witnessed and absent. New findings, each an
 error unless stated: `history.removed`, `history.altered`, `history.checkpoint-missing`, `history.checkpoint-invalid`,
 `history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`,
-`history.listing-mismatch` (a warning), `record.subject-not-counting` and
+`history.listing-mismatch` (a warning, only for a record that the root operator or a person holding administer signed, or
+that is anchored with its present bytes; any other record a checkpoint lists with other bytes is `history.altered`, an agent's
+own signed record included), `record.subject-not-counting` and
 `record.reference-not-counting`; `history.deleted-in-git` is a warning and `history.expected` information.
 `signature.required` now also reports an unsigned history checkpoint or device revision. Status lists the history errors,
 `history.unanchored`, and, once the estate has adopted checkpoints, `signature.required`, first. `estate check --expect`

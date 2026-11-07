@@ -192,17 +192,59 @@ internal sealed class HistoryAnalysis
         // A checkpoint counts when its signatures verify and it is either an adoption checkpoint by an author who may anchor, or follows
         // only checkpoints that count, through hashes that match. So the estate has adopted only when the counting graph reaches its
         // adoption checkpoint, and a checkpoint whose path is broken or leads to one that does not count witnesses nothing.
+        // The graph is walked with a stack of its own rather than by recursion, so a long chain read in any order cannot exhaust the
+        // call stack. A checkpoint is marked as not counting while its predecessors are judged.
         var judged = new Dictionary<string, bool>(StringComparer.Ordinal);
-        bool Counting(CheckpointBody checkpoint)
+        bool Counting(CheckpointBody start)
         {
-            string id = checkpoint.Record.Id;
-            if (judged.TryGetValue(id, out bool known)) return known;
-            judged[id] = false;
-            bool value = trust.Authentic(checkpoint.Record) && (checkpoint.Previous.Count == 0
-                ? eligible.Contains(id)
-                : checkpoint.Previous.All(p => byId.TryGetValue(p.Id, out CheckpointBody? predecessor) && predecessor.Record.ComputedHash == p.Hash && Counting(predecessor)));
-            judged[id] = value;
-            return value;
+            if (judged.TryGetValue(start.Record.Id, out bool known)) return known;
+            var path = new Stack<(CheckpointBody Checkpoint, int Next)>();
+            Enter(start);
+            while (path.TryPop(out (CheckpointBody Checkpoint, int Next) frame))
+            {
+                (CheckpointBody checkpoint, int next) = frame;
+                bool value = true;
+                bool descended = false;
+                for (; next < checkpoint.Previous.Count; next++)
+                {
+                    (string id, string hash) = checkpoint.Previous[next];
+                    if (!byId.TryGetValue(id, out CheckpointBody? predecessor) || predecessor.Record.ComputedHash != hash)
+                    {
+                        value = false;
+                        break;
+                    }
+
+                    if (judged.TryGetValue(id, out bool counts))
+                    {
+                        if (counts) continue;
+                        value = false;
+                        break;
+                    }
+
+                    path.Push((checkpoint, next));
+                    Enter(predecessor);
+                    descended = true;
+                    break;
+                }
+
+                if (!descended) judged[checkpoint.Record.Id] = value;
+            }
+
+            return judged[start.Record.Id];
+
+            void Enter(CheckpointBody checkpoint)
+            {
+                string id = checkpoint.Record.Id;
+                judged[id] = false;
+                if (!trust.Authentic(checkpoint.Record)) return;
+                if (checkpoint.Previous.Count == 0)
+                {
+                    judged[id] = eligible.Contains(id);
+                    return;
+                }
+
+                path.Push((checkpoint, 0));
+            }
         }
 
         List<CheckpointBody> counting = [.. checkpoints.Where(Counting)];
@@ -280,15 +322,16 @@ internal sealed class HistoryAnalysis
                     entries[id] = agreeing.Count > 0 ? agreeing[0] : standing[0];
                     if (disagreeing.Count == 0) continue;
 
-                    // Only a listing by an author who may anchor can make a present record that is signed and verifies, or is anchored with
-                    // these bytes, count for nothing; another author's listing of other bytes is reported, and the record keeps counting.
-                    if (((present.Signatures.Count > 0 && trust.Authentic(present)) || trust.Anchors.Contains(SignatureChecks.AnchorKey(id, present.ComputedHash))) &&
+                    // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
+                    // with these bytes, count for nothing; another author's listing of other bytes is reported, and the record keeps counting.
+                    // Any other record listed with other bytes is altered, whoever signed it, its own signer included.
+                    if ((trust.MayAnchor(present) || trust.Anchors.Contains(SignatureChecks.AnchorKey(id, present.ComputedHash))) &&
                         disagreeing.All(v => !Anchorer(v.Checkpoint)))
                     {
                         foreach (WitnessedEntry listing in disagreeing)
                         {
                             findings.Warning("history.listing-mismatch", present.ExpectedPath,
-                                $"History checkpoint {listing.Checkpoint}, by {byId[listing.Checkpoint].Record.By}, lists this record with hash {listing.Entry.Hash}, and the record here has hash {present.ComputedHash} and is signed and verifies, or is anchored with that hash. A listing by an author who may not anchor makes no such record count for nothing; the root operator or a person holding administer acknowledges the listed version's removal to settle it.");
+                                $"History checkpoint {listing.Checkpoint}, by {byId[listing.Checkpoint].Record.By}, lists this record with hash {listing.Entry.Hash}, and the record here has hash {present.ComputedHash} and is signed by one who may anchor, or is anchored with that hash. A listing by an author who may not anchor makes no such record count for nothing; the root operator or a person holding administer acknowledges the listed version's removal to settle it.");
                         }
 
                         continue;
@@ -296,8 +339,8 @@ internal sealed class HistoryAnalysis
 
                     altered.Add(id);
                     findings.Error("history.altered", present.ExpectedPath, agreeing.Count > 0
-                        ? $"History checkpoints {agreeing[0].Checkpoint} and {disagreeing[0].Checkpoint} witness this record with different hashes, {agreeing[0].Entry.Hash} and {disagreeing[0].Entry.Hash}. Restore the bytes a counting checkpoint witnessed, or have the root operator or a person holding administer acknowledge the other version's removal."
-                        : $"Witnessed by history checkpoint {disagreeing[0].Checkpoint} with hash {disagreeing[0].Entry.Hash}, and present with hash {present.ComputedHash}. It counts for nothing until the witnessed bytes are restored from any clone or the repository's history, or the root operator or a person holding administer acknowledges the witnessed version's removal.");
+                        ? $"History checkpoints {agreeing[0].Checkpoint}, by {byId[agreeing[0].Checkpoint].Record.By}, and {disagreeing[0].Checkpoint}, by {byId[disagreeing[0].Checkpoint].Record.By}, witness this record with different hashes, {agreeing[0].Entry.Hash} and {disagreeing[0].Entry.Hash}. Restore the bytes a counting checkpoint witnessed, or have the root operator or a person holding administer acknowledge the other version's removal."
+                        : $"Witnessed by history checkpoint {disagreeing[0].Checkpoint}, by {byId[disagreeing[0].Checkpoint].Record.By}, with hash {disagreeing[0].Entry.Hash}, and present with hash {present.ComputedHash}. It counts for nothing until the witnessed bytes are restored from any clone or the repository's history, or the root operator or a person holding administer acknowledges the witnessed version's removal.");
                     continue;
                 }
 

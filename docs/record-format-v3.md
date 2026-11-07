@@ -477,10 +477,12 @@ nothing. Restoring the witnessed bytes settles it, and so does an anchoring
 checkpoint's `removed` entry for that id and hash; only the removals an author who
 may anchor lists count. A record re-added after its removal was acknowledged is part
 of the tail until a checkpoint lists it. When the only listings that disagree with a
-present record are by authors who may not anchor, and the record is signed and
-verifies or is anchored with its present hash, it keeps counting and the estate
-check warns `history.listing-mismatch`, naming each such listing's checkpoint and
-author. `history.checkpoint-invalid`
+present record are by authors who may not anchor, and the record is signed by one
+who may anchor (with devices whose own admissions rest on signed admissions) or
+is anchored with its present hash, it keeps counting and the estate check warns
+`history.listing-mismatch`, naming each such listing's checkpoint and author. Any
+other record listed with other bytes is `history.altered`, whoever signed it, its
+own signer included. `history.checkpoint-invalid`
 reports a malformed inventory, a checkpoint that lists itself, and a head whose
 `records` or `recordSetHash` differ from what it witnesses.
 

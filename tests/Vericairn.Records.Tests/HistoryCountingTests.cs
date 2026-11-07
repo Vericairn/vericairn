@@ -155,7 +155,7 @@ public class HistoryCountingTests
     }
 
     [Fact]
-    public void AListingByAnAuthorWhoMayNotAnchorTakesNoSignedRecordAway()
+    public void AListingByAnAuthorWhoMayNotAnchorTakesNoRecordAnAnchorerSignedAway()
     {
         using var f = new HistoryFixture();
         f.Require();
@@ -246,5 +246,102 @@ public class HistoryCountingTests
         Assert.Contains(model.Findings, x => x.Code == "history.anchor-author" && x.Location.StartsWith(agents.ExpectedPath, StringComparison.Ordinal));
         Assert.Contains(model.Findings, x => x.Code == "history.checkpoint-invalid" && x.Location.StartsWith(agents.ExpectedPath, StringComparison.Ordinal));
         Assert.Contains(model.Findings, x => x.Code == "history.removed" && x.Location == order.ExpectedPath);
+    }
+
+    [Fact]
+    public void ASignerRewritingItsOwnWitnessedRecordAltersIt()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        f.Adopt();
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("CNT-9", "Original"), signer: f.BuilderSigner);
+        RecordEnvelope agents = f.Checkpoint(f.Estate.BuilderId, f.BuilderSigner, "interval");
+        EstateModel model = f.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.True(SignedHistory.Of(model).IsWitnessed(order.Id));
+
+        // The agent rewrites its own witnessed work order under the same id, signed again with its own key.
+        JsonObject body = HistoryFixture.Body(order);
+        body["title"] = "Rewritten after witness";
+        File.Delete(f.PathOf(order));
+        RecordAuthor.Write(f.Root, RecordAuthor.Create(new RecordDraft("work-order", order.By, PolicyFixture.Element(body), null, null, order.AtTime, order.Id, 3), [f.BuilderSigner]));
+        model = f.Load();
+        RecordEnvelope rewritten = model.ById[order.Id];
+        Assert.True(SignatureChecks.IsAuthentic(model, rewritten));
+        Assert.False(model.Counts(rewritten));
+        Finding altered = Assert.Single(model.Findings, x => x.Code == "history.altered" && x.Location == order.ExpectedPath);
+        Assert.Contains(agents.Id, altered.Message, StringComparison.Ordinal);
+        Assert.Contains(f.Estate.BuilderId, altered.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(model.Findings, x => x.Code == "history.listing-mismatch");
+        Assert.Contains(EstateStatus.HistoryProblems(model), x => x.Code == "history.altered" && x.Location == order.ExpectedPath);
+        Assert.DoesNotContain(EstateStatus.WorkItems(model), i => i.Key == "CNT-9");
+
+        // A later checkpoint by the root operator does not witness the rewritten bytes: the record stays altered.
+        f.Checkpoint();
+        model = f.Load();
+        Assert.False(model.Counts(model.ById[order.Id]));
+        Assert.Contains(model.Findings, x => x.Code == "history.altered" && x.Location == order.ExpectedPath);
+
+        // Restoring the witnessed bytes settles it.
+        File.Delete(f.PathOf(order));
+        RecordAuthor.Write(f.Root, RecordAuthor.Create(new RecordDraft("work-order", order.By, PolicyFixture.Element(HistoryFixture.Body(order)), null, null, order.AtTime, order.Id, 3), [f.BuilderSigner]));
+        model = f.Load();
+        Assert.Equal(order.ComputedHash, model.ById[order.Id].ComputedHash);
+        Assert.True(model.Counts(model.ById[order.Id]));
+        Assert.DoesNotContain(model.Findings, x => x.Code == "history.altered");
+    }
+
+    [Fact]
+    public void ALongChainOfCheckpointsWithDescendingIdsLoads()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        f.Estate.SetClock(new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        f.Adopt();
+        EstateModel model = f.Load();
+        HistoryState state = SignedHistory.Of(model);
+        var set = model.Records.Where(r => state.IsWitnessed(r.Id)).Select(r => (r.Id, r.ComputedHash)).ToList();
+        RecordReference head = state.Heads.Single();
+        RecordEnvelope previous = model.ById[head.Id];
+
+        // Each checkpoint follows the one before it and has a lower id, so judging them in id order walks the whole chain at once.
+        const int Length = 3000;
+        DateTimeOffset at = new(2026, 12, 31, 0, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < Length; i++)
+        {
+            set.Add((previous.Id, previous.ComputedHash));
+            byte[] inventory = Encoding.UTF8.GetBytes(previous.ExpectedPath["records/".Length..] + " " + previous.ComputedHash + "\n");
+            f.StoreObjects(new CheckpointDraft(default, [inventory]));
+            DateTimeOffset moment = at.AddSeconds(-i);
+            f.Estate.SetClock(moment.AddSeconds(-1));
+            previous = f.Estate.Add("history-checkpoint", f.Estate.OperatorId, new JsonObject
+            {
+                ["previous"] = new JsonArray(new JsonObject { ["id"] = previous.Id, ["hash"] = previous.ComputedHash }),
+                ["inventory"] = new JsonArray(ContentHash.Sha256(inventory)),
+                ["records"] = set.Count,
+                ["recordSetHash"] = RecordSets.Hash(set),
+                ["trigger"] = "manual",
+            }.ToJsonString(), id: IdAt(moment), signer: f.OperatorSigner);
+        }
+
+        // A small stack: judging the chain by recursion would exhaust it.
+        EstateModel? loaded = null;
+        var thread = new Thread(() => loaded = f.Load(), 256 * 1024);
+        thread.Start();
+        thread.Join();
+        HistoryState chain = SignedHistory.Of(loaded!);
+        Assert.Equal(Length + 1, chain.CountingCheckpoints.Count);
+        Assert.Equal(previous.Id, Assert.Single(chain.Heads).Id);
+        Assert.DoesNotContain(loaded!.Findings, x => x.Code.StartsWith("history.", StringComparison.Ordinal) && x.Severity == Severity.Error);
+    }
+
+    /// <summary>An identifier for a moment, outside the process's monotonic generator, so that a later record can have a lower id.</summary>
+    private static string IdAt(DateTimeOffset moment)
+    {
+        var bytes = new byte[16];
+        long ms = moment.ToUnixTimeMilliseconds();
+        for (int i = 5; i >= 0; i--, ms >>= 8) bytes[i] = (byte)ms;
+        bytes[15] = 1;
+        return Ulid.FromBytes(bytes).Value;
     }
 }
