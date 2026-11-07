@@ -50,3 +50,24 @@ The generic record reader advances its implementation identity to `vericairn.rec
 field of results and operations and an assignment's `step` change their schema explanations. Its hash changes;
 declarations pinned to an earlier implementation require the ordinary explicit generator update before regeneration, and
 earlier golden fixtures remain retained. The generator id and contract version 1 are unchanged.
+
+## Finishing an operator action after its merge (FIX-89)
+
+`IEstateApi` adds `OperatorUnfinished()` and `OperatorFinish(OperatorFinishRequest)`, with their cancellable counterparts
+`OperatorUnfinishedAsync` and `OperatorFinishAsync`; each has a default implementation, so existing implementers stay
+source-compatible. The daemon adds `GET /v1/operator/unfinished` and `POST /v1/operator/unfinished`, the SDK's `VericairnClient`
+implements all four, and `OperatorFinish` has the 15-minute deadline `OperatorRecord` has. The protocol adds
+`OperatorFinishRequest`, `OperatorUnfinishedResponse` and `OperatorUnfinishedAction`. The command line adds `operator
+unfinished`; no MCP tool is added.
+
+`IRecordCommitAdapter` in `Vericairn.Runtime` adds overloads of `Prepare` and `Branch` that take the untracked receipts to
+tolerate: those of the earlier action the runtime finished from its records. Their default implementations call the existing
+members and tolerate none, so an adapter that does not override them refuses those receipts, as before.
+`GitRecordCommitAdapter` overrides both.
+
+`POST /v1/operator/record` keeps `OperatorRecordRequest` and `OperatorRecordResponse`. Its behavior changes: an action whose
+merge is recorded resumes by observing its target run only, without branch, commit, push, opening or merge, wherever the clone
+is; and while an earlier action is unfinished, a new one first finishes it when its merge is recorded and its target checks
+pass, and otherwise is refused with `status` `refused`, naming the earlier action's record id, type and subject. The local
+checkpoint, which is machine state and no record, also keeps the action's type, subject and author and the finished action
+whose receipts the next one tolerates; checkpoints written by earlier builds are read as before.

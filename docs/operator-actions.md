@@ -296,6 +296,37 @@ alone never permits a retry. If the host still cannot establish the outcome, fol
 operator reconciliation procedure in [Checked repository changes](changes.md). Another action
 cannot displace an unfinished action's checkpoint. Keep the original body until the action completes.
 
+### Finishing an action after its merge (0.9.2)
+
+From 0.9.2, an action whose merge is recorded is finished from its own records. A pull request often
+merges while the target branch's run is still pending, and the host may delete the merged branch.
+Once the confirmed merge operation is in the estate, resuming the action observes only the target run
+at the merge commit, under the merge's original identity. It does not recreate the branch, sign,
+commit, push, open or merge again, and it leaves the clone's branch and files as they are, usually on
+main after the operator updated it. A passing target run completes the action and clears the clone's
+unfinished mark; a pending, failed or incomplete one keeps it.
+
+```sh
+vericairn operator unfinished
+vericairn operator unfinished --finish --by <operator-id>
+```
+
+The first command reads the clone's checkpoint and records and writes nothing. It shows the action's
+record id, type and subject, branch, head, pull request and stage (`prepared`, `recorded`, `committed`,
+`pushed`, `opened`, `merge-failed`, `merge-uncertain` or `merged`), the merge commit and latest target
+check verdict, and what finishing it needs. For an action that has not merged, that is the original
+`operator record` command, to be run with the body of its stored record (`vericairn records show
+<record-id>`) and, after a known failure, `--reconciliation`. `--finish` finishes a merged action once
+its target checks pass, waiting up to `--wait-seconds` (default 120, at most 240) while they are pending;
+a failed target run must first be rerun or corrected on the host. Only the action's own operator
+finishes it, on their admitted device.
+
+Starting the next `operator record` finishes a merged action the same way before it starts, and then
+proceeds. That next action tolerates the finished action's own untracked receipts, including the
+target-run observation just recorded, beside its own; commit them all separately afterwards, as
+always. An action that has not merged still refuses a new one, and the refusal names its record id,
+type and subject.
+
 The action's commit contains only its signed record and required generated register members.
 Operation revisions, observations and any target-failure ask stay in the estate as separate,
 uncommitted records. A resumed action tolerates
@@ -335,6 +366,15 @@ principal; all authoring, signature, authority and presence checks remain in for
 15-minute deadline that checks and releases have, because each check phase may wait up to 240
 seconds. When a request is aborted, the daemon passes the abort to the action, which stops at its
 next recorded step, before any merge. The same command with the same body then resumes it.
+
+From 0.9.2, `GET /v1/operator/unfinished` and `VericairnClient.OperatorUnfinished()` return
+`OperatorUnfinishedResponse`, whose `action` is null when the clone has no unfinished action. Otherwise
+it carries `identity`, `recordId`, `type`, `subject`, `by`, `record`, `branch`, `head`, `stage`,
+`pullRequest`, `merge`, `mergeCommit`, `checkStatus`, `targetObservation`, `ask`, `finishable`, `summary`
+and `nextStep`. `POST /v1/operator/unfinished` and `OperatorFinish(OperatorFinishRequest)` accept `by`
+and `waitSeconds` and return `OperatorRecordResponse`; `completed` with `ok` means the action finished,
+and `none` with `ok` means nothing was unfinished. Both have cancellable counterparts; neither is offered
+through MCP.
 
 Record errors retain the unresolved items and findings but remove authoring commands. The new CLI
 command returns 0 for a valid read, 1 when the record snapshot has errors, and 2 when it cannot read

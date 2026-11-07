@@ -31,6 +31,7 @@ public sealed class OperatorRecordGitTests : IDisposable
     private static readonly string ByteHash = ContentHash.Sha256(Encoding.UTF8.GetBytes(RecordText));
     private static readonly IReadOnlyDictionary<string, string> RecordFiles = new Dictionary<string, string>(StringComparer.Ordinal) { [RecordPath] = ByteHash };
     private static readonly HashSet<string> NoReceipts = new(StringComparer.Ordinal);
+    private static readonly string[] MilestoneKeys = ["M-1", "M-2"];
     private bool loseCommitReceipt;
     private bool refuseBranch;
     private int commits;
@@ -92,6 +93,27 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.Throws<ProviderRefusedException>(() => adapter.Commit(root, "operator/example", basis.Head, RecordFiles, NoReceipts));
         Assert.Equal(basis.Head, Git("rev-parse", "HEAD"));
         Assert.Equal("Keep this.\n", File.ReadAllText(Path.Combine(root, kind == "untracked" ? "other.txt" : "readme.txt")));
+    }
+
+    [Fact]
+    public void ANewActionToleratesOnlyTheNamedReceiptsOfTheActionItFinished()
+    {
+        const string receipt = "records/operation/2026-10/finished-receipt.json";
+        Write(receipt, "{}\n");
+        var receipts = new HashSet<string>(StringComparer.Ordinal) { receipt };
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(root));
+        Assert.Equal(basis, adapter.Prepare(root, receipts));
+        adapter.Branch(root, basis, "operator/example", RecordFiles, receipts);
+        Assert.Equal("operator/example", Git("branch", "--show-current"));
+        WriteRecord();
+        string head = adapter.Commit(root, "operator/example", basis.Head, RecordFiles, receipts);
+        Assert.Equal(RecordPath, Git("diff-tree", "--no-commit-id", "--name-only", "-r", basis.Head, head));
+        Assert.Equal("?? " + receipt, Git("status", "--porcelain=v1", "--untracked-files=all"));
+        Git("checkout", "main");
+        Write("other.txt", "Unrelated.\n");
+        Assert.Throws<ProviderRefusedException>(() => adapter.Prepare(root, receipts));
+        Assert.Throws<ProviderRefusedException>(() => adapter.Branch(root, basis, "operator/another", RecordFiles, receipts));
+        Assert.Equal("main", Git("branch", "--show-current"));
     }
 
     [Fact]
@@ -288,6 +310,65 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.Equal(0, service.Validate().Errors);
     }
 
+    [Fact]
+    public void AnActionStoppedAfterItsMergeIsFinishedByTheNextActionWithoutRecreatingItsBranch()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Estate","role":"Estate","location":{"github":"Example/estate"},"visibility":"private"}""");
+        estate.Add("product", estate.OperatorId, $$"""
+            {"name":"Estate","slug":"estate","summary":"Test estate.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
+             "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":["tests"]} }
+            """);
+        RecordEnvelope[] milestones = [.. MilestoneKeys.Select(key =>
+        {
+            RecordEnvelope order = estate.Add("work-order", estate.OperatorId, $$"""{"key":"{{key}}","kind":"milestone","title":"Milestone {{key}}","intent":"Finish.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
+            estate.Add("work-status", estate.OperatorId, """{"status":"submitted","note":"Ready."}""", order.Reference);
+            return order;
+        })];
+        foreach (string file in Directory.EnumerateFiles(estate.Root, "*", SearchOption.AllDirectories))
+            Write(Path.GetRelativePath(estate.Root, file), File.ReadAllText(file));
+        RepositoryClones.Register(estate.Estate.Id, repository.Id, root);
+        using EstateService service = EstateService.Open(root);
+        string device = service.DeviceCreate(new(estate.OperatorId, "Operator device", "file")).Written!.Id;
+        Assert.True(service.DeviceAdmit(new(device, estate.OperatorId, "Admit the operator.")).Ok);
+        Git("add", ".");
+        Git("commit", "-m", "Prepare the test estate");
+        var remote = new RecordedRemote(Git("rev-parse", "HEAD")) { ScanPasses = true, TargetPending = true };
+        service.Providers = new() { RecordCommitAdapter = adapter, PushAdapter = remote, SecretScanner = remote };
+        service.Providers.Register(remote.Memory);
+        OperatorRecordRequest Accept(RecordEnvelope order) => new("acceptance", estate.OperatorId,
+            JsonSerializer.SerializeToElement(new { statement = "I accept this milestone.", basis = Array.Empty<string>(), self = true }),
+            $"work-order:{order.Id}:{order.ComputedHash}", WaitSeconds: 0);
+        OperatorRecordResponse first = service.OperatorRecord(Accept(milestones[0]), TestContext.Current.CancellationToken);
+        Assert.False(first.Ok);
+        Assert.Equal("pending", first.Change!.CheckStatus);
+        Assert.Equal(first.Branch, Git("branch", "--show-current"));
+
+        // As in the operator's own clone: the pull request merged, its branch was deleted, the receipts were committed separately
+        // and the clone returned to main before main's run passed.
+        Git("checkout", "main");
+        Git("merge", "--no-ff", "--no-edit", first.Branch!);
+        Git("branch", "-D", first.Branch!);
+        Git("add", "records");
+        Git("commit", "-m", "Commit the first action's receipts");
+        Assert.Empty(Git("status", "--porcelain=v1", "--untracked-files=all"));
+        string main = Git("rev-parse", "HEAD");
+        remote.TargetPending = false;
+        remote.Memory.SetTarget("Example/estate", new("main", remote.Memory.MergeCommit, [new("tests", remote.Memory.MergeCommit, "completed", "success")]));
+        int before = commits;
+
+        OperatorRecordResponse next = service.OperatorRecord(Accept(milestones[1]), TestContext.Current.CancellationToken);
+        Assert.True(next.Ok, next.Message + " " + next.NextStep);
+        Assert.Equal(before + 1, commits);
+        Assert.Empty(Git("branch", "--list", first.Branch!));
+        Assert.Equal(next.Record!.Path, Git("diff-tree", "--no-commit-id", "--name-only", "-r", main, next.Head!));
+        Assert.Equal(next.Head + " " + main, Git("rev-list", "--parents", "-n", "1", next.Head!));
+        Assert.All(Git("status", "--porcelain=v1", "--untracked-files=all").Split('\n'), line => Assert.StartsWith("?? records/operation/", line, StringComparison.Ordinal));
+        Assert.Null(service.OperatorUnfinished().Action);
+        Assert.Equal(2, remote.Pushes);
+        Assert.Equal(0, service.Validate().Errors);
+    }
+
     [Theory]
     [InlineData("decision", "branch")]
     [InlineData("release", "branch")]
@@ -453,12 +534,14 @@ public sealed class OperatorRecordGitTests : IDisposable
     {
         internal MemoryPullRequestProvider Memory { get; } = new();
         internal bool ScanPasses { get; set; }
+        internal bool TargetPending { get; set; }
         internal int Pushes { get; private set; }
         private string? pushed;
         public PushPlan Prepare(string directory, string remote, string branch, string target, string head)
         {
             Memory.Checks = [new("tests", head, "completed", "success")];
-            Memory.SetTarget("Example/estate", new("main", Memory.MergeCommit, [new("tests", Memory.MergeCommit, "completed", "success")]));
+            Memory.SetTarget("Example/estate", new("main", Memory.MergeCommit, [TargetPending
+                ? new("tests", Memory.MergeCommit, "in_progress", null) : new("tests", Memory.MergeCommit, "completed", "success")]));
             return new(branch, target, head, basis, null, basis);
         }
         public SecretScan Scan(string directory, PushPlan plan) => new("scanner", "1.0.0", plan.Range, ScanPasses ? "passed" : "unavailable", ScanPasses ? 0 : null);

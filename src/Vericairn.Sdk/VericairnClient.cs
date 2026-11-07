@@ -333,6 +333,12 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => Post<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request)!;
 
     /// <inheritdoc />
+    public OperatorUnfinishedResponse OperatorUnfinished() => Get<OperatorUnfinishedResponse>("/v1/operator/unfinished")!;
+
+    /// <inheritdoc />
+    public OperatorRecordResponse OperatorFinish(OperatorFinishRequest request) => Post<OperatorFinishRequest, OperatorRecordResponse>("/v1/operator/unfinished", request)!;
+
+    /// <inheritdoc />
     public OperatorCloseCandidatesResponse OperatorCloseCandidates() => Get<OperatorCloseCandidatesResponse>("/v1/operator/close")!;
 
     /// <inheritdoc />
