@@ -17,6 +17,7 @@ internal sealed class EstateCommand : Command
         Subcommands.Add(new EstateExportCommand(context));
         Subcommands.Add(new EstateRestoreCommand(context));
         Subcommands.Add(new EstateUpgradeCommand(context));
+        Subcommands.Add(new EstateVerifyCommand(context));
         Subcommands.Add(new EstateReconcileCommand(context));
         Subcommands.Add(new EstateCacheCommand(context));
     }
