@@ -9,7 +9,7 @@ namespace Vericairn.Cli;
 internal sealed class StatusCommand : Command
 {
     public StatusCommand(CommandContext context, ReleaseUpdates updates)
-        : base("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command. --json is identical on every machine for the same records and includes complete record-derived attention references. Human status also shows labelled local worker concerns. " + UpdateNotices.Help)
+        : base("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command. --json is identical on every machine for the same records and includes complete record-derived attention references. Human status also shows labelled local worker concerns and, when a daemon served it, that daemon's release against the estate's pin. " + UpdateNotices.Help)
     {
         var operations = new EstateViews(context);
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
