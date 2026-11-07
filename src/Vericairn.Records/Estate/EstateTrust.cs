@@ -63,10 +63,12 @@ internal sealed partial class EstateTrust
     private List<RecordEnvelope>? principalsInOrder;
     private IReadOnlySet<string> anchors = NoAnchors;
 
-    private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
+    private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
+        bool unsettled = false)
     {
         this.model = model;
         Manifest = manifest;
+        Unsettled = unsettled;
         // Read through the type lookups, which hold every record until the loader keeps only those that count, so that judging a model
         // walks only the records trust rests on.
         admissionsBySubject = model.OfType("admission").Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
@@ -74,9 +76,7 @@ internal sealed partial class EstateTrust
         rawSupersededBy = model.SupersededBy;
         principalRecords = [.. model.OfType("principal")];
         authorityRecords = [.. model.OfType("authority")];
-        // The first charter is the one the manifest names; another charter that supersedes nothing never displaces it. Only a model read
-        // without a manifest falls back to the first charter by id.
-        FirstEstate = manifest is null ? model.RawFirstEstate() : NamedCharter(model, manifest.Estate);
+        FirstEstate = firstCharter;
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
         FirstAuthority = model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
@@ -136,9 +136,70 @@ internal sealed partial class EstateTrust
     /// <summary>Whether the estate has adopted history checkpoints: it holds a checkpoint that counts.</summary>
     internal bool Adopted => History.Adopted;
 
-    /// <summary>Judges a model's records.</summary>
-    internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null) =>
-        new(model, manifest, objects, files);
+    /// <summary>The errors about which charter is the estate's first, reported with the history findings.</summary>
+    internal List<Finding> RootFindings { get; } = [];
+
+    /// <summary>Whether witnessed history names more than one first charter, so that no record counts until the copy is settled.</summary>
+    internal bool Unsettled { get; }
+
+    /// <summary>
+    /// Judges a model's records. The first charter, which names the root operator, is the one the manifest names; another charter that
+    /// supersedes nothing never displaces it, and only a model read without a manifest falls back to the first such charter by id. Once
+    /// the estate has adopted checkpoints, witnessed history decides instead: the first charter is the one its counting checkpoints
+    /// witnessed first, judged under that charter's root operator. A manifest that names another charter is then an error and changes
+    /// nothing, and a charter that first appears after adoption never becomes the first. When more than one charter is so witnessed,
+    /// each under its own root operator, no charter is read as the first and no record counts until the copy is settled, so that nothing
+    /// built from the records that count can take either root.
+    /// </summary>
+    internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null)
+    {
+        RecordEnvelope? named = manifest is null ? model.RawFirstEstate() : NamedCharter(model, manifest.Estate);
+        var chosen = new EstateTrust(model, manifest, objects, files, named);
+        List<RecordEnvelope> charters = [.. model.OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        if (objects is null || manifest is null || charters.Count == 0) return chosen;
+        if (charters.Count == 1 && ReferenceEquals(charters[0], named)) return chosen;
+
+        List<EstateTrust> witnessed = [];
+        foreach (RecordEnvelope charter in charters)
+        {
+            EstateTrust trust = ReferenceEquals(charter, named) ? chosen : new EstateTrust(model, manifest, objects, files, charter);
+            if (trust.WitnessedFirst(charters)) witnessed.Add(trust);
+        }
+
+        if (witnessed.Count == 0) return chosen;
+        if (witnessed.Count > 1)
+        {
+            var unsettled = new EstateTrust(model, manifest, objects, files, null, unsettled: true);
+            unsettled.RootFindings.Add(new Finding(Severity.Error, "history.root-ambiguous", EstateLayout.RecordsDirectory,
+                $"History checkpoints that count, each set under its own root operator, witness different first charters: {string.Join(", ", witnessed.Select(t => t.FirstEstate!.Id))}. No root operator is read and no record counts until one set is removed; compare this copy with a head known elsewhere (estate check --expect) to tell which history belongs."));
+            return unsettled;
+        }
+
+        EstateTrust root = witnessed[0];
+        if (!ReferenceEquals(root.FirstEstate, named))
+        {
+            root.RootFindings.Add(new Finding(Severity.Error, "history.manifest-root", EstateLayout.ManifestPath,
+                $"The manifest names {manifest.Estate ?? "no charter"} as the estate's first charter, and its history checkpoints witnessed charter {root.FirstEstate!.Id} first. Witnessed history decides, so the root operator is the one charter {root.FirstEstate.Id} names; restore the manifest's estate to {root.FirstEstate.Id}."));
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// Whether this judgment's estate has adopted checkpoints and its counting checkpoints witnessed its first charter, with the bytes
+    /// present, before any other charter that supersedes nothing.
+    /// </summary>
+    private bool WitnessedFirst(IReadOnlyList<RecordEnvelope> charters)
+    {
+        if (!Adopted || FirstEstate is not { } first) return false;
+        List<(string Charter, string Checkpoint)> seen = [.. charters
+            .Where(c => History.Entries.TryGetValue(c.Id, out WitnessedEntry? entry) && entry.Entry.Hash == c.ComputedHash)
+            .Select(c => (c.Id, History.Entries[c.Id].Checkpoint))];
+        int index = seen.FindIndex(s => s.Charter == first.Id);
+        if (index < 0) return false;
+        string earliest = seen[index].Checkpoint;
+        return seen.All(s => s.Charter == first.Id || string.CompareOrdinal(s.Checkpoint, earliest) > 0);
+    }
 
     /// <summary>The records that do not count, each with the reason the loader reports it under.</summary>
     internal IReadOnlySet<string> NotCounting()
@@ -153,8 +214,9 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a record counts. A witnessed record present with another hash does not; otherwise each kind follows its rule: admissions
-    /// <see cref="AdmissionCounts(RecordEnvelope, Mode)"/>, device revisions <see cref="DeviceRevisionCounts"/>, checkpoints the history graph, charter revisions
+    /// Whether a record counts. No record counts in an unsettled copy, and a witnessed record present with another hash does not; otherwise
+    /// each kind follows its rule: admissions <see cref="AdmissionCounts(RecordEnvelope, Mode)"/>, device revisions <see cref="DeviceRevisionCounts"/>,
+    /// checkpoints the history graph, charter revisions
     /// <see cref="CharterRevisionCounts"/>, other signed records <see cref="Authentic"/> and unsigned records <see cref="Unsigned"/>.
     /// </summary>
     internal bool Counts(RecordEnvelope record)
@@ -169,7 +231,7 @@ internal sealed partial class EstateTrust
 
         bool Judge(RecordEnvelope r)
         {
-            if (History.Altered.Contains(r.Id)) return false;
+            if (Unsettled || History.Altered.Contains(r.Id)) return false;
             // A grant or principal revision dated before the record below it in its line counts for nothing.
             if (RefusedAuthorityRevision(r)) return false;
             if (r.Type == "admission") return AdmissionCounts(r, Mode.Anchors);

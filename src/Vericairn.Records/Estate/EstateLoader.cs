@@ -214,6 +214,11 @@ public static class EstateLoader
             findings.Add(finding);
         }
 
+        foreach (Finding finding in trust.RootFindings)
+        {
+            findings.Add(finding);
+        }
+
         foreach (Finding finding in manifestFindings)
         {
             findings.Add(finding);

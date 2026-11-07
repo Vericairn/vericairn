@@ -190,7 +190,8 @@ public static class EstateStatus
 
     /// <summary>
     /// The history errors that stand: removed, altered or missing witnessed records and checkpoints, invalid checkpoints, unanchored
-    /// records and, once the estate has adopted checkpoints, unsigned records the signature policy refuses.
+    /// records, a first charter that witnessed history disputes and, once the estate has adopted checkpoints, unsigned records the
+    /// signature policy refuses.
     /// </summary>
     public static List<Finding> HistoryProblems(EstateModel model)
     {
