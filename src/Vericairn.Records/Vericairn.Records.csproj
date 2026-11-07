@@ -20,4 +20,9 @@
     <InternalsVisibleTo Include="Vericairn.Sdk" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Text/UnicodeFolding.Tables.cs is derived from Unicode data files, whose license travels with the package. -->
+    <None Include="../../licenses/Unicode-3.0.txt" Pack="true" PackagePath="/licenses/" />
+  </ItemGroup>
+
 </Project>
