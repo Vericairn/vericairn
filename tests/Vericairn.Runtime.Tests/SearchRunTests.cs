@@ -54,6 +54,23 @@ public class SearchRunTests
         Assert.Equal(File.ReadAllBytes(Path.Combine(run.Estate.Root, run.Estate.Load().ById[decision.Id].ExpectedPath)),
             JsonSerializer.Deserialize<ContextReadResponse>(read.Text, ProtocolJson.Options)!.Content);
 
+        // The agent cites the decision it found in its result: by id in the summary and by exact hash in its evidence.
+        ToolCallResult attempt = registry.Call("work_attempt", new JsonObject { ["assignment"] = run.Assignment, ["workspace"] = "widget, branch work/w-1", ["note"] = "Calibrate first." });
+        Assert.False(attempt.IsError, attempt.Text);
+        string attemptId = JsonSerializer.Deserialize<WriteOutcome>(attempt.Text, ProtocolJson.Options)!.Written!.Id;
+        RecordEnvelope cited = run.Estate.Load().ById[decision.Id];
+        ToolCallResult result = registry.Call("work_result", new JsonObject
+        {
+            ["attempt"] = attemptId,
+            ["body"] = new JsonObject
+            {
+                ["outcome"] = "completed", ["summary"] = $"Calibrated the widget as decision {decision.Id} requires.", ["outputs"] = new JsonArray(),
+                ["evidence"] = new JsonArray(new JsonObject { ["summary"] = "The decision found by search and read by its pin.", ["hash"] = cited.ComputedHash }),
+                ["checks"] = new JsonArray(), ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "Review the result.",
+            },
+        });
+        Assert.False(result.IsError, result.Text);
+
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, null, 5));
         Assert.True(stopped.Ok, stopped.Message);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
@@ -72,6 +89,21 @@ public class SearchRunTests
         Assert.Null(replay.Problem);
         Assert.Equal(2, replay.Outcomes.Count);
         Assert.All(replay.Outcomes, o => Assert.True(o.Replayed && o.Matches == true, o.Message + " " + string.Join("; ", o.Differences)));
+    }
+
+    [Fact]
+    public void AGoalStepCarriesItsSearchesIntoTheRunsIntent()
+    {
+        using var run = new RunEstate(recordFormat: 3);
+        RoutingServiceTests.Routed(run);
+        RecordWritten decision = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", run.Estate.OperatorId, RunEstate.Json($$"""{"title":"Widget varnish","stake":"medium","statement":"Varnish the widget twice.","summary":"Varnish the widget twice.","synthesis":"Twice.","effects":["varnish twice"],"notAuthorized":[],"affects":[],"decidedBy":"{{run.Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}"""))));
+        GoalStepResponse step = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report("step")) }) { Search = ["varnish the widget"] });
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+        JsonElement selection = Assert.Single(AgentRuns.Find(run.Estate.Load(), step.Run.Run)!.Intent.Body.GetProperty("execution").GetProperty("contextSelections").EnumerateArray());
+        Assert.Contains(selection.GetProperty("candidates").EnumerateArray(), c => c.GetProperty("source").TryGetProperty("id", out JsonElement id) && id.GetString() == decision.Id);
+        Assert.Equal(0, run.Service.Check().Errors);
     }
 
     [Fact]

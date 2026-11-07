@@ -32,10 +32,10 @@ public static partial class SearchSelections
     public const int MaxObservedSelections = 100;
 
     /// <summary>What became of a candidate.</summary>
-    public static readonly IReadOnlyList<string> States = ["selected", "duplicate", "below-limit", "excluded", "index-fault"];
+    internal static readonly IReadOnlyList<string> States = ["selected", "duplicate", "below-limit", "excluded", "index-fault"];
 
     /// <summary>The kinds of passage a candidate can be.</summary>
-    public static readonly IReadOnlyList<string> Kinds = ["record", "document", "knowledge"];
+    internal static readonly IReadOnlyList<string> Kinds = ["record", "document", "knowledge"];
 
     /// <summary>The statement a record carries when it omits candidates its readers could not all read; it gives no count.</summary>
     public const string Limited = "Candidates whose audience does not cover every reader of this record are omitted.";
