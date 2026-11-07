@@ -18,11 +18,16 @@ internal static class PolicyAuthority
         "authority" => IsPolicyGrant(model, record),
         "decision" => PolicyRecords.Property(record.Body, "policies").ValueKind != JsonValueKind.Undefined,
         "result" => PolicyRecords.Property(record.Body, "duties").ValueKind != JsonValueKind.Undefined,
-        "review" => PolicyRecords.Property(record.Body, "read").ValueKind != JsonValueKind.Undefined || (record.Subject is { Type: "result" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) && PolicyRecords.Property(result.Body, "duties").ValueKind != JsonValueKind.Undefined),
+        // A review is duty evidence by its subject: a result with duties. Its read list alone does not make it one (FIX-94).
+        "review" => IsDutyReview(model, record.Subject),
         "reconciliation" => record.Subject is { } reference && model.ById.TryGetValue(reference.Id, out RecordEnvelope? target) &&
             (target.Type is "estate-policy" or "policy-exception" or "writing-exception" || target.Type == "authority" && IsPolicyGrant(model, target)),
         _ => false,
     };
+
+    /// <summary>Whether a review of this subject is duty evidence: its subject is a result revision that carries duties.</summary>
+    internal static bool IsDutyReview(EstateModel model, RecordReference? subject) => subject is { Type: "result" } &&
+        model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) && PolicyRecords.Property(result.Body, "duties").ValueKind != JsonValueKind.Undefined;
 
     internal static bool IsPolicyGrant(EstateModel model, RecordEnvelope record) => model.Chain(record).Select(id => model.ById[id]).Any(r =>
         ScopesWithBounds.Any(s => PolicyRecords.Contains(PolicyRecords.Property(r.Body, "scope"), s)));

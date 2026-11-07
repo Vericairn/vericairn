@@ -86,11 +86,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var service = new EstateService(EstateSession.Open(root));
-        if (workerOptions is not null) service.WorkerOptions = workerOptions;
-        service.JudgeInterruptedBatches();
-        service.runDispatch.RecoverSettlements();
-        service.ReconcileRunAttention();
-        return service;
+        try
+        {
+            if (workerOptions is not null) service.WorkerOptions = workerOptions;
+            service.JudgeInterruptedBatches();
+            service.runDispatch.RecoverSettlements();
+            service.ReconcileRunAttention();
+            return service;
+        }
+        // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.
+        catch { service.Dispose(); throw; }
     }
 
     // Kept separate from retained-observation recovery: existing settlements need only their records.
@@ -312,18 +317,22 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
-        if (IsPolicyWrite(draft) || request.Type is "result" or "review")
+        if (request.Type is "result" or "review")
+        {
+            lock (gate)
+            {
+                return NewEvidenceLocked(request, draft, session.Load());
+            }
+        }
+
+        if (IsPolicyWrite(draft))
         {
             lock (gate)
             {
                 EstateModel model = session.Load();
-                bool dutyEvidence = IsDutyEvidence(draft, model);
-                if (request.Type is "result" or "review" && !dutyEvidence) return WriteLocked(draft, model);
                 if (request.At is not null || request.Id is not null) return Refuse("Policy and duty evidence authoring uses the runtime's fresh time and record identity.");
-                if (dutyEvidence && (subject is null || !model.ById.TryGetValue(subject.Id, out RecordEnvelope? evidenceSubject) ||
-                    !model.IsCurrent(evidenceSubject) || subject != evidenceSubject.Reference)) return PolicyConflict();
                 string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
-                    : request.Type == "policy-exception" || dutyEvidence ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
+                    : request.Type == "policy-exception" ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
                 if (expected is null || request.Expected != expected) return PolicyConflict();
                 return SignedPolicyWrite(draft, model);
             }
