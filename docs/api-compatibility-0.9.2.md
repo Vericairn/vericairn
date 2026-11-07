@@ -188,3 +188,50 @@ The root operator's self-authored principal record is unchanged. Validation and 
 the estate whose author does not resolve under the same code at severity `info`; it adds no error and the record keeps its
 reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
 changes.
+
+## Keyword search and search-selected context (CONTEXT-02)
+
+`IEstateApi` adds `Search(SearchRequest)`, `SearchIndex(SearchIndexRequest)`, `SearchReplay(SearchReplayRequest)`,
+`Context(ContextRequest)` and `BriefContext(BriefContextRequest)`, with their cancellable counterparts `SearchAsync`,
+`SearchIndexAsync`, `SearchReplayAsync`, `ContextAsync(ContextRequest, CancellationToken)` and
+`BriefContextAsync(BriefContextRequest, CancellationToken)`. Each has a default implementation: the three search members
+refuse with `unsupported`, and the two context members answer exactly as `Context(string, long?)` and
+`BriefContext(string, long?, string?, string?, CommunicationValues?)` when the request names no search and no principal, and
+refuse with `unsupported` otherwise. Existing implementers stay source-compatible. `EstateService`, `VericairnClient` and
+`CancellationBoundApi` implement all ten. The SDK sends a request without search or principal on the existing GET routes.
+
+The daemon adds `POST /v1/search`, `POST /v1/search/index`, `POST /v1/search/replay`, `POST /v1/context/prepare` and
+`POST /v1/context/brief`, each a read: no signing key, presence or local-network write ledger. Each has a request scope rule;
+a device-signed request may name its own principal or none in `SearchRequest`, `ContextRequest` and `BriefContextRequest`.
+The OpenAPI document describes each route, request and response.
+
+The protocol adds `SearchRequest` (with the init property `Method`), `SearchResponse` (with `Trust`), `SearchCandidate` (with
+`Reason` and `Key`), `SearchExcerpt`, `SearchIndexRequest`, `SearchIndexResponse` (with `Unavailable`), `SearchSegment`,
+`SearchReplayRequest`, `SearchReplayResponse`, `SearchReplayOutcome`, `ContextRequest` (with `Principal`) and
+`BriefContextRequest` (with `Principal`). `RunStartRequest` and `GoalStepRequest` add the init property `Search`, up to five
+queries for the run's package; older servers ignore it.
+
+A context package that used search has manifest format `vericairn.context-manifest/2`: format 1 with the basis's
+`selections`, a `search` member (`selection`, `rank`) on each search-selected source entry, and search candidates after the
+explicit selection. A package without search keeps format 1 and its hash. An excerpt's `extent.start` may now be greater than
+zero, at a UTF-8 boundary. The human rendering of a package adds a section with search candidates' excerpts as text only when
+it has some.
+
+`Vericairn.Records` adds `Search.SearchSelections`: the selection format and keyword method identities, the candidate and
+selection limits, `Hash`, `ListDigest`, `Validate` and `ValidateObserved`. Record format remains 3; the additive
+`execution.contextSelections` and `searchesObserved` of `agent-run` operations are in
+[record format 3](record-format-v3.md#search-selections-in-agent-runs-092). The operation type's field descriptions change,
+so the generic record reader advances its implementation identity to `vericairn.records/readers/8`. Its hash changes;
+declarations pinned to an earlier implementation need the ordinary explicit generator update before regeneration, and earlier
+golden fixtures remain. The generator id and contract version 1 are unchanged.
+
+`Vericairn.Runtime` adds `SourceFile` and the `ISourceAdapter.ReadTreeAtCommit` member, whose default implementation returns
+null; `GitCommandAdapter` implements it, reading an exact commit's files from local history without checkout or fetch.
+`RunDirectory` adds `SearchesFile`. A run's MCP server is now configured as `mcp serve --as <agent> --run <run id>`; `mcp serve`
+adds `--run`, and with it keeps each served search in the run's directory for settlement. `Vericairn.Mcp` adds
+`ToolCallResult.Meta`, sent as a tool result's `_meta`, and `ToolRegistry.SearchObserved`; the server lists the `search` read
+tool, and `context_prepare` and `work_brief` take an optional `search` argument.
+
+The command line adds `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`,
+`work brief`, `worker run` and `goal step`. `doctor` adds a `search` line. The index, `search.db` beside the live store, is
+machine-local derived state: no export, push, record or generated document contains it.

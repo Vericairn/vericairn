@@ -42,6 +42,11 @@ public sealed record DesignFileChange(string Path, string Hash);
 /// <param name="Documents">Complete changed design-file membership and current content hashes.</param>
 public sealed record DesignChangeSet(string BaseCommit, string Head, IReadOnlyList<DesignFileChange> Documents);
 
+/// <summary>One regular file of a repository at an exact commit, with its exact bytes.</summary>
+/// <param name="Path">Repository-relative path with '/' separators.</param>
+/// <param name="Bytes">The blob's bytes.</param>
+public sealed record SourceFile(string Path, byte[] Bytes);
+
 /// <summary>
 /// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
 /// work and never publishes; integration and remote publication are provider operations, not adapter ones.
@@ -85,6 +90,12 @@ public interface ISourceAdapter
     /// Null means unavailable or unsupported; without an observation the estate checks every entry.
     /// </summary>
     IReadOnlySet<string>? IgnoredEstateEntries(string root) => null;
+
+    /// <summary>
+    /// The regular files under the given top-level directories at an exact commit of this repository's local history, read without
+    /// checkout, fetch or change. Null when unsupported, when the commit is absent, or when the history is shallow or unreadable.
+    /// </summary>
+    IReadOnlyList<SourceFile>? ReadTreeAtCommit(string root, string commit, IReadOnlyList<string> directories) => null;
 
     /// <summary>
     /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.

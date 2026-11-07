@@ -178,7 +178,8 @@ public sealed partial class EstateService
                 carried = routed.Envelope.Id;
             }
 
-            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, request.Branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage);
+            run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, request.Branch, request.Base, request.WallMinutes, request.Settings, request.Configuration, request.Execution, request.Allocation, request.ContextPackage)
+            { Search = request.Search };
         }
 
         // The run starts through the worker, whose preflight comes before anything is recorded and which judges the custody precondition

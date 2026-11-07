@@ -13,6 +13,9 @@ public sealed record ToolCallResult(string Text, bool IsError, bool Unknown = fa
 {
     /// <summary>A serving daemon release warning, separate from the tool's unchanged result text.</summary>
     public string? Warning { get; init; }
+
+    /// <summary>Labels for the result, sent as its <c>_meta</c>, such as its trust; never instructions.</summary>
+    public JsonObject? Meta { get; init; }
 }
 
 /// <summary>One tool: a name, a description that describes and never directs, an input schema, and the call it makes through the API.</summary>
@@ -147,6 +150,7 @@ public sealed partial class ToolRegistry
             .. CompanionTools(),
             .. PromptTools(),
             .. TemplateTools(),
+            .. SearchTools(),
             Read("policies_list", "Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record.", NoArguments(),
                 async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
             Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),
@@ -193,12 +197,24 @@ public sealed partial class ToolRegistry
                     "json" => new ToolCallResult((await api.ProgressAsync(cancellationToken: token).ConfigureAwait(false)).Json.GetRawText(), false),
                     string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                 }),
-            Read("work_brief", "The measured brief of a work order, by key or record id: mandatory originals, the complete withheld list and the latest result's next step. Named optional sources stay withheld unless maxBytes is given and they fit. Recipient settings control the lead; reads write nothing.", Arguments(("workOrder", "Work-order key, for example M2-API, or its record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string."), ("recipient", "The person addressed by the contributor; omitted means estate defaults only."), ("assignment", "The exact assignment for the recipient override.")), "workOrder",
-                async (api, a, token) => { BriefResponse? b = (await api.BriefContextAsync(Arg(a, "workOrder"), ContextLimit(a), OptionalArg(a, "recipient"), OptionalArg(a, "assignment"), cancellationToken: token).ConfigureAwait(false)); return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, b.Problem is not null); }),
+            Read("work_brief", "The measured brief of a work order, by key or record id: mandatory originals, the complete withheld list and the latest result's next step. Named optional sources stay withheld unless maxBytes is given and they fit. Recipient settings control the lead; optional searches add candidates as optional sources that grant no authority; reads write nothing.", WithSearchArgument(Arguments(("workOrder", "Work-order key, for example M2-API, or its record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string."), ("recipient", "The person addressed by the contributor; omitted means estate defaults only."), ("assignment", "The exact assignment for the recipient override."))), "workOrder",
+                async (api, a, token) =>
+                {
+                    BriefResponse? b = Searches(a) is { Count: > 0 } searches
+                        ? await api.BriefContextAsync(new BriefContextRequest(Arg(a, "workOrder"), ContextLimit(a), OptionalArg(a, "recipient"), OptionalArg(a, "assignment"), Search: searches) { Principal = actingPrincipal }, token).ConfigureAwait(false)
+                        : await api.BriefContextAsync(Arg(a, "workOrder"), ContextLimit(a), OptionalArg(a, "recipient"), OptionalArg(a, "assignment"), cancellationToken: token).ConfigureAwait(false);
+                    return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, b.Problem is not null);
+                }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
                 async (api, a, token) => { ObserveResponse? o = (await api.ObserveAsync(Arg(a, "workOrder"), cancellationToken: token).ConfigureAwait(false)); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
-            Read("context_prepare", "Compute a measured deterministic context package for a work order, with exact original identities and a complete withheld list. Optional maxBytes is a context allocation, separate from a run spending cap; mandatory overflow refuses. Without maxBytes, optional bodies are withheld. Tokens remain unknown. Writes nothing.", Arguments(("workOrder", "Work-order key or record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string.")), "workOrder",
-                async (api, a, token) => { ContextResponse c = (await api.ContextAsync(Arg(a, "workOrder"), ContextLimit(a), cancellationToken: token).ConfigureAwait(false)); return new ToolCallResult(c.Text, c.Problem is not null); }),
+            Read("context_prepare", "Compute a measured deterministic context package for a work order, with exact original identities and a complete withheld list. Optional maxBytes is a context allocation, separate from a run spending cap; mandatory overflow refuses. Without maxBytes, optional bodies are withheld. Optional searches add the top three new candidates of each as optional sources pinned by exact hash, recorded in the manifest; they grant no authority. Tokens remain unknown. Writes nothing.", WithSearchArgument(Arguments(("workOrder", "Work-order key or record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string."))), "workOrder",
+                async (api, a, token) =>
+                {
+                    ContextResponse c = Searches(a) is { Count: > 0 } searches
+                        ? await api.ContextAsync(new ContextRequest(Arg(a, "workOrder"), ContextLimit(a), searches) { Principal = actingPrincipal }, token).ConfigureAwait(false)
+                        : await api.ContextAsync(Arg(a, "workOrder"), ContextLimit(a), cancellationToken: token).ConfigureAwait(false);
+                    return new ToolCallResult(c.Text, c.Problem is not null);
+                }),
             Read("context_read", "Read the pinned original by its self-contained identity, never the latest revision. Rechecks access and verifies its hashes; returns original bytes as base64 with the same identity as the CLI and API.", ContextReadArguments(),
                 async (api, a, token) => { ContextReadResponse c = (await api.ContextReadAsync(Arg(a, "pin"), cancellationToken: token).ConfigureAwait(false)); return new ToolCallResult(JsonSerializer.Serialize(c, ProtocolJson.Options), c.Problem is not null); }),
             Read("record_get", "One record by id: its envelope with type, author, subject, hash, signatures and body, and whether it is current.", Arguments(("id", "Record id (ULID).")), "id",

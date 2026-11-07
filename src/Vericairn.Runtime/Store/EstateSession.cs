@@ -125,6 +125,42 @@ public sealed class EstateSession : IDisposable
 
     internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles());
 
+    /// <summary>
+    /// The estate and the exact record files it was loaded from, from one snapshot; the files are not copied and must not be changed.
+    /// The judged model is reused only for the identical file snapshot and manifest bytes it was judged from, which is what search
+    /// reads (identities, pins and supersession); it carries no time-dependent judgment of its own.
+    /// </summary>
+    internal (EstateModel Model, IReadOnlyDictionary<string, RecordFile> Files) LoadSnapshot()
+    {
+        if (readOnly)
+        {
+            IReadOnlyList<RecordFile> files = ReadFiles();
+            return (EstateLoader.Load(Root, files), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+        }
+
+        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+        LiveStore.FileSnapshot snapshot = Live.Snapshot();
+        string manifest = ManifestIdentity();
+        if (snapshotModel is { } cached && ReferenceEquals(cached.Files, snapshot) && cached.Manifest == manifest) return (cached.Model, snapshot.ByPath);
+        if (!ReferenceEquals(snapshot, loadedFiles))
+        {
+            parseCache.Retain(snapshot.ByPath);
+            loadedFiles = snapshot;
+        }
+
+        EstateModel model = EstateLoader.Load(Root, snapshot.Files, parseCache);
+        snapshotModel = (snapshot, manifest, model);
+        return (model, snapshot.ByPath);
+    }
+
+    private (LiveStore.FileSnapshot Files, string Manifest, EstateModel Model)? snapshotModel;
+
+    private string ManifestIdentity()
+    {
+        try { return Records.Hashing.ContentHash.Sha256(File.ReadAllBytes(Path.Combine(Root, EstateLayout.ManifestPath))); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return "unreadable " + Guid.NewGuid().ToString("N"); }
+    }
+
     /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
     {

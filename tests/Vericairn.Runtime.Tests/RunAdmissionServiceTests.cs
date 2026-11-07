@@ -98,7 +98,7 @@ public sealed class RunAdmissionServiceTests
             },
             _ => null, (_, _) => throw new InvalidOperationException("Release admission is outside this fixture."));
         return new RunAdmissionService(records, () => run.Service.Providers, () => run.Service.WorkerOptions,
-            (_, _, order, goal, maxBytes, recipient, assignment, _) =>
+            (_, _, order, goal, maxBytes, recipient, assignment, _, _, _) =>
             {
                 Assert.Equal(run.Goal, goal.Id);
                 return run.Service.BriefContext(order.Id, maxBytes, recipient, assignment)!;

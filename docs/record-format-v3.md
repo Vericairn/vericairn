@@ -397,3 +397,26 @@ its review from `review` records of that exact hash; see the
 [operator guide](operator-guide.md#runs-of-a-flow-092). `records describe goal`,
 `records describe assignment`, `records describe result` and `records describe
 operation` include these contracts.
+
+## Search selections in agent runs (0.9.2)
+
+CONTEXT-02 adds two optional fields to `agent-run` operations within format 3, and no record type. A run without them is
+unchanged; an older release refuses a record that has them, and the manifest's pin keeps an estate on one release.
+
+| Field | Contract |
+| --- | --- |
+| `execution.contextSelections` | Fixed at intent with the run's `execution`: each dispatch-time search of the run's package, at most five, each of at most 50 candidates. It requires the exact `contextPackage`. |
+| `searchesObserved` | Recorded at settlement only, on an `observed-success` or `known-failure` revision, and kept by every later revision: `selections` (at most 100), `complete` (whether every search the run's MCP server served is kept) and `digest`, SHA-256 of the canonical JSON array of every observed selection's hash in order, which a complete list's selections must equal. |
+
+Each selection is a `vericairn.search-selection/1` object with its own `hash`, SHA-256 of its canonical JSON without the
+`hash` member: `method` (`keyword`, version `vericairn.search.keyword/1`, analyzer and engine), `query` (the exact `text`,
+parsed `terms`, `phrases` and `filters`), `limit` and `selectLimit`, `reader` (`principal` or null, and the `audiences`
+searched), `index` (`revision`, each segment's `audience` with its `records` and `documents` basis hashes, `current`, `commit`
+or `uncommitted`, and `asOf`, the latest recorded time among the indexed records), the ranked `candidates` and `more`. A
+candidate holds its `rank`, integer `score`, `kind`, `audience`, `source` identity, `pin`, matched `fields`, `extent` and
+`state` (`selected`, `duplicate`, `below-limit`, `excluded` or `index-fault`), with a `reason` for the last two; an index
+fault's source names only what the index held. A record carries only candidates whose audience is Internal or Public, and a
+selection that omits others says so in `limited`, without a count. Validation refuses a hash that does not match, a candidate
+of another audience, more candidates or selections than these limits, an out-of-order rank and any field not listed here.
+The context manifest that holds a package's selections is `vericairn.context-manifest/2`; it is a derived artifact, not a
+record. Because the operation's field descriptions change, the generic record reader advances to `vericairn.records/readers/8`.

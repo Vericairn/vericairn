@@ -247,6 +247,37 @@ failures with no uncertain submitted effect. The dedicated route has no fallback
 runtimes. A passing response reserves nothing and grants no authority: actual submission repeats the
 gate against its current inputs. See the [release guide](software.md#release-providers-and-the-products-release-profile).
 
+## Keyword search and search-selected context (0.9.2)
+
+CONTEXT-02 adds five routes, each a read that writes no record: their input travels in a POST body because up to five
+queries of 1,024 bytes do not fit a request line, and none takes a signing key or the local-network write ledger.
+
+| Route | Operation | Request and response |
+|---|---|---|
+| `POST /v1/search` | `Search` | `SearchRequest` (`query`, optional `limit` 1 to 50, `allowStale`, `principal`, `method`) and `SearchResponse` |
+| `POST /v1/search/index` | `SearchIndex` | `SearchIndexRequest` (`rebuild`) and `SearchIndexResponse` |
+| `POST /v1/search/replay` | `SearchReplay` | `SearchReplayRequest` (`selection`, or `record` with optional `selectionHash`) and `SearchReplayResponse` |
+| `POST /v1/context/prepare` | `Context(ContextRequest)` | `ContextRequest` (`workOrder`, `maxBytes`, up to five `search` queries, `principal`) and `ContextResponse` |
+| `POST /v1/context/brief` | `BriefContext(BriefContextRequest)` | `BriefContextRequest` (the brief's fields, `search` and `principal`) and `BriefResponse`, or 404 for no such work order |
+
+`SearchResponse` carries `text`, the `selection` (the canonical `vericairn.search-selection/1` record of the search, with its
+own hash), the ranked `candidates`, `current` (false when answered stale), `more`, `completeness` (present only for a reader
+that cannot read every segment: `Completeness cannot be confirmed.`, naming and counting nothing), `problem` and `trust`. Each
+`SearchCandidate` gives its `rank`, `score` (BM25 from its own audience segment, times 10,000, rounded half away from zero),
+`kind` (`record`, `document` or `knowledge`), `state`, `title`, `source` identity, `pin`, matched `fields`, `audience`, a
+record's `key`, a `reason` for an excluded candidate or an index fault, and an `excerpt` of at most 320 bytes of the original,
+labelled untrusted. Refusals answer HTTP 200 with a typed problem: `search-query-empty`, `search-query-oversize`,
+`search-query-invalid`, `search-method-unavailable`, `search-index-unavailable`, `invalid`, or `denied` for a request device
+that lost admission. Restricted and nonexistent sources answer alike.
+
+A request's `principal` names who the search or package is for, and only narrows what the caller may read: a device-signed
+request may name its own principal or none (`RequestScope` refuses another), and the local socket's caller reads the whole
+estate as before. Without `search` or `principal`, `ContextRequest` and `BriefContextRequest` are the existing reads, and the
+SDK sends them on the existing GET routes. `RunStartRequest` and `GoalStepRequest` add `search`, up to five queries for the
+run's package. `IEstateApi` adds `Search`, `SearchIndex`, `SearchReplay`, `Context(ContextRequest)` and
+`BriefContext(BriefContextRequest)`, each with a default implementation and a cancellable counterpart; `VericairnClient` and
+`CancellationBoundApi` implement all ten. See [API compatibility for 0.9.2](api-compatibility-0.9.2.md#keyword-search-and-search-selected-context-context-02).
+
 ## Context artifacts (0.7.0 addition)
 
 `GET /v1/context/work/{key}` (`Context`) computes and returns a

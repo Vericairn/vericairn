@@ -13,6 +13,7 @@ internal sealed class ExecutionOptions
     private readonly Option<long?> outputTokens = new("--output-tokens") { Description = "Output allocation, within the run's token reservation; not measured consumption." };
     private readonly Option<long?> contextBytes = new("--context-bytes") { Description = "Maximum canonical context payload bytes, separate from token reservations; mandatory originals and accounting must fit." };
     private readonly Option<string?> contextPackage = new("--context-package") { Description = "Optional expected hash of the context package assembled for this run; a mismatch refuses dispatch." };
+    private readonly Option<string[]> search = new("--search") { Description = "A search query whose top three new candidates join the run's package as optional sources pinned by exact hash; repeatable, at most five. They grant no authority, and the run's intent records each selection (record format 3).", AllowMultipleArgumentsPerToken = false };
 
     public ExecutionOptions(Command command)
     {
@@ -22,8 +23,10 @@ internal sealed class ExecutionOptions
         command.Options.Add(outputTokens);
         command.Options.Add(contextBytes);
         command.Options.Add(contextPackage);
+        command.Options.Add(search);
     }
 
     public RunChoices Read(ParseResult result) => new(result.GetValue(configuration), result.GetValue(execution) ?? [],
-        result.GetValue(inputTokens), result.GetValue(outputTokens), result.GetValue(contextPackage), result.GetValue(contextBytes));
+        result.GetValue(inputTokens), result.GetValue(outputTokens), result.GetValue(contextPackage), result.GetValue(contextBytes))
+    { Search = result.GetValue(search) is { Length: > 0 } queries ? queries : null };
 }

@@ -284,11 +284,13 @@ public sealed class McpServer
 
                 var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = call.Text });
                 if (call.Warning is { } warning) content.Add(new JsonObject { ["type"] = "text", ["text"] = "warning: " + warning });
-                return Result(id, new JsonObject
+                var result = new JsonObject
                 {
                     ["content"] = content,
                     ["isError"] = call.IsError,
-                });
+                };
+                if (call.Meta is { } meta) result["_meta"] = meta.DeepClone();
+                return Result(id, result);
             default:
                 return Error(id, -32601, $"Method not found: {method}.");
         }

@@ -1,0 +1,437 @@
+{
+  "basis": {
+    "access": "estate-wide read permission; rechecked on retrieval",
+    "asOf": "2026-11-01T12:00:10Z",
+    "asOfMethod": "latest recorded timestamp in the observed file set; not live external health",
+    "audience": "authorized estate reader",
+    "communication": "presentation supplied by the caller; no depth selection by the context contract",
+    "estate": "01M6S000000000000000000001",
+    "execution": null,
+    "generator": "vericairn.context/1",
+    "nextTask": "Continue the recorded work; inspect current constraints and return contract.",
+    "outsideSelection": {
+      "api": "/v1/records?type=document-revision",
+      "list": "vericairn context catalogue",
+      "mcp": "records_list with type=document-revision",
+      "scope": "The rest of the document catalogue is outside this selection, not withheld material. Listing it does not read its original bodies."
+    },
+    "recordFormat": 3,
+    "scope": "This work step's instructions, governing decisions, effects and pinned input records, plus optional documents named by that work, its inputs and governing decisions. Referenced prerequisite work remains an input, not another assignment. Historical file bodies outside this step, unrelated records, output objects and unrecorded conversation are outside this selection.",
+    "selection": "deterministic working instructions and effects, governing decisions, exact input records and signature devices; prerequisite work remains an input, not another active assignment; historical file bodies outside this step are not selected; mandatory originals before explicitly named optional sources; unmentioned catalogue entries are outside this selection; then up to five recorded searches, whose top three new candidates each are optional sources pinned by exact hash that grant no authority and never reorder the explicit selection",
+    "selections": [
+      {
+        "candidates": [
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 870,
+              "start": 0
+            },
+            "fields": [
+              "body.statement",
+              "body.summary",
+              "body.synthesis"
+            ],
+            "kind": "record",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowODJkNDBkMDJlMDI4MjU4YzFkZjlhNDQxNDhkZjJiY2M4MDg0NjRlYTM3YTVhY2Y0OTk1MGM3ZDU3ODM1Mjk5IiwiYnl0ZXMiOjg3MCwiaGFzaCI6InNoYTI1Njo1MGQ5NWQwNjZmNzA2NWRlYzZmNzhiN2VkODEwYmFhNmJiMTdhZjI0ZjgxZjRiNDFiZjkzYTg3NTE1NmY1N2M2IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMCIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kZWNpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDEwLmpzb24iLCJ0eXBlIjoiZGVjaXNpb24ifX0",
+            "rank": 1,
+            "score": 59110,
+            "source": {
+              "byteHash": "sha256:082d40d02e028258c1df9a44148df2bcc808464ea37a5acf49950c7d57835299",
+              "bytes": 870,
+              "hash": "sha256:50d95d066f7065dec6f78b7ed810baa6bb17af24f81f4b41bf93a875156f57c6",
+              "id": "01M6S000000000000000000010",
+              "kind": "record",
+              "path": "records/decision/2026-11/01M6S000000000000000000010.json",
+              "type": "decision"
+            },
+            "state": "duplicate"
+          },
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 534,
+              "start": 0
+            },
+            "fields": [
+              "body.summary"
+            ],
+            "kind": "record",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo0NzkxZWRiYmIxNmM3YWE5NTIxMTEyYjczYzI5ZTkzMzZiZDc5MjE0OTY2ZThjNDYwZTU0NjNhYWQwNDBlMmM5IiwiYnl0ZXMiOjUzNCwiaGFzaCI6InNoYTI1NjoyYWVlYzJhNmY3NDBlYjZlMGYwNjkzMTdkOWI0NzVjN2EwYzE5OTBhYzIxNTU5YzZiNjdlMGZlNzZjNzcyYjBkIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNCIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+            "rank": 2,
+            "score": 21339,
+            "source": {
+              "byteHash": "sha256:4791edbbb16c7aa9521112b73c29e9336bd79214966e8c460e5463aad040e2c9",
+              "bytes": 534,
+              "hash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d",
+              "id": "01M6S000000000000000000014",
+              "kind": "record",
+              "path": "records/document-revision/2026-11/01M6S000000000000000000014.json",
+              "type": "document-revision"
+            },
+            "state": "selected"
+          },
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 552,
+              "start": 0
+            },
+            "fields": [
+              "body.summary"
+            ],
+            "kind": "record",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo1OGZiNGM3ZGQyZmUwNGM4M2IzNzYwMzQ0NzVhNWY4MDk0MjFkN2I0OWRiODA3OTRkZGY1NGQyYzI5OWZiN2QwIiwiYnl0ZXMiOjU1MiwiaGFzaCI6InNoYTI1NjpiNDNhOTFlOWY1M2U4ZGRmYmNhMTRjNTJhNmYyMmZjNWMwMGEzZTEyZWE3NWJiZWEwNWU5OTg0ZjYwNDI5MDU5IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNSIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE1Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+            "rank": 3,
+            "score": 20992,
+            "source": {
+              "byteHash": "sha256:58fb4c7dd2fe04c83b376034475a5f809421d7b49db80794ddf54d2c299fb7d0",
+              "bytes": 552,
+              "hash": "sha256:b43a91e9f53e8ddfbca14c52a6f22fc5c00a3e12ea75bbea05e9984f60429059",
+              "id": "01M6S000000000000000000015",
+              "kind": "record",
+              "path": "records/document-revision/2026-11/01M6S000000000000000000015.json",
+              "type": "document-revision"
+            },
+            "state": "selected"
+          },
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 548,
+              "start": 0
+            },
+            "fields": [
+              "body.summary"
+            ],
+            "kind": "record",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjpjMDIzZGVkZmQ0YmYwZThhNTQ2NGM5ODZlMWQ1MzZiZTUwNzNmNWZjMzQxZmFjNTRmMTMyMmE3ODdkOTZmYzYyIiwiYnl0ZXMiOjU0OCwiaGFzaCI6InNoYTI1Njo0NDkzNzhjNTIyNWNlYzdiMDE2MmJlOTFhMThjOWVlZDFmNzc4NzAwNGRhZDFhMzEzOGZhNDdjZmQwMTg5N2QzIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNiIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE2Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+            "rank": 4,
+            "score": 20992,
+            "source": {
+              "byteHash": "sha256:c023dedfd4bf0e8a5464c986e1d536be5073f5fc341fac54f1322a787d96fc62",
+              "bytes": 548,
+              "hash": "sha256:449378c5225cec7b0162be91a18c9eed1f7787004dad1a3138fa47cfd01897d3",
+              "id": "01M6S000000000000000000016",
+              "kind": "record",
+              "path": "records/document-revision/2026-11/01M6S000000000000000000016.json",
+              "type": "document-revision"
+            },
+            "state": "selected"
+          }
+        ],
+        "format": "vericairn.search-selection/1",
+        "hash": "sha256:d0184cd158cf1dbafaa13b03950e92cd44dd07fbaf092cfd30bbbb1e0503971a",
+        "index": {
+          "asOf": "2026-11-01T12:00:10Z",
+          "commit": "uncommitted",
+          "current": true,
+          "revision": "sha256:83dceb5afaabdc6fc1924c6c142ef15f53c8048f573f5333a51bac82275237ad",
+          "segments": [
+            {
+              "audience": "Internal",
+              "documents": "sha256:6c74059736976b232e457af184f191e0b5a8f17bd95b318190e48d19991de4b0",
+              "records": "sha256:c7def37c36b2a42c8e43e28d2d4e0807b02b90e29ed978fb1bbbb843a8b87296"
+            },
+            {
+              "audience": "Members only",
+              "documents": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            },
+            {
+              "audience": "Public",
+              "documents": "sha256:d5ce289fa154cfc3bf906d7dd572b869d4e3ba9d781980ca34ef801db3b1f7a0",
+              "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        "limit": 10,
+        "method": {
+          "analyzer": "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming",
+          "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
+          "name": "keyword",
+          "version": "vericairn.search.keyword/1"
+        },
+        "more": false,
+        "query": {
+          "filters": {
+            "history": false
+          },
+          "phrases": [],
+          "terms": [
+            "original",
+            "bytes"
+          ],
+          "text": "original bytes"
+        },
+        "reader": {
+          "audiences": [
+            "Internal",
+            "Members only",
+            "Public"
+          ],
+          "principal": null
+        },
+        "selectLimit": 3
+      },
+      {
+        "candidates": [
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 57,
+              "start": 262
+            },
+            "fields": [
+              "row.Holds"
+            ],
+            "kind": "document",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+            "rank": 1,
+            "score": 55768,
+            "source": {
+              "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+              "bytes": 449,
+              "kind": "document",
+              "path": "design/search-notes.md",
+              "revision": "01M6S000000000000000000014",
+              "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+            },
+            "state": "selected"
+          },
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 162,
+              "start": 214
+            },
+            "fields": [
+              "heading"
+            ],
+            "kind": "document",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+            "rank": 2,
+            "score": 29162,
+            "source": {
+              "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+              "bytes": 449,
+              "kind": "document",
+              "path": "design/search-notes.md",
+              "revision": "01M6S000000000000000000014",
+              "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+            },
+            "state": "duplicate"
+          },
+          {
+            "audience": "Internal",
+            "extent": {
+              "length": 54,
+              "start": 320
+            },
+            "fields": [],
+            "kind": "document",
+            "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+            "rank": 3,
+            "score": 27434,
+            "source": {
+              "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+              "bytes": 449,
+              "kind": "document",
+              "path": "design/search-notes.md",
+              "revision": "01M6S000000000000000000014",
+              "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+            },
+            "state": "duplicate"
+          }
+        ],
+        "format": "vericairn.search-selection/1",
+        "hash": "sha256:28b43d091454da9cb3c537a149089321b848706c28051af7c96103e6ac6648cb",
+        "index": {
+          "asOf": "2026-11-01T12:00:10Z",
+          "commit": "uncommitted",
+          "current": true,
+          "revision": "sha256:83dceb5afaabdc6fc1924c6c142ef15f53c8048f573f5333a51bac82275237ad",
+          "segments": [
+            {
+              "audience": "Internal",
+              "documents": "sha256:6c74059736976b232e457af184f191e0b5a8f17bd95b318190e48d19991de4b0",
+              "records": "sha256:c7def37c36b2a42c8e43e28d2d4e0807b02b90e29ed978fb1bbbb843a8b87296"
+            },
+            {
+              "audience": "Members only",
+              "documents": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            },
+            {
+              "audience": "Public",
+              "documents": "sha256:d5ce289fa154cfc3bf906d7dd572b869d4e3ba9d781980ca34ef801db3b1f7a0",
+              "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        "limit": 10,
+        "method": {
+          "analyzer": "nfkc-casefold; letter-digit runs; connected identifiers also whole; no stemming",
+          "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
+          "name": "keyword",
+          "version": "vericairn.search.keyword/1"
+        },
+        "more": false,
+        "query": {
+          "filters": {
+            "history": false
+          },
+          "phrases": [],
+          "terms": [
+            "heron",
+            "catalog"
+          ],
+          "text": "heron catalog"
+        },
+        "reader": {
+          "audiences": [
+            "Internal",
+            "Members only",
+            "Public"
+          ],
+          "principal": null
+        },
+        "selectLimit": 3
+      }
+    ],
+    "workOrder": {
+      "hash": "sha256:250e879ce7db80df5d23709ade6fbdd656534cc8bc5e3083b85d04bf2c1b2b68",
+      "id": "01M6S000000000000000000012"
+    }
+  },
+  "format": "vericairn.context-manifest/2",
+  "sources": [
+    {
+      "byteHash": "sha256:082d40d02e028258c1df9a44148df2bcc808464ea37a5acf49950c7d57835299",
+      "bytes": 870,
+      "dependency": "Read before continuing W-1",
+      "hash": "sha256:50d95d066f7065dec6f78b7ed810baa6bb17af24f81f4b41bf93a875156f57c6",
+      "id": "01M6S000000000000000000010",
+      "key": "s000000",
+      "kind": "record",
+      "mandatory": true,
+      "path": "records/decision/2026-11/01M6S000000000000000000010.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowODJkNDBkMDJlMDI4MjU4YzFkZjlhNDQxNDhkZjJiY2M4MDg0NjRlYTM3YTVhY2Y0OTk1MGM3ZDU3ODM1Mjk5IiwiYnl0ZXMiOjg3MCwiaGFzaCI6InNoYTI1Njo1MGQ5NWQwNjZmNzA2NWRlYzZmNzhiN2VkODEwYmFhNmJiMTdhZjI0ZjgxZjRiNDFiZjkzYTg3NTE1NmY1N2M2IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMCIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kZWNpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDEwLmpzb24iLCJ0eXBlIjoiZGVjaXNpb24ifX0",
+      "state": "retained",
+      "type": "decision"
+    },
+    {
+      "byteHash": "sha256:36368dbbce6d8d0d31daa23a79c5983784ccb2c82a24c78c01ca2a408eb3def8",
+      "bytes": 549,
+      "dependency": "Read before continuing W-1",
+      "hash": "sha256:b99e831bbd740d201d0e3787a029b44e706c2791cb321ad8857a23e35006b3be",
+      "id": "01M6S000000000000000000001",
+      "key": "s000001",
+      "kind": "record",
+      "mandatory": true,
+      "path": "records/estate/2026-11/01M6S000000000000000000001.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjozNjM2OGRiYmNlNmQ4ZDBkMzFkYWEyM2E3OWM1OTgzNzg0Y2NiMmM4MmEyNGM3OGMwMWNhMmE0MDhlYjNkZWY4IiwiYnl0ZXMiOjU0OSwiaGFzaCI6InNoYTI1NjpiOTllODMxYmJkNzQwZDIwMWQwZTM3ODdhMDI5YjQ0ZTcwNmMyNzkxY2IzMjFhZDg4NTdhMjNlMzUwMDZiM2JlIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9lc3RhdGUvMjAyNi0xMS8wMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMS5qc29uIiwidHlwZSI6ImVzdGF0ZSJ9fQ",
+      "state": "retained",
+      "type": "estate"
+    },
+    {
+      "byteHash": "sha256:9c64e415970a6bfe4ad4b1a1cf8ce181a5ff15beff0195d6545313bc5a268fa5",
+      "bytes": 360,
+      "dependency": "Read before continuing W-1",
+      "hash": "sha256:75cc5656eddadbe1761145ce2687aa162bda9c71c5dd22919ac8ce76f0154104",
+      "id": "01M6S000000000000000000002",
+      "key": "s000002",
+      "kind": "record",
+      "mandatory": true,
+      "path": "records/principal/2026-11/01M6S000000000000000000002.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo5YzY0ZTQxNTk3MGE2YmZlNGFkNGIxYTFjZjhjZTE4MWE1ZmYxNWJlZmYwMTk1ZDY1NDUzMTNiYzVhMjY4ZmE1IiwiYnl0ZXMiOjM2MCwiaGFzaCI6InNoYTI1Njo3NWNjNTY1NmVkZGFkYmUxNzYxMTQ1Y2UyNjg3YWExNjJiZGE5YzcxYzVkZDIyOTE5YWM4Y2U3NmYwMTU0MTA0IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMiIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9wcmluY2lwYWwvMjAyNi0xMS8wMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMi5qc29uIiwidHlwZSI6InByaW5jaXBhbCJ9fQ",
+      "state": "retained",
+      "type": "principal"
+    },
+    {
+      "byteHash": "sha256:11ff67c04c66941280529d83474ef17f5816f848a41910d68e7987d0ebdd2bc0",
+      "bytes": 648,
+      "dependency": "Read before continuing W-1",
+      "hash": "sha256:250e879ce7db80df5d23709ade6fbdd656534cc8bc5e3083b85d04bf2c1b2b68",
+      "id": "01M6S000000000000000000012",
+      "key": "s000003",
+      "kind": "record",
+      "mandatory": true,
+      "path": "records/work-order/2026-11/01M6S000000000000000000012.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjoxMWZmNjdjMDRjNjY5NDEyODA1MjlkODM0NzRlZjE3ZjU4MTZmODQ4YTQxOTEwZDY4ZTc5ODdkMGViZGQyYmMwIiwiYnl0ZXMiOjY0OCwiaGFzaCI6InNoYTI1NjoyNTBlODc5Y2U3ZGI4MGRmNWQyMzcwOWFkZTZmYmRkNjU2NTM0Y2M4YmM1ZTMwODNiODVkMDRiZjJjMWIyYjY4IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMiIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy93b3JrLW9yZGVyLzIwMjYtMTEvMDFNNlMwMDAwMDAwMDAwMDAwMDAwMDAwMTIuanNvbiIsInR5cGUiOiJ3b3JrLW9yZGVyIn19",
+      "state": "retained",
+      "type": "work-order"
+    },
+    {
+      "byteHash": "sha256:4791edbbb16c7aa9521112b73c29e9336bd79214966e8c460e5463aad040e2c9",
+      "bytes": 534,
+      "dependency": "candidate from search s1; optional; grants no authority",
+      "hash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d",
+      "id": "01M6S000000000000000000014",
+      "key": "s000004",
+      "kind": "record",
+      "mandatory": false,
+      "path": "records/document-revision/2026-11/01M6S000000000000000000014.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo0NzkxZWRiYmIxNmM3YWE5NTIxMTEyYjczYzI5ZTkzMzZiZDc5MjE0OTY2ZThjNDYwZTU0NjNhYWQwNDBlMmM5IiwiYnl0ZXMiOjUzNCwiaGFzaCI6InNoYTI1NjoyYWVlYzJhNmY3NDBlYjZlMGYwNjkzMTdkOWI0NzVjN2EwYzE5OTBhYzIxNTU5YzZiNjdlMGZlNzZjNzcyYjBkIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNCIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+      "search": {
+        "rank": 2,
+        "selection": "s1"
+      },
+      "state": "retained",
+      "type": "document-revision"
+    },
+    {
+      "byteHash": "sha256:58fb4c7dd2fe04c83b376034475a5f809421d7b49db80794ddf54d2c299fb7d0",
+      "bytes": 552,
+      "dependency": "candidate from search s1; optional; grants no authority",
+      "hash": "sha256:b43a91e9f53e8ddfbca14c52a6f22fc5c00a3e12ea75bbea05e9984f60429059",
+      "id": "01M6S000000000000000000015",
+      "key": "s000005",
+      "kind": "record",
+      "mandatory": false,
+      "path": "records/document-revision/2026-11/01M6S000000000000000000015.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo1OGZiNGM3ZGQyZmUwNGM4M2IzNzYwMzQ0NzVhNWY4MDk0MjFkN2I0OWRiODA3OTRkZGY1NGQyYzI5OWZiN2QwIiwiYnl0ZXMiOjU1MiwiaGFzaCI6InNoYTI1NjpiNDNhOTFlOWY1M2U4ZGRmYmNhMTRjNTJhNmYyMmZjNWMwMGEzZTEyZWE3NWJiZWEwNWU5OTg0ZjYwNDI5MDU5IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNSIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE1Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+      "search": {
+        "rank": 3,
+        "selection": "s1"
+      },
+      "state": "retained",
+      "type": "document-revision"
+    },
+    {
+      "byteHash": "sha256:c023dedfd4bf0e8a5464c986e1d536be5073f5fc341fac54f1322a787d96fc62",
+      "bytes": 548,
+      "dependency": "candidate from search s1; optional; grants no authority",
+      "hash": "sha256:449378c5225cec7b0162be91a18c9eed1f7787004dad1a3138fa47cfd01897d3",
+      "id": "01M6S000000000000000000016",
+      "key": "s000006",
+      "kind": "record",
+      "mandatory": false,
+      "path": "records/document-revision/2026-11/01M6S000000000000000000016.json",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjpjMDIzZGVkZmQ0YmYwZThhNTQ2NGM5ODZlMWQ1MzZiZTUwNzNmNWZjMzQxZmFjNTRmMTMyMmE3ODdkOTZmYzYyIiwiYnl0ZXMiOjU0OCwiaGFzaCI6InNoYTI1Njo0NDkzNzhjNTIyNWNlYzdiMDE2MmJlOTFhMThjOWVlZDFmNzc4NzAwNGRhZDFhMzEzOGZhNDdjZmQwMTg5N2QzIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxNiIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kb2N1bWVudC1yZXZpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE2Lmpzb24iLCJ0eXBlIjoiZG9jdW1lbnQtcmV2aXNpb24ifX0",
+      "search": {
+        "rank": 4,
+        "selection": "s1"
+      },
+      "state": "retained",
+      "type": "document-revision"
+    },
+    {
+      "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+      "bytes": 449,
+      "dependency": "candidate from search s2; optional; grants no authority",
+      "key": "s000007",
+      "kind": "document",
+      "mandatory": false,
+      "path": "design/search-notes.md",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+      "revision": "01M6S000000000000000000014",
+      "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d",
+      "search": {
+        "rank": 1,
+        "selection": "s2"
+      },
+      "state": "retained"
+    }
+  ]
+}

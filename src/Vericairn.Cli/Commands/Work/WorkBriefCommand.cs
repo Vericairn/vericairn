@@ -14,9 +14,12 @@ internal sealed class WorkBriefCommand : Command
         var keyArgument = new Argument<string>("work-order") { Description = "Work-order key (for example M1-WORK) or record id." };
         var agentContext = new Option<bool>("--agent-context") { Description = "Use the measured agent brief served by MCP; named optional bodies stay withheld without a byte allocation." };
         var maxBytes = new Option<long?>("--max-bytes") { Description = "Context byte allocation; implies --agent-context. Mandatory overflow refuses instead of truncating." };
+        var search = new Option<string[]>("--search") { Description = "A search query whose top three new candidates join the brief's package as optional sources pinned by exact hash; repeatable, at most five; implies --agent-context. Candidates grant no authority.", AllowMultipleArgumentsPerToken = false };
         Arguments.Add(keyArgument);
         Options.Add(agentContext);
         Options.Add(maxBytes);
-        SetAction(parseResult => operations.WorkBrief(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(context.JsonOption), context.Presentation.Read(parseResult), parseResult.GetValue(agentContext), parseResult.GetValue(maxBytes)));
+        Options.Add(search);
+        SetAction(parseResult => operations.WorkBrief(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(context.JsonOption), context.Presentation.Read(parseResult), parseResult.GetValue(agentContext), parseResult.GetValue(maxBytes),
+            parseResult.GetValue(search) is { Length: > 0 } searches ? searches : null));
     }
 }

@@ -17,7 +17,9 @@ public sealed partial class EstateService
     private static readonly string[] RetainedAdapterSourceFields = ["path", "revision", "revisionHash"];
 
     /// <inheritdoc />
-    public ContextResponse Context(string workOrder, long? maxBytes = null)
+    public ContextResponse Context(string workOrder, long? maxBytes = null) => ContextFor(workOrder, maxBytes, null, null);
+
+    private ContextResponse ContextFor(string workOrder, long? maxBytes, IReadOnlyList<string>? searches, string? principal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -31,7 +33,7 @@ public sealed partial class EstateService
 
             RecordEnvelope? order = WorkView.FindOrder(model, workOrder);
             if (order is null) return ContextRefusal("not-found", "No work order has that identity.");
-            ContextResponse result = ContextLocked(model, files, order, maxBytes);
+            ContextResponse result = ContextLocked(model, files, order, maxBytes, searches: searches, principal: principal);
             try
             {
                 if (result.Package is { } package && PresentationUse(model, Vericairn.Records.Templates.PresentationTemplates.Context) is { } use)
@@ -42,7 +44,8 @@ public sealed partial class EstateService
         }
     }
 
-    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true, bool fullSelectedScope = false, RecordEnvelope? progressGoal = null)
+    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true, bool fullSelectedScope = false, RecordEnvelope? progressGoal = null,
+        IReadOnlyList<string>? searches = null, string? principal = null)
     {
         List<FindingDto> errors = model.Findings.Where(f => f.Severity == Severity.Error)
             .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)).ToList();
@@ -78,7 +81,22 @@ public sealed partial class EstateService
                 new FindingDto("error", "context.original-unavailable", s.Identity["path"]!.GetValue<string>(), s.Dependency)).ToList()));
         }
 
+        JsonArray? selections = null;
+        if (searches is { Count: > 0 })
+        {
+            (List<ContextAssembly.Source>? found, JsonArray? recorded, Problem? problem) = SearchSources(model, files, sources, searches, principal);
+            if (problem is not null) return new ContextResponse(problem.Message + "\n", null, problem);
+            sources.AddRange(found!);
+            selections = recorded;
+        }
+
         JsonObject basis = ContextSelection.Basis(model, "This work step's instructions, governing decisions, effects and pinned input records, plus optional documents named by that work, its inputs and governing decisions. Referenced prerequisite work remains an input, not another assignment. Historical file bodies outside this step, unrelated records, output objects and unrecorded conversation are outside this selection.", order);
+        if (selections is not null)
+        {
+            // Search selects; it never authorizes. Candidates are optional sources pinned by exact hash, after the explicit selection.
+            basis["selections"] = selections;
+            basis["selection"] = basis["selection"]!.GetValue<string>() + "; then up to five recorded searches, whose top three new candidates each are optional sources pinned by exact hash that grant no authority and never reorder the explicit selection";
+        }
         if (!checkBatches)
         {
             basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";
@@ -86,9 +104,10 @@ public sealed partial class EstateService
         return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order, includeDocumentCatalogue: false, progressGoal), maxBytes, fullSelectedScope);
     }
 
-    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null, CommunicationProfile? profile = null, JsonObject? promptUse = null, RecordEnvelope? progressGoal = null)
+    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null, CommunicationProfile? profile = null, JsonObject? promptUse = null, RecordEnvelope? progressGoal = null,
+        IReadOnlyList<string>? searches = null, string? principal = null)
     {
-        ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope, progressGoal);
+        ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope, progressGoal, searches, principal);
         if (context.Package is not { } package)
         {
             return new BriefResponse(context.Text, Element(new JsonObject { ["problem"] = JsonSerializer.SerializeToNode(context.Problem, ProtocolJson.Options) }), Problem: context.Problem);

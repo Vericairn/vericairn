@@ -765,6 +765,7 @@ internal sealed partial class RunDispatchService(
 
             JsonObject body = JsonNode.Parse(found.Latest.Body.GetRawText())!.AsObject();
             change(body);
+            ObserveSearches(found, body);
             var draft = new RecordDraft("operation", by, Element(body), found.Latest.Subject, found.Latest.Id);
             if (body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure" or "canceled"))
             {
@@ -772,6 +773,22 @@ internal sealed partial class RunDispatchService(
             }
 
             return SettleAttentionLocked(model, found, draft);
+        }
+    }
+
+    // The searches the run's MCP server served its agent are recorded once, with whichever revision settles the run, from record
+    // format 3. An unreadable log leaves the settlement without them rather than holding it.
+    private void ObserveSearches(AgentRuns.Run run, JsonObject body)
+    {
+        if (session.Manifest.RecordFormat < 3 || body["searchesObserved"] is not null || body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure")
+            || EstateModel.BodyString(run.Latest, "status") is "observed-success" or "known-failure" or "canceled") return;
+        try
+        {
+            if (Search.ObservedSearches.Read(WorkerOptions.OpenRunDirectory(session.Manifest.Estate, run.Id)) is JsonObject searches) body["searchesObserved"] = searches;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Nothing is recorded that was not read whole.
         }
     }
 
