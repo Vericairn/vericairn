@@ -439,8 +439,9 @@ internal sealed class EventFollower : IAsyncDisposable
 
                 items.Writer.TryComplete();
             }
-            catch (Exception exception) when (exception is OperationCanceledException && stop.IsCancellationRequested)
+            catch (Exception) when (stop.IsCancellationRequested)
             {
+                // Stopped by the test: a platform may surface the cancelled read as an I/O failure.
                 items.Writer.TryComplete();
             }
             catch (Exception exception)
@@ -482,7 +483,7 @@ internal sealed class EventFollower : IAsyncDisposable
     {
         await stop.CancelAsync();
         try { await Completion; }
-        catch (Exception exception) when (exception is OperationCanceledException or HttpRequestException or IOException) { }
+        catch (Exception exception) when (exception is OperationCanceledException or HttpRequestException or IOException or ObjectDisposedException) { }
         stop.Dispose();
     }
 }
