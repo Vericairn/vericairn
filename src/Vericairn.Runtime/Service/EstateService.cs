@@ -86,11 +86,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var service = new EstateService(EstateSession.Open(root));
-        if (workerOptions is not null) service.WorkerOptions = workerOptions;
-        service.JudgeInterruptedBatches();
-        service.runDispatch.RecoverSettlements();
-        service.ReconcileRunAttention();
-        return service;
+        try
+        {
+            if (workerOptions is not null) service.WorkerOptions = workerOptions;
+            service.JudgeInterruptedBatches();
+            service.runDispatch.RecoverSettlements();
+            service.ReconcileRunAttention();
+            return service;
+        }
+        // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.
+        catch { service.Dispose(); throw; }
     }
 
     // Kept separate from retained-observation recovery: existing settlements need only their records.

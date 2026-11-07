@@ -764,6 +764,25 @@ the unreadable journal's write hold. This is local recovery state, not a new rec
 
 Objects are content-addressed bytes beside the records: `objects put <file>`, `objects list`, `objects verify` reads every object and checks its bytes against its name.
 
+### A damaged live store (0.9.2)
+
+Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
+
+From 0.9.2 (FIX-93), a live store that SQLite cannot use, such as a malformed database, stops the command with a diagnostic instead of an unhandled exception. The diagnostic quotes SQLite's error, names the profile and the store's path, and gives the profile's recovery route. A store that another runtime holds says so, and the route is to let that command finish or stop the daemon.
+
+For a repository-synced estate, rebuild the cache from the repository's record files:
+
+```sh
+vericairn runtime status
+vericairn runtime stop
+vericairn estate cache rebuild
+vericairn estate check
+```
+
+`estate cache rebuild` moves `live.db` and its `-wal`, `-shm` and any `-journal` file together, unchanged, into a new `failed-cache/<UTC time>` directory beside the cache, for diagnosis. It then reads every record file in the repository into a new cache and reports how many it read. The record files are not changed. It refuses while a daemon answers for the estate, and while another command of 0.9.2 or later has the estate open. Every writable session holds the estate's writer lock, `live.lock`, shared, and the rebuild holds it alone. A command that starts during a rebuild is refused until it finishes. A daemon of an earlier release takes no such lock, so stop it first. The cache also keeps notes that exist only on this machine: interim progress notes, attention acknowledgments and an unfinished operator action's checkpoint. The rebuilt cache starts without them, and they stay in the kept files. Finish an operator action before rebuilding where you can. Delete a kept directory once it is no longer needed.
+
+A local-only estate's database is never moved, deleted or rebuilt as a cache, and `estate cache rebuild` refuses it without changing anything. Stop every daemon and command that uses it, and keep `live.db` with its `-wal` and `-shm` files together. Then recover from a backup of that directory or from an earlier `estate export`. `estate restore` restores an export as a repository-synced estate.
+
 ## 11. The daemon
 
 Commands run an embedded runtime unless a daemon serves the estate on this machine; ordinary estate operations are clients of it, so that one owner holds the live state. Restore creates another copy directly. `recover compare`, `docs notes` and `docs regenerate` read the files and live store directly, even when a daemon serves this estate.

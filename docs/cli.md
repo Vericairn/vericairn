@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 8, November 6, 2026. Add `estate cache rebuild` in the development build.
+
 Revision 7, November 3, 2026. Add the run options of `goal propose` for a run of a flow in the development build.
 
 Revision 6, November 3, 2026. Add `worker run --prepare-only` and workspace setup commands for 0.9.1.
@@ -351,3 +353,18 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
 [operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
+
+## `vericairn estate cache rebuild` (0.9.2)
+
+`vericairn estate cache rebuild` rebuilds this clone's derived cache of a repository-synced estate from the repository's
+record files (FIX-93). It moves the failed `live.db` with its `-wal`, `-shm` and any `-journal` file, unchanged, into a new
+`failed-cache/<UTC time>` directory beside the cache. It refuses a local-only estate, whose database is canonical, and
+changes nothing there. It also refuses while a daemon answers for the estate or another command has it open. With `--json`
+it prints `estate`, `cache`, `records` (the record files read), `retained` (the kept directory, or null when no cache
+existed) and `retainedFiles`. See the [operator's guide](operator-guide.md#a-damaged-live-store-092).
+
+```sh
+vericairn runtime stop
+vericairn estate cache rebuild --json
+vericairn estate check
+```

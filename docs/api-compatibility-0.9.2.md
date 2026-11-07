@@ -51,6 +51,23 @@ field of results and operations and an assignment's `step` change their schema e
 declarations pinned to an earlier implementation require the ordinary explicit generator update before regeneration, and
 earlier golden fixtures remain retained. The generator id and contract version 1 are unchanged.
 
+## Live-store diagnostics and the cache rebuild (FIX-93)
+
+No route, interface member, protocol type or public member is added, removed or changed. The public `LiveStore`
+operations, and with them `EstateSession` and `EstateService.Open`, now report a SQLite failure as an `IOException` whose
+message names the storage profile, the store's path and the recovery route, with the `SqliteException` as its inner
+exception. They no longer throw the `SqliteException` itself. A failed `EstateService.Open` disposes its session before the
+exception leaves. The command line, which already reported an `IOException` as a bounded `error:` line with exit code `2`,
+reports these failures the same way.
+
+A writable `EstateSession` now holds `live.lock`, beside the live store, open with shared access for its lifetime. Sessions
+coexist as before. `EstateSession.Open` fails with an `IOException` while a cache rebuild holds that lock alone. Read-only
+sessions take no lock.
+
+The command line adds `estate cache rebuild`, which is not offered over the API, the SDK or MCP. It runs only on the
+estate's own machine with no daemon serving the estate. Its JSON output is `{estate, cache, records, retained,
+retainedFiles}`. No record type, record format or generated document changes.
+
 ## Review evidence route (FIX-94)
 
 No route, interface member, protocol type or command option is added or removed. `NewRecord` (`POST /v1/records`,
