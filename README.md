@@ -204,8 +204,11 @@ The following capabilities are in 0.9.1.
   `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
   a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
   takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent.
-  Explicit and routed runs on the old assignment are then refused before intent, without a charge. Multi-step
-  planning and scheduling are outside this Community implementation.
+  Explicit and routed runs on the old assignment are then refused before intent, without a charge. In the
+  development build, a goal can run a flow, a template of kind `flow` declaring roles and ordered steps with their
+  hand-off contract: `vericairn goal show` derives each step's state, and each item it must hand on with its
+  provenance, evidence and review, from the records, and `vericairn goal step` moves the run one work or review step
+  per command, routed by the step's role, its brief pinning the inputs by hash; a reserved step is never dispatched. Multi-step planning and scheduling are outside this Community implementation.
   `vericairn devices pair` issues a short-lived pairing
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at

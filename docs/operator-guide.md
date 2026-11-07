@@ -1173,6 +1173,62 @@ changed or added, or a changed `info/exclude`, is never applied and counts as a 
 A nested repository anywhere in the workspace, even under an excluded directory, marks the audit incomplete.
 These belong to the running worker: a worker still at 0.8.0 keeps its older audit and settlement.
 
+### Runs of a flow (0.9.2)
+
+A run is a goal whose plan names a [flow](templates.md#flows-092), the subject it serves, its own configuration and,
+optionally, the step it ends at. Its work is one ordinary work order, and each work or review step of the flow is an
+assignment of that work order naming the step. Propose and activate a run as any goal; `--flow` reads the flow's exact pin
+from the templates this runtime offers, and `--subject` binds each field of the flow's subject by its kind:
+
+```sh
+vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \
+  --done '{"type":"release","subject":"<product id>","fields":{"status":"published"}}' \
+  --work-order <work order id> --budget wallMinutes=120 --budget attemptsPerStep=3 \
+  --flow example/song@1.0.0 --subject product=<product id> --subject version=1.0.0 --subject tracks=intro,outro \
+  --flow-option step.shorts=off --until master
+vericairn goal activate <goal> --by <sponsor>
+vericairn goal show <goal>
+```
+
+`goal show`, the API's goal read, the SDK and the MCP `goal_get` and `goal_progress` tools give the run's position from the
+records alone: each step, once or once per instance under `each`, with its state and why, and each item it declares with
+its own state: `satisfied`, `missing`, `unproven` (its producing record does not show the declared provenance), `unverified`
+(a named verification does not pass at its exact hash), `in-review`, `stale` (it changed after its review) or `off`. A step is
+`done`, and closes, when its done predicates hold and every required item, and each optional item its configuration leaves on,
+is satisfied; an item that changes after its review reopens it. A step is `stale` when an input it used changed after use, so
+it reruns under its recovery once what it waits on is done; `blocked` while an earlier step it waits on is not done,
+naming every failing precondition, trap and due time; `in-review` while an item awaits its review, or a result awaits one
+before another attempt; `stopped` while a person holds its role or its assignment, it is a reserved act, or a watch passed
+its limit; `next` when an agent carries it; and `off` when the run's configuration, its `until` step or an unentered branch
+leaves it out. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
+`template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
+source. The same records give the same position on every machine at the same time (due times and watches read the clock);
+a machine that cannot resolve the flow shows the goal, says so, and takes none of its steps.
+
+`goal next` routes each ready work or review step by its role through the goal's roles, its roster or the estate's, exactly
+as a work order's step is routed, from the assignments and asks of that step alone. `goal step` then takes one step per
+command: the first, in the flow's order, whose route acts. An agent's step is an assignment of the run's work order naming
+the step and its instance (`step: {key, instance}`), stored with its run's intent after the worker's preflight, on the branch
+`work/<work order>-<step>` by default; a person's is an assignment and an ask. The assignment's brief pins each input the
+step takes by type, id and hash, lists each item with its provenance, evidence and review, carries the step's role brief and
+recovery, and prohibits what the goal's constraints, the reserved effects and the flow's `never` lines prohibit. A result or
+an operation may record its own `provenance` (its inputs by hash, provider, tool and settings) where an item requires it. A
+person can take over a step an agent holds with `work takeover`, which carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
+is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal other than its author
+and the step's own holders, of the item's reviewer role with its independence: in this build, an operator or an agent. A
+review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
+contributor of its own assignment. A verification an item names is a `verification` record of that exact subject that
+passed. Evidence is any passing verification of the exact subject by the declared method, whoever recorded it, the item's
+producer included; independence is what an item's review requires, not its evidence. A provenance that names a principal
+holds only for a principal of this estate.
+
+`goal step` never dispatches a reserved step; it stops, waiting on the operator, and no grant in this build lets an agent
+carry it. Nor does it dispatch an `operation`, `decision`, `effect`, `exchange` or `flow` step: each counts once its done
+predicates hold, recorded by whoever carries it. In this build an exchange's export and intake are not executed, an effect
+has no API or browser route, and nothing takes a run's next steps automatically; a person carries them. A stop is shown in the
+run's position and in `goal step`'s message; its operator request, and its place in status, Workbench and Remote, are not
+built yet, and a step with no available principal is reported rather than asked of the sponsor.
+
 ## 19. Pairing, local-network connections and revocation
 
 Pairing connects another machine to a serving runtime; it does not clone the estate. The listener is off unless configured. Configure it on the runtime's machine and restart:

@@ -64,6 +64,7 @@ public sealed class OperationType : IRecordType
         new("signals", "object[]", false, "Worker event-stream and settlement observations: code, severity (warning|critical), at, summary, optional fingerprint, count and attention (ask id). Raw invocation inputs never enter a record.", 2),
         new("execution", "object", false, "Immutable admitted model, effort, provenance, disabled Adapter, environment inventory and context allocation, recorded before dispatch.", 2),
         new("executionObserved", "object", false, "Harness reports at settlement, with discrepancies and facts still unknown; never inferred from the request.", 2),
+        new("provenance", "object", false, ProducedBy.Description, 3),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
 
@@ -461,6 +462,7 @@ public sealed class OperationType : IRecordType
         PackageRecordRules.Operation(context);
         ExecutionRecord.Read(context, status);
         SavedPrompts.ValidateUse(context);
+        ProducedBy.Read(context, body);
         body.NoOtherKeys();
         if (context.Format >= 2)
         {

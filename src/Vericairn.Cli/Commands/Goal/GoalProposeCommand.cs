@@ -24,6 +24,10 @@ internal sealed class GoalProposeCommand : Command
         var workOrderOption = new Option<string[]>("--work-order") { Description = "A work order the sponsor gives as its plan; repeatable. Without one a planner proposes its work, as work orders that name the goal among their inputs." };
         var inputOption = new Option<string[]>("--input") { Description = "A record it builds on, as type:id; repeatable." };
         var deadlineOption = new Option<string?>("--deadline") { Description = "The goal's deadline, for example 2026-12-01T00:00:00Z; validated and recorded but not yet enforced." };
+        var flowOption = new Option<string?>("--flow") { Description = "A flow to run, as id@version, a template of kind flow (vericairn templates list): the goal is a run of it, whose plan gives exactly one --work-order and whose every work and review step is an assignment of it naming the step." };
+        var subjectOption = new Option<string[]>("--subject") { Description = "With --flow, a field of the flow's subject as name=value: a record field by its id (or type:id), a list field as comma-separated item names, a text field as its text; repeatable." };
+        var flowOptionOption = new Option<string[]>("--flow-option") { Description = "With --flow, the goal's own configuration as name=value: a flow option, or step.<key>=on|off for an optional step, narrower than the estate's and the product's template-defaults; repeatable. No configuration turns off a required step, a reserved marking or a step an estate policy requires." };
+        var untilOption = new Option<string?>("--until") { Description = "With --flow, the step the run ends at; the steps after it are not part of the run." };
         var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation, and only its sponsor, a person, or an operator for a goal an agent sponsors records it." };
         Options.Add(byOption);
         Options.Add(titleOption);
@@ -38,6 +42,10 @@ internal sealed class GoalProposeCommand : Command
         Options.Add(workOrderOption);
         Options.Add(inputOption);
         Options.Add(deadlineOption);
+        Options.Add(flowOption);
+        Options.Add(subjectOption);
+        Options.Add(flowOptionOption);
+        Options.Add(untilOption);
         Options.Add(supersedesOption);
         SetAction(parseResult => operations.GoalPropose(
             parseResult.GetValue(context.EstateOption)!,
@@ -55,7 +63,11 @@ internal sealed class GoalProposeCommand : Command
                 parseResult.GetValue(workOrderOption) ?? [],
                 parseResult.GetValue(inputOption) ?? [],
                 parseResult.GetValue(deadlineOption),
-                parseResult.GetValue(supersedesOption)),
+                parseResult.GetValue(supersedesOption),
+                parseResult.GetValue(flowOption),
+                parseResult.GetValue(subjectOption) ?? [],
+                parseResult.GetValue(flowOptionOption) ?? [],
+                parseResult.GetValue(untilOption)),
             parseResult.GetValue(context.JsonOption)));
     }
 }

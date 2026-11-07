@@ -102,6 +102,7 @@ public sealed partial class EstateService
                 string file = GeneratedDocumentVerification.SafeFile(session.Root, request.Path);
                 if (File.Exists(file) || Directory.Exists(file)) return NewRefused("The destination already exists; instantiation never overwrites existing work.");
                 TemplateDefinition definition = TemplateCatalog.Resolve(model, new(request.Template.Id, request.Template.Version, request.Template.Hash));
+                if (definition.IsFlow) return NewRefused("A flow is a role process a goal runs by naming it in its plan, not a document's sections; propose a goal with --flow instead.");
                 if (PresentationTemplates.Definitions.Any(d => d.Id == definition.Id)) return NewRefused("Use templates render with an exact subject and explicit adoption for these content forms; they are not living-document declarations.");
                 if (!TemplateCatalog.All(model).Any(t => t.Id == definition.Id && t.Version == definition.Version)) return NewRefused("The template version is retired for new instances.");
                 IReadOnlyDictionary<string, string> options = TemplateInstances.Options(model, definition, request.Scope ?? default, request.Options ?? default);

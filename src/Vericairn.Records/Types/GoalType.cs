@@ -49,7 +49,7 @@ public sealed class GoalType : IRecordType
         new("roster", "ulid", false, "The roster record whose roles it uses; the estate's current roster otherwise.", 2),
         new("roles", "object[]", false, "Role overrides for this goal: role, principals in order of preference, optional note.", 2),
         new("budget", "object", true, "Caps by unit, granted by the sponsor's activation; wallMinutes and attemptsPerStep are required. Units: " + Caps.Units + ".", 2),
-        new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan.", 2),
+        new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan. From format 3, a run's plan adds flow: pin {id, version, hash} of a template of kind flow, subject (each field the flow's subject declares: a record {type, id, hash?}, a text, or a list of item names), optional options (flow options and step.<key> on|off for optional steps, the goal's own configuration, narrower than template-defaults) and optional until (the step the run ends at); a run's plan is given, with exactly one ordinary work order, and each step is an assignment of it naming the step.", 2),
         new("limits", "object", false, "consecutiveFailures (a positive integer) and deadline (a timestamp) are validated and recorded but not yet enforced. stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds) override the roster and launcher defaults, enforced by the worker.", 2),
         new("inputs", "reference[]", true, "Decisions, work orders and designs it builds on: {type, id, hash?}; may be empty.", 2),
         new("progressRequest", "object", false, "Requested progress for every step: types, statusText and cadence. Replaces the estate and roster-entry request; an assignment brief may replace it.", 3),
@@ -103,10 +103,17 @@ public sealed class GoalType : IRecordType
             string? policy = plan.Enum("policy", true, PlanPolicies);
             plan.Enum("approval", true, Approvals);
             IReadOnlyList<string>? orders = plan.StringArray("workOrders", policy == "given", allowEmpty: policy != "given", maxItemLength: Identity.Ulid.Length);
+            BodyReader? flow = plan.Since(3, "flow") ? plan.Nested("flow", false) : null;
             plan.NoOtherKeys();
             foreach (string id in orders ?? [])
             {
                 context.RequireReference("plan.workOrders", id, "work-order");
+            }
+
+            // A run of a flow (design/flow.md § 12), additive in format 3: a reader lacking the flow's content shows the goal and runs none of it.
+            if (flow is not null)
+            {
+                FlowRuns.Validate(context, flow, policy, orders);
             }
         }
 

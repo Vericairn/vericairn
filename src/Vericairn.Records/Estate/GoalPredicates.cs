@@ -62,13 +62,25 @@ public static class GoalPredicates
     }
 
     /// <summary>Evaluates a record predicate from the current records.</summary>
-    public static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate)
+    public static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate) => Count(model, predicate).Verdict;
+
+    /// <summary>
+    /// The current records a record predicate counts, oldest first: those it decides match, without those it cannot decide here. A
+    /// flow step's record outputs are the newest of these of the output's type (the estate's design/flow.md § 5).
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> Matching(EstateModel model, JsonElement predicate)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return Count(model, predicate).Matches;
+    }
+
+    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate)
     {
         ArgumentNullException.ThrowIfNull(model);
         string? type = Text(predicate, "type");
         if (type is null || RecordTypeRegistry.Find(type) is null)
         {
-            return new Verdict("unknown", $"The predicate names no record type this build reads ({type ?? "none"}).", []);
+            return (new Verdict("unknown", $"The predicate names no record type this build reads ({type ?? "none"}).", []), []);
         }
 
         string? subject = Text(predicate, "subject");
@@ -134,7 +146,7 @@ public static class GoalPredicates
             .GroupBy(r => r.Id, StringComparer.Ordinal).Select(g => g.First())
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .Select(r => r.Reference).ToList();
-        return new Verdict(value, reason.ToString(), references);
+        return (new Verdict(value, reason.ToString(), references), matches);
     }
 
     /// <summary>A completion condition in words: what a record predicate counts and its bounds, or an evidence statement and its check.</summary>

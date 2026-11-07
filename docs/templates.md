@@ -400,6 +400,144 @@ through raw record authoring, while existing pins remain readable and revisable.
 Estate template files alone have no retirement flag; retaining the original
 content remains necessary to inspect earlier instances.
 
+## Flows (0.9.2)
+
+A template of kind `flow` declares a role process instead of a document's
+sections: what a run is about, its roles, its ordered steps, and the items each
+step must produce or collect before it closes, its hand-off contract. A goal runs
+a flow by naming its exact pin in `plan.flow`; the
+[operator guide](operator-guide.md#runs-of-a-flow-092) shows a run from proposal
+to its stops. A flow, its configuration and its extensions grant nothing, as
+every template.
+
+```json
+{
+  "format": "vericairn.template/1",
+  "kind": "flow",
+  "id": "example/song",
+  "version": "1.0.0",
+  "purpose": "Produce a song and release it.",
+  "subject": {
+    "summary": "a recording",
+    "fields": [
+      { "name": "product", "type": "record", "recordType": "product" },
+      { "name": "version", "type": "text" },
+      { "name": "tracks", "type": "list" }
+    ]
+  },
+  "roles": [
+    { "id": "writer", "holder": "either", "brief": "Write and produce the material." },
+    { "id": "listener", "holder": "person", "brief": "Listen to the master." },
+    { "id": "decider", "holder": "person", "brief": "Accept and publish." }
+  ],
+  "options": [{ "id": "review", "values": ["independent", "person", "none"], "default": "none" }],
+  "never": ["never publish without the operator"],
+  "steps": [
+    { "key": "master", "title": "Master the track", "kind": "work", "role": "writer",
+      "required": true, "recovery": "Master again from the pinned inputs.",
+      "outputs": [
+        { "name": "master", "kind": "file", "mediaType": "audio/wav", "required": true,
+          "provenance": { "holder": "agent", "tool": "claude-code" },
+          "evidence": [{ "name": "loudness", "method": "loudness-check" }],
+          "review": { "independence": "person", "role": "listener" } },
+        { "name": "notes", "kind": "file", "optional": true, "default": "on", "review": "none" }
+      ] },
+    { "key": "shorts", "title": "Cut a clip", "kind": "work", "role": "writer",
+      "optional": true, "default": "on", "each": "tracks", "recovery": "Cut it again.",
+      "inputs": [{ "name": "master", "from": "step", "step": "master", "output": "master" }],
+      "outputs": [{ "name": "clip", "kind": "file", "required": true, "provenance": { "inputs": ["master"] } }] },
+    { "key": "publish", "title": "Publish", "kind": "operation", "role": "decider",
+      "optional": true, "default": "on", "reserved": "publish", "recovery": "Reconcile first.",
+      "done": [{ "type": "release", "subject": "{subject.product}",
+                 "fields": { "version": "{subject.version}", "status": "published" } }] }
+  ]
+}
+```
+
+- `subject` names the fields a run binds: a `record` of a type, a `text`, or a
+  `list` of names an `each` step runs over, one instance per name.
+- `roles` give each role its holder, `person`, `agent` or `either`, and its
+  role brief, which the step's assignment carries. Routing never gives a step of
+  a `person` role to an agent, and a goal that names an agent in one is refused.
+- Each step has `key`, `title`, `kind` (`work`, `review`, `operation`, `effect`,
+  `decision`, `exchange` or `flow`), `role`, either `required: true` or
+  `optional: true` with a `default` of `on` or `off`, and `recovery`. It may add
+  `reserved` (`accept-release`, `publish`, `spend`, `use-credential` or
+  `security-review`), `after`, `requires`, `done`, `action`, `traps`, `inputs`,
+  `outputs`, `review`, `each` and `when`.
+- A step waits on the step declared before it, or on the steps its `after`
+  names (an empty list for none), and on the producers of its inputs; steps
+  whose waits are done may run in parallel. References name earlier steps only.
+- `requires` keeps a step's preconditions; `requires`, `done`, a trap's `holds`
+  and a branch's `when` are record predicates in the goal completion language.
+  Their string values may bind the run: `{subject.<field>}`, `{instance}` in an
+  `each` step, `{goal}` and `{work}`.
+- `inputs` name a subject field or an earlier step's item. `outputs` lists the
+  items the step must produce or collect before it closes, each with its
+  completion requirements:
+  - `name` and `kind`: `file` (a work step's result output by name and hash,
+    with an optional `mediaType`), `record` (the newest record of `recordType`
+    the done predicates count), `observation` (an operation observed to succeed,
+    or an observation record), `verification` (a passing verification),
+    `decision` (a person's decision) or `attestation` (a person's record of
+    `recordType`). A review step's one item is its review: `kind` `record`,
+    `recordType` `review`. `recordKind` narrows a record by its `kind` field.
+  - `required: true`, or `optional: true` with a `default`.
+  - `provenance`: who must produce it, by `holder`, `role` or `principal`; and,
+    for an item a result or an operation produces, the step `inputs` it comes
+    from by hash and the `provider`, `tool` and `settings` it used.
+  - `evidence`: named verifications, each by `method` and optionally `command`
+    and `role`, that must pass at the item's exact hash.
+  - `review`: its own reviewer, an independence (`none`, `self`, `independent`,
+    `other-harness` or `person`) as a word, or `{independence, role}` naming the
+    reviewer's role. An item without one takes its step's `review`, which
+    defaults to the flow's `review` option.
+- `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
+  watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
+  predicates hold; a work or review step has no watch.
+- `effect` names its route (`api`, `person` or `browser`), `exchange` its export
+  (material by input, question, answer format, expiry and route) and intake
+  route, and a `flow` step the pin of the flow it runs.
+- `branches` name steps that stay off until the branch's predicates hold, with
+  the step the run returns to; `triggers` declare standing-agent trigger kinds.
+
+An item is satisfied when it exists at an exact hash and is of its kind, the
+record that produced it shows the declared provenance (a result's or an
+operation's recorded `provenance`, else the assignment's pinned inputs and the
+run that carried it), each named verification passes at that hash, and a review
+passes that hash by a principal of the reviewer role with the declared
+independence, other than its producer and the step's own holders. A review step
+closes on a review by a principal of its role or by its own assignee. Evidence is
+any passing verification of the exact subject by the declared method, whoever
+recorded it; independence is what the item's review requires. A file reviewed or verified in an earlier result at the same hash
+stays covered; one that changed after its review is stale. A step closes when its
+done predicates hold and every required item, and each optional item its
+configuration leaves on, is satisfied; this is derived from the records and never
+stored, so an agent's claim closes nothing.
+
+An extension names its base in `extends` and declares no subject. It adds roles,
+options and steps, each placed after a named step with `following` or at the
+end, and it may turn off, with `off`, a step or an item (`step.item`) its base
+declares optional. It never redeclares a base step or role, so it never turns off
+a required step or item, removes a reserved marking or changes who may hold a
+role; a branch takes in only the extension's own steps, and turning off a step or
+an item never leaves a required step without its input. Resolution checks the
+whole chain, up to eight bases.
+
+A run's configuration is the flow's defaults, then `template-defaults` for the
+exact flow pin at the estate, at the flow's `domain` and at the run's product
+(the subject's product field, or the product its work order is placed for),
+then the goal's own `plan.flow.options`, the narrowest winning. An optional step
+is configured by the option `step.<key>` and an optional item by
+`item.<step>.<item>`, each `on` or `off`; an optional step fed by a step or item
+that is off is off too. No configuration names a required step or item, so none
+turns one off or removes a reserved marking; a `template-defaults` record or goal
+that turns off a step or item an active estate policy requires, by a
+[`vericairn.estate/flow-steps`](policies.md#required-flow-steps-092) rule, is
+refused, as is a run whose wider configuration leaves one off or whose `until`
+ends it before one. `docs new` and `docs adopt` refuse a flow, and a living
+document never pins one.
+
 ## Client and extension contract
 
 The API adds `GET /v1/templates`, `POST /v1/documents/new`,
