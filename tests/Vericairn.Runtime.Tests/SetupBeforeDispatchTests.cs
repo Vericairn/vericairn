@@ -12,8 +12,8 @@ namespace Vericairn.Runtime.Tests;
 
 /// <summary>
 /// A workspace setup command configured on the machine (FIX-86): run in the workspace before dispatch, as the person and outside the
-/// harness, its outcome alone recorded when it succeeds; a failure, a timeout, a new link or a change outside the permitted paths
-/// refuses before the intent, so nothing is recorded.
+/// harness, with a harness's filtered environment and the variables it names (FIX-96), its outcome alone recorded when it succeeds; a
+/// failure, a timeout, a new link or a change outside the permitted paths refuses before the intent, so nothing is recorded.
 /// </summary>
 [Collection("home")]
 public sealed class SetupBeforeDispatchTests
@@ -23,15 +23,18 @@ public sealed class SetupBeforeDispatchTests
     {
         using RunEstate run = PrepareOnlyWorkspaceTests.Ignoring(new RunEstate());
         string mark = "person-" + Ulid.NewUlid().Value;
+        // Credential-shaped names are assembled here, so no literal credential name or value sits in the source.
+        string named = "NPM_" + "TOKEN", ambient = "GH_" + "TOKEN";
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
             Environment = new Dictionary<string, string>(run.Service.WorkerOptions.Environment!, WorkerEnvironment.Names)
             {
-                ["PERSON_SETTING"] = mark, ["VERICAIRN_RUNTIME_BINDING"] = mark,
+                ["PERSON_SETTING"] = mark, ["UNNAMED_SETTING"] = mark, [named] = mark, [ambient] = mark, ["NODE_OPTIONS"] = "--require " + mark,
+                ["VERICAIRN_RUNTIME_BINDING"] = mark,
             },
         };
         string setup = run.Report("setup");
-        using Configured configured = new(run, new() { Command = FakeHarness.Command("setup-install", setup) });
+        using Configured configured = new(run, new() { Command = FakeHarness.Command("setup-install", setup), Variables = ["PERSON_SETTING", named] });
         string report = run.Report("run");
 
         RunResponse started = run.Start("claude-code", "claude", report);
@@ -41,7 +44,13 @@ public sealed class SetupBeforeDispatchTests
         Assert.Equal("observed-success", settled.Status);
         JsonObject given = Assert.Single(FakeHarness.Reports(setup));
         JsonObject environment = given["environment"]!.AsObject();
+        // A harness's filtered environment, plus only what the configuration names: a named credential passes, an ambient one,
+        // a loader directive and an unnamed setting do not (FIX-96).
         Assert.Equal(mark, environment["PERSON_SETTING"]!.GetValue<string>());
+        Assert.Equal(mark, environment[named]!.GetValue<string>());
+        // Windows names it Path; variable names compare without case there.
+        Assert.Contains(environment, variable => string.Equals(variable.Key, "PATH", StringComparison.OrdinalIgnoreCase));
+        foreach (string absent in new[] { ambient, "NODE_OPTIONS", "UNNAMED_SETTING" }) Assert.False(environment.ContainsKey(absent), absent);
         Assert.DoesNotContain(environment, variable => variable.Key.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase));
         string workspace = given["directory"]!.GetValue<string>();
         Assert.Equal(workspace, FakeHarness.Reports(report)[^1]["directory"]!.GetValue<string>());

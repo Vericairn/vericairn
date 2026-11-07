@@ -249,6 +249,14 @@ public partial interface IEstateApi
     Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(OperatorRecord), () => OperatorRecord(request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable read of this clone's unfinished operator action.</summary>
+    Task<OperatorUnfinishedResponse> OperatorUnfinishedAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(OperatorUnfinished), OperatorUnfinished, false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="OperatorFinish"/>; a stopped observation does not undo an effect.</summary>
+    Task<OperatorRecordResponse> OperatorFinishAsync(OperatorFinishRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(OperatorFinish), () => OperatorFinish(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable read of operator-close candidates.</summary>
     Task<OperatorCloseCandidatesResponse> OperatorCloseCandidatesAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(OperatorCloseCandidates), OperatorCloseCandidates, false, this as IClientOperationLifetime, cancellationToken);

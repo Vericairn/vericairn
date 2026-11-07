@@ -108,6 +108,8 @@ public static class OpenApiDocument
         ("POST", "/v1/operator/requests/{id}/done"),
         ("POST", "/v1/operator/requests/{id}/dismiss"),
         ("POST", "/v1/operator/record"),
+        ("GET", "/v1/operator/unfinished"),
+        ("POST", "/v1/operator/unfinished"),
         ("GET", "/v1/operator/close"),
         ("POST", "/v1/operator/close"),
         ("GET", "/v1/goals"),
@@ -490,6 +492,17 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = "OperatorRecordResponse: the signed record, retained branch and head, last recorded change and exact recovery step. Only ok with completed means the pinned merge and target checks passed.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/OperatorRecordResponse" } } } };
         }
+        else if (path == "/v1/operator/unfinished")
+        {
+            string schema = method == "GET" ? "OperatorUnfinishedResponse" : "OperatorRecordResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = method == "GET"
+                    ? "OperatorUnfinishedResponse: this clone's unfinished operator action with its record, branch, head, pull request, stage, recorded merge, latest target-run observation, whether its records alone can finish it and what finishing needs; null when none. Reading writes nothing."
+                    : "OperatorRecordResponse: completed when the recorded merge's target checks passed; otherwise the action is retained as it was, with what finishing it needs. Nothing is signed, branched, committed, pushed, opened or merged.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } },
+            };
+        }
         else if (path == "/v1/operator/close")
         {
             string schema = method == "GET" ? "OperatorCloseCandidatesResponse" : "OperatorCloseResponse";
@@ -647,6 +660,18 @@ public static class OpenApiDocument
             ("supersedes", "string"), ("product", "string"), ("waitSeconds", "integer"), ("reconciliation", "string"));
         operatorRecordRequest["required"] = new JsonArray("type", "by", "body");
         operatorRecordRequest["properties"]!["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 240, ["default"] = 120 };
+
+        JsonObject operatorFinishRequest = Object(("by", "string"), ("waitSeconds", "integer"));
+        operatorFinishRequest["required"] = new JsonArray("by");
+        operatorFinishRequest["properties"]!["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 240, ["default"] = 120 };
+        JsonObject unfinishedAction = Object(("identity", "string"), ("recordId", "string"), ("type", "string"), ("subject", "string"), ("by", "string"),
+            ("record", "object"), ("branch", "string"), ("head", "string"), ("stage", "string"), ("pullRequest", "string"), ("merge", "object"),
+            ("mergeCommit", "string"), ("checkStatus", "string"), ("targetObservation", "object"), ("ask", "object"), ("finishable", "boolean"),
+            ("summary", "string"), ("nextStep", "string"));
+        unfinishedAction["required"] = new JsonArray("identity", "recordId", "branch", "stage", "finishable", "summary", "nextStep");
+        unfinishedAction["properties"]!["stage"]!["enum"] = new JsonArray("prepared", "recorded", "committed", "pushed", "opened", "merge-failed", "merge-uncertain", "merged");
+        JsonObject unfinishedResponse = Object(("action", "object"), ("problem", "object"));
+        unfinishedResponse["properties"]!["action"] = SchemaReference("OperatorUnfinishedAction");
 
         JsonObject closeSelection = Object(("key", "string"), ("workOrder", "object"), ("result", "object"), ("reviews", "array"));
         closeSelection["required"] = new JsonArray("key", "workOrder", "result", "reviews");
@@ -854,6 +879,9 @@ public static class OpenApiDocument
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["OperatorRecordRequest"] = operatorRecordRequest,
+            ["OperatorFinishRequest"] = operatorFinishRequest,
+            ["OperatorUnfinishedAction"] = unfinishedAction,
+            ["OperatorUnfinishedResponse"] = unfinishedResponse,
             ["OperatorRequestsResponse"] = Object(("text", "string"), ("json", "object"), ("hasErrors", "boolean")),
             ["OperatorRequestWriteRequest"] = requestWrite,
             ["OperatorRequestCarryRequest"] = requestCarry,
@@ -973,6 +1001,7 @@ public static class OpenApiDocument
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
         "/v1/operator/record" => "OperatorRecordRequest",
+        "/v1/operator/unfinished" => "OperatorFinishRequest",
         "/v1/operator/requests" => "OperatorRequestWriteRequest",
         "/v1/operator/asks/{id}/carry" => "OperatorRequestCarryRequest",
         "/v1/operator/requests/{id}/done" or "/v1/operator/requests/{id}/dismiss" => "OperatorRequestCloseRequest",
@@ -1112,6 +1141,8 @@ public static class OpenApiDocument
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
+        ("GET", "/v1/operator/unfinished") => "Read this clone's unfinished operator action from its local checkpoint and its records: the signed record's id, type and subject, branch, head, pull request and stage, the recorded merge and latest target-run observation, whether its records alone can finish it, and what finishing it needs. Reading signs, observes and writes nothing. Not exposed through MCP.",
+        ("POST", "/v1/operator/unfinished") => "Finish this clone's unfinished operator action from its own records: once its merge is recorded, a passing target run at the merge commit, already recorded or observed now under the merge's original identity, completes it and clears the clone's unfinished mark. Nothing is signed, branched, committed, pushed, opened or merged; any other action is refused with what finishing it needs. waitSeconds bounds the wait for pending target checks from 0 to 240 (default 120). Not exposed through MCP.",
         ("POST", "/v1/operator/record") => "Sign the operator's own record on their admitted device, commit that record alone on a new estate branch, and scan, push, open, wait and merge through recorded changes operations. Requires a clean repository-synced estate at record format 3 and declared checks. Identical input resumes the original action; uncertain effects are observed before retry. waitSeconds bounds each check phase from 0 to 240 (default 120). Synchronous only; not exposed through MCP.",
         ("POST", "/v1/changes/open") => "Record intent and open a pull request from an exact head with a recorded successful scanned push.",
         ("POST", "/v1/changes/merge") => "Record intent and checks, refuse missing or unsuccessful checks, merge pinned to the head, and observe the target run. A failure raises an operator ask.",

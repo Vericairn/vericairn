@@ -308,6 +308,8 @@ vericairn work result <attempt id> --by <builder id> --body result.json
 {"outcome": "completed", "summary": "What was done and how it was verified.", "outputs": [{"name": "widget.txt", "hash": "sha256:...", "bytes": 123, "location": "widget.txt"}], "evidence": [{"summary": "Continuous integration run 123 passed on three platforms."}], "checks": [{"name": "tests", "outcome": "passed", "summary": "42 tests."}], "limitations": ["What the result does not establish."], "unresolvedEffects": [], "nextStep": "What follows."}
 ```
 
+An output's `location` is a repository-relative path. From 0.9.2 a new result whose output location carries a URL scheme, such as `https:` or `file:`, is refused (`result.output-scheme`); put the reference in `evidence`, whose `location` may be a URL, and name an output held elsewhere by its hash and bytes without a `location`. Results already in the estate keep their reading, and `estate check` reports each one as a warning naming its outputs with a scheme.
+
 Outcomes are `completed`, `partial`, `blocked` or `abandoned`; a partial result with a next step is how an agent hands over cleanly. `vericairn work brief W-1` includes the measured mandatory originals, complete withheld list and latest result's next step. It can read verified document originals as well as records; a missing required source refuses preparation rather than silently shortening the brief. Section 20 covers context allocation and pinned retrieval. `vericairn work observe W-1` shows the assignments, attempts, results, amendments, reviews and acceptances of an order. A change of scope is an amendment (`work amend <assignment> --by --body`), which authorizes nothing until a decision admits it. An agent can also make progress claims through MCP; section 23 distinguishes those claims from observation and acceptance.
 
 ## 6. Review and acceptance
@@ -337,6 +339,8 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 ```
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
+
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews that passed: a new one whose basis names a review with outcome `findings` or `fail` is refused (`acceptance.basis-outcome`), whatever authority scope it holds. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none, on the operator's own judgment. The rule is prospective. Acceptances already in the estate keep their reading and still accept their subject; `estate check` and `records validate` report each one that names such a review as information, with the review and its outcome.
 
 ### Closing finished steps (0.8.4)
 
@@ -536,6 +540,14 @@ The API returns this same response with HTTP 200 and the SDK preserves it. Unkno
 hashes retain HTTP 404 and SDK null. Check the identifier for the latter; for a resolution problem,
 use the named references to recover the exact retained bytes. Replacing them with current source
 bytes does not restore the historical basis. Reading a recovered basis grants no submission authority.
+
+From 0.9.2 (FIX-95), a basis keeps the files of a repository read at an exact commit, such as an
+evidence repository a duty result names, by path and hash alone, and `release basis` reads them from
+that repository's Git objects at the commit, through its registered clone. A source finding whose
+revision is a commit means no clone registered here holds that commit at that path and hash; register one
+with `vericairn sources clone <path> --resource <id>`. Submission writes only the estate's own working-tree
+files beside the basis object; commit them with it. Copies of exact-commit files that 0.9.1 and earlier
+wrote are no longer needed to read their bases. See [estate policies](policies.md) for the retention bound.
 
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
@@ -1609,6 +1621,18 @@ member publication recovers from its original journal when the estate reopens.
 The queue and one-step command are not MCP tools.
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
+
+From 0.9.2, an action that stopped after its merge, for example while main's
+check was still running, is finished from its own records. Once the merge is
+recorded, resuming observes only the target run at the merge commit; it never
+recreates the deleted branch, signs or commits again, and leaves the clone on
+whatever branch it is on, usually main. `operator unfinished` shows the clone's
+unfinished action: its record id, type and subject, branch, head, pull request,
+stage, and what finishing it needs. `operator unfinished --finish --by <operator>`
+finishes it once the target checks pass. Starting the next `operator record`
+does the same first, then proceeds; that next action tolerates the finished
+action's own uncommitted receipts. An action that has not merged still refuses
+a new one, and the refusal names its record id, type and subject.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or

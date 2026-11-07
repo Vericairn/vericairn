@@ -21,8 +21,12 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
     internal GitRecordCommitAdapter(Func<ProcessStartInfo, ProcessResult> run) => this.run = run;
 
     /// <inheritdoc />
-    public RecordCommitBasis Prepare(string directory)
+    public RecordCommitBasis Prepare(string directory) => Prepare(directory, new HashSet<string>(StringComparer.Ordinal));
+
+    /// <inheritdoc />
+    public RecordCommitBasis Prepare(string directory, IReadOnlySet<string> receipts)
     {
+        ArgumentNullException.ThrowIfNull(receipts);
         // A relative prefix avoids confusing filesystem aliases with a directory inside the repository.
         if (Read(directory, "rev-parse", "--show-prefix").Trim().Length != 0)
             throw new ProviderRefusedException("The estate must be the repository root, not a directory inside another repository.");
@@ -30,20 +34,25 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
             throw new ProviderRefusedException("The estate needs complete local history before recording an operator action.");
         string branch = Read(directory, "symbolic-ref", "--short", "HEAD").Trim();
         string head = Head(directory);
-        Check(directory, branch, head, new HashSet<string>(StringComparer.Ordinal));
+        Check(directory, branch, head, receipts);
         return new(branch, head);
     }
 
     /// <inheritdoc />
-    public void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files)
+    public void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files) =>
+        Branch(directory, basis, branch, files, new HashSet<string>(StringComparer.Ordinal));
+
+    /// <inheritdoc />
+    public void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
     {
         ArgumentNullException.ThrowIfNull(basis);
+        ArgumentNullException.ThrowIfNull(receipts);
         ValidateFiles(files);
         ValidBranch(directory, branch);
         string current = Read(directory, "symbolic-ref", "--short", "HEAD").Trim();
         if (current == branch) return; // Commit verifies the base, record bytes and every changed path on recovery.
         RequireBranch(directory, basis.Branch, basis.Head);
-        RequireChanges(directory, new HashSet<string>(StringComparer.Ordinal), files.Keys.ToHashSet(StringComparer.Ordinal));
+        RequireChanges(directory, receipts, files.Keys.ToHashSet(StringComparer.Ordinal));
         WithoutHooks(directory, "checkout", "-b", branch, basis.Head);
     }
 

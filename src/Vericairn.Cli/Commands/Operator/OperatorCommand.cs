@@ -11,6 +11,7 @@ internal sealed class OperatorCommand : Command
     {
         Subcommands.Add(new OperatorListCommand(context));
         Subcommands.Add(new OperatorRecordCommand(context));
+        Subcommands.Add(new OperatorUnfinishedCommand(context));
         Subcommands.Add(new OperatorCloseCommand(context));
         Subcommands.Add(new OperatorRequestCommand(context));
         Subcommands.Add(new OperatorRequestCommand(context, carry: true));
