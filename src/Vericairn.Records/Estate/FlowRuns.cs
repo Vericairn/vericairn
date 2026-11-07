@@ -133,7 +133,20 @@ public static class FlowRuns
     /// force before a record when one is given (otherwise now), applying to the estate or to the run's product, whose rule of kind
     /// <see cref="PolicyKind"/> names the flow.
     /// </summary>
-    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, string flowId, string? product, RecordEnvelope? before = null)
+    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, string flowId, string? product, RecordEnvelope? before = null) =>
+        PolicyRequired(model, [flowId], product, before);
+
+    /// <summary>
+    /// The steps and items an estate policy requires of a resolved flow: those a policy requires of the flow or of any base it extends, so
+    /// that an extension never turns off a step a policy requires of its base.
+    /// </summary>
+    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, FlowDefinition flow, string? product, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        return PolicyRequired(model, flow.Chain.Select(c => c.Id).ToList(), product, before);
+    }
+
+    private static Dictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, IReadOnlyList<string> flowIds, string? product, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
         var required = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
@@ -155,7 +168,7 @@ public static class FlowRuns
             foreach (JsonElement rule in TJson.Array(policy.Body, "rules").Where(r => TJson.Text(r, "kind") == PolicyKind))
             {
                 JsonElement parameters = TJson.Object(rule, "parameters");
-                if (TJson.Text(parameters, "flow") != flowId)
+                if (!flowIds.Contains(TJson.Text(parameters, "flow") ?? string.Empty, StringComparer.Ordinal))
                 {
                     continue;
                 }
@@ -291,7 +304,7 @@ public static class FlowRuns
             return refusals;
         }
 
-        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(model, flow.Pin.Id, product, before);
+        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(model, flow, product, before);
         var turnedOff = new List<string>();
         var itemsOff = new List<string>();
         foreach (JsonProperty choice in choices.EnumerateObject())
@@ -434,7 +447,7 @@ public static class FlowRuns
             context.Error(code, message);
         }
 
-        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(context.Model, resolved.Pin.Id, product, context.Record);
+        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(context.Model, resolved, product, context.Record);
         Configuration configuration = Configure(context.Model, context.Record, resolved, context.Record);
 
         // The run's effective configuration, not only the goal's own options, carries every step a policy requires: a wider default,

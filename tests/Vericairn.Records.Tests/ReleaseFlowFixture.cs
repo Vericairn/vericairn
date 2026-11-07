@@ -22,7 +22,7 @@ public sealed class ReleaseFlowFixture : IDisposable
 
     public const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
-    public ReleaseFlowFixture(TemplateDefinition? flow = null, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? extraPolicy = null)
+    public ReleaseFlowFixture(bool firstParty = false, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? policy = null)
     {
         Records = new PolicyFixture();
         RecordEnvelope basis = Add("decision", Records.DecisionBody());
@@ -41,12 +41,12 @@ public sealed class ReleaseFlowFixture : IDisposable
                 FlowFixture.Role("release-manager", Estate.BuilderId), FlowFixture.Role("submitter", Estate.OperatorId), FlowFixture.Role("reviewer", Reviewer),
                 FlowFixture.Role("decider", Estate.OperatorId), FlowFixture.Role("publisher", Estate.OperatorId)),
         });
-        if (extraPolicy is not null)
+        if (policy is not null)
         {
-            Records.Policy(extraPolicy(this));
+            Records.Policy(policy(this));
         }
 
-        Flow = flow ?? SoftwareFlows.ReleaseFlow;
+        Flow = firstParty ? InstallFirstParty(Estate) : SoftwareFlows.ReleaseFlow;
         Goal = Add("goal", GoalBody(Version, options));
         Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: Goal.Reference);
     }
@@ -277,6 +277,18 @@ public sealed class ReleaseFlowFixture : IDisposable
     }
 
     public static string Hash(char c) => FlowFixture.Hash(c);
+
+    /// <summary>The first-party extension's file, which Vericairn's estate keeps under docs/templates, read from the product's fixtures.</summary>
+    public static string FirstPartyPath => Path.Combine(RecordCompanionTests.FindRepository(), "tests", "fixtures", "flows", "vericairn-first-party-release-1.0.0.json");
+
+    /// <summary>Copies the first-party extension byte for byte into an estate's docs/templates, as Vericairn's estate keeps it.</summary>
+    public static TemplateDefinition InstallFirstParty(TestEstate estate)
+    {
+        string text = File.ReadAllText(FirstPartyPath);
+        estate.WriteFile("docs/templates/vericairn-first-party-release-1.0.0.json", text);
+        using System.Text.Json.JsonDocument json = System.Text.Json.JsonDocument.Parse(text);
+        return TemplateDefinition.Read(json.RootElement);
+    }
 
     public void Dispose() => Records.Dispose();
 }
