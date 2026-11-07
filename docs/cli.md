@@ -329,7 +329,7 @@ workspace root. See [Preparing a workspace before the agent
 starts](software.md#coding-agents-the-worker-and-its-launchers) for the checks
 that follow setup and what the run records.
 
-## Runs of a flow (0.9.1)
+## Runs of a flow (0.9.2)
 
 `vericairn templates list` includes flows, templates of kind `flow`. `goal propose --flow <id>@<version>` proposes a run of
 one: its plan names the flow's exact pin, read from the templates the runtime offers, and gives exactly one `--work-order`.
@@ -350,4 +350,4 @@ vericairn goal step <goal> --by <operator> --repository <repository id> --wall-m
 
 `goal show` adds the run's position, `goal next` routes its ready work and review steps, and `goal step` takes one of them
 per command. `--subject`, `--flow-option` and `--until` without `--flow` are refused. See the
-[operator's guide](operator-guide.md#runs-of-a-flow-091) and [Templates](templates.md#flows-091).
+[operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).

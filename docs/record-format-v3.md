@@ -355,12 +355,12 @@ reference include that value; generic readable companions retain the complete
 pin. [Adoption](templates.md#adopt-an-existing-estate-document) keeps existing
 records and authored bytes and explicitly prepares any generated regions.
 
-## Runs of a flow (0.9.1)
+## Runs of a flow (0.9.2)
 
 PROC-05 adds optional fields within format 3 and no record type. A goal without
 `plan.flow` and an assignment without `step` behave as before; no migration
 rewrites a record. A flow is template content of kind `flow`
-([Templates](templates.md#flows-091)), not a record.
+([Templates](templates.md#flows-092)), not a record.
 
 | Record | Additive contract |
 | --- | --- |
@@ -368,7 +368,7 @@ rewrites a record. A flow is template content of kind `flow`
 | `assignment` | Optional `step: {key, instance?, inputs?}` names the flow step the assignment carries, its instance for a step that runs over a list under `each`, and each input its brief pins as `{name, type, id, hash}`. Every assignment of a run's work order names a work or review step of the run's flow, and no other assignment names one. A reserved step, or a step of a role the flow marks person, is never assigned to an agent. |
 | `result`, `operation` | Optional `provenance: {inputs?, provider?, tool?, settings?}`: what produced it, where a flow item's provenance requires it and its other fields do not show it. `inputs` are `{name?, type, id, hash}` of exact records; `settings` are string values by name. A reader lacking the field shows the record and leaves an item that requires it unsatisfied. |
 | `template-defaults` | Unchanged fields; for a flow's exact pin, `options` configure the flow's options, its optional steps' `step.<key>` and its optional items' `item.<step>.<item>` (`on` or `off`) at the estate, domain or product scope. |
-| `estate-policy` | A rule of the foundation kind `vericairn.estate/flow-steps`, version 1, with parameters `{flow, steps?, items?}`, requires the named steps and items (`step.item`) of the flow ([policies](policies.md#required-flow-steps-091)). |
+| `estate-policy` | A rule of the foundation kind `vericairn.estate/flow-steps`, version 1, with parameters `{flow, steps?, items?}`, requires the named steps and items (`step.item`) of the flow ([policies](policies.md#required-flow-steps-092)). |
 
 Validation refuses a configuration, in a goal's plan or in `template-defaults`,
 that names an option the flow does not declare or a value it does not allow,
@@ -391,6 +391,6 @@ items' state, is derived from the records whenever it is read and never stored:
 an item's value from the step's result or the record it names at an exact hash,
 its provenance from that record, its evidence from `verification` records and
 its review from `review` records of that exact hash; see the
-[operator guide](operator-guide.md#runs-of-a-flow-091). `records describe goal`,
+[operator guide](operator-guide.md#runs-of-a-flow-092). `records describe goal`,
 `records describe assignment`, `records describe result` and `records describe
 operation` include these contracts.

@@ -400,13 +400,13 @@ through raw record authoring, while existing pins remain readable and revisable.
 Estate template files alone have no retirement flag; retaining the original
 content remains necessary to inspect earlier instances.
 
-## Flows (0.9.1)
+## Flows (0.9.2)
 
 A template of kind `flow` declares a role process instead of a document's
 sections: what a run is about, its roles, its ordered steps, and the items each
 step must produce or collect before it closes, its hand-off contract. A goal runs
 a flow by naming its exact pin in `plan.flow`; the
-[operator guide](operator-guide.md#runs-of-a-flow-091) shows a run from proposal
+[operator guide](operator-guide.md#runs-of-a-flow-092) shows a run from proposal
 to its stops. A flow, its configuration and its extensions grant nothing, as
 every template.
 
@@ -533,7 +533,7 @@ is configured by the option `step.<key>` and an optional item by
 that is off is off too. No configuration names a required step or item, so none
 turns one off or removes a reserved marking; a `template-defaults` record or goal
 that turns off a step or item an active estate policy requires, by a
-[`vericairn.estate/flow-steps`](policies.md#required-flow-steps-091) rule, is
+[`vericairn.estate/flow-steps`](policies.md#required-flow-steps-092) rule, is
 refused, as is a run whose wider configuration leaves one off or whose `until`
 ends it before one. `docs new` and `docs adopt` refuse a flow, and a living
 document never pins one.

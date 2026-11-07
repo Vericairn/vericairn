@@ -1173,9 +1173,9 @@ changed or added, or a changed `info/exclude`, is never applied and counts as a 
 A nested repository anywhere in the workspace, even under an excluded directory, marks the audit incomplete.
 These belong to the running worker: a worker still at 0.8.0 keeps its older audit and settlement.
 
-### Runs of a flow (0.9.1)
+### Runs of a flow (0.9.2)
 
-A run is a goal whose plan names a [flow](templates.md#flows-091), the subject it serves, its own configuration and,
+A run is a goal whose plan names a [flow](templates.md#flows-092), the subject it serves, its own configuration and,
 optionally, the step it ends at. Its work is one ordinary work order, and each work or review step of the flow is an
 assignment of that work order naming the step. Propose and activate a run as any goal; `--flow` reads the flow's exact pin
 from the templates this runtime offers, and `--subject` binds each field of the flow's subject by its kind:

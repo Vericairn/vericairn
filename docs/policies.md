@@ -155,9 +155,9 @@ Evaluating the rule reports each current record written after the policy began t
 older build or merged from another copy of the estate. Earlier records are left alone, and no record is rewritten. A finding
 never repeats the term, since findings are themselves rendered into generated documents.
 
-## Required flow steps (0.9.1)
+## Required flow steps (0.9.2)
 
-An estate can require steps and items of a [flow](templates.md#flows-091) that a venture's configuration would otherwise turn
+An estate can require steps and items of a [flow](templates.md#flows-092) that a venture's configuration would otherwise turn
 off, such as the review of each output that leaves the estate. Declare them in an estate policy that applies to the estate or to
 one product, with a rule of kind `vericairn.estate/flow-steps`, version 1, whose parameters name the flow and at least one
 distinct step key in `steps` or item in `items`, as `step.item`.
