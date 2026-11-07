@@ -1040,8 +1040,8 @@ dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool
 The overview, the approved section and the paragraph are a person's text; the commands only place them. `prepare` runs the
 steps in order for a version, stopping at the first refusal. It runs `assemble`, then `docs notes` when the set has no notes,
 `insert` with `--security`, `compare`, `freeze`, and `index` with `--index-paragraph`. For a frozen set it only confirms the
-freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means `freeze` found the set
-incomplete, as `docs check` reports it; 2 means a step refused.
+freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
+`freeze` reports it from `docs check`, or differs from the build, as `compare` reports it; 2 means a step refused.
 
 ```sh
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- prepare --out docs/releases/0.9.2 \

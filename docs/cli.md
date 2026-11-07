@@ -480,5 +480,5 @@ overwrite a person's text or a frozen set.
 | `index <set> --paragraph <file>` | Adds a frozen set's paragraph, which links `[<version> set](<version>/README.md)`, to the release index, newest first. |
 | `prepare --out <set> --documents <file>` | Runs `assemble`, `docs notes` when the set has none (`--estate`, `--from`, `--since`), `insert` (`--security`, `--security-hash`), `compare`, `freeze` and `index` (`--index-paragraph`), stopping at the first refusal. |
 
-`--json` prints one JSON object per step. Exit 0 means the step is done or was already done, 1 that `freeze` found the set
-incomplete, and 2 a refusal. See the [operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092).
+`--json` prints one JSON object per step. Exit 0 means the step is done or was already done, 1 that the set is incomplete
+(`freeze`) or differs from the build (`compare` within `prepare`), and 2 a refusal. See the [operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092).
