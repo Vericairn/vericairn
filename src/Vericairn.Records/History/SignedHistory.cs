@@ -103,6 +103,11 @@ internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(stri
 /// <param name="Removed">The acknowledged removals.</param>
 internal sealed record Closure(Dictionary<string, HashSet<string>> Versions, HashSet<string> Removed)
 {
+    /// <summary>Whether some version of the record is listed and not acknowledged removed, counting any further removals given.</summary>
+    internal bool Stands(string id, IEnumerable<(string Id, string Hash)> removals) =>
+        Versions.TryGetValue(id, out HashSet<string>? versions) &&
+        versions.Any(hash => !Removed.Contains(SignatureChecks.AnchorKey(id, hash)) && !removals.Contains((id, hash)));
+
     /// <summary>
     /// The witnessed set, by id and hash, once acknowledged removals, and any further ones given, take their versions out; null while a
     /// record keeps two versions, which a checkpoint cannot witness at once.
@@ -181,47 +186,61 @@ internal sealed class HistoryAnalysis
     /// <summary>Judges the graph once anchors are known.</summary>
     internal HistoryState Complete(Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
     {
-        // A checkpoint counts when it is signed and its signatures verify; an adoption checkpoint also when its author may anchor.
-        List<CheckpointBody> counting = [.. checkpoints.Where(c => trust.Authentic(c.Record) && (c.Previous.Count > 0 || eligible.Contains(c.Record.Id)))];
-        var followed = new HashSet<string>(counting.SelectMany(c => c.Previous.Select(p => p.Id)), StringComparer.Ordinal);
-        List<RecordReference> heads = [.. counting.Where(c => !followed.Contains(c.Record.Id)).Select(c => c.Record.Reference)];
         var byId = checkpoints.ToDictionary(c => c.Record.Id, StringComparer.Ordinal);
-
         var altered = new HashSet<string>(StringComparer.Ordinal);
 
-        // Every checkpoint a counting checkpoint follows, through hashes that match, is part of what it witnesses.
-        var reachable = new SortedDictionary<string, CheckpointBody>(StringComparer.Ordinal);
-        var queue = new Queue<CheckpointBody>(counting);
-        foreach (CheckpointBody checkpoint in counting) reachable[checkpoint.Record.Id] = checkpoint;
-        while (queue.Count > 0)
+        // A checkpoint counts when its signatures verify and it is either an adoption checkpoint by an author who may anchor, or follows
+        // only checkpoints that count, through hashes that match. So the estate has adopted only when the counting graph reaches its
+        // adoption checkpoint, and a checkpoint whose path is broken or leads to one that does not count witnesses nothing.
+        var judged = new Dictionary<string, bool>(StringComparer.Ordinal);
+        bool Counting(CheckpointBody checkpoint)
         {
-            CheckpointBody checkpoint = queue.Dequeue();
+            string id = checkpoint.Record.Id;
+            if (judged.TryGetValue(id, out bool known)) return known;
+            judged[id] = false;
+            bool value = trust.Authentic(checkpoint.Record) && (checkpoint.Previous.Count == 0
+                ? eligible.Contains(id)
+                : checkpoint.Previous.All(p => byId.TryGetValue(p.Id, out CheckpointBody? predecessor) && predecessor.Record.ComputedHash == p.Hash && Counting(predecessor)));
+            judged[id] = value;
+            return value;
+        }
+
+        List<CheckpointBody> counting = [.. checkpoints.Where(Counting)];
+        foreach (CheckpointBody checkpoint in checkpoints.Where(c => trust.Authentic(c.Record)))
+        {
             foreach ((string id, string hash) in checkpoint.Previous)
             {
                 if (!byId.TryGetValue(id, out CheckpointBody? predecessor))
                 {
                     if (model.ById.ContainsKey(id))
-                        findings.Error("history.checkpoint-invalid", checkpoint.Record.ExpectedPath + "#body.previous", $"History checkpoint {checkpoint.Record.Id} follows {id}, which is not a format-3 history checkpoint.");
+                        findings.Error("history.checkpoint-invalid", checkpoint.Record.ExpectedPath + "#body.previous", $"History checkpoint {checkpoint.Record.Id} follows {id}, which is not a format-3 history checkpoint; it witnesses nothing.");
                     else
                         findings.Error("history.checkpoint-missing", checkpoint.Record.ExpectedPath + "#body.previous",
-                            $"History checkpoint {checkpoint.Record.Id} follows checkpoint {id} at {hash}, which is not here. Restore it from any clone or the repository's history, verified against that hash.");
-                    continue;
+                            $"History checkpoint {checkpoint.Record.Id} follows checkpoint {id} at {hash}, which is not here; until it is restored from any clone or the repository's history, verified against that hash, this checkpoint witnesses nothing.");
                 }
-
-                if (predecessor.Record.ComputedHash != hash)
+                else if (predecessor.Record.ComputedHash != hash)
                 {
                     if (altered.Add(id))
                         findings.Error("history.altered", predecessor.Record.ExpectedPath,
                             $"History checkpoint {checkpoint.Record.Id} follows this checkpoint at {hash}, and it is present with hash {predecessor.Record.ComputedHash}. Restore the witnessed bytes from any clone or the repository's history.");
-                    continue;
                 }
-
-                if (!reachable.ContainsKey(id))
+                else if (!Counting(predecessor))
                 {
-                    reachable[id] = predecessor;
-                    queue.Enqueue(predecessor);
+                    findings.Error("history.checkpoint-invalid", checkpoint.Record.ExpectedPath + "#body.previous",
+                        $"History checkpoint {checkpoint.Record.Id} follows checkpoint {id}, which does not count, so this checkpoint witnesses nothing: a checkpoint counts only on a path of counting checkpoints back to an adoption checkpoint by the root operator or a person holding administer.");
                 }
             }
+        }
+
+        var followed = new HashSet<string>(counting.SelectMany(c => c.Previous.Select(p => p.Id)), StringComparer.Ordinal);
+        List<RecordReference> heads = [.. counting.Where(c => !followed.Contains(c.Record.Id)).Select(c => c.Record.Reference)];
+
+        // Whether a checkpoint's author may anchor, read once per checkpoint.
+        var anchorers = new Dictionary<string, bool>(StringComparer.Ordinal);
+        bool Anchorer(string id)
+        {
+            if (!anchorers.TryGetValue(id, out bool value)) anchorers[id] = value = eligible.Contains(id) || trust.MayAnchor(byId[id].Record);
+            return value;
         }
 
         var entries = new Dictionary<string, WitnessedEntry>(StringComparer.Ordinal);
@@ -229,9 +248,10 @@ internal sealed class HistoryAnalysis
         bool read = objects is not null;
         if (read)
         {
-            // Every listing of every record, earliest checkpoint first. A version whose removal is acknowledged settles nothing else.
+            // Every listing of every record by a counting checkpoint, earliest checkpoint first. A version whose removal is acknowledged
+            // stands no more, and a record re-added after it is part of the tail until a checkpoint lists it.
             var listings = new Dictionary<string, List<WitnessedEntry>>(StringComparer.Ordinal);
-            foreach (CheckpointBody checkpoint in reachable.Values)
+            foreach (CheckpointBody checkpoint in counting.OrderBy(c => c.Record.Id, StringComparer.Ordinal))
             {
                 List<InventoryEntry> listed = Inventory(checkpoint, objects!, findings);
                 inventories[checkpoint.Record.Id] = listed;
@@ -248,52 +268,65 @@ internal sealed class HistoryAnalysis
                 }
             }
 
-            foreach ((string id, List<WitnessedEntry> versions) in listings)
+            foreach ((string id, List<WitnessedEntry> versions) in listings.OrderBy(l => l.Key, StringComparer.Ordinal))
             {
                 List<WitnessedEntry> standing = [.. versions.Where(v => !acknowledged.Contains(SignatureChecks.AnchorKey(v.Entry.Id, v.Entry.Hash)))];
-                entries[id] = standing.Count > 0 ? standing[0] : versions[0];
-                if (standing.Select(v => v.Entry.Hash).Distinct(StringComparer.Ordinal).Skip(1).FirstOrDefault() is { } other && altered.Add(id))
+                if (standing.Count == 0) continue;
+                model.ById.TryGetValue(id, out RecordEnvelope? present);
+                if (present is not null)
                 {
-                    WitnessedEntry first = standing[0];
-                    WitnessedEntry second = standing.First(v => v.Entry.Hash == other);
-                    findings.Error("history.altered", first.Entry.RepositoryPath,
-                        $"History checkpoints {first.Checkpoint} and {second.Checkpoint} witness this record with different hashes, {first.Entry.Hash} and {other}. Restore the bytes a counting checkpoint witnessed, or have the root operator or a person holding administer acknowledge the other version's removal.");
-                }
-            }
+                    List<WitnessedEntry> agreeing = [.. standing.Where(v => v.Entry.Hash == present.ComputedHash)];
+                    List<WitnessedEntry> disagreeing = [.. standing.Where(v => v.Entry.Hash != present.ComputedHash)];
+                    entries[id] = agreeing.Count > 0 ? agreeing[0] : standing[0];
+                    if (disagreeing.Count == 0) continue;
 
-            foreach (WitnessedEntry witnessed in entries.Values.OrderBy(e => e.Entry.Id, StringComparer.Ordinal))
-            {
-                InventoryEntry entry = witnessed.Entry;
-                if (acknowledged.Contains(SignatureChecks.AnchorKey(entry.Id, entry.Hash))) continue;
-                if (!model.ById.TryGetValue(entry.Id, out RecordEnvelope? present))
-                {
-                    if (files?.Contains(entry.RepositoryPath) == true)
+                    // Only a listing by an author who may anchor can make a present record that is signed and verifies, or is anchored with
+                    // these bytes, count for nothing; another author's listing of other bytes is reported, and the record keeps counting.
+                    if (((present.Signatures.Count > 0 && trust.Authentic(present)) || trust.Anchors.Contains(SignatureChecks.AnchorKey(id, present.ComputedHash))) &&
+                        disagreeing.All(v => !Anchorer(v.Checkpoint)))
                     {
-                        altered.Add(entry.Id);
-                        findings.Error("history.altered", entry.RepositoryPath,
-                            $"Witnessed by history checkpoint {witnessed.Checkpoint} with hash {entry.Hash}, and the file here is not that record. Restore the witnessed bytes from any clone or the repository's history, verified against that hash.");
-                    }
-                    else
-                    {
-                        findings.Error("history.removed", entry.RepositoryPath,
-                            $"Witnessed by history checkpoint {witnessed.Checkpoint} with hash {entry.Hash}, and absent here. Restore the file from any clone or the repository's history, verified against that hash, or have the root operator or a person holding administer acknowledge the removal, with a reason, in an anchoring checkpoint's removed list.");
+                        foreach (WitnessedEntry listing in disagreeing)
+                        {
+                            findings.Warning("history.listing-mismatch", present.ExpectedPath,
+                                $"History checkpoint {listing.Checkpoint}, by {byId[listing.Checkpoint].Record.By}, lists this record with hash {listing.Entry.Hash}, and the record here has hash {present.ComputedHash} and is signed and verifies, or is anchored with that hash. A listing by an author who may not anchor makes no such record count for nothing; the root operator or a person holding administer acknowledges the listed version's removal to settle it.");
+                        }
+
+                        continue;
                     }
 
+                    altered.Add(id);
+                    findings.Error("history.altered", present.ExpectedPath, agreeing.Count > 0
+                        ? $"History checkpoints {agreeing[0].Checkpoint} and {disagreeing[0].Checkpoint} witness this record with different hashes, {agreeing[0].Entry.Hash} and {disagreeing[0].Entry.Hash}. Restore the bytes a counting checkpoint witnessed, or have the root operator or a person holding administer acknowledge the other version's removal."
+                        : $"Witnessed by history checkpoint {disagreeing[0].Checkpoint} with hash {disagreeing[0].Entry.Hash}, and present with hash {present.ComputedHash}. It counts for nothing until the witnessed bytes are restored from any clone or the repository's history, or the root operator or a person holding administer acknowledges the witnessed version's removal.");
                     continue;
                 }
 
-                if (present.ComputedHash != entry.Hash && !altered.Contains(entry.Id))
+                WitnessedEntry witnessed = standing[0];
+                entries[id] = witnessed;
+                InventoryEntry absent = witnessed.Entry;
+                if (standing.Select(v => v.Entry.Hash).Distinct(StringComparer.Ordinal).Skip(1).FirstOrDefault() is { } other)
                 {
-                    altered.Add(entry.Id);
-                    findings.Error("history.altered", present.ExpectedPath,
-                        $"Witnessed by history checkpoint {witnessed.Checkpoint} with hash {entry.Hash}, and present with hash {present.ComputedHash}. It counts for nothing until the witnessed bytes are restored from any clone or the repository's history, or the root operator or a person holding administer acknowledges the witnessed version's removal.");
+                    altered.Add(id);
+                    findings.Error("history.altered", absent.RepositoryPath,
+                        $"History checkpoints {witnessed.Checkpoint} and {standing.First(v => v.Entry.Hash == other).Checkpoint} witness this record with different hashes, {absent.Hash} and {other}, and it is not here. Restore the bytes a counting checkpoint witnessed, or have the root operator or a person holding administer acknowledge the removal of each version.");
+                }
+                else if (files?.Contains(absent.RepositoryPath) == true)
+                {
+                    altered.Add(id);
+                    findings.Error("history.altered", absent.RepositoryPath,
+                        $"Witnessed by history checkpoint {witnessed.Checkpoint} with hash {absent.Hash}, and the file here is not that record. Restore the witnessed bytes from any clone or the repository's history, verified against that hash.");
+                }
+                else
+                {
+                    findings.Error("history.removed", absent.RepositoryPath,
+                        $"Witnessed by history checkpoint {witnessed.Checkpoint} with hash {absent.Hash}, and absent here. Restore the file from any clone or the repository's history, verified against that hash, or have the root operator or a person holding administer acknowledge the removal, with a reason, in an anchoring checkpoint's removed list.");
                 }
             }
 
             foreach (RecordReference head in heads)
             {
                 CheckpointBody checkpoint = byId[head.Id];
-                if (CloseOver([checkpoint.Record.Id], byId, c => inventories.GetValueOrDefault(c.Record.Id))?.Witnessed([]) is not { } set) continue;
+                if (CloseOver([checkpoint.Record.Id], byId, c => inventories.GetValueOrDefault(c.Record.Id), c => Anchorer(c.Record.Id))?.Witnessed([]) is not { } set) continue;
                 string hash = RecordSets.Hash(set.Select(p => (p.Key, p.Value)));
                 if (checkpoint.Records != set.Count || checkpoint.RecordSetHash != hash)
                 {
@@ -304,8 +337,7 @@ internal sealed class HistoryAnalysis
         }
 
         int tail = read ? model.Records.Count(r => !entries.ContainsKey(r.Id)) : model.Records.Count;
-        int witnessedCount = entries.Values.Count(e => !acknowledged.Contains(SignatureChecks.AnchorKey(e.Entry.Id, e.Entry.Hash)));
-        return new HistoryState(counting.Count > 0, heads, witnessedCount, tail, [.. findings], read, altered, entries, acknowledged,
+        return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,
             counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal));
     }
 
@@ -313,7 +345,8 @@ internal sealed class HistoryAnalysis
     /// What checkpoints witness together: every listing in their inventories and those of the checkpoints they follow, through hashes
     /// that match, and the removals they acknowledge; null when an inventory cannot be read.
     /// </summary>
-    internal static Closure? CloseOver(IEnumerable<string> starts, IReadOnlyDictionary<string, CheckpointBody> byId, Func<CheckpointBody, IReadOnlyList<InventoryEntry>?> inventory)
+    internal static Closure? CloseOver(IEnumerable<string> starts, IReadOnlyDictionary<string, CheckpointBody> byId, Func<CheckpointBody, IReadOnlyList<InventoryEntry>?> inventory,
+        Func<CheckpointBody, bool> mayAcknowledge)
     {
         var closure = new Closure(new(StringComparer.Ordinal), new(StringComparer.Ordinal));
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -333,7 +366,12 @@ internal sealed class HistoryAnalysis
                 versions.Add(entry.Hash);
             }
 
-            foreach ((string id, string hash) in checkpoint.Removed) closure.Removed.Add(SignatureChecks.AnchorKey(id, hash));
+            // Only an author who may anchor acknowledges a removal.
+            if (checkpoint.Removed.Count > 0 && mayAcknowledge(checkpoint))
+            {
+                foreach ((string id, string hash) in checkpoint.Removed) closure.Removed.Add(SignatureChecks.AnchorKey(id, hash));
+            }
+
             foreach ((string id, string hash) in checkpoint.Previous)
             {
                 if (byId.TryGetValue(id, out CheckpointBody? predecessor) && predecessor.Record.ComputedHash == hash && seen.Add(id)) queue.Enqueue(id);
@@ -387,7 +425,7 @@ internal sealed class HistoryAnalysis
 public static class SignedHistory
 {
     /// <summary>The codes of the history errors that hold release submission and lead status while one stands.</summary>
-    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author"];
+    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored"];
 
     /// <summary>The estate's history state.</summary>
     public static HistoryState Of(EstateModel model)
@@ -412,9 +450,9 @@ public static class SignedHistory
         objects ??= model.ObjectReader;
         HistoryState state = Of(model);
         Closure closure = Heads(model, state.Heads, objects) ?? throw new InvalidOperationException("The heads' inventories cannot be read; restore them before writing a checkpoint.");
-        List<RecordEnvelope> tail = [.. model.Records.Where(r => !closure.Versions.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal)];
-        IReadOnlyList<byte[]> inventory = HistoryInventory.Write(tail, maxObjectBytes);
         List<(string Id, string Hash, string Reason)> removals = [.. (removed ?? []).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        List<RecordEnvelope> tail = [.. model.Records.Where(r => !closure.Stands(r.Id, removals.Select(x => (x.Id, x.Hash)))).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        IReadOnlyList<byte[]> inventory = HistoryInventory.Write(tail, maxObjectBytes);
         Dictionary<string, string> set = closure.Witnessed(removals.Select(r => (r.Id, r.Hash)))
             ?? throw new InvalidOperationException("The heads witness a record with two hashes; acknowledge the removal of the version that is not here.");
         foreach (RecordEnvelope record in tail) set[record.Id] = record.ComputedHash;
@@ -459,7 +497,7 @@ public static class SignedHistory
             if (objects(hash) is { } bytes && bytes.LongLength > HistoryInventory.MaxObjectBytes) return $"Inventory object {hash} exceeds the object limit.";
         }
 
-        List<RecordEnvelope> tail = [.. model.Records.Where(r => !closure.Versions.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        List<RecordEnvelope> tail = [.. model.Records.Where(r => !closure.Stands(r.Id, draft.Removed)).OrderBy(r => r.Id, StringComparer.Ordinal)];
         if (!listed.Select(e => (e.Id, e.Path, e.Hash)).SequenceEqual(tail.Select(r => (r.Id, r.ExpectedPath[(EstateLayout.RecordsDirectory.Length + 1)..], r.ComputedHash))))
             return $"Its inventory lists every record no head witnesses, and only those: {tail.Count.ToString(CultureInfo.InvariantCulture)} records here, sorted by id, each by its path under records/ and its hash.";
         foreach ((string id, string hash) in draft.Anchored)
@@ -483,7 +521,7 @@ public static class SignedHistory
     }
 
     /// <summary>
-    /// Whether this copy holds an expected checkpoint, named by id, by content hash or by at least eight hexadecimal digits of it: present,
+    /// Whether this copy holds an expected checkpoint, named by id, by content hash or by at least sixteen hexadecimal digits of it: present,
     /// signed and counting. A fresh machine cannot tell whether the newest checkpoints were removed with the tail, so it checks against
     /// a head known elsewhere (design/signed-history.md § 9). Null when it does; otherwise the error that refuses the copy.
     /// </summary>
@@ -493,6 +531,9 @@ public static class SignedHistory
         return Expect(model.Records.Where(r => r.Type == "history-checkpoint").Select(r => (r.Id, r.ComputedHash, r.ExpectedPath, model.Counts(r))), expected);
     }
 
+    /// <summary>The fewest hexadecimal digits of a checkpoint's hash that name it for <see cref="Expect(EstateModel, string)"/>.</summary>
+    public const int MinimumExpectedDigits = 16;
+
     /// <summary>Whether the given checkpoints, by id, hash, path and whether each counts, hold the expected one; null when they do.</summary>
     public static Finding? Expect(IEnumerable<(string Id, string Hash, string Path, bool Counts)> checkpoints, string expected)
     {
@@ -501,9 +542,9 @@ public static class SignedHistory
         string text = expected.Trim();
         string hex = text.StartsWith(ContentHash.Prefix, StringComparison.Ordinal) ? text[ContentHash.Prefix.Length..] : text;
         bool byId = text.Length == 26 && Ulid.IsValid(text);
-        bool byHash = !byId && hex.Length is >= 8 and <= 64 && hex.All(char.IsAsciiHexDigit);
+        bool byHash = !byId && hex.Length is >= MinimumExpectedDigits and <= 64 && hex.All(char.IsAsciiHexDigit);
         if (!byId && !byHash)
-            return new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names no checkpoint: give its id, its content hash or at least eight hexadecimal digits of the hash.");
+            return new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names no checkpoint: give its id, its full content hash or at least {MinimumExpectedDigits} hexadecimal digits of the hash.");
         string lower = hex.ToLowerInvariant();
         List<(string Id, string Hash, string Path, bool Counts)> matches = [.. checkpoints.Where(c =>
             byId ? c.Id == text : c.Hash.StartsWith(ContentHash.Prefix, StringComparison.Ordinal) && c.Hash[ContentHash.Prefix.Length..].StartsWith(lower, StringComparison.Ordinal))];
@@ -527,6 +568,6 @@ public static class SignedHistory
             var problems = new FindingList();
             List<InventoryEntry> listed = HistoryAnalysis.Inventory(checkpoint, objects, problems);
             return problems.Count > 0 ? null : listed;
-        });
+        }, checkpoint => model.Trust.MayAnchor(checkpoint.Record));
     }
 }

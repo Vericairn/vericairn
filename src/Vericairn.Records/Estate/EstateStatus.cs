@@ -182,11 +182,16 @@ public static class EstateStatus
         return text.ToString();
     }
 
-    /// <summary>The history errors that stand: removed, altered or missing witnessed records and checkpoints, and invalid checkpoints.</summary>
+    /// <summary>
+    /// The history errors that stand: removed, altered or missing witnessed records and checkpoints, invalid checkpoints, unanchored
+    /// records and, once the estate has adopted checkpoints, unsigned records the signature policy refuses.
+    /// </summary>
     public static List<Finding> HistoryProblems(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return [.. model.Findings.Where(f => f.Severity == Severity.Error && History.SignedHistory.ProblemCodes.Contains(f.Code))
+        // Once the estate has adopted checkpoints, an unsigned record refused by the signature policy is a history problem too.
+        bool adopted = History.SignedHistory.Adopted(model);
+        return [.. model.Findings.Where(f => f.Severity == Severity.Error && (History.SignedHistory.ProblemCodes.Contains(f.Code) || adopted && f.Code == "signature.required"))
             .OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)];
     }
 
