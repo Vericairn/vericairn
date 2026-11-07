@@ -112,12 +112,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public static string Version =>
         typeof(EstateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 
+    /// <summary>A test's stand-in for the release this runtime reports in its health, to act as a daemon of another release; the product version when null.</summary>
+    internal string? ReportedVersion { get; set; }
+
     /// <inheritdoc />
     public HealthResponse Health()
     {
         lock (gate)
         {
-            return new HealthResponse(ApiVersion.Current, Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
+            return new HealthResponse(ApiVersion.Current, ReportedVersion ?? Version, session.Manifest.Estate, session.Root, session.Profile, session.Manifest.RecordFormat, startedAt, Environment.ProcessId);
         }
     }
 

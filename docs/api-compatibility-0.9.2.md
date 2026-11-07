@@ -189,6 +189,23 @@ the estate whose author does not resolve under the same code at severity `info`;
 reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
 changes.
 
+## An upgrade replaces an older runtime (OPS-05)
+
+No route, interface member, protocol type or public member is added, removed or changed. `GET /v1/health` keeps its
+`HealthResponse`, whose `vericairn` the command line now compares, without build metadata, with the release the estate's
+manifest pins. Comparison follows SemVer precedence, so a prerelease of the pinned version is older than it.
+
+The command line changes. `estate upgrade`, when it applies an upgrade or runs again once applied, ends with a runtime step:
+a daemon serving the estate on this machine whose release is older than the new pin is asked to stop through the existing
+`POST /v1/shutdown`, and when the command line is the pinned release's build, by version and by the source commit the
+pinned release record or dependency observation names, it starts that release's daemon as `runtime start` does. A daemon of the pinned or a newer release, of another estate or root, or one that refuses the connection is not
+stopped, and none is started where none served. Its `--json` output, the `UpgradeResponse` as before, adds `runtime` with
+`outcome`, `served`, `started`, `done` and `warning`; `--check` adds nothing. `runtime status --json` adds
+`servingRelease`, `pin`, `pinnedRelease` and `mismatch`. Human `status` adds a final `Serving runtime (this machine):` line,
+and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, with a mismatch on stderr. Older clients
+ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
+No record type, record format or generated document changes.
+
 ## A reconciliation settles operations that share an identity (FIX-100)
 
 No route, interface member or protocol type is added or changed. A `reconciliation` whose subject is an operation and whose

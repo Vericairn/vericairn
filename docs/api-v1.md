@@ -1044,7 +1044,7 @@ in the body, and partial, pending and changed-target states are never flattened 
 | `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` disables loopback TLS; a configured local-network listener still serves; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
 | `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
-| `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured |
+| `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured. From 0.9.2 (OPS-05), also the serving daemon's release, from `GET /v1/health`, against the estate's pin, with a mismatch line and the commands that settle it while they differ |
 | `vericairn runtime install [--plan]` | Install the daemon as a per-user service that starts at login and restarts after failure: a launchd agent (`~/Library/LaunchAgents`), a systemd user unit (`~/.config/systemd/user`) or a Task Scheduler logon task; `--plan` shows the unit and the commands without installing |
 | `vericairn runtime uninstall` | Remove that service |
 | `vericairn runtime configure [--local-network <address:port>\|off] [--allow-public]` | From 0.6.0, the address the local-network profile listens on from the runtime's next start, or off; without options, the configuration. A wildcard address, or one other networks may reach, needs `--allow-public`. Kept in `runtime.json` beside the live store |
@@ -1153,6 +1153,13 @@ migration. The target, client and runtime build identities must agree. The respo
 identify that observation; its other fields retain their shape. `check: true` writes nothing.
 The path is input only and is never recorded. Offline inputs include saved release/tag responses,
 `SHA256SUMS` and the platform archive; see [installation](install.md#offline-inputs).
+
+From 0.9.2 (OPS-05), the upgrade request and response are unchanged, and the command line adds a runtime step after an
+applied upgrade: a daemon serving the estate on this machine whose `GET /v1/health` release is older than the new pin is
+asked to stop with `POST /v1/shutdown`, and the pinned release's daemon is started in its place when the command line is
+that release's build. `vericairn estate upgrade --json` then adds `runtime` (`outcome`, `served`, `started`, `done`,
+`warning`), and `vericairn runtime status --json` adds `servingRelease`, `pin`, `pinnedRelease` and `mismatch`; see
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md#an-upgrade-replaces-an-older-runtime-ops-05).
 
 ## Agent progress claims (0.7.0, additive)
 
