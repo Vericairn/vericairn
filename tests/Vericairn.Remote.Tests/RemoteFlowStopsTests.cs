@@ -10,13 +10,14 @@ using Vericairn.Remote;
 namespace Vericairn.Remote.Tests;
 
 /// <summary>
-/// Remote shows a run's stops (the estate's design/flow.md § 8; design/release-procedure.md § 8): the operator's next reserved step with
-/// its exact command, from the same status every surface reads, in the state language; Remote carries none of them out.
+/// Remote shows a run's stops (the estate's design/flow.md § 8; design/release-procedure.md § 8): the operator's next reserved step, from
+/// the same canonical status every surface reads, as of its newest record and without the command a live read shows, in the state
+/// language; Remote carries none of them out.
 /// </summary>
 public sealed class RemoteFlowStopsTests(HeadlessFixture fixture)
 {
     [Fact]
-    public async Task RemoteShowsTheOperatorsNextReservedStepWithItsCommandAsStatusDoes()
+    public async Task RemoteShowsTheOperatorsNextReservedStepAsCanonicalStatusDoes()
     {
         using FlowFixture run = FlowFixture.AtAcceptance();
         using var connections = new FakeConnections(run.Estate.Root);
@@ -28,9 +29,10 @@ public sealed class RemoteFlowStopsTests(HeadlessFixture fixture)
             Assert.True(model.HasStops);
             Assert.Equal(expected, model.Stops);
             StopRow stop = Assert.Single(model.Stops);
-            Assert.Equal(("reserved", "accept", run.AcceptCommandNow), (stop.Kind, stop.Name, stop.Command));
+            Assert.Equal(("reserved", "accept", null), (stop.Kind, stop.Name, stop.Command));
             Assert.Equal(StateLanguage.Label("flow-stop", "reserved"), stop.KindLabel);
-            Assert.EndsWith("Command: " + run.AcceptCommandNow, stop.Detail, StringComparison.Ordinal);
+            Assert.DoesNotContain(run.AcceptCommandNow, stop.Detail, StringComparison.Ordinal);
+            Assert.StartsWith("As of ", model.StopsAsOf, StringComparison.Ordinal);
 
             // The list is shown on the phone's home, and nothing there acts on a stop.
             ListBox list = Assert.Single(view.GetLogicalDescendantsOfType<ListBox>().Distinct(), l => Avalonia.Automation.AutomationProperties.GetName(l)?.StartsWith("Stops of runs", StringComparison.Ordinal) == true);

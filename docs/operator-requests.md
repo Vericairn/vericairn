@@ -126,7 +126,13 @@ canonical status as of its newest record. A request's events follow the same
 delivery: `open` while it is delivered, then `withdrawn`, `settled` or `closed`. It
 stays open, so close it with `done` or `dismiss` when you wish. Closing a request
 never completes its step, whoever closes it: the step is done only once the
-operator's act is recorded. See
+operator's own authentic act is recorded. Only the addressed operator's own signed
+close stops the step's request being made again; an agent's close, citing your
+words or not, leaves it due. A request recorded by a principal who does not take
+the run's steps is never delivered. The list shows a step request's checked
+command first and labels its recommendation and other prose as the requester's,
+not checked; a client that cannot read the runtime's queue shows no step request
+as open. See
 [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
 
 ## API, SDK and MCP

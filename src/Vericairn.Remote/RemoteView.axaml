@@ -183,7 +183,8 @@
                 </ListBox.ItemTemplate>
               </ListBox>
               <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasStops}" Text="Stops of runs: what waits on a person" />
-              <ListBox ItemsSource="{Binding Stops}" IsVisible="{Binding HasStops}" AutomationProperties.Name="Stops of runs, with the operator's next reserved step and its exact command">
+              <TextBlock Classes="muted" IsVisible="{Binding HasStops}" Text="{Binding StopsAsOf}" TextWrapping="Wrap" />
+              <ListBox ItemsSource="{Binding Stops}" IsVisible="{Binding HasStops}" AutomationProperties.Name="Stops of runs, with the operator's next reserved step">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="p:StopRow">
                     <Border Classes="card">

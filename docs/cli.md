@@ -13,9 +13,11 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 13, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
+Revision 14, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
 
-Revision 12, November 7, 2026. Add a run's stops to `goal step`, `goal show`, `goal next`, `status` and `operator list` in the development build.
+Revision 13, November 7, 2026. Add a run's stops to `goal step`, `goal show`, `goal next`, `status` and `operator list` in the development build.
+
+Revision 12, November 7, 2026. Add the build tooling's documentation-set commands in the development build.
 
 Revision 11, November 7, 2026. Add `events watch` in the development build.
 
@@ -400,7 +402,8 @@ response's `request` names the record. The command is computed only for a reserv
 request waits, `goal next` shows the route as `requested` and `goal step` records nothing more; once a request carrying that
 command was closed, the route is `closed`. `goal show`, `goal next` and `status` list the run's stops, each with why it waits,
 on whom and how it reaches them, and for a reserved step that is next its command; with `--json`, the position's `stops`, each
-step's `stop` and `command`, and status's `runs`. At most three stops of a run reach one person at a time: a fourth routes as
+step's `stop` and `command`, and status's `runs`, whose stops carry no command. At most three stops of the estate's runs reach
+one person at a time: a fourth routes as
 `queued`, and `goal step` dispatches nothing for it. `operator list` delivers a run's request only while it carries the command
 the records give now, and lists each open request a run no longer waits on, `withdrawn` or `settled`, under `withdrawn` in its
 JSON. See [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
@@ -476,6 +479,25 @@ vericairn events watch --subject <goal id> --after <cursor>
 
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
+
+## Preparing a documentation set with the build tooling (0.9.2)
+
+`vericairn-docs`, the build tooling in `tools/Vericairn.DocsTool` and not part of the shipped command line, adds five
+commands beside `generate` and `compare` (DOCS-11). They prepare a release's set in the steps its builder took by hand.
+`vericairn docs notes` and `vericairn docs check` are unchanged. Each command writes only the set's directory,
+`docs/releases/frozen-sha256.json` or `docs/releases/README.md`, changes nothing when run again, and refuses rather than
+overwrite a person's text or a frozen set.
+
+| Command | What it does |
+|---|---|
+| `assemble --out <set> --documents <file>` | Generates the references and manifest as `generate` does, copies every declared maintained guide byte for byte, writes `api.md` from `api-v1.md`, and keeps the set's overview. `--overview <file>` copies the overview once when the set has none; `--guides <dir>` names the guides' directory, `docs/` by default; `--keep-references` keeps references generated earlier. |
+| `insert <set> --section <file>` | Inserts the approved section byte for byte before `## What the release contains` in `release-notes.md`. `--before` and `--document` name another anchor line or document; `--expected-hash <sha256:hex>` refuses other bytes. |
+| `freeze <set>` | Checks the set as `docs check` does, then adds every file's SHA-256 to `frozen-sha256.json` under its version. `--documents <file>` names the declaration, `documents.json` beside the sets by default. |
+| `index <set> --paragraph <file>` | Adds a frozen set's paragraph, which links `[<version> set](<version>/README.md)`, to the release index, newest first. |
+| `prepare --out <set> --documents <file>` | Runs `assemble`, `docs notes` when the set has none (`--estate`, `--from`, `--since`), `insert` (`--security`, `--security-hash`), `compare`, `freeze` and `index` (`--index-paragraph`), stopping at the first refusal. |
+
+`--json` prints one JSON object per step. Exit 0 means the step is done or was already done, 1 that the set is incomplete
+(`freeze`) or differs from the build (`compare` within `prepare`), and 2 a refusal. See the [operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092).
 
 ## `vericairn docs pass --before` (0.9.2)
 

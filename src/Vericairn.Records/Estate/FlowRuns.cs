@@ -613,7 +613,8 @@ public static class FlowRuns
         List<RecordEnvelope> requests = model.Current("operator-request")
             .Where(r => TJson.Object(r.Body, "flowStep") is { ValueKind: JsonValueKind.Object } step && TJson.Text(step, "goal") == first && TJson.Text(step, "key") == key && TJson.Text(step, "instance") == item)
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
-        return requests.LastOrDefault(r => OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && (c.Type == "observation" || EstateModel.BodyString(c, "outcome") == "done")))
+        return requests.LastOrDefault(r => OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && SignatureChecks.IsAuthentic(model, c)
+                && (c.Type == "observation" || EstateModel.BodyString(c, "outcome") == "done")))
             ?? requests.LastOrDefault();
     }
 

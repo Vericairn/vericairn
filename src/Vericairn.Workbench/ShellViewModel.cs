@@ -103,6 +103,9 @@ public sealed partial class ShellViewModel : Observable
     /// <summary>True while a run has a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
+    public string StopsAsOf { get; private set; } = string.Empty;
+
     /// <summary>Recently opened estates.</summary>
     public ObservableCollection<string> Recent { get; }
 
@@ -334,7 +337,9 @@ public sealed partial class ShellViewModel : Observable
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
             Replace(Stops, estate.Stops);
+            StopsAsOf = estate.StopsAsOf;
             Raise(nameof(HasStops));
+            Raise(nameof(StopsAsOf));
             List<CompanionCatalogDocument> catalogs = Documents.OfType<CompanionCatalogDocument>().ToList();
             if (catalogs.Count > 0)
             {

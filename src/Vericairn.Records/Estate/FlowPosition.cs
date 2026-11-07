@@ -220,11 +220,18 @@ public static partial class FlowPosition
 
         /// <summary>The time the position was derived at: the read's, or for canonical status the records' own (<see cref="FlowStops.RecordedTime"/>).</summary>
         public DateTimeOffset At { get; init; }
+
+        /// <summary>
+        /// How many stops reach each person across every run, delivered or due: at most <see cref="FlowStops.PerDelivery"/>, the rest
+        /// queued; what routing counts before it lets one more reach a person.
+        /// </summary>
+        public IReadOnlyDictionary<string, int> Reaching { get; init; } = new Dictionary<string, int>(StringComparer.Ordinal);
     }
 
     /// <summary>
-    /// Whether a principal holds a reserved act (design/flow.md § 8; design/operating-modes.md § 6): a person with the operator role. No
-    /// grant of a reserved act takes effect before ID-04 makes its scope a checked name, so no agent holds one in this build.
+    /// Whether a principal holds a reserved act now (design/flow.md § 8; design/operating-modes.md § 6): a person with the operator role,
+    /// to whom a reserved step's request is put. No grant of a reserved act takes effect before ID-04 makes its scope a checked name, so
+    /// no agent holds one in this build. Whether a record is the act itself is <see cref="IsReservedAct"/>.
     /// </summary>
     public static bool HoldsReservedAct(EstateModel model, string? principal)
     {
@@ -232,8 +239,27 @@ public static partial class FlowPosition
         return GoalRules.IsPerson(model, principal) && model.HasRole(principal, Roles.Operator);
     }
 
+    /// <summary>
+    /// Whether a record is an act of a reserved step's holder (design/flow.md § 8): its signatures are authentic, so its author is who it
+    /// claims, and that author was a person with the operator role, by an authentic chain of principal revisions, when it was made. A
+    /// record's claimed author, an author's role granted later, and an unsigned or altered record never count; a past act of an operator
+    /// whose role was revoked afterwards still does.
+    /// </summary>
+    public static bool IsReservedAct(EstateModel model, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(record);
+        return SignatureChecks.IsAuthentic(model, record) && PolicyAuthority.OperatorAt(model, record.By, record.At);
+    }
+
     /// <summary>Derives a run's position from the records at a time (due times, watches and backoffs read it); nothing is stored.</summary>
-    public static Position Derive(EstateModel model, RecordEnvelope goal, DateTimeOffset at)
+    public static Position Derive(EstateModel model, RecordEnvelope goal, DateTimeOffset at) => Derive(model, goal, at, deliver: true);
+
+    /// <summary>
+    /// A run's position, with its stops delivered across every run (at most three reach one person at a time, design/cohesion-contract.md
+    /// § 5) or, for that delivery itself, each run's stops before it.
+    /// </summary>
+    internal static Position Derive(EstateModel model, RecordEnvelope goal, DateTimeOffset at, bool deliver)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
@@ -258,7 +284,14 @@ public static partial class FlowPosition
         }
 
         var position = new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention(), At = at };
-        return position with { Stops = FlowStops.Of(model, position, at) };
+        position = position with { Stops = FlowStops.Of(model, position, at) };
+        if (!deliver)
+        {
+            return position;
+        }
+
+        (IReadOnlyList<FlowStops.RunStop> stops, IReadOnlyDictionary<string, int> reaching) = FlowStops.Deliver(model, position, at);
+        return position with { Stops = stops, Reaching = reaching };
     }
 
     /// <summary>A return of the run to an earlier step by a failure route: the step, its instance (null for every one), when, and why.</summary>
@@ -1016,7 +1049,7 @@ public static partial class FlowPosition
         }
 
         /// <summary>The records a step's done predicates count: for a reserved act only those of a principal who holds it; every record otherwise.</summary>
-        private Func<RecordEnvelope, bool>? Admit(FlowStep step) => step.Reserved is null ? null : record => HoldsReservedAct(model, record.By);
+        private Func<RecordEnvelope, bool>? Admit(FlowStep step) => step.Reserved is null ? null : record => IsReservedAct(model, record);
 
         /// <summary>
         /// A reserved step's exact command, its declared action with each placeholder bound from the records as they stand now: the run's
@@ -1091,7 +1124,7 @@ public static partial class FlowPosition
             // and its items; a result counts only when the operator recorded it. No agent's work or claim closes it (design/flow.md § 8).
             if (step.Reserved is not null)
             {
-                RecordEnvelope? own = result is not null && HoldsReservedAct(model, result.By) ? result : null;
+                RecordEnvelope? own = result is not null && IsReservedAct(model, result) ? result : null;
                 List<ItemState> acted = step.Outputs.Select(o => Judge(step, o, own, done, assignments, reviews, authors, null)).ToList();
                 ItemState? unmet = acted.FirstOrDefault(i => !i.Satisfied && i.State != "off");
                 return new Closing(doneMet && unmet is null, acted.Where(i => i.Value is not null && i.State != "off").Select(i => i.Value!).ToList(), acted, null, null,
@@ -1710,11 +1743,14 @@ public static partial class FlowPosition
     private static string Time(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>A value a command takes unquoted: letters, digits and . _ : / @ + = , -, not starting with a dash, so a bound value is never an option or a shell word.</summary>
-    [GeneratedRegex(@"^[A-Za-z0-9._:/@+=,][A-Za-z0-9._:/@+=,\-]{0,499}$")]
+    [GeneratedRegex(@"^[A-Za-z0-9._:/@+=,][A-Za-z0-9._:/@+=,\-]{0,499}\z")]
     private static partial Regex CommandValue();
 
-    /// <summary>The run's position as text: the flow, its configuration and every step with its state and why.</summary>
-    public static string RenderText(EstateModel model, Position position)
+    /// <summary>
+    /// The run's position as text: the flow, its configuration and every step with its state and why; a record-derived document passes
+    /// <paramref name="commands"/> false, and its reserved step's command is left out.
+    /// </summary>
+    public static string RenderText(EstateModel model, Position position, bool commands = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(position);
@@ -1744,7 +1780,7 @@ public static partial class FlowPosition
             text.Append("  Required attention (").Append(attention.Kind).Append("): ").Append(attention.Summary).Append(" [").Append(attention.Trigger.Type).Append(' ').Append(attention.Trigger.Id).Append("]\n");
         }
 
-        FlowStops.AppendText(text, model, position.Stops, "  ");
+        FlowStops.AppendText(text, model, position.Stops, "  ", commands);
 
         int index = 0;
         foreach (StepInstance step in position.Steps)
@@ -1784,8 +1820,11 @@ public static partial class FlowPosition
         return text.ToString();
     }
 
-    /// <summary>The run's position as JSON, the same on every machine for the same records and time.</summary>
-    public static JsonObject RenderJson(EstateModel model, Position position)
+    /// <summary>
+    /// The run's position as JSON, the same on every machine for the same records and time; a record-derived document passes
+    /// <paramref name="commands"/> false, and its reserved step's command is left out.
+    /// </summary>
+    public static JsonObject RenderJson(EstateModel model, Position position, bool commands = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(position);
@@ -1814,7 +1853,7 @@ public static partial class FlowPosition
         json["complete"] = position.Complete;
         json["attention"] = new JsonArray(position.RunAttention.Select(a => (JsonNode)AttentionJson(a)).ToArray());
         json["next"] = new JsonArray(position.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray());
-        json["stops"] = FlowStops.RenderJson(model, position.Stops);
+        json["stops"] = FlowStops.RenderJson(model, position.Stops, commands);
         json["steps"] = new JsonArray(position.Steps.Select(s => (JsonNode)new JsonObject
         {
             ["key"] = s.Step.Key,
@@ -1826,7 +1865,7 @@ public static partial class FlowPosition
             ["reserved"] = s.Step.Reserved,
             ["state"] = s.State,
             ["stop"] = s.Stop,
-            ["command"] = s.Command,
+            ["command"] = commands ? s.Command : null,
             ["reasons"] = new JsonArray(s.Reasons.Select(r => (JsonNode)r).ToArray()),
             ["principal"] = s.Principal,
             ["principalName"] = s.Principal is null ? null : Routing.NameOf(model, s.Principal),

@@ -111,6 +111,13 @@ public static class GoalPredicates
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
 
+        // A rule's admission judges the record of an act itself; a derived state rests on other records, the act's or not, so a
+        // predicate that names one never holds under a rule (a reserved step's done predicates name no state: FlowContract).
+        if (admit is not null && state is not null)
+        {
+            return (new Verdict("not-met", $"{DescribePredicate(predicate)}: a state rests on other records than those counted, so it cannot show whose act made it true.", candidates.Select(r => r.Reference).ToList()), []);
+        }
+
         var read = new List<RecordEnvelope>(candidates);
         var matches = new List<RecordEnvelope>();
         var undecided = new List<(RecordEnvelope Record, string Why)>();

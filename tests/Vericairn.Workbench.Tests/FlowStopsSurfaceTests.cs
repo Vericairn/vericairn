@@ -29,9 +29,10 @@ public class FlowStopsSurfaceTests(HeadlessFixture fixture)
             fromGoal = GoalPresentation.From(service.Goal(run.Goal.Id)!.Json, service.GoalNext(run.Goal.Id)!.Json).Stops;
         }
 
-        // Status and the goal view give the same stop, worded in the state language, the command among it.
-        StopRow stop = Assert.Single(fromStatus);
-        Assert.Equal(fromStatus, fromGoal);
+        // Status and the goal view give the same stop, worded in the state language; the command comes only from the live goal view.
+        StopRow stop = Assert.Single(fromGoal);
+        Assert.Equal(fromStatus, fromGoal.Select(s => s with { Command = null }));
+        Assert.Null(Assert.Single(fromStatus).Command);
         Assert.Equal(("reserved", "accept", "delivered", run.AcceptCommandNow), (stop.Kind, stop.Name, stop.Delivery, stop.Command));
         Assert.Equal(StateLanguage.Label("flow-stop", "reserved"), stop.KindLabel);
         Assert.Equal(StateLanguage.Label("flow-delivery", "delivered"), stop.DeliveryLabel);
@@ -46,6 +47,8 @@ public class FlowStopsSurfaceTests(HeadlessFixture fixture)
             await fixture.UiAsync(() => shell.OpenEstateAsync(run.Estate.Root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.True(shell.HasStops);
             Assert.Equal(fromStatus, shell.Stops);
+            Assert.StartsWith("As of ", shell.StopsAsOf, StringComparison.Ordinal);
+            Assert.Contains("the estate's newest record", shell.StopsAsOf, StringComparison.Ordinal);
 
             // The Goals workspace shows the run's stops as the goal view gives them.
             await fixture.UiAsync(async () =>
@@ -56,7 +59,7 @@ public class FlowStopsSurfaceTests(HeadlessFixture fixture)
             GoalsWorkspace page = Assert.IsType<GoalsWorkspace>(shell.SelectedDocument);
             Assert.Equal(run.Goal.Id, page.Selected!.Id);
             Assert.True(page.HasStops);
-            Assert.Equal(fromStatus, page.Stops);
+            Assert.Equal(fromGoal, page.Stops);
         }
         finally
         {

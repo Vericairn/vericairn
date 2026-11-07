@@ -1002,6 +1002,62 @@ Classification uses current estate state, not a snapshot at the window's end; wo
 not accept each result. Later imports with older timestamps can require another explicit widening.
 Earlier sets and their checksums remain unchanged.
 
+### Preparing a set with the build tooling (0.9.2)
+
+From 0.9.2 (DOCS-11) the build tooling prepares a set in the steps a release's builder took by hand. Each step writes only
+the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`. Running a step again changes nothing,
+and a step refuses rather than overwrite what a person wrote or what a frozen set holds. The version comes first: set
+`VersionPrefix` in `Directory.Build.props` to the release's version, declare any new document in
+`docs/releases/documents.json`, commit, and build the tooling in Release at that commit. The tooling refuses build sources
+that differ from its commit, as `generate` always has, and a set whose directory does not name its build's version.
+
+```sh
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.2 --documents docs/releases/documents.json --overview overview.md
+vericairn --estate <root> docs notes --from 0.9.1 --to 0.9.2 --out docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.2 --section security.md --expected-hash sha256:<hex>
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- freeze docs/releases/0.9.2
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- index docs/releases/0.9.2 --paragraph paragraph.md
+```
+
+- `assemble` generates the references and the manifest as `generate` does. It copies every declared maintained guide byte
+  for byte from `docs/` (`--guides` names another directory) and writes `api.md` as a copy of `api-v1.md`. A maintained
+  file never replaces one the tooling generated, such as `cli-client-outcomes.md`. The set's `README.md` is the overview a
+  person writes for the release, never the repository's README. `--overview` copies a file there once, when the set has
+  none. The set's own overview is kept, and an `--overview` that differs from it is refused. The command names what is still
+  pending, the overview or the notes. `--keep-references` keeps references generated earlier, at the reference build
+  commit, and only copies.
+- `vericairn docs notes` renders the notes and records their window, as before.
+- `insert` places the operator's approved section, byte for byte, before `## What the release contains`; `--before` and
+  `--document` name another anchor line or document. It refuses a missing or repeated anchor, carriage returns, a section
+  without its heading line and another section under the same heading. `--expected-hash` refuses any bytes but the
+  approved ones. Inserting the same bytes again changes nothing.
+- `freeze` holds the set to `docs check` against the declaration, and refuses a file that is neither declared nor
+  generated, such as `.DS_Store`, and a manifest of another version. It then adds every file's `sha256:` to
+  `frozen-sha256.json` under the version, in path order, leaving every earlier entry as it was. Freezing a frozen set
+  confirms it. A frozen set whose files differ is refused with each difference: a correction goes into the next set.
+- `index` adds the set's paragraph to `docs/releases/README.md`, newest first under "Documentation sets", byte for byte from
+  a file that links the set as `[<version> set](<version>/README.md)`. It describes only a frozen set, and it refuses a set
+  the index already describes in other words, since the index's living-document pass revises that paragraph.
+
+The overview, the approved section and the paragraph are a person's text; the commands only place them. `prepare` runs the
+steps in order for a version, stopping at the first refusal. It runs `assemble`, then `docs notes` when the set has no notes,
+`insert` with `--security`, `compare`, `freeze`, and `index` with `--index-paragraph`. For a frozen set it only confirms the
+freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
+`freeze` reports it from `docs check`, or differs from the build, as `compare` reports it; 2 means a step refused.
+
+```sh
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- prepare --out docs/releases/0.9.2 \
+  --documents docs/releases/documents.json --estate <root> --from 0.9.1 --overview overview.md \
+  --security security.md --security-hash sha256:<hex> --index-paragraph paragraph.md
+```
+
+`prepare` renders the notes with its own build, the release's. A release's builder who runs `docs notes` with the
+estate's installed `vericairn` instead runs it first, since `prepare` keeps notes the set already has; the 0.8.4 notes, for
+example, were rendered by 0.8.3, before FIX-64's one entry per supersession chain. The frozen-set test no longer lists the
+frozen versions. Every set the release index links, every set directory except the build's own version until it is
+frozen, and each set before 0.6.0 must stay indexed.
+
 Documents that follow changing facts remain living documents (section 16).
 
 ## 16. Living documents
@@ -1471,12 +1527,19 @@ command when the same principal recorded it; otherwise a new request carries the
 `withdrawn` name each open request that is not delivered, as `withdrawn` or `settled`, with why. Each stays open until its
 operator closes it with `operator done` or `dismiss`.
 
-The step is done only from the records of the operator's own act. Its done predicates and any record item count only records
-an operator recorded, and a result counts only when an operator recorded it. Closing the request does not complete the step,
-and neither does an agent's record of the act nor an agent's close citing the operator's words; the step's reasons name each
-record that does not count. Once the operator's act is recorded, the request is `settled` and no longer delivered. A request
-closed while its command still holds is not made again (route `closed`), and the step waits for the act's record. A reserved
-step whose input changed after it was done waits on the operator again, with the command the records give now.
+The step is done only from the records of the operator's own act. Its done predicates and any record item count a record only
+when its signatures are authentic and its author was a person with the operator role when it was made; a result counts only
+on the same terms. A record's claimed author, an unsigned or altered record, and an act made before its author became an
+operator never count, while a past act of an operator whose role was later revoked still does. Under a charter where
+signatures are optional, the operator therefore signs a reserved act. A reserved step's done predicates name no `state`, which
+other records decide. Closing the request does not complete the step, and neither does an agent's record of the act nor an
+agent's close citing the operator's words; the step's reasons name each record that does not count. Once the operator's act
+is recorded, the request is `settled` and no longer delivered. A request the addressed operator closed with their own signed
+close, while its command still holds, is not made again (route `closed`), and the step waits for the act's record. Any other
+close, an agent's among them, leaves the step's request due again. A request recorded by a principal who does not take the
+run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
+command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
+status and attention show the checked command first and label that prose as not checked.
 
 Every surface shows a run's stops the same way, from the records:
 
@@ -1484,24 +1547,27 @@ Every surface shows a run's stops the same way, from the records:
   next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
 - `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
 - the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
-- Workbench's home and its Goals workspace;
-- Remote's Attention.
+- Workbench's home, from canonical status with its as-of time, and its Goals workspace, read now;
+- Remote's Attention, from canonical status with its as-of time.
 
 Each stop names the step, or `<step> review` for an item's review, `the run` for the run's own attention and `the goal` for its
 acceptance. It says why it waits (`person`, `reserved`, `attention` or `accept`), who it waits on, how it reaches them, and for
-a reserved step that is next its exact command. It reaches its person in one of these ways:
+a reserved step that is next its exact command. Only a live read shows that command: human status, `goal show`, `goal next`,
+the Goals workspace, `operator list` and attention, which read the real clock. Canonical status and a hand-over package, which
+trust each record's claimed time, show the stop without it. A stop reaches its person in one of these ways:
 
 - `due`: the next `goal step` delivers it, as an assignment and an ask, an ask, or an operator request;
 - `delivered`: its assignment, ask or request waits on the person;
 - `closed`: its ask was answered or its request closed, and it is not asked again while that holds;
-- `queued`: three stops of the run already reach that person;
+- `queued`: three stops of the estate's runs already reach that person;
 - `outside`: `goal step` does not carry it, so nothing is recorded to reach the person in this build. That is an effect or an
   exchange a person carries, a watch past its limit, a step no one is named for, or the goal's acceptance.
 
-At most three stops of a run reach one person at a time, in the order the flow reaches them. `goal next` routes a fourth as
-`queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it, or its
-request is settled or withdrawn. Remote shows the stops and each reserved step's command. It answers asks as before, and it
-carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
+At most three stops reach one person at a time across every run. Those already delivered count first; then each due stop in
+the flows' order, the earliest position in its flow first and, at the same position, the older run first. `goal next` routes a
+fourth as `queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it,
+or its request is settled or withdrawn. Remote shows the stops as canonical status gives them. It answers asks as before, and
+it carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
 
 ### The software release and upgrade flows (0.9.2)
 

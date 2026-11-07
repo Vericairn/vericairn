@@ -367,6 +367,13 @@ public static partial class FlowContract
                 step.Error("flow.reserved", "done", "A reserved step declares its done predicates: the records of the operator's act, from which its completion is read.");
             }
 
+            // A derived state rests on records other than those counted, a work order's status or acceptance, an ask's answers or a
+            // document's clearance, so it cannot show that the operator's own act made it true.
+            if (done.Any(d => d.Has("state")))
+            {
+                step.Error("flow.reserved", "done", "A reserved step's done predicates count the records of the operator's act itself and name no state, which other records decide.");
+            }
+
             foreach (string placeholder in Placeholders(action))
             {
                 if (!CommandBinds(placeholder, subject, extension, each is not null, inputs))
@@ -924,7 +931,7 @@ public static partial class FlowContract
     }
 
     /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal}, {work}, {input.&lt;name&gt;.id} or {request}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}$")]
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}\z")]
     internal static partial Regex Binding();
 
     /// <summary>A check or objection a step's action runs: lower-case words joined by dots, hyphens or a slash, such as release.client-build.</summary>

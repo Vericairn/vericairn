@@ -127,6 +127,14 @@ public sealed class EstateView
     /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
     public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
 
+    /// <summary>
+    /// When the stops were derived, in words: canonical status gives them as of the estate's newest record and leaves a reserved step's
+    /// command to a live read; empty without runs.
+    /// </summary>
+    public string StopsAsOf => Runs.FirstOrDefault(r => r.AsOf is not null)?.AsOf is string at
+        ? $"As of {at}, the estate's newest record. What fell due since, and each reserved step's exact command, show in a live read: the Goals workspace or vericairn goal next."
+        : string.Empty;
+
     /// <summary>Attention items derived from the above, most urgent first.</summary>
     public IReadOnlyList<AttentionItem> Attention { get; private set; } = [];
 

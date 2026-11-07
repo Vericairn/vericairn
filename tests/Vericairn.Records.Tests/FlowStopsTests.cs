@@ -53,8 +53,9 @@ public class FlowStopsTests
         using JsonDocument status = JsonDocument.Parse(EstateStatus.RenderJson(model, new FindingList()));
         JsonElement shownRun = Assert.Single(status.RootElement.GetProperty("runs").EnumerateArray());
         Assert.Equal(run.Goal.Id, shownRun.GetProperty("goal").GetProperty("id").GetString());
-        Assert.True(JsonNode.DeepEquals(FlowStops.RenderJson(model, next.Stops), JsonNode.Parse(shownRun.GetProperty("stops").GetRawText())));
-        Assert.Contains("    command: " + accept, EstateStatus.Render(model, new FindingList()), StringComparison.Ordinal);
+        Assert.True(JsonNode.DeepEquals(FlowStops.RenderJson(model, next.Stops, commands: false), JsonNode.Parse(shownRun.GetProperty("stops").GetRawText())));
+        Assert.DoesNotContain(accept, status.RootElement.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("    command: " + accept, EstateStatus.Render(model, new FindingList(), run.Estate.Clock), StringComparison.Ordinal);
 
         // The operator's act completes acceptance; only then is publication next, with its own command.
         run.Marked("ACCEPTED");
@@ -105,7 +106,7 @@ public class FlowStopsTests
         JsonObject queue = OperatorRequests.Derive(model, null, run.Estate.Clock);
         Assert.Equal(request.Id, queue["delivered"]![0]!["revision"]!.GetValue<string>());
         Assert.Equal(forged.Id, queue["withdrawn"]![0]!["revision"]!.GetValue<string>());
-        Assert.Contains("Command, the step's as the records give it now: " + first, OperatorRequests.RenderText(model, null, run.Estate.Clock), StringComparison.Ordinal);
+        Assert.Contains("A run's reserved step; its command, checked against the records: " + first + "\n  The requester's words, not checked:\n", OperatorRequests.RenderText(model, null, run.Estate.Clock), StringComparison.Ordinal);
 
         // The master changes before the operator acts: acceptance no longer waits, and its request is withdrawn from delivery.
         RecordEnvelope remastered = run.Result(mastering, "completed", ("master", FlowFixture.Hash('c'), null));
@@ -143,7 +144,8 @@ public class FlowStopsTests
         string accept = run.Step("accept").Command!;
         RecordEnvelope request = run.Add("operator-request", RequestBody(run, accept), subject: run.Work.Reference);
 
-        // An agent closes the request citing the operator's words: the request is closed, and acceptance still waits on the operator's act.
+        // An agent closes the request citing the operator's words: the request is closed, acceptance still waits on the operator's act,
+        // and since the close is not the addressed operator's own, the step's request is due again.
         run.Add("operator-request-close", new JsonObject
         {
             ["outcome"] = "done",
@@ -151,7 +153,7 @@ public class FlowStopsTests
         }, builder: true, subject: request.Reference);
         Assert.Equal("stopped", run.Step("accept").State);
         FlowStops.RunStop stop = Assert.Single(run.Position().Stops);
-        Assert.Equal(("closed", request.Id), (stop.Delivery, stop.Record!.Id));
+        Assert.Equal(("due", null), (stop.Delivery, stop.Record));
         Assert.Empty(OperatorRequests.WaitingOf(run.Estate.Load(), null, run.Estate.Clock).Open);
 
         // An agent's record of the act does not count; the operator's own revision of it does.
@@ -235,6 +237,170 @@ public class FlowStopsTests
         run.Result(held[0], "completed", ("clip", FlowFixture.Hash('1'), null));
         Assert.Equal(["clip[verse] delivered", "clip[chorus] delivered", "clip[bridge] due", "clip[outro] queued"], Stops(run, goal).Select(s => $"{s.Name} {s.Delivery}"));
     }
+
+    [Fact]
+    public void OnlyAnAuthenticActOfAPrincipalWhoWasAnOperatorThenCompletesAReservedStep()
+    {
+        using var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        ToAcceptance(run);
+
+        // An unsigned record claiming the operator as its author proves nothing: acceptance still waits.
+        RecordEnvelope forged = run.Policies.Add("work-order", Marker("ACCEPTED"), sign: false);
+        Assert.False(FlowPosition.IsReservedAct(run.Estate.Load(), forged));
+        Assert.Equal("stopped", run.Step("accept").State);
+
+        // A person's signed act before they hold the operator role does not count, even once they hold it.
+        RecordEnvelope person = run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("contributor") });
+        Signing.StoreSigner signer = run.Policies.AdmitSigner(person.Id);
+        RecordEnvelope early = run.Estate.Add("work-order", person.Id, Marker("ACCEPTED").ToJsonString(), supersedes: forged.Id, signer: signer);
+        RecordEnvelope promoted = run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("operator") }, supersedes: person.Id);
+        Assert.False(FlowPosition.IsReservedAct(run.Estate.Load(), early));
+        Assert.Equal("stopped", run.Step("accept").State);
+
+        // Their act as an operator counts, and still counts after the role is revoked.
+        RecordEnvelope act = run.Estate.Add("work-order", person.Id, Marker("ACCEPTED").ToJsonString(), supersedes: early.Id, signer: signer);
+        Assert.Equal("done", run.Step("accept").State);
+        run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("contributor") }, supersedes: promoted.Id);
+        Assert.True(FlowPosition.IsReservedAct(run.Estate.Load(), act));
+        Assert.Equal("done", run.Step("accept").State);
+    }
+
+    [Fact]
+    public void AReservedActsPredicateNeverHoldsByADerivedState()
+    {
+        using var run = new FlowFixture();
+        JsonElement accepted = FlowFixture.Element(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SONG-1" }, ["state"] = "planned" });
+        EstateModel model = run.Estate.Load();
+        Assert.Equal("met", GoalPredicates.EvaluatePredicate(model, accepted).Value);
+        GoalPredicates.Verdict refused = GoalPredicates.EvaluatePredicate(model, accepted, record => FlowPosition.IsReservedAct(model, record));
+        Assert.Equal("not-met", refused.Value);
+        Assert.Contains("a state rests on other records than those counted", refused.Reason, StringComparison.Ordinal);
+        Assert.Empty(GoalPredicates.Matching(model, accepted, record => true));
+    }
+
+    [Theory]
+    [InlineData("1.0.0\n")]
+    [InlineData("-rf")]
+    [InlineData("1.0 beta")]
+    [InlineData("1.0.0\t")]
+    [InlineData("1.0.0\u00e9")]
+    [InlineData("1;rm")]
+    [InlineData("$(id)")]
+    [InlineData("`id`")]
+    [InlineData("a|b")]
+    [InlineData("a&b")]
+    [InlineData("'a'")]
+    [InlineData("a\\b")]
+    [InlineData("a*")]
+    [InlineData("a>b")]
+    public void ABoundValueACommandWouldNotTakeUnquotedBlocksTheStepAndIsNeverPutIn(string value)
+    {
+        JsonObject song = FlowFixture.Song();
+        song["subject"]!["fields"]!.AsArray().Add(new JsonObject { ["name"] = "version", ["type"] = "text" });
+        song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "accept")["action"] = "example-provider accept --version {subject.version}";
+        using var run = new FlowFixture(song, new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" },
+            subject: f => new JsonObject { ["recording"] = new JsonObject { ["type"] = "work-order", ["id"] = f.Work.Id }, ["tracks"] = new JsonArray("intro"), ["version"] = value });
+        ToAcceptance(run);
+        FlowPosition.StepInstance accepting = run.Step("accept");
+        Assert.Equal(("blocked", null), (accepting.State, accepting.Command));
+        Assert.Equal("its command cannot be computed from the records now: {subject.version} is a value with characters a command never takes unquoted, so it is not put in", Assert.Single(accepting.Reasons));
+        Assert.Empty(run.Position().Stops);
+    }
+
+    [Fact]
+    public void ASafeValueIsPutInAndASlugEndsAtItsLastCharacter()
+    {
+        Assert.Matches(Types.Patterns.Slug, "intro");
+        Assert.DoesNotMatch(Types.Patterns.Slug, "intro\n");
+        JsonObject song = FlowFixture.Song();
+        song["subject"]!["fields"]!.AsArray().Add(new JsonObject { ["name"] = "version", ["type"] = "text" });
+        song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "accept")["action"] = "example-provider accept --version {subject.version}";
+        using var run = new FlowFixture(song, new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" },
+            subject: f => new JsonObject { ["recording"] = new JsonObject { ["type"] = "work-order", ["id"] = f.Work.Id }, ["tracks"] = new JsonArray("intro\n"), ["version"] = "1.0.0-rc.1+build=7,a/b@c" });
+        Assert.Contains(run.Estate.Load().Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(run.Goal.ExpectedPath, StringComparison.Ordinal) && f.Message.Contains("an instance name", StringComparison.Ordinal));
+        ToAcceptance(run);
+        Assert.Equal("example-provider accept --version 1.0.0-rc.1+build=7,a/b@c", run.Step("accept").Command);
+    }
+
+    [Fact]
+    public void NoAgentThatDoesNotTakeTheRunsStepsSilencesAReservedStepsRequest()
+    {
+        using var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        ToAcceptance(run);
+        string accept = run.Step("accept").Command!;
+        JsonObject Words(RecordEnvelope request) => new()
+        {
+            ["outcome"] = "done",
+            ["operatorWords"] = new JsonObject { ["by"] = run.Estate.OperatorId, ["statement"] = "Done.", ["source"] = "A conversation", ["at"] = request.At },
+        };
+
+        // The builder, who takes no steps of the run, records the step's request with its exact command and closes it citing the operator.
+        JsonObject body = RequestBody(run, accept);
+        body["askedBy"] = run.Estate.BuilderId;
+        RecordEnvelope own = run.Add("operator-request", body, builder: true, subject: run.Work.Reference);
+        Assert.StartsWith("Test Builder recorded it, and does not take the run's steps", Assert.Single(FlowStops.Classify(run.Estate.Load(), run.Position(), new FlowRuns.StepRef("accept", null))).Reason, StringComparison.Ordinal);
+        run.Add("operator-request-close", Words(own), builder: true, subject: own.Reference);
+
+        // It closes the operator's own request the same way: neither close silences the step, whose request stays due.
+        RecordEnvelope request = run.Add("operator-request", RequestBody(run, accept), subject: run.Work.Reference);
+        run.Add("operator-request-close", Words(request), builder: true, subject: request.Reference);
+        FlowStops.RunStop stop = Assert.Single(run.Position().Stops);
+        Assert.Equal(("due", null), (stop.Delivery, stop.Record));
+
+        // Only the addressed operator's own close stops the request being made again while its command holds.
+        RecordEnvelope again = run.Add("operator-request", RequestBody(run, accept), subject: run.Work.Reference);
+        run.Add("operator-request-close", new JsonObject { ["outcome"] = "dismissed", ["reason"] = "Not now." }, subject: again.Reference);
+        stop = Assert.Single(run.Position().Stops);
+        Assert.Equal(("closed", again.Id), (stop.Delivery, stop.Record!.Id));
+    }
+
+    [Fact]
+    public void AtMostThreeStopsReachOnePersonAcrossEveryRun()
+    {
+        JsonObject flow = Clips();
+        using var run = new FlowFixture(flow, run: false);
+        RecordEnvelope first = Activate(run, run.Work, "a", "b");
+        RecordEnvelope other = run.Add("work-order", new JsonObject
+        {
+            ["key"] = "SONG-2", ["kind"] = "ordinary", ["title"] = "The second song", ["intent"] = "Cut its clips.", ["scope"] = new JsonArray("path:song/"),
+            ["exitQuestion"] = "Are its clips cut?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("clips"),
+        });
+        RecordEnvelope second = Activate(run, other, "c", "d");
+
+        // Four clips wait on the operator across two runs: the earliest of each flow first, then by run, three at a time.
+        Assert.Equal(["clip[a] due", "clip[b] due"], Stops(run, first).Select(s => $"{s.Name} {s.Delivery}"));
+        Assert.Equal(["clip[c] due", "clip[d] queued"], Stops(run, second).Select(s => $"{s.Name} {s.Delivery}"));
+        Assert.Equal(3, FlowPosition.Derive(run.Estate.Load(), first, run.Estate.Clock).Reaching[run.Estate.OperatorId]);
+    }
+
+    private static JsonObject Clips() => new()
+    {
+        ["format"] = "vericairn.template/1", ["kind"] = "flow", ["id"] = "example/clips", ["version"] = "1.0.0", ["purpose"] = "Cut a clip of each track.",
+        ["subject"] = new JsonObject
+        {
+            ["summary"] = "a recording",
+            ["fields"] = new JsonArray(new JsonObject { ["name"] = "recording", ["type"] = "record", ["recordType"] = "work-order" }, new JsonObject { ["name"] = "tracks", ["type"] = "list" }),
+        },
+        ["roles"] = new JsonArray(new JsonObject { ["id"] = "editor", ["holder"] = "person", ["brief"] = "Cut the clip by hand." }),
+        ["options"] = new JsonArray(new JsonObject { ["id"] = "review", ["values"] = new JsonArray("independent", "none"), ["default"] = "none" }),
+        ["steps"] = new JsonArray(FlowFixture.Step("clip", "work", "editor", each: "tracks", outputs: new JsonArray(FlowFixture.FileItem("clip")))),
+    };
+
+    private static RecordEnvelope Activate(FlowFixture run, RecordEnvelope work, params string[] tracks)
+    {
+        JsonObject body = run.GoalBody(tracks: new JsonArray(tracks.Select(t => (JsonNode)t).ToArray()), roles: new JsonArray(FlowFixture.Role("editor", run.Estate.OperatorId)));
+        body["plan"]!["workOrders"] = new JsonArray(work.Id);
+        body["plan"]!["flow"]!["subject"]!["recording"] = new JsonObject { ["type"] = "work-order", ["id"] = work.Id };
+        RecordEnvelope goal = run.Add("goal", body);
+        run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: goal.Reference);
+        return goal;
+    }
+
+    private static JsonObject Marker(string key) => new()
+    {
+        ["key"] = key, ["kind"] = "ordinary", ["title"] = "Marker " + key, ["intent"] = "Stand in for an act's record.", ["scope"] = new JsonArray("marker"),
+        ["exitQuestion"] = "Recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("marker"),
+    };
 
     private static List<FlowStops.RunStop> Stops(FlowFixture run, RecordEnvelope goal) => FlowPosition.Derive(run.Estate.Load(), goal, run.Estate.Clock).Stops.ToList();
 

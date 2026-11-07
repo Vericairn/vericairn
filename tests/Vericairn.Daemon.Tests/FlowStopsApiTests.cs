@@ -38,6 +38,13 @@ public class FlowStopsApiTests
         StatusResponse status = await api.StatusAsync(TestContext.Current.CancellationToken);
         Assert.True(JsonNode.DeepEquals(embedded, JsonNode.Parse(shown.Json.GetProperty("flow").GetProperty("stops").GetRawText())));
         Assert.True(JsonNode.DeepEquals(embedded, JsonNode.Parse(routed.Json.GetProperty("flow").GetProperty("stops").GetRawText())));
+
+        // Canonical status gives the same stops but leaves a reserved step's command to the live reads.
+        foreach (JsonNode? live in embedded!.AsArray())
+        {
+            live!["command"] = null;
+        }
+
         Assert.True(JsonNode.DeepEquals(embedded, JsonNode.Parse(Assert.Single(status.Json.GetProperty("runs").EnumerateArray()).GetProperty("stops").GetRawText())));
 
         // The operator's next reserved step, its exact command and its delivered request, as every read gives it.
@@ -50,10 +57,12 @@ public class FlowStopsApiTests
         Assert.Equal(run.Request.Id, Assert.Single(queue.Json.GetProperty("delivered").EnumerateArray()).GetProperty("revision").GetString());
         Assert.False(queue.Json.TryGetProperty("withdrawn", out _));
 
-        // Every client's rows come from these stops alone, the same from status and from the goal view.
+        // Every client's rows come from these stops alone: the same from status and from the goal view, the command only from the live read.
         IReadOnlyList<StopRow> fromStatus = EstateView.From(status, "now").Stops;
-        Assert.Equal(fromStatus, GoalPresentation.From(shown.Json, routed.Json).Stops);
-        Assert.Equal(run.AcceptCommandNow, Assert.Single(fromStatus).Command);
+        IReadOnlyList<StopRow> fromGoal = GoalPresentation.From(shown.Json, routed.Json).Stops;
+        Assert.Equal(fromStatus, fromGoal.Select(s => s with { Command = null }));
+        Assert.Null(Assert.Single(fromStatus).Command);
+        Assert.Equal(run.AcceptCommandNow, Assert.Single(fromGoal).Command);
     }
 
     [Fact]

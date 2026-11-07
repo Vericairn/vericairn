@@ -17,7 +17,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
-            JsonObject report = Actions.Derive(model);
+            JsonObject report = Actions.Derive(model, FlowClock.GetUtcNow());
             using JsonDocument json = JsonDocument.Parse(Actions.RenderJson(report));
             CommunicationProfile profile = Communication(recipient ?? Routing.RootOperator(model), assignment, view);
             string text = CommunicationPresentation.Protected(profile, "status", "operator actions",

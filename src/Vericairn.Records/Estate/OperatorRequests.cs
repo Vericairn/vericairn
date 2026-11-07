@@ -148,10 +148,15 @@ public static class OperatorRequests
         foreach (RecordEnvelope request in open.Take(PerDelivery))
         {
             string? command = FlowStops.StepOf(request) is null ? null : FlowStops.CommandOf(request);
+            if (command is not null)
+            {
+                text.Append("  A run's reserved step; its command, checked against the records: ").Append(command).Append('\n')
+                    .Append("  The requester's words, not checked:\n");
+            }
+
             text.Append("  Recommendation: ").Append(EstateModel.BodyString(request, "recommendation")).Append('\n')
                 .Append("  Action: ").Append(EstateModel.BodyString(request, "action")).Append(" [operator-request ").Append(request.Id).Append("]\n")
                 .Append("  Why: ").Append(EstateModel.BodyString(request, "why")).Append('\n')
-                .Append(command is null ? string.Empty : $"  Command, the step's as the records give it now: {command}\n")
                 .Append("  Destination: ").Append(EstateModel.BodyString(request, "destination")).Append('\n')
                 .Append("  If unanswered: ").Append(EstateModel.BodyString(request, "consequence")).Append('\n')
                 .Append("  Asked by: ").Append(EstateModel.BodyString(request, "askedBy")).Append("; to: ").Append(EstateModel.BodyString(request, "to")).Append('\n')

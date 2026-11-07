@@ -144,6 +144,7 @@
                 </ListBox.ItemTemplate>
               </ListBox>
               <TextBlock Text="Stops of runs: what waits on a person, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasStops}" />
+              <TextBlock Text="{Binding StopsAsOf}" TextWrapping="Wrap" Opacity="0.8" IsVisible="{Binding HasStops}" />
               <ListBox Name="StopsList" Focusable="True" ItemsSource="{Binding Stops}" MaxHeight="240" IsVisible="{Binding HasStops}" AutomationProperties.Name="Stops of runs">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="pres:StopRow">
