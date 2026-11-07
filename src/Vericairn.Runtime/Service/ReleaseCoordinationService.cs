@@ -71,9 +71,7 @@ internal sealed partial class ReleaseCoordinationService(
         byte[] basis = serializeBasis(assessment, compared, excluded ?? []);
         if (basis.LongLength > EstateLayout.MaxObjectBytes)
             objections.Add(new("error", "release.basis-size", "release-basis", $"The retained basis would be {basis.LongLength} bytes; the object limit is {EstateLayout.MaxObjectBytes} bytes."));
-        foreach (var repository in assessment.Basis.Repositories)
-        foreach (var file in repository.Files.Where(f => f.Available && f.Bytes.Length > EstateLayout.MaxObjectBytes))
-            objections.Add(new("error", "release.basis-file-size", repository.Identity + ":" + file.Path, $"A retained source file exceeds the {EstateLayout.MaxObjectBytes}-byte object limit."));
+        objections.AddRange(ReleaseBasisRetention.Objections(assessment.Basis));
         if (probe)
         {
             JsonObject proposedBody = body.DeepClone().AsObject();
@@ -341,7 +339,7 @@ internal sealed partial class ReleaseCoordinationService(
                     fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
                 if (probeRecord is not null) fresh.Objections.AddRange(recordAccess.LoadWith([probeRecord]).Findings.Where(f => f.Severity == Severity.Error).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
                 JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
-                if (!admitted.HasSameInputsAndFindings(fresh.Assessment, [claimRevision]) && !fresh.Objections.Any(f => f.Code is "release.basis-size" or "release.basis-file-size"))
+                if (!admitted.HasSameInputsAndFindings(fresh.Assessment, [claimRevision]) && !fresh.Objections.Any(f => ReleaseBasisRetention.SizeCodes.Contains(f.Code)))
                     Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
                 admitted = fresh.Assessment;
                 if (fresh.Objections.Count > 0)

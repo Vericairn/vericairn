@@ -104,6 +104,11 @@ unavailable at admission keep that historical state and do not become new resolu
 The CLI and MCP show these same findings; SDK synchronous, asynchronous and cancellation-bound
 reads preserve the typed response. See [API compatibility for 0.8.3](api-compatibility-0.8.3.md#retained-release-basis-diagnostics-fix-58).
 
+From 0.9.2 (FIX-95), retained bases have format `vericairn.release-basis/3`, and a file of a repository
+read at an exact commit resolves from that repository's Git objects at the commit through a clone
+registered on the serving machine. When none can supply it and no earlier copy is retained, its
+`release-basis.missing` finding says so. See [API compatibility for 0.9.2](api-compatibility-0.9.2.md#a-release-basis-keeps-evidence-files-by-hash-fix-95).
+
 ## Work-order creation (0.8.3)
 
 `POST /v1/work/new` takes `WorkNewRequest`, the API counterpart of `vericairn work new`:
