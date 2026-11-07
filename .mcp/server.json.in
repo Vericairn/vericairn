@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.vericairn/vericairn",
+  "name": "io.github.Vericairn/vericairn",
   "description": "Read and contribute to a Vericairn estate under the acting principal's authority.",
   "repository": {
     "url": "https://github.com/Vericairn/vericairn",

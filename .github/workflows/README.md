@@ -90,7 +90,7 @@ Only its publication job can request an identity token, log in to NuGet or push.
 immutable release. It verifies that release's `dotnet-vc` package against `SHA256SUMS`,
 checks its embedded `.mcp/server.json` with the same verifier, waits until nuget.org
 serves the version, and publishes the manifest to the official MCP Registry as
-`io.github.vericairn/vericairn` with a pinned, checksum-verified `mcp-publisher`, signing
+`io.github.Vericairn/vericairn` with a pinned, checksum-verified `mcp-publisher`, signing
 in with this repository's OIDC identity. No person's token is used.
 The verifiers' unit tests use Python's standard library:
 
