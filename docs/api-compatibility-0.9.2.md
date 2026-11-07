@@ -266,6 +266,50 @@ a goal's `limits` change their schema explanations. Its hash changes; declaratio
 require the ordinary explicit generator update before regeneration, and earlier golden fixtures remain retained. The
 generator id and contract version 1 are unchanged.
 
+## The event journal and the API stream (WATCH-05)
+
+`IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts
+`EventsAsync` and `EventGetAsync`; each has a default implementation, so existing implementers stay source-compatible, and
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. `Events` has a one-minute deadline, since a long
+poll waits up to 25 seconds. The daemon adds `GET /v1/events`, which answers with server-sent events when the request accepts
+`text/event-stream` and otherwise as a long poll, and `GET /v1/events/{key}`; both are reads, with a request scope and no
+write ledger. The protocol adds `EventEnvelope` (format `vericairn.event/1`), `EventReference`, `EventFilter`,
+`EventsResponse`, `EventStreamItem` and `EventVocabulary`; the OpenAPI document adds the two routes and the schemas
+`EventEnvelope`, `EventReference` and `EventsResponse`. The SDK adds `VericairnClient.StreamEventsAsync` and
+`WatchEventsAsync`, which return `IAsyncEnumerable<EventStreamItem>`. The command line adds `events watch`; no MCP tool or
+notification is added (`MCP-05` adds those).
+
+`StatusResponse`, `ProgressResponse`, `AttentionResponse`, `AsksResponse` and `GoalResponse` add the optional `EventsCursor`
+property, serialized as `eventsCursor` only when the runtime keeps a journal, which the daemon does and the embedded runtime
+does not. It sits beside the canonical JSON, which is unchanged, so the status document stays the same on every machine. These
+are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
+and `Json` instead. Older clients ignore the property and older servers omit it.
+
+`EventBatch.Closed` is true when the journal closed under a reader; a long poll then answers 503 with `unavailable`, and a stream
+ends. A state read whose derivation fails answers without `eventsCursor` instead of failing. `Vericairn.Runtime` adds
+`EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
+`EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
+principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
+`Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
+beside the live store, and the key that names subjects that are not records in `events.key`, kept across epochs, both
+owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
+also derives what that read shows and may write the journal; it writes no record. No record type, record format or
+generated document changes.
+
+## Preparing a documentation set (DOCS-11)
+
+No route, interface member, protocol type, shipped command or record type is added or changed. `vericairn-docs`, the build
+tooling that no distributable ships, adds `assemble`, `insert`, `freeze`, `index` and `prepare`. `generate` and `compare` keep
+their options, outputs and refusals: `generate` still writes into any directory. Each new command takes a set whose
+directory is named for its version, and `assemble`, unless it keeps the references, refuses one that is not the build's.
+
+A set's manifest, references and notes keep their formats. `freeze` writes `docs/releases/frozen-sha256.json` in its existing
+format, `vericairn.frozen-docs/1`, indented by two spaces with one final line break. It adds a set's entries after the
+earlier sets and changes none of them. `index` changes `docs/releases/README.md` only by adding a paragraph under its
+documentation sets heading. The frozen-set test in the command line's suite no longer lists the frozen versions. It
+requires every set the release index links, every set directory except the build's own version until it is frozen, and
+each set before 0.6.0 to stay indexed, so freezing a set no longer edits the test.
+
 ## Stops and their surfaces (PROC-06)
 
 No route or interface member is added. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds `stops`, and each step
@@ -335,33 +379,3 @@ author takes the run's steps and it is put to a person who holds the act. Record
 remains 3; its addition, an operator request's `flowStep`, is in
 [record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
 explanation of `operator-request` now includes `flowStep`.
-
-## The event journal and the API stream (WATCH-05)
-
-`IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts
-`EventsAsync` and `EventGetAsync`; each has a default implementation, so existing implementers stay source-compatible, and
-`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. `Events` has a one-minute deadline, since a long
-poll waits up to 25 seconds. The daemon adds `GET /v1/events`, which answers with server-sent events when the request accepts
-`text/event-stream` and otherwise as a long poll, and `GET /v1/events/{key}`; both are reads, with a request scope and no
-write ledger. The protocol adds `EventEnvelope` (format `vericairn.event/1`), `EventReference`, `EventFilter`,
-`EventsResponse`, `EventStreamItem` and `EventVocabulary`; the OpenAPI document adds the two routes and the schemas
-`EventEnvelope`, `EventReference` and `EventsResponse`. The SDK adds `VericairnClient.StreamEventsAsync` and
-`WatchEventsAsync`, which return `IAsyncEnumerable<EventStreamItem>`. The command line adds `events watch`; no MCP tool or
-notification is added (`MCP-05` adds those).
-
-`StatusResponse`, `ProgressResponse`, `AttentionResponse`, `AsksResponse` and `GoalResponse` add the optional `EventsCursor`
-property, serialized as `eventsCursor` only when the runtime keeps a journal, which the daemon does and the embedded runtime
-does not. It sits beside the canonical JSON, which is unchanged, so the status document stays the same on every machine. These
-are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
-and `Json` instead. Older clients ignore the property and older servers omit it.
-
-`EventBatch.Closed` is true when the journal closed under a reader; a long poll then answers 503 with `unavailable`, and a stream
-ends. A state read whose derivation fails answers without `eventsCursor` instead of failing. `Vericairn.Runtime` adds
-`EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
-`EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
-principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
-`Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
-beside the live store, and the key that names subjects that are not records in `events.key`, kept across epochs, both
-owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
-also derives what that read shows and may write the journal; it writes no record. No record type, record format or
-generated document changes.

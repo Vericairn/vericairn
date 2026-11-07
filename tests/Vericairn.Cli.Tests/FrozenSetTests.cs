@@ -3,13 +3,18 @@
 
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Vericairn.Cli.Tests;
 
 /// <summary>Published and withdrawn documentation sets retain every frozen byte; a future set remains editable until frozen.</summary>
 [Trait("Journey", "D19-G")]
-public class FrozenSetTests
+public partial class FrozenSetTests
 {
+    // The sets frozen before the release index linked each set's overview. Every later set is held in the index by its link there and
+    // by its directory, so freezing a new set never edits this list; removing a set's entry needs its link removed as well.
+    private static readonly string[] Unlinked = ["0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.4.1", "0.4.2", "0.5.0", "0.5.1", "0.5.2"];
+
     [Fact]
     public void EveryFrozenSetMatchesItsChecksumIndex()
     {
@@ -24,12 +29,41 @@ public class FrozenSetTests
         using JsonDocument index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "frozen-sha256.json")));
         Assert.Equal("vericairn.frozen-docs/1", index.RootElement.GetProperty("format").GetString());
         JsonElement sets = index.RootElement.GetProperty("sets");
-        foreach (string version in new[] { "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.4.1", "0.4.2", "0.5.0", "0.5.1", "0.5.2", "0.6.0", "0.6.1", "0.7.0", "0.7.1", "0.7.2", "0.7.3", "0.8.0", "0.8.1", "0.8.2", "0.8.3", "0.8.4", "0.9.0", "0.9.1" })
-        {
-            Assert.True(sets.TryGetProperty(version, out _), $"Frozen set {version} must stay indexed, even if withdrawn.");
-        }
-
+        // A frozen set stays indexed, even if withdrawn.
+        Assert.Empty(Unindexed(releases, sets, BuildVersion(root), Unlinked));
         Assert.Empty(Differences(releases, sets));
+    }
+
+    [Fact]
+    public void AFrozenSetCannotLeaveTheIndexWhileItsLinkOrDirectoryRemains()
+    {
+        string root = CliHarness.TempDirectory("frozen-witnesses");
+        try
+        {
+            foreach (string version in new[] { "0.1.0", "0.2.0", "0.3.0" }) Directory.CreateDirectory(Path.Combine(root, version));
+            File.WriteAllText(Path.Combine(root, "README.md"), "# Sets\n\n## Documentation sets\n\nThe [0.2.0 set](0.2.0/README.md) is frozen.\n");
+            JsonElement Index(params string[] versions) =>
+                JsonDocument.Parse(JsonSerializer.Serialize(versions.ToDictionary(v => v, _ => new Dictionary<string, string>()))).RootElement;
+
+            // 0.3.0 is the build's own set, editable until frozen; 0.1.0 predates the index's links and is held by name.
+            Assert.Empty(Unindexed(root, Index("0.1.0", "0.2.0"), "0.3.0", ["0.1.0"]));
+            Assert.Equal(["0.3.0: not indexed"], Unindexed(root, Index("0.1.0", "0.2.0"), "0.4.0", ["0.1.0"]));
+
+            // An entry removed while the set's directory or its link in the release index remains is noticed.
+            Assert.Equal(["0.2.0: not indexed"], Unindexed(root, Index("0.1.0"), "0.3.0", ["0.1.0"]));
+            Directory.Delete(Path.Combine(root, "0.2.0"));
+            Assert.Equal(["0.2.0: not indexed"], Unindexed(root, Index("0.1.0"), "0.3.0", ["0.1.0"]));
+            Directory.Delete(Path.Combine(root, "0.1.0"));
+            Assert.Equal(["0.1.0: not indexed"], Unindexed(root, Index("0.2.0"), "0.3.0", ["0.1.0"]));
+
+            // The release index describes only frozen sets, so a linked set has no exception, even the build's own.
+            File.AppendAllText(Path.Combine(root, "README.md"), "\nThe [0.3.0 set](0.3.0/README.md) is prepared.\n");
+            Assert.Equal(["0.3.0: not indexed"], Unindexed(root, Index("0.1.0", "0.2.0"), "0.3.0", ["0.1.0"]));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -107,6 +141,34 @@ public class FrozenSetTests
 
         return differences;
     }
+
+    // Every set the release index links, every set directory but the build's own until it is frozen, and the sets named before
+    // the index linked them: each must be indexed, so no frozen set leaves the index unless all three are changed together.
+    private static List<string> Unindexed(string releases, JsonElement sets, string buildVersion, IEnumerable<string> unlinked)
+    {
+        var required = new SortedSet<string>(unlinked, StringComparer.Ordinal);
+        string readme = Path.Combine(releases, "README.md");
+        if (File.Exists(readme)) required.UnionWith(SetLink().Matches(File.ReadAllText(readme)).Select(m => m.Groups["version"].Value));
+        required.UnionWith(Directory.EnumerateDirectories(releases).Select(Path.GetFileName).OfType<string>()
+            .Where(name => SetVersion().IsMatch(name) && (name != buildVersion || sets.TryGetProperty(name, out _))));
+        return [.. required.Where(v => !sets.TryGetProperty(v, out _)).Select(v => v + ": not indexed")];
+    }
+
+    private static string BuildVersion(string root)
+    {
+        Match prefix = VersionPrefix().Match(File.ReadAllText(Path.Combine(root, "Directory.Build.props")));
+        Assert.True(prefix.Success, "Directory.Build.props names the version this build documents.");
+        return prefix.Groups[1].Value;
+    }
+
+    [GeneratedRegex(@"\[(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) set\]\(\k<version>/README\.md\)")]
+    private static partial Regex SetLink();
+
+    [GeneratedRegex(@"^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")]
+    private static partial Regex SetVersion();
+
+    [GeneratedRegex(@"<VersionPrefix>([^<]+)</VersionPrefix>")]
+    private static partial Regex VersionPrefix();
 
     private static string Hash(string path)
     {
