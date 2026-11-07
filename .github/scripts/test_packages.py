@@ -117,6 +117,20 @@ class McpPackageVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "mcp-name"):
             verify_mcp_package(self.package)
 
+    def test_a_development_build_before_0_9_2_carries_the_corrected_name(self):
+        self.nuspec = self.nuspec.replace("<version>1.2.3</version>", "<version>0.9.1</version>")
+        self.manifest = json.loads(json.dumps(self.manifest).replace("1.2.3", "0.9.1"))
+        self.write()
+        self.assertEqual("io.github.Vericairn/vericairn", verify_mcp_package(self.package, allow_legacy=True)["name"])
+
+    def test_the_readme_and_manifest_names_must_agree(self):
+        self.nuspec = self.nuspec.replace("<version>1.2.3</version>", "<version>0.9.1</version>")
+        self.manifest = json.loads(json.dumps(self.manifest).replace("1.2.3", "0.9.1"))
+        self.readme = self.readme.replace("io.github.Vericairn/", "io.github.vericairn/")
+        self.write()
+        with self.assertRaisesRegex(SystemExit, "unexpected registry schema or server name"):
+            verify_mcp_package(self.package, allow_legacy=True)
+
     def test_older_immutable_releases_without_the_icon_remain_verifiable(self):
         path = Path(self.temporary.name) / "Example.0.8.0.nupkg"
         path.write_bytes(package_bytes(NUSPEC.replace("1.0.0", "0.8.0").replace(f"<icon>{ICON_NAME}</icon>", ""), entries=[]))

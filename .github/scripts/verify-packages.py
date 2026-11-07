@@ -37,11 +37,17 @@ def verify_mcp_package(path, allow_legacy=False):
                 return None
             if sorted(types) != ["DotnetTool", "McpServer"]:
                 raise ValueError("expected both DotnetTool and McpServer package types")
-            name = LEGACY_MCP_NAME if (allow_legacy and release and tuple(map(int, release.groups())) < (0, 9, 2)) else MCP_NAME
+            # A release before 0.9.2 may carry either name: published ones the lowercase one, builds of the
+            # development version the corrected one. The README line and the manifest must agree.
+            accepted = [MCP_NAME]
+            if allow_legacy and release and tuple(map(int, release.groups())) < (0, 9, 2):
+                accepted.append(LEGACY_MCP_NAME)
             readme = metadata.findtext("{*}readme")
-            marker = f"<!-- mcp-name: {name} -->"
-            if not readme or package.read(readme).decode("utf-8-sig").splitlines().count(marker) != 1:
+            lines = package.read(readme).decode("utf-8-sig").splitlines() if readme else []
+            carried = [candidate for candidate in accepted if lines.count(f"<!-- mcp-name: {candidate} -->") == 1]
+            if len(carried) != 1 or sum(line.startswith("<!-- mcp-name:") for line in lines) != 1:
                 raise ValueError("package README must carry the mcp-name line exactly once")
+            name = carried[0]
             manifest = json.loads(package.read(".mcp/server.json"))
             if not version or manifest["version"] != version:
                 raise ValueError("server version must equal the package version")
