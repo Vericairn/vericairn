@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -52,6 +53,9 @@ public sealed class ReconciliationType : IRecordType
         body.Allow("policyAuthority");
         body.NoOtherKeys();
         bool communication = subject?.Type is "communication-setting" or "communication-delegation";
+        // From 0.9.2 (FIX-100), operations recorded independently under one identity, such as two runtimes' concurrent intents, are
+        // settled like independent first communication profiles: one kept current, the others closed with the settling principal's note.
+        bool identity = SettlesIdentity(context.Model, context.Record);
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("reconciliation.author", $"Reconciling principal {context.Record.By} has no principal record.");
@@ -63,6 +67,14 @@ public sealed class ReconciliationType : IRecordType
         else if (policyGrant)
         {
             if (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At)) context.Error("policy.authority", "Only the operator reconciles bounded policy grants and their revocations.");
+        }
+        else if (identity)
+        {
+            // The authority that records an operation settles which one of several stands; administration alone does not.
+            if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
+            {
+                context.Error("reconciliation.author", "Operations sharing an identity are settled by the operator or under the 'local-engineering' scope, the authority that records operations.");
+            }
         }
         else if (communication)
         {
@@ -86,7 +98,12 @@ public sealed class ReconciliationType : IRecordType
             return;
         }
 
-        foreach (string id in withdrawn.Append(kept))
+        if (identity)
+        {
+            SettledIdentity(context, subject!, withdrawn.Append(kept).ToList());
+        }
+
+        foreach (string id in identity ? [] : withdrawn.Append(kept))
         {
             RecordEnvelope? successor = context.Find(id);
             if (successor is null)
@@ -107,5 +124,61 @@ public sealed class ReconciliationType : IRecordType
         {
             context.Error("reconciliation.kept", "The kept successor cannot also be withdrawn.");
         }
+    }
+
+    /// <summary>
+    /// Whether a reconciliation settles operations recorded independently under one identity (FIX-100): its subject is an operation and
+    /// none of the records it keeps or withdraws is a revision of that subject. Such a settlement is signed, as policy reconciliations are.
+    /// </summary>
+    internal static bool SettlesIdentity(EstateModel model, RecordEnvelope reconciliation)
+    {
+        if (reconciliation.Type != "reconciliation" || reconciliation.Subject is not { } reference || !model.ById.TryGetValue(reference.Id, out RecordEnvelope? subject)
+            || subject.Type != "operation")
+        {
+            return false;
+        }
+
+        List<string> named = Named(reconciliation);
+        return named.Count > 0 && named.All(id => !model.ById.TryGetValue(id, out RecordEnvelope? record) || record.Supersedes != subject.Id);
+    }
+
+    // Every record kept or withdrawn names an operation under the subject's identity, the latest revision of its own operation, and
+    // no two of them revise one operation: they are independent current records, and nothing else is settled this way.
+    private static void SettledIdentity(ValidationContext context, RecordEnvelope subject, List<string> named)
+    {
+        string? identity = EstateModel.BodyString(subject, "identity");
+        var operations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string id in named)
+        {
+            RecordEnvelope? record = context.Find(id);
+            if (record is null)
+            {
+                context.Error("reconciliation.successor", $"{id} does not exist.");
+            }
+            else if (record.Type != "operation" || identity is null || EstateModel.BodyString(record, "identity") != identity)
+            {
+                context.Error("reconciliation.identity", $"{id} is not an operation under identity {identity}; a reconciliation settles only operations that share the subject's identity.");
+            }
+            else if (context.Model.OfType("operation").Any(o => o.Supersedes == id))
+            {
+                context.Error("reconciliation.identity", $"{id} is an earlier revision of its operation; name the operation's latest revision.");
+            }
+            else if (!operations.Add(context.Model.Chain(record)[0]))
+            {
+                context.Error("reconciliation.identity", $"{id} revises an operation the reconciliation already names; it settles independent operations, one revision each.");
+            }
+        }
+    }
+
+    private static List<string> Named(RecordEnvelope reconciliation)
+    {
+        var named = new List<string>();
+        if (EstateModel.BodyString(reconciliation, "kept") is string kept) named.Add(kept);
+        if (reconciliation.Body.TryGetProperty("withdrawn", out JsonElement withdrawn) && withdrawn.ValueKind == JsonValueKind.Array)
+        {
+            named.AddRange(withdrawn.EnumerateArray().Where(w => w.ValueKind == JsonValueKind.String).Select(w => w.GetString()!));
+        }
+
+        return named;
     }
 }
