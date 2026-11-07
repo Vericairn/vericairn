@@ -324,6 +324,8 @@ vericairn records new review --by <reviewer id> --subject result:<result id>:<re
 
 `independence` must match the facts: `self` when the reviewer authored the subject, `independent-agent` for a different agent principal, `operator` for the operator; the tool refuses a mislabeled review. Outcomes are `pass`, `findings` or `fail`.
 
+A result review may also list the exact records it read in `read` (`[{"type": "result", "id": "...", "hash": "sha256:..."}]`). From 0.9.2 (FIX-94), what a review needs depends only on its result. A review of a result without duties needs no `--expected` and no device, with or without `read`. Given `--expected`, the review is refused unless that is the result's current hash. A review of a result with duties is signed duty evidence, with or without `read`. It needs `--expected` with the current result hash and an admitted device of the reviewer whose key this runtime holds. A missing hash or device is refused by name, while a stale hash is a conflict. `work review` always records a signed review, so it always needs both. [Inspecting estate policies](policies.md) describes duty evidence.
+
 An acceptance closes a result or a work order, pinned to its exact hash:
 
 ```sh
