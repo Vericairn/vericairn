@@ -581,6 +581,12 @@ public sealed class DaemonHost : IAsyncDisposable
             maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.SignedBodyLimit);
         }
 
+        // A network MCP message is smaller still (MCP-03): one JSON-RPC message, refused beyond its limit before authentication.
+        if (Mcp.Serves(context))
+        {
+            maximum = Math.Min(maximum ?? long.MaxValue, McpEndpoint.BodyLimit);
+        }
+
         if (size is { IsReadOnly: false })
         {
             size.MaxRequestBodySize = null;
@@ -641,10 +647,11 @@ public sealed class DaemonHost : IAsyncDisposable
                 : null;
         if (denied is not null)
         {
-            if (Mcp.Enabled && Mcp.Sessions.Count > 0 && context.Request.Headers[RequestSigning.DeviceHeader].ToString() is { Length: > 0 } named)
+            if (Mcp.Enabled && context.Request.Headers[RequestSigning.DeviceHeader].ToString() is { Length: > 0 } named && Mcp.Sessions.TakeDeviceSweep(named))
             {
                 // The device a refused request names, on any route, may hold network MCP sessions: if the records say it no longer
-                // stands, they end now, streams included. A device that stands keeps them, whoever named it.
+                // stands, they end now, streams included. A device that stands keeps them, whoever named it, and its sessions are
+                // swept this way at most once in a few seconds.
                 Mcp.Sessions.Sweep(Service, named);
             }
 

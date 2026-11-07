@@ -177,6 +177,82 @@ public class NetworkMcpTransportTests
     }
 
     [Fact]
+    public async Task APreparedRecordLapsesUnsignedAfterTenMinutes()
+    {
+        (LocalNetworkHarness harness, string assignment) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        RuntimeConnection agent = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        using McpWire client = NetworkMcp.Wire(harness, agent);
+        await client.InitializeAsync();
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        harness.Host.Service.PreparedClock = clock;
+        JsonObject arguments = NetworkMcp.Args(("assignment", assignment), ("workspace", "widget repository"), ("note", "Build it."));
+        JsonObject prepared = await client.CallAsync("work_attempt", (JsonObject)arguments.DeepClone(), new JsonObject { ["vericairn/prepare"] = true });
+        JsonObject plan = prepared["_meta"]!["vericairn/plan"]!["prepared"]!.AsObject();
+        int records = harness.Estate.Load().Records.Count;
+
+        clock.Now += TimeSpan.FromMinutes(11);
+        JsonObject lapsed = await client.CallAsync("work_attempt", (JsonObject)arguments.DeepClone(), new JsonObject
+        {
+            ["vericairn/plan"] = plan["plan"]!.GetValue<string>(), ["vericairn/signature"] = McpWire.Sign(harness.Signer(agent), plan["hash"]!.GetValue<string>()),
+        });
+        Assert.True(lapsed["isError"]!.GetValue<bool>());
+        Assert.Contains("lapsed unsigned", McpWire.Text(lapsed), StringComparison.Ordinal);
+        Assert.Equal(records, harness.Estate.Load().Records.Count);
+    }
+
+    [Fact]
+    public async Task OnLoopbackAWriteIsKeptInTheLedgerAndLosingTheProfileEndsTheStream()
+    {
+        (LocalNetworkHarness harness, string assignment) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        WriteOutcome created = harness.Socket.DeviceCreate(new DeviceCreateRequest(harness.Estate.BuilderId, "Agent here", "file", ["embedded", "loopback"]));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(device, harness.Estate.OperatorId, "The agent's device here.")).Ok);
+        DeviceRequestSigner signer = DeviceRequestSigner.Find(device)!;
+        using var client = new McpWire(VericairnClient.SignedHttp(harness.Host.Endpoint, signer));
+        await client.InitializeAsync();
+
+        // A network write on loopback names the device that asked in local-network-writes.jsonl, as one on the local network does.
+        WriteOutcome written = McpWire.Outcome(await client.WriteAsync("work_attempt", NetworkMcp.Args(("assignment", assignment), ("workspace", "widget repository"), ("note", "Build it.")), signer));
+        Assert.True(written.Ok, written.Problem?.Message);
+        LocalNetworkWrite kept = Assert.Single(LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!));
+        Assert.Equal((device, harness.Estate.BuilderId, "POST /v1/work/attempt", written.Written!.Id, "written"), (kept.Device, kept.Principal, kept.Operation, kept.Record, kept.State));
+
+        // The server stream is bound to the loopback profile: withdrawing it ends the stream at once.
+        using HttpResponseMessage stream = await client.OpenStreamAsync();
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync(TestContext.Current.CancellationToken));
+        Assert.NotNull(await McpWire.ReadUntilAsync(reader, line => line.StartsWith(':')));
+        RecordResponse record = harness.Socket.Record(device)!;
+        JsonObject body = JsonNode.Parse(record.Envelope.GetProperty("body").GetRawText())!.AsObject();
+        body["profiles"] = new JsonArray("embedded");
+        using System.Text.Json.JsonDocument changed = System.Text.Json.JsonDocument.Parse(body.ToJsonString());
+        Assert.True(harness.Socket.NewRecord(new NewRecordRequest("device", harness.Estate.BuilderId, changed.RootElement, Supersedes: device)).Ok);
+        Assert.Null(await McpWire.ReadUntilAsync(reader, line => line.StartsWith("data:", StringComparison.Ordinal)));
+        Assert.Equal(0, harness.Host.Mcp.Sessions.CountFor(device));
+    }
+
+    [Fact]
+    public async Task AFailingRouteAnswersAGenericProblemAndNoMachinePath()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(mcp: true);
+        var failing = new Microsoft.AspNetCore.Routing.RouteEndpoint(_ => throw new IOException("Cannot read /private/estate/.vericairn/live.db"),
+            Microsoft.AspNetCore.Routing.Patterns.RoutePatternFactory.Parse("/v1/status"), 0,
+            new Microsoft.AspNetCore.Http.EndpointMetadataCollection(new Microsoft.AspNetCore.Routing.HttpMethodMetadata(["GET"])), "failing");
+        var operations = new McpOperations([failing]);
+        var device = new AuthenticatedDevice("01DEVICE", harness.Estate.BuilderId, "key", LocalNetwork: true);
+        using var http = new HttpClient(operations.Handler(harness.Host, new Microsoft.AspNetCore.Http.DefaultHttpContext(), device, Vericairn.Runtime.Service.DeviceSigning.Read, CancellationToken.None))
+            { BaseAddress = new Uri("http://vericairn-mcp/") };
+        using HttpResponseMessage answer = await http.GetAsync(new Uri("v1/status", UriKind.Relative), TestContext.Current.CancellationToken);
+        string text = await answer.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.InternalServerError, answer.StatusCode);
+        Assert.Contains("failed on the runtime", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/private/estate", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TheServerStreamCarriesItsSessionsMessagesToItsDeviceAlone()
     {
         (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync();

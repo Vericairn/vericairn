@@ -288,14 +288,34 @@ public sealed partial class EstateService
         return kept;
     }
 
-    /// <summary>The kind of a principal by its id, from 0.9.2: human, agent or service; null when no current principal has that id.</summary>
-    public string? PrincipalKind(string principal)
+    /// <summary>
+    /// From 0.9.2 (MCP-03): the standing of each device and the kind of each principal named, read from one reading of the records,
+    /// so a caller judging several asks the records once. A device or principal the records do not name is null.
+    /// </summary>
+    public DeviceStandingsRead ReadStandings(IEnumerable<string> devices, IEnumerable<string>? principals = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        ArgumentNullException.ThrowIfNull(devices);
         lock (gate)
         {
             EstateModel model = session.Read();
-            return model.CurrentPrincipal(principal) is RecordEnvelope current ? EstateModel.BodyString(current, "kind") : null;
+            var standings = new Dictionary<string, DeviceStanding?>(StringComparer.Ordinal);
+            foreach (string device in devices.Where(d => !string.IsNullOrWhiteSpace(d)))
+            {
+                standings[device] = Standing(model, device);
+            }
+
+            var kinds = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (string principal in (principals ?? []).Where(p => !string.IsNullOrWhiteSpace(p)))
+            {
+                kinds[principal] = model.CurrentPrincipal(principal) is RecordEnvelope current ? EstateModel.BodyString(current, "kind") : null;
+            }
+
+            return new DeviceStandingsRead(standings, kinds);
         }
     }
 }
+
+/// <summary>Devices' standings and principals' kinds from one reading of the records, from 0.9.2.</summary>
+/// <param name="Devices">Each device asked for, by the id it was named by: its standing, or null when no device has that id.</param>
+/// <param name="PrincipalKinds">Each principal asked for: human, agent or service, or null when no current principal has that id.</param>
+public sealed record DeviceStandingsRead(IReadOnlyDictionary<string, DeviceStanding?> Devices, IReadOnlyDictionary<string, string?> PrincipalKinds);

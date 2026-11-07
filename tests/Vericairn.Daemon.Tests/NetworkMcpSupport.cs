@@ -252,3 +252,11 @@ internal static class NetworkMcp
 
     public static JsonObject ResultBody(string summary = "The widget builds.") => JsonNode.Parse($$"""{"outcome":"completed","summary":"{{summary}}","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}""")!.AsObject();
 }
+
+/// <summary>A clock a test moves by assignment, for prepared records' lapse.</summary>
+internal sealed class MovableClock(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = now;
+
+    public override DateTimeOffset GetUtcNow() => Now;
+}

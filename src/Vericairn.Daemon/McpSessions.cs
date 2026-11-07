@@ -143,6 +143,7 @@ internal sealed class McpSessions(TimeProvider time)
     private readonly Dictionary<string, int> calls = new(StringComparer.Ordinal);
     private int running;
     private DateTimeOffset lastSwept = DateTimeOffset.MinValue;
+    private readonly Dictionary<string, DateTimeOffset> deviceSwept = new(StringComparer.Ordinal);
 
     /// <summary>How often a request to /mcp sweeps every session; each request's own device is judged on every request regardless.</summary>
     internal static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
@@ -227,70 +228,102 @@ internal sealed class McpSessions(TimeProvider time)
 
     /// <summary>
     /// Ends every session that has been idle an hour, and every session whose device is no longer admitted with its key and the
-    /// profile the session was opened on, as the records say now.
+    /// profile the session was opened on, as one reading of the records says now; with <paramref name="device"/>, that device's only.
     /// </summary>
     internal int Sweep(EstateService service, string? device = null)
     {
-        DateTimeOffset now = time.GetUtcNow();
-        List<McpSession> open;
+        List<string> devices;
         lock (gate)
         {
             if (device is null)
             {
-                lastSwept = now;
+                lastSwept = time.GetUtcNow();
             }
 
-            open = [.. sessions.Values.Where(s => device is null || s.Device == device)];
+            devices = [.. sessions.Values.Where(s => device is null || s.Device == device).Select(s => s.Device).Distinct(StringComparer.Ordinal)];
         }
 
-        var ended = new List<McpSession>();
-        foreach (IGrouping<string, McpSession> held in open.GroupBy(s => s.Device, StringComparer.Ordinal))
+        if (devices.Count == 0)
         {
-            DeviceStanding? standing;
-            try
-            {
-                standing = service.Standing(held.Key);
-            }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
-            {
-                continue;
-            }
-
-            foreach (McpSession session in held)
-            {
-                if (now - session.LastUsed > Idle || standing is null || standing.Admission != "admitted"
-                    || !string.Equals(standing.Principal, session.Principal, StringComparison.Ordinal)
-                    || !standing.Profiles.Contains(session.Profile, StringComparer.Ordinal))
-                {
-                    ended.Add(session);
-                }
-            }
+            return 0;
         }
 
+        DeviceStandingsRead read;
+        try
+        {
+            read = service.ReadStandings(devices);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            return 0;
+        }
+
+        return Sweep(read);
+    }
+
+    /// <summary>
+    /// Ends the sessions of the devices a reading of the records covers that are idle an hour or whose device no longer stands, and
+    /// every session idle an hour; sessions of devices the reading does not cover are judged by idleness alone.
+    /// </summary>
+    internal int Sweep(DeviceStandingsRead read)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        DateTimeOffset now = time.GetUtcNow();
         lock (gate)
         {
+            List<McpSession> ended = [.. sessions.Values.Where(session => now - session.LastUsed > Idle
+                || read.Devices.TryGetValue(session.Device, out DeviceStanding? standing) && !Stands(standing, session))];
             foreach (McpSession session in ended)
             {
                 EndLocked(session);
             }
-        }
 
-        return ended.Count;
+            return ended.Count;
+        }
     }
 
-    /// <summary>Sweeps when the last sweep of every session is more than a few seconds old, so a busy runtime reads standings sparingly.</summary>
-    internal int SweepIfDue(EstateService service)
+    /// <summary>
+    /// The devices holding sessions, when a sweep of every session is due: more than <see cref="SweepInterval"/> since the last;
+    /// otherwise none. Taking them marks the sweep done, so a busy runtime reads the records for it sparingly.
+    /// </summary>
+    internal IReadOnlyCollection<string> DueDevices()
     {
+        DateTimeOffset now = time.GetUtcNow();
         lock (gate)
         {
-            if (time.GetUtcNow() - lastSwept < SweepInterval)
+            if (now - lastSwept < SweepInterval)
             {
-                return 0;
+                return [];
             }
-        }
 
-        return Sweep(service);
+            lastSwept = now;
+            return [.. sessions.Values.Select(s => s.Device).Distinct(StringComparer.Ordinal)];
+        }
     }
+
+    /// <summary>
+    /// Whether a refused request naming a device should sweep its sessions now: it holds some, and none of its sweeps ran in the last
+    /// <see cref="SweepInterval"/>, so refused requests never make the runtime read the records more than that for one device.
+    /// </summary>
+    internal bool TakeDeviceSweep(string device)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        lock (gate)
+        {
+            if (!sessions.Values.Any(s => s.Device == device)
+                || deviceSwept.TryGetValue(device, out DateTimeOffset last) && now - last < SweepInterval)
+            {
+                return false;
+            }
+
+            deviceSwept[device] = now;
+            return true;
+        }
+    }
+
+    private static bool Stands(DeviceStanding? standing, McpSession session) =>
+        standing is not null && standing.Admission == "admitted" && string.Equals(standing.Principal, session.Principal, StringComparison.Ordinal)
+        && standing.Profiles.Contains(session.Profile, StringComparer.Ordinal);
 
     /// <summary>Ends every session, as the daemon stops.</summary>
     internal void EndAll()
@@ -336,6 +369,10 @@ internal sealed class McpSessions(TimeProvider time)
     {
         sessions.Remove(session.Id);
         session.End();
+        if (!sessions.Values.Any(s => s.Device == session.Device))
+        {
+            deviceSwept.Remove(session.Device);
+        }
     }
 
     private static string NewId() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));

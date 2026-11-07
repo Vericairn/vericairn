@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using Vericairn.Mcp;
+using Vericairn.Protocol;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
@@ -73,7 +74,7 @@ internal sealed class McpServeCommand : Command
             bridge.RunAsync(Console.In, context.Output, context.CancellationToken).GetAwaiter().GetResult();
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException) && exception is not IClientOperationFailure)
         {
             return context.Fail(exception.Message);
         }

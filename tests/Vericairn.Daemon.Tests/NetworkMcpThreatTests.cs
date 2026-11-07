@@ -262,7 +262,9 @@ public class NetworkMcpThreatTests
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(paired.DevicePublicKey), DateTimeOffset.UtcNow);
 
         // The declared length alone refuses it: nothing of the body is read beyond the refusal's bounded drain, and no signature is tried.
-        byte[] head = System.Text.Encoding.ASCII.GetBytes($"POST /mcp HTTP/1.1\r\nHost: {harness.Address}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {RequestAuthenticator.SignedBodyLimit + 1}\r\n\r\n{{\"jsonrpc\":\"2.0\"");
+        // A message to /mcp holds at most 1 MiB, well under the API's signed-body limit.
+        Assert.True(McpEndpoint.BodyLimit < RequestAuthenticator.SignedBodyLimit);
+        byte[] head = System.Text.Encoding.ASCII.GetBytes($"POST /mcp HTTP/1.1\r\nHost: {harness.Address}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {McpEndpoint.BodyLimit + 1}\r\n\r\n{{\"jsonrpc\":\"2.0\"");
         string answer = await Raw.ExchangeAsync(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate, head, TestTiming.HangTimeout);
         Assert.StartsWith("HTTP/1.1 413", answer, StringComparison.Ordinal);
         Assert.Contains("limit", answer, StringComparison.Ordinal);
@@ -325,6 +327,48 @@ public class NetworkMcpThreatTests
         await holding.CancelAsync();
         await Task.WhenAll(opened).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         harness.Host.EventStreamOpened = null;
+    }
+
+    [Fact]
+    public async Task ARefusedRequestEndsTheSessionsOfADeviceThatNoLongerStandsAndNoOther()
+    {
+        (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        RuntimeConnection standing = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        RuntimeConnection lost = harness.Pair(harness.Estate.BuilderId, "Agent desktop");
+        using (McpWire one = NetworkMcp.Wire(harness, standing)) await one.InitializeAsync();
+        using (McpWire two = NetworkMcp.Wire(harness, lost)) await two.InitializeAsync();
+
+        // A refused request naming a device that stands (a signature that does not verify) leaves its sessions alone.
+        DeviceRequestSigner signer = harness.Signer(standing);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(standing.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var raw = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        (HttpStatusCode forged, _) = await raw.SendAsync(HttpMethod.Get, "/v1/status", (standing.Device, RequestSigning.FormatTime(DateTimeOffset.UtcNow), Base64Url.EncodeToString(new byte[64])));
+        Assert.Equal(HttpStatusCode.Unauthorized, forged);
+        Assert.Equal(1, harness.Host.Mcp.Sessions.CountFor(standing.Device));
+
+        // Revoked, the other device's next request, on any route, is refused and ends its sessions.
+        Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(lost.Device, harness.Estate.OperatorId, "The desktop was retired.")).Ok);
+        DeviceRequestSigner retired = harness.Signer(lost);
+        using X509Certificate2 retiredCredential = LocalNetworkCredential.Issue(retired, Base64Url.DecodeFromChars(lost.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var revoked = new MutualTls(harness, retiredCredential, harness.Host.Endpoint.Loopback!.Certificate);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await revoked.SendSignedAsync(retired, HttpMethod.Get, "/v1/status")).Status);
+        Assert.Equal(0, harness.Host.Mcp.Sessions.CountFor(lost.Device));
+        Assert.Equal(1, harness.Host.Mcp.Sessions.CountFor(standing.Device));
+
+        // A device's refused requests sweep at most once in a few seconds.
+        Assert.False(harness.Host.Mcp.Sessions.TakeDeviceSweep(standing.Device));
+        harness.Time.Advance(McpSessions.SweepInterval + TimeSpan.FromSeconds(1));
+        Assert.True(harness.Host.Mcp.Sessions.TakeDeviceSweep(standing.Device));
+        Assert.False(harness.Host.Mcp.Sessions.TakeDeviceSweep(lost.Device));
+    }
+
+    [Fact]
+    public void HostAddressesCompareWithoutTheirScopeOrTheirIpv4Mapping()
+    {
+        Assert.Equal(McpEndpoint.Unscoped(IPAddress.Parse("fe80::1")), McpEndpoint.Unscoped(IPAddress.Parse("fe80::1%7")));
+        Assert.Equal(IPAddress.Parse("192.168.1.20"), McpEndpoint.Unscoped(IPAddress.Parse("::ffff:192.168.1.20")));
+        Assert.NotEqual(McpEndpoint.Unscoped(IPAddress.Parse("fe80::1")), McpEndpoint.Unscoped(IPAddress.Parse("fe80::2%7")));
     }
 
     [Fact]

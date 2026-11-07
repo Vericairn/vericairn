@@ -241,6 +241,13 @@ internal sealed class McpOperations
             {
                 return Refused((HttpStatusCode)exception.StatusCode, new Problem("refused", exception.Message, []));
             }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException or JsonException or ArgumentException
+                && !stop.IsCancellationRequested)
+            {
+                // What failed stays in the runtime's log: its message may name paths on this machine, which a network client never sees.
+                host.Log($"network MCP: {operation} failed for device {device.Identity}: {exception.GetType().Name}: {exception.Message}");
+                return Refused(HttpStatusCode.InternalServerError, new Problem("unavailable", $"{operation} failed on the runtime; its log says why.", []));
+            }
 
             var response = new HttpResponseMessage((HttpStatusCode)context.Response.StatusCode) { Content = new ByteArrayContent(output.ToArray()), RequestMessage = request };
             if (context.Response.ContentType is string type && MediaTypeHeaderValue.TryParse(type, out MediaTypeHeaderValue? media))

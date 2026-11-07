@@ -26,14 +26,27 @@ internal sealed class McpBridge : IDisposable
     private const string SessionHeader = "Mcp-Session-Id";
     private const string VersionHeader = "MCP-Protocol-Version";
 
-    /// <summary>The record type each prepared write authors, which the bridge checks before its device signs.</summary>
-    private static readonly Dictionary<string, string> Writes = new(StringComparer.Ordinal)
+    /// <summary>
+    /// The writes the bridge prepares and signs, each with the record type it authors and what it is about: the subject's type and
+    /// the argument naming it. Any other call is forwarded once, as it came, and nothing it answers is ever signed.
+    /// </summary>
+    private static readonly Dictionary<string, (string Type, string Subject, string? Argument)> Writes = new(StringComparer.Ordinal)
     {
-        ["work_attempt"] = "attempt",
-        ["work_progress"] = "work-progress",
-        ["work_result"] = "result",
-        ["work_amend"] = "amendment",
-        ["document_review"] = "document-review",
+        ["work_attempt"] = ("attempt", "assignment", "assignment"),
+        ["work_progress"] = ("work-progress", "attempt", "attempt"),
+        ["work_result"] = ("result", "attempt", "attempt"),
+        ["work_amend"] = ("amendment", "assignment", "assignment"),
+        ["document_review"] = ("document-review", "living-document", null),
+    };
+
+    /// <summary>The body fields each write's record may hold beyond those its arguments supply: what the runtime adds.</summary>
+    private static readonly Dictionary<string, string[]> Added = new(StringComparer.Ordinal)
+    {
+        ["work_attempt"] = ["startedAt"],
+        ["work_progress"] = ["completedAt"],
+        ["work_result"] = ["progressClaim"],
+        ["work_amend"] = [],
+        ["document_review"] = ["content", "answers", "independence", "findings", "checks", "covered", "sections"],
     };
 
     private readonly HttpClient http;
@@ -117,7 +130,7 @@ internal sealed class McpBridge : IDisposable
                 }
 
                 JsonNode? id = message["id"];
-                string? method = message["method"] is JsonValue m && m.TryGetValue(out string? name) ? name : null;
+                string? method = Text(message["method"]);
                 if (method is null && id is not null && message["result"] is null && message["error"] is null)
                 {
                     await WriteAsync(Error(id.DeepClone(), -32600, "Invalid request: no method.")).ConfigureAwait(false);
@@ -163,15 +176,28 @@ internal sealed class McpBridge : IDisposable
             await EndAsync().ConfigureAwait(false);
         }
 
-        (HttpStatusCode status, JsonObject? body, string? problem, string? opened) = await PostAsync(message, cancellationToken).ConfigureAwait(false);
-        if (status != HttpStatusCode.OK || body is null)
+        try
         {
-            return Error(id, -32603, Refused(status, problem));
-        }
+            (HttpStatusCode status, JsonObject? body, string? problem, string? opened) = await PostAsync(message, cancellationToken).ConfigureAwait(false);
+            if (status != HttpStatusCode.OK || body is null)
+            {
+                return Error(id, -32603, Refused(status, problem));
+            }
 
-        session = opened;
-        version = body["result"]?["protocolVersion"]?.GetValue<string>();
-        return body;
+            if (body["result"] is not JsonObject result || Text(result["protocolVersion"]) is not string negotiated || opened is null)
+            {
+                return Error(id, -32603, "The runtime's answer to initialize names no session and protocol version; nothing was opened.");
+            }
+
+            session = opened;
+            version = negotiated;
+            return body;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or TimeoutException or InvalidOperationException or JsonException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return Error(id, -32603, "The runtime could not be reached: " + (ClientFailure.FromException(exception)?.Message ?? exception.Message));
+        }
     }
 
     private async Task<JsonObject> RequestAsync(JsonObject message, string method, CancellationToken cancellationToken)
@@ -192,10 +218,20 @@ internal sealed class McpBridge : IDisposable
         }
     }
 
-    /// <summary>A write in two steps: prepared, checked, signed by this device, repeated with the plan; any other call once.</summary>
+    /// <summary>
+    /// A write in two steps: prepared, checked to be the record its call asks for, signed by this device, repeated with the plan.
+    /// Any other call is forwarded once, unchanged, and nothing it returns is signed.
+    /// </summary>
     private async Task<JsonObject> CallAsync(JsonObject message, JsonNode id, CancellationToken cancellationToken)
     {
         JsonObject parameters = message["params"] as JsonObject ?? [];
+        string? tool = Text(parameters["name"]);
+        if (tool is null || !Writes.ContainsKey(tool))
+        {
+            return await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
+        }
+
+        JsonObject arguments = parameters["arguments"] as JsonObject ?? [];
         JsonObject ownMeta = parameters["_meta"] as JsonObject ?? [];
         JsonObject preparing = (JsonObject)message.DeepClone();
         JsonObject preparingParameters = preparing["params"] as JsonObject ?? [];
@@ -207,59 +243,150 @@ internal sealed class McpBridge : IDisposable
         preparingParameters["_meta"] = meta;
 
         JsonObject first = await ForwardAsync(preparing, id, cancellationToken).ConfigureAwait(false);
-        if (first["result"] is not JsonObject result || result["isError"]?.GetValue<bool>() == true
+        if (first["result"] is not JsonObject result || result["isError"] is JsonValue failed && failed.TryGetValue(out bool isError) && isError
             || result["_meta"]?["vericairn/plan"]?["prepared"] is not JsonObject prepared)
         {
-            // A read, an active progress note or a refusal: the runtime prepared nothing, and this is the call's answer.
+            // An active progress note, which writes no record, or a refusal: the runtime prepared nothing, and this is the answer.
             return first;
         }
 
-        string tool = parameters["name"]?.GetValue<string>() ?? string.Empty;
-        if (Unsignable(prepared, tool) is string refusal)
+        if (Unsignable(prepared, tool, arguments) is string refusal)
         {
             log?.WriteLine("vericairn mcp: " + refusal);
             return Result(id, refusal, isError: true);
         }
 
-        string hash = prepared["hash"]!.GetValue<string>();
-        string signature = Base64Url.EncodeToString(sign(RecordSigning.Digest(hash)));
+        string hash = Text(prepared["hash"])!;
+        string signature;
+        try
+        {
+            signature = Base64Url.EncodeToString(sign(RecordSigning.Digest(hash)));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return Error(id, -32603, $"This device did not sign the prepared record: {exception.Message} Nothing was written.");
+        }
+
         JsonObject signing = (JsonObject)message.DeepClone();
         JsonObject signingParameters = signing["params"] as JsonObject ?? [];
         signing["params"] = signingParameters;
         JsonObject signed = (JsonObject)ownMeta.DeepClone();
         signed.Remove("vericairn/prepare");
-        signed["vericairn/plan"] = prepared["plan"]!.GetValue<string>();
+        signed["vericairn/plan"] = Text(prepared["plan"]);
         signed["vericairn/signature"] = signature;
         signingParameters["_meta"] = signed;
         return await ForwardAsync(signing, id, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Why this device does not sign a prepared record, or null: its content must hash to the hash the runtime asks to be signed, name
-    /// this device's principal as author and carry no signature, and be the record type its tool writes.
+    /// Why this device does not sign a prepared record, or null. The record must be one a write tool authors, of that tool's type, hash
+    /// to the hash the runtime asks to be signed, carry no signature, name this device's principal as author, be about the very
+    /// record the call's arguments name, and hold every field those arguments supply unchanged, with nothing beyond what the
+    /// runtime adds to such a record. Anything else is refused.
     /// </summary>
-    private string? Unsignable(JsonObject prepared, string tool)
+    internal string? Unsignable(JsonObject prepared, string tool, JsonObject arguments)
     {
-        if (prepared["hash"] is not JsonValue hashValue || !hashValue.TryGetValue(out string? hash) || prepared["plan"] is not JsonValue
-            || prepared["record"] is not JsonObject record)
+        const string Nothing = " Nothing was signed or written.";
+        if (!Writes.TryGetValue(tool, out (string Type, string Subject, string? Argument) shape))
         {
-            return "The runtime's prepared record is incomplete; nothing was signed or written.";
+            return $"{tool} is not a write this bridge signs; the runtime prepared a record for it." + Nothing;
+        }
+
+        if (Text(prepared["hash"]) is not string hash || Text(prepared["plan"]) is null || prepared["record"] is not JsonObject record)
+        {
+            return "The runtime's prepared record is incomplete." + Nothing;
         }
 
         var findings = new FindingList();
-        RecordEnvelope? envelope = RecordParser.Parse(Encoding.UTF8.GetBytes(record.ToJsonString()), "prepared", findings, checkFormatting: false);
-        if (envelope is null || envelope.ComputedHash != hash || envelope.Signatures.Count > 0)
+        RecordEnvelope? envelope;
+        try
         {
-            return "The runtime asked this device to sign a hash its prepared record does not have; nothing was signed or written.";
+            envelope = RecordParser.Parse(Encoding.UTF8.GetBytes(record.ToJsonString()), "prepared", findings, checkFormatting: false);
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException or InvalidOperationException or JsonException)
+        {
+            envelope = null;
+        }
+
+        if (envelope is null || envelope.ComputedHash != hash || envelope.Signatures.Count > 0 || Text(prepared["id"]) is string named && named != envelope.Id)
+        {
+            return "The runtime asked this device to sign a hash its prepared record does not have." + Nothing;
         }
 
         if (!string.Equals(envelope.By, principal, StringComparison.Ordinal))
         {
-            return $"The prepared record names {envelope.By} as its author, not this device's principal {principal}; nothing was signed or written.";
+            return $"The prepared record names {envelope.By} as its author, not this device's principal {principal}." + Nothing;
         }
 
-        return Writes.TryGetValue(tool, out string? type) && envelope.Type != type
-            ? $"{tool} writes a {type} record, and the runtime prepared a {envelope.Type}; nothing was signed or written."
+        if (envelope.Type != shape.Type)
+        {
+            return $"{tool} writes a record of type {shape.Type}, and the runtime prepared one of type {envelope.Type}." + Nothing;
+        }
+
+        if (envelope.Subject is not { } subject || subject.Type != shape.Subject
+            || shape.Argument is string argument && Text(arguments[argument]) is string asked && subject.Id != asked
+            || shape.Argument is string required && Text(arguments[required]) is null)
+        {
+            return $"The prepared record is not about the {shape.Subject} this call names." + Nothing;
+        }
+
+        return BodyRefusal(tool, record["body"] as JsonObject, arguments, Text(record["at"])) is string body ? body + Nothing : null;
+    }
+
+    /// <summary>Why a prepared record's body is not the one its call's arguments supply, or null.</summary>
+    private static string? BodyRefusal(string tool, JsonObject? body, JsonObject arguments, string? at)
+    {
+        if (body is null)
+        {
+            return "The prepared record has no body.";
+        }
+
+        var supplied = new JsonObject();
+        switch (tool)
+        {
+            case "work_attempt":
+                supplied["workspace"] = arguments["workspace"]?.DeepClone();
+                supplied["note"] = arguments["note"]?.DeepClone();
+                if (Text(body["startedAt"]) != at) return "The prepared attempt states a start other than its own time.";
+                break;
+            case "work_progress":
+                if (Text(arguments["state"]) != "completed") return "Only a completed phase is a record; the runtime prepared one for another claim.";
+                supplied["phase"] = arguments["phase"]?.DeepClone();
+                supplied["note"] = arguments["note"]?.DeepClone();
+                if (arguments.ContainsKey("progress")) supplied["progress"] = arguments["progress"]?.DeepClone();
+                if (arguments.ContainsKey("statusText")) supplied["statusText"] = arguments["statusText"]?.DeepClone();
+                if (Text(body["completedAt"]) != at) return "The prepared progress record states a completion other than its own time.";
+                break;
+            case "work_result":
+            case "work_amend":
+                if (arguments["body"] is not JsonObject given) return "The call supplies no body, yet the runtime prepared one.";
+                foreach ((string name, JsonNode? value) in given)
+                {
+                    supplied[name] = value?.DeepClone();
+                }
+
+                break;
+            case "document_review":
+                supplied["outcome"] = arguments["outcome"]?.DeepClone();
+                supplied["summary"] = arguments["summary"]?.DeepClone();
+                if (body["findings"] is not JsonArray { Count: 0 }) return "The prepared review carries findings the call did not supply.";
+                if (arguments.ContainsKey("sections") != body.ContainsKey("sections")) return "The prepared review's sections are not the ones the call names.";
+                break;
+            default:
+                return "The call is not a write this bridge signs.";
+        }
+
+        foreach ((string name, JsonNode? value) in supplied)
+        {
+            if (!body.TryGetPropertyValue(name, out JsonNode? held) || !JsonNode.DeepEquals(held, value))
+            {
+                return $"The prepared record's {name} is not the one the call supplies.";
+            }
+        }
+
+        string[] added = Added[tool];
+        return body.Select(p => p.Key).FirstOrDefault(name => !supplied.ContainsKey(name) && !added.Contains(name, StringComparer.Ordinal)) is string extra
+            ? $"The prepared record holds {extra}, which the call does not supply."
             : null;
     }
 
@@ -321,7 +448,7 @@ internal sealed class McpBridge : IDisposable
             }
 
             session = opened;
-            version = body["result"]?["protocolVersion"]?.GetValue<string>();
+            version = Text(body["result"]?["protocolVersion"]);
             log?.WriteLine("vericairn mcp: the runtime ended the session; a new one is open");
             await PostAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" }, cancellationToken).ConfigureAwait(false);
             return session is not null;
@@ -367,7 +494,7 @@ internal sealed class McpBridge : IDisposable
         };
         request.Headers.Accept.ParseAdd("application/json");
         request.Headers.Accept.ParseAdd("text/event-stream");
-        if (session is not null && message["method"]?.GetValue<string>() != "initialize")
+        if (session is not null && Text(message["method"]) != "initialize")
         {
             request.Headers.TryAddWithoutValidation(SessionHeader, session);
             if (version is not null)
@@ -386,7 +513,7 @@ internal sealed class McpBridge : IDisposable
             {
                 JsonNode? node = JsonNode.Parse(text);
                 body = node as JsonObject;
-                problem = body?["message"]?.GetValue<string>() ?? body?["error"]?["message"]?.GetValue<string>();
+                problem = Text(body?["message"]) ?? Text(body?["error"]?["message"]);
             }
             catch (JsonException)
             {
@@ -397,6 +524,9 @@ internal sealed class McpBridge : IDisposable
         string? opened = response.Headers.TryGetValues(SessionHeader, out IEnumerable<string>? values) ? values.FirstOrDefault() : null;
         return (response.StatusCode, response.StatusCode == HttpStatusCode.OK ? body : null, problem, opened);
     }
+
+    /// <summary>A JSON string's value, or null for anything else.</summary>
+    private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;
 
     private static string Refused(HttpStatusCode status, string? problem) =>
         $"The runtime answered {(int)status} {status}{(problem is null ? "." : ": " + problem)}";

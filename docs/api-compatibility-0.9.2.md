@@ -301,8 +301,9 @@ generated document changes.
 No route, OpenAPI operation, request or response type of API version 1 is added or changed. The daemon serves the Model
 Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners when the operator turned it on,
 outside the API's route table; each tool call runs the API's own route in the daemon's process for the requesting device,
-with that route's request scope. `DaemonEndpoint` gains the optional `Mcp`, serialized as `mcp` (the path served) only
-while it is on; older clients ignore it and older daemons omit it.
+with that route's request scope. A message to `/mcp` holds at most 1 MiB, refused before authentication, and a network
+write is kept in `local-network-writes.jsonl` on loopback as on the local network. `DaemonEndpoint` gains the optional
+`Mcp`, serialized as `mcp` (the path served) only while it is on; older clients ignore it and older daemons omit it.
 
 `Vericairn.Daemon` now depends on `Vericairn.Mcp`. `DaemonOptions` adds `Mcp` and `McpAllowedOrigins`, which override the
 runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `AllowedOrigins` and the static
@@ -310,7 +311,8 @@ runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `Allow
 them. A file whose `allowedOrigins` names something other than an origin is refused as unreadable settings.
 
 `Vericairn.Runtime` adds `DeviceSigning` and `DeviceSigningMode` (`Read`, `Prepare`, `Sign`), the overload
-`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.PrincipalKind(principal)`. Under a
+`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.ReadStandings(devices, principals)`, which
+returns a `DeviceStandingsRead`: each device's standing and each principal's kind from one reading of the records. Under a
 `DeviceSigning`, no key on the runtime's machine signs and no record is written unsigned: an operation writes nothing,
 prepares the one record it authors for the requesting device, or writes that record only with the device's signature over
 the plan's exact record, re-authored from the same request with the plan's id and time; every other store is refused.

@@ -248,7 +248,7 @@ user acts for any principal. `vericairn runtime status` shows `/mcp` while a dae
 
 **Who may connect.** Every request on `/mcp` is signed by one device, as the API's requests are: the
 loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `vericairn-request/2`,
-with the same freshness, replay and body rules. The device must be admitted now, permitted the
+with the same freshness and replay rules; a message holds at most 1 MiB, refused before it is authenticated. The device must be admitted now, permitted the
 profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
 person connects an MCP client as an agent principal of their own, so its writes are never attributed
 to them. On loopback the device needs the `loopback` profile (`vericairn devices create --profile embedded
@@ -268,7 +268,7 @@ gets `404`, after which a client initializes again. DELETE ends a session. A ses
 device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
 hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
 four sessions, a new one ending its least recently used, and the runtime 64; a device runs at most four
-requests at once and all devices eight, so network MCP never takes the connections the API and the
+requests at once and all devices eight, its request counted before its body is read, so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
 
@@ -291,8 +291,8 @@ writing nothing. The client checks that record, signs the record-signing digest 
 device key, and repeats the call with the same arguments and `_meta` `{"vericairn/plan": <plan>,
 "vericairn/signature": <signature>}`. The runtime checks that the plan is this device's, unused and
 under ten minutes old, that the arguments yield the same record and that the signature verifies, then
-writes it with that signature alone; each write is kept in `local-network-writes.jsonl` on the
-local network. A write in one call is a tool error. An active progress note keeps live state and no
+writes it with that signature alone; each write is kept in `local-network-writes.jsonl`, on loopback
+as on the local network. A write in one call is a tool error. An active progress note keeps live state and no
 record, so it needs no plan. A device holds at most 32 prepared records at once. Tools that write
 carry `_meta["vericairn/prepared"]: true` in `tools/list`.
 
@@ -307,10 +307,12 @@ sends resource notifications on this stream.
 **The bridge.** `vericairn mcp serve --connection <connection>` serves standard input and output to a
 local harness, as `mcp serve` does, and forwards each message to the remote estate's `/mcp` over a
 connection this machine paired (`vericairn connections`), named by its id or its estate's name. Every
-request is signed by the connection's device. For each `tools/call` the bridge first asks the runtime
-to prepare; when a record comes back it checks that the record hashes to the hash it is asked to
-sign, names the device's principal as author and is the record type the tool writes, then signs it
-with the same key and repeats the call, returning only the final answer. A session the runtime ended
+request is signed by the connection's device. Only for the five writes does the bridge first ask the
+runtime to prepare; when a record comes back it checks that the record hashes to the hash it is asked
+to sign, names the device's principal as author, is the record type the tool writes, is about the
+assignment or attempt the call names, and holds every field the call supplies unchanged with nothing
+beyond what the runtime adds, then signs it with the same key and repeats the call, returning only the
+final answer. Any other call is forwarded once as it came, and nothing it returns is signed. A session the runtime ended
 is opened again once; when its input ends, the bridge ends its session. Any other client doing the
 same, with the SDK's `DeviceRequestSigner` and `DeviceSignedRecords` or its own code, is Vericairn-aware.
 

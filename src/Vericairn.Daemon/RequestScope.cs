@@ -74,7 +74,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             return await next(context).ConfigureAwait(false);
         }
 
-        if (!device.LocalNetwork)
+        // A network MCP write is kept in the ledger on loopback too (MCP-03): every network write names the device that asked.
+        if (!device.LocalNetwork && signing is null)
         {
             return await WriteAsync(context, next, device, profile, signing).ConfigureAwait(false);
         }

@@ -481,8 +481,9 @@ while a daemon serves it.
 On the agent's machine, `vericairn mcp serve --connection <connection>` bridges a stdio harness to that estate over a
 connection `vericairn connections add` paired, named by its id or its estate's name. It serves standard input and output
 as `mcp serve` does and forwards each message to the runtime's `/mcp`, signing every request with the connection's
-device; a write is prepared by the runtime, its record checked to be the one the tool writes for this device's
-principal, signed with the same key and then written. The remote runtime judges each call as its API operation for that
+device. Only a write is prepared: its record is checked to be the one the call asks for (the tool's record type, this
+device's principal as author, the assignment or attempt the call names, every field the call supplies unchanged), signed
+with the same key and then written; nothing another call returns is ever signed. The remote runtime judges each call as its API operation for that
 device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
 principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
 key is no longer held here.

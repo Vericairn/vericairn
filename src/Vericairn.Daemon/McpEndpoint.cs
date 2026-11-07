@@ -38,6 +38,12 @@ internal sealed class McpEndpoint
     /// <summary>The protocol-version header later requests carry.</summary>
     internal const string VersionHeader = "MCP-Protocol-Version";
 
+    /// <summary>
+    /// The most a message to /mcp may hold: one JSON-RPC message, whose largest arguments are a result's or a review's body. Smaller
+    /// than the API's signed-body limit, it is applied before authentication.
+    /// </summary>
+    internal const long BodyLimit = 1024 * 1024;
+
     /// <summary>The revisions served over HTTP: Streamable HTTP begins at 2025-03-26, so the older HTTP transport is not served.</summary>
     internal static readonly IReadOnlyList<string> Versions = [.. McpServer.SupportedProtocolVersions.Where(v => string.CompareOrdinal(v, "2025-03-26") >= 0)];
 
@@ -116,9 +122,16 @@ internal sealed class McpEndpoint
             return;
         }
 
-        Sessions.SweepIfDue(host.Service);
+        // One reading of the records judges this request's device and, when a sweep is due, every device holding a session.
+        IReadOnlyCollection<string> due = Sessions.DueDevices();
+        DeviceStandingsRead read = host.Service.ReadStandings(due.Append(device.Identity).Distinct(StringComparer.Ordinal), [device.Principal]);
+        if (due.Count > 0)
+        {
+            Sessions.Sweep(read);
+        }
+
         string profile = device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : RequestScope.LoopbackProfile;
-        if (Refusal(device, profile) is (int status, Problem refused))
+        if (Refusal(device, profile, read) is (int status, Problem refused))
         {
             await Problem(context, status, refused).ConfigureAwait(false);
             return;
@@ -148,9 +161,9 @@ internal sealed class McpEndpoint
     internal void Stop() => Sessions.EndAll();
 
     /// <summary>Why an authenticated device may not use network MCP on this profile, or null.</summary>
-    private (int Status, Problem Problem)? Refusal(AuthenticatedDevice device, string profile)
+    private static (int Status, Problem Problem)? Refusal(AuthenticatedDevice device, string profile, DeviceStandingsRead read)
     {
-        DeviceStanding? standing = host.Service.Standing(device.Identity);
+        DeviceStanding? standing = read.Devices.GetValueOrDefault(device.Identity);
         if (standing is null || standing.Admission != "admitted" || standing.PublicKey != device.PublicKey)
         {
             return (StatusCodes.Status401Unauthorized, new Problem("denied", $"Device {device.Identity} is not admitted now.", []));
@@ -161,7 +174,7 @@ internal sealed class McpEndpoint
             return (StatusCodes.Status401Unauthorized, new Problem("denied", $"Device {device.Identity} is not permitted the {profile} profile, so it cannot use network MCP here.", []));
         }
 
-        string? kind = host.Service.PrincipalKind(device.Principal);
+        string? kind = read.PrincipalKinds.GetValueOrDefault(device.Principal);
         return kind is "agent" or "service"
             ? null
             : (StatusCodes.Status403Forbidden, new Problem("denied", $"Network MCP serves agents and services: device {device.Identity} acts for {device.Principal}, a {kind ?? "principal unknown here"}. A person connects an MCP client as an agent principal of their own.", []));
@@ -169,6 +182,14 @@ internal sealed class McpEndpoint
 
     private async Task PostAsync(HttpContext context, AuthenticatedDevice device, string profile)
     {
+        // The device's call slot is taken before its body is parsed, so parsing too is bounded per device and per runtime.
+        using IDisposable? slot = Sessions.TryCall(device.Identity);
+        if (slot is null)
+        {
+            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device runs at most {McpSessions.CallsPerDevice} MCP requests at once and all devices {McpSessions.CallsPerRuntime}; retry when one finishes.", [])).ConfigureAwait(false);
+            return;
+        }
+
         if (!MediaTypeHeaderValue.TryParse(context.Request.ContentType, out MediaTypeHeaderValue? type)
             || !string.Equals(type.MediaType.Value, "application/json", StringComparison.OrdinalIgnoreCase))
         {
@@ -248,13 +269,6 @@ internal sealed class McpEndpoint
 
             context.Response.StatusCode = StatusCodes.Status202Accepted;
             context.Response.ContentLength = 0;
-            return;
-        }
-
-        using IDisposable? slot = Sessions.TryCall(device.Identity);
-        if (slot is null)
-        {
-            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device runs at most {McpSessions.CallsPerDevice} MCP requests at once and all devices {McpSessions.CallsPerRuntime}; retry when one finishes.", [])).ConfigureAwait(false);
             return;
         }
 
@@ -347,7 +361,7 @@ internal sealed class McpEndpoint
             // The stream is bound to the session's device as the event stream is: it ends before the next message once the device is
             // no longer admitted with its key and profile, and its wake-ups come from the journal, which a revocation enters.
             (EventSubscription? subscription, Problem? problem) = host.Service.OpenEvents(null, new EventFilter(Kinds: ["record"]), device.Principal,
-                device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+                device.Identity, device.PublicKey, profile);
             if (subscription is null)
             {
                 Problem refusal = problem ?? new Problem("unavailable", "The server stream is unavailable.", []);
@@ -494,18 +508,24 @@ internal sealed class McpEndpoint
             return false;
         }
 
-        if (local.IsIPv4MappedToIPv6)
-        {
-            local = local.MapToIPv4();
-        }
-
         string host = named.Host.Trim('[', ']');
         if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
         {
             return IPAddress.IsLoopback(local);
         }
 
-        return IPAddress.TryParse(host, out IPAddress? address) && (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).Equals(local);
+        return IPAddress.TryParse(host, out IPAddress? address) && Unscoped(address).Equals(Unscoped(local));
+    }
+
+    /// <summary>An address as compared for Host: IPv4 for an IPv4-mapped one, and an IPv6 address without its scope id.</summary>
+    internal static IPAddress Unscoped(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            return address.MapToIPv4();
+        }
+
+        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? new IPAddress(address.GetAddressBytes()) : address;
     }
 
     /// <summary>Whether a request's Accept header admits a media type; an absent header admits anything, as HTTP has it.</summary>

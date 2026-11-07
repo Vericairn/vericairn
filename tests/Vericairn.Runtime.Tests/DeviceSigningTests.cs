@@ -84,4 +84,41 @@ public sealed class DeviceSigningTests
         Assert.Equal(before + 1, service.Session.Load().Records.Count);
         Assert.Equal(0, service.Validate().Errors);
     }
+
+    [Fact]
+    public void OneDeviceHoldsAtMostThirtyTwoPreparedRecordsAndAnotherIsNotKeptOut()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, OrderBody);
+        RecordEnvelope assignment = estate.Add("assignment", estate.OperatorId, $$"""{"contributor":"{{estate.BuilderId}}","brief":{{Brief}}}""", order.Reference);
+        using EstateService service = EstateService.Open(estate.Root);
+        string operatorDevice = service.DeviceCreate(new(estate.OperatorId, "Operator device", "file")).Written!.Id;
+        Assert.True(service.DeviceAdmit(new(operatorDevice, estate.OperatorId, "Admit the operator's own device.")).Ok);
+        string Admit(string name)
+        {
+            string id = service.DeviceCreate(new(estate.BuilderId, name, "file")).Written!.Id;
+            Assert.True(service.DeviceAdmit(new(id, estate.OperatorId, "Admit a builder device.")).Ok);
+            return id;
+        }
+
+        string first = Admit("First builder device");
+        string second = Admit("Second builder device");
+        WriteOutcome Prepare(string device, int n)
+        {
+            using (service.ForDeviceRequest(device, EstateModel.BodyString(service.Session.Load().ById[device], "publicKey")!, null, DeviceSigning.Prepare()))
+            {
+                return service.Attempt(new AttemptRequest(assignment.Id, estate.BuilderId, "widget repository", $"Attempt {n}."));
+            }
+        }
+
+        for (int n = 0; n < 32; n++)
+        {
+            Assert.Equal("prepared", Prepare(first, n).Problem?.Code);
+        }
+
+        WriteOutcome full = Prepare(first, 32);
+        Assert.Equal("unavailable", full.Problem?.Code);
+        Assert.Contains("32 records awaiting its signature", full.Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal("prepared", Prepare(second, 0).Problem?.Code);
+    }
 }

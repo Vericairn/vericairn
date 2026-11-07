@@ -174,14 +174,14 @@ From 0.9.2 (`MCP-03`) the daemon serves the Model Context Protocol over Streamab
 local-network listeners, when the operator turned it on with `vericairn runtime configure --mcp on`; never on the local
 socket. `/mcp` is not an operation of API version 1 and is not in the OpenAPI document: no route, request or response type
 of the API is added or changed. Its requests are authenticated as the API's are, signed by one device with the profile's
-request-signing scheme, freshness, replay protection and body limit (8 MiB), and the device must be admitted, permitted
+request-signing scheme, freshness and replay protection, with a body limit of 1 MiB applied before authentication, and the device must be admitted, permitted
 the profile and an agent's or a service's. Before authentication, its `Host` must name the listener's own address and port
 (or `localhost` on loopback), and an `Origin` it names must be one the operator allowed.
 
 Each tool call runs as its API operation for the requesting device. The daemon runs the operation's own route in its
 process, with that route's binding and request scope and the service call behind it, as a request of that device; so a
 call is refused exactly as the API refuses the same request from that device, a write rechecks the device's standing, key
-and profile under the write lock, and on the local network it is kept in `local-network-writes.jsonl`. A network tool
+and profile under the write lock, and on loopback as on the local network it is kept in `local-network-writes.jsonl`. A network tool
 reaches only the operations its tools use: reads by GET (never the event stream), the POST reads `resources/read`,
 `releases/check` and `templates/render`, and the contributor writes `POST /v1/work/attempt`, `POST /v1/work/progress`,
 `POST /v1/work/result`, `POST /v1/work/amend` and `POST /v1/documents/{id}/reviews`; never a machine-local one.
@@ -1177,7 +1177,7 @@ manager needs them; nothing of it enters a repository.
 | Command | Does |
 |---|---|
 | `vericairn devices pair --principal <id> --by <administrator> [--profile <profile>]...` | On the runtime's machine, with the runtime serving the local-network profile: issue a pairing code and show it once, with its expiry, its attempts, the runtime identity's fingerprint and the command to run on the new device |
-| `vericairn devices writes [<device>]` | On the runtime's machine: what paired devices wrote over the local network, when, which device, for which principal, the operation and the record it produced, from `local-network-writes.jsonl` beside the live store |
+| `vericairn devices writes [<device>]` | On the runtime's machine: what paired devices wrote over the local network, when, which device, for which principal, the operation and the record it produced, from `local-network-writes.jsonl` beside the live store. From 0.9.2 (MCP-03), also network MCP writes on loopback |
 | `vericairn connections add <address> --code <code> --name <name> [--custody <custody>] [--presence true\|false]` | On the new device: pair with the runtime at the address, keep the connection, check it, and name the earlier connections to the same estate it replaced |
 | `vericairn connections list` | Check every connection now and show its state |
 | `vericairn connections remove <id>` | Forget a connection on this machine; the device stays admitted until an administrator revokes it, and its key stays in this machine's custody |
