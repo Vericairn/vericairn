@@ -28,7 +28,8 @@ internal static class SearchAudiences
             "" or "internal" => Internal,
             "members" or "members-only" or "members only" => Members,
             "public" => Public,
-            _ => "restricted: " + label,
+            // Any other value is a restriction of its own, named by its letters, digits, spaces and hyphens, at most 60 of them.
+            _ => "restricted: " + new string(label.Where(c => char.IsLetterOrDigit(c) || c is ' ' or '-').Take(60).ToArray()),
         };
     }
 
