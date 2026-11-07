@@ -62,6 +62,12 @@ public class FlowContractTests
         { "tool-of-a-record-item", "flow.provenance" },
         { "evidence-named-twice", "flow.duplicate" },
         { "review-in-an-undeclared-role", "flow.role" },
+        { "reserved-without-its-command", "flow.reserved" },
+        { "reserved-without-done", "flow.reserved" },
+        { "command-binds-an-unknown-field", "flow.binding" },
+        { "command-binds-an-instance-outside-each", "flow.binding" },
+        { "command-binds-an-undeclared-input", "flow.binding" },
+        { "command-binds-an-input-part-it-lacks", "flow.binding" },
     };
 
     [Theory]
@@ -101,6 +107,12 @@ public class FlowContractTests
             case "evidence-named-twice": Step("draft")["outputs"]![0]!["evidence"] = new JsonArray(new JsonObject { ["name"] = "spell", ["method"] = "spellcheck" }, new JsonObject { ["name"] = "spell", ["method"] = "lint" }); break;
             case "review-in-an-undeclared-role": Step("draft")["outputs"]![0]!["review"] = new JsonObject { ["independence"] = "independent", ["role"] = "editor" }; break;
             case "watch-on-a-work-step": Step("master")["when"] = new JsonObject { ["watch"] = new JsonObject { ["every"] = "PT1H", ["limit"] = "P1D" } }; Step("master")["done"] = new JsonArray(FlowFixture.Marker("MASTERED")); break;
+            case "reserved-without-its-command": Step("publish").Remove("action"); break;
+            case "reserved-without-done": Step("draft")["reserved"] = "security-review"; Step("draft")["action"] = "example-provider review --goal {goal}"; break;
+            case "command-binds-an-unknown-field": Step("publish")["action"] = "example-provider publish --carrier {subject.carrier}"; break;
+            case "command-binds-an-instance-outside-each": Step("publish")["action"] = "example-provider publish --track {instance}"; break;
+            case "command-binds-an-undeclared-input": Step("publish")["action"] = "example-provider publish --master {input.master.hash}"; break;
+            case "command-binds-an-input-part-it-lacks": Step("accept")["inputs"] = new JsonArray(FlowFixture.Input("master", "master", "master")); Step("accept")["action"] = "example-provider accept --size {input.master.size}"; break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 

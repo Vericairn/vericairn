@@ -22,6 +22,9 @@
     <Compile Include="../TestSupport/CompanionWriteFixture.cs" Link="TestSupport/CompanionWriteFixture.cs" />
     <EmbeddedResource Include="shared-api-values.json" />
     <Compile Include="../Vericairn.Records.Tests/TestEstate.cs" Link="Fixtures/TestEstate.cs" />
+    <Compile Include="../Vericairn.Records.Tests/PolicyFixture.cs" Link="Fixtures/PolicyFixture.cs" />
+    <Compile Include="../Vericairn.Records.Tests/TemplateFixture.cs" Link="Fixtures/TemplateFixture.cs" />
+    <Compile Include="../Vericairn.Records.Tests/FlowFixture.cs" Link="Fixtures/FlowFixture.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -151,7 +151,7 @@ public static class CommunicationPresentation
         Exception? unavailable = null;
         try { progress = readProgress(); }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or JsonException or NotSupportedException) { unavailable = exception; }
-        var derivation = new AttentionDerivation(api.Records, api.Record, () => progress ?? throw new InvalidOperationException("Progress is unavailable.", unavailable), api.Asks, api.Goals, api.Runs);
+        var derivation = new AttentionDerivation(api.Records, api.Record, () => progress ?? throw new InvalidOperationException("Progress is unavailable.", unavailable), api.Asks, api.Goals, api.Runs, api.OperatorRequests);
         if (progress?.Json.ValueKind == JsonValueKind.Object && progress.Json.TryGetProperty("attention", out JsonElement observed))
         {
             try

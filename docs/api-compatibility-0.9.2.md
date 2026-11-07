@@ -266,6 +266,57 @@ a goal's `limits` change their schema explanations. Its hash changes; declaratio
 require the ordinary explicit generator update before regeneration, and earlier golden fixtures remain retained. The
 generator id and contract version 1 are unchanged.
 
+## Stops and their surfaces (PROC-06)
+
+No route or interface member is added. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds `stops`, and each step
+instance adds `stop` (why a stopped step waits: `person`, `reserved`, `attention` or `accept`) and `command` (for the reserved
+step that is next, its exact command; otherwise null). Each stop has `kind`, `name`, `title`, `step` (`key`, `instance`,
+`review`), `principal`, `principalName`, `reason`, `delivery` (`due`, `delivered`, `closed`, `queued` or `outside`), `record`,
+`act` and `command`. `GET /v1/goals/{id}/next` keeps `vericairn.next/1`; its `flow` adds the same `stops`, the route vocabulary
+adds `request`, `requested`, `closed` and `queued`, and each route adds `request`, the operator request it names.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; its outcome may be `request`, and it adds the init-only `Request`,
+serialized as `request` only when this call wrote an operator request. The OpenAPI schema `GoalStepResponse` adds `request`.
+`GET /v1/status` adds `runs` to its canonical JSON, each active, paused, budget-limited or blocked run of a flow with its
+`goal`, `pin`, `available`, `unavailable`, `done`, `steps`, `complete`, `next` and `stops`, and its text adds a `Runs:` section
+when there is one. The operator request queue, in `GET /v1/operator/requests`, status's `operatorRequests` and required
+attention, delivers a request that names a run's step (`flowStep`) only while it is due, and adds `withdrawn`: each open request
+a run no longer waits on, with `id`, `revision`, `hash`, `state` (`settled` or `withdrawn`) and `reason`. Its text adds the
+step's command to a delivered step's request, and a line for each open request that is not delivered. Older clients ignore the
+added members and values; older servers omit them, which is not evidence that a run has no stops. The SDK's and the MCP
+server's goal, next, status and request reads carry the same JSON; no tool is added and no description changes.
+
+The state language's `step-route` vocabulary adds `request`, `requested`, `closed` and `queued`, and it adds the `flow-stop`
+and `flow-delivery` vocabularies. `Vericairn.Presentation` adds `StopRow` and `FlowRunRow`, `GoalPresentation.Stops`, and
+`EstateView.Runs` and `Stops`. Workbench's `ShellViewModel` and `GoalsWorkspace` add `Stops` and `HasStops`, and so does
+Remote's `RemoteViewModel`. `Vericairn.Protocol`'s attention derivation reads the request queue when the API offers it, and
+derives it from the records otherwise.
+
+`Vericairn.Records` adds public types and members:
+
+- `Estate.FlowStops`: `Kinds`, `Deliveries`, `RequestStates` and `PerDelivery`; the records `RunStop`, `FlowStepReference` and
+  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `Of`, `Runs`, `RenderJson`,
+  `AppendText`, `RunsJson` and `RunsText`.
+- `Estate.FlowPosition.HoldsReservedAct`; `StepInstance.Stop` and `Command`; and `Position.Stops`. `FlowPosition` is now
+  `partial`.
+- `Estate.GoalPredicates.EvaluatePredicate` and `Matching` overloads taking the records a rule admits.
+- `Estate.OperatorRequests.Held`, `Waiting`, `WaitingOf`, and `Derive` and `RenderText` overloads at a time; `Open` now
+  leaves out a run's request that is not due.
+- `NextEligible.Route.Request`, an optional trailing parameter; `NextEligible.RouteStates` adds `request`, `requested`,
+  `closed` and `queued`, and `FlowDispatching` adds `request`.
+- `Templates.FlowContract.Placeholders`.
+
+Behavior changes to the runs that PROC-05 and PROC-10 add, each within record format 3. A flow's reserved step must declare its
+`action`, the exact command the operator runs, and its `done` predicates (`flow.reserved`), and the command's placeholders must
+be bindings of the run (`flow.binding`); a flow content that lacks them no longer validates. A reserved step's done predicates
+and record items count only records a person with the operator role recorded, and a result counts only when one recorded it:
+a reserved step that an agent's record satisfied under PROC-05 is no longer done, and an agent's attestation item of a reserved
+step is `missing` rather than `unproven`. A reserved step whose input changed after it was done shows `stopped`, waiting on the
+operator again, rather than `stale`. A reserved step whose command cannot be bound from the records shows `blocked`. `goal step`
+records a reserved step's operator request instead of answering `none`, and queues a fourth stop to one person. Record format
+remains 3; its addition, an operator request's `flowStep`, is in
+[record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
+explanation of `operator-request` now includes `flowStep`.
+
 ## The event journal and the API stream (WATCH-05)
 
 `IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts

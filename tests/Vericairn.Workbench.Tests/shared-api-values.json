@@ -91,6 +91,24 @@
     "stopped",
     "off"
   ],
+  "Vericairn.Records.Estate.FlowStops.Deliveries": [
+    "due",
+    "delivered",
+    "closed",
+    "queued",
+    "outside"
+  ],
+  "Vericairn.Records.Estate.FlowStops.Kinds": [
+    "person",
+    "reserved",
+    "attention",
+    "accept"
+  ],
+  "Vericairn.Records.Estate.FlowStops.RequestStates": [
+    "due",
+    "settled",
+    "withdrawn"
+  ],
   "Vericairn.Records.Estate.GoalPredicates.Verdicts": [
     "met",
     "not-met",
@@ -121,7 +139,8 @@
     "agent",
     "person",
     "reserved",
-    "attention"
+    "attention",
+    "request"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -133,7 +152,11 @@
     "review",
     "asked",
     "answered",
-    "attention"
+    "attention",
+    "request",
+    "requested",
+    "closed",
+    "queued"
   ],
   "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
     "hash",

@@ -105,6 +105,27 @@ the outcome or observation records its actual destination. The software posts
 nothing on their behalf. Evidence remains a claim to inspect, not a grant of
 publication or acceptance authority.
 
+## A run's reserved step (0.9.2)
+
+A run of a flow puts each reserved step to the operator as a request when the step
+is next. `vericairn goal step` records it with an optional `flowStep`, naming the
+run's goal by its first revision, the step's `key` and, for a step that runs over
+a list, its `instance`. Its subject is the run's work order, and its one content
+item is the step's exact command, bound from the records at that moment. A
+`publish` step's request is a publication request.
+
+Such a request is delivered only while it is due: its step waits on the operator,
+it carries exactly the command the records give now, a principal who takes the
+run's steps recorded it, and no earlier request carries the step. Otherwise it is
+not delivered. It is `settled` once the step is done from the records of the
+operator's own act, and `withdrawn` when the step no longer waits on it or its
+command is no longer the one the records give. The JSON list names each such
+request under `withdrawn`, with its state and why, and the text says so too. It
+stays open, so close it with `done` or `dismiss` when you wish. Closing a request
+never completes its step, whoever closes it: the step is done only once the
+operator's act is recorded. See
+[stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
+
 ## API, SDK and MCP
 
 The SDK exposes `OperatorRequests`, `OperatorRequestWrite`, `OperatorRequestCarry`,

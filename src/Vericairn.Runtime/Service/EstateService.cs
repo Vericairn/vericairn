@@ -226,7 +226,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             progress,
             recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
             () => GoalView.Rows(model).Select(r => new GoalRow(r.Id, r.Hash, r.Title, r.Status, r.Sponsor, r.SponsorName)).ToList(),
-            runs ?? (() => Runs(model, includeLocalObservations))).Derive(recipient);
+            runs ?? (() => Runs(model, includeLocalObservations)),
+            to => new OperatorRequestsResponse(string.Empty, Element(Vericairn.Records.Estate.OperatorRequests.Derive(model, to)), model.Findings.HasErrors)).Derive(recipient);
     }
 
     /// <inheritdoc />

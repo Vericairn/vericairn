@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
@@ -23,7 +24,7 @@ namespace Vericairn.Records.Estate;
 /// findings start another attempt within them; a failed step takes its failure route; and a spent retry budget stops it for the
 /// sponsor, only what depends on it waiting. Every attempt stays recorded and shown. Reading grants nothing.
 /// </summary>
-public static class FlowPosition
+public static partial class FlowPosition
 {
     /// <summary>The states of a step of a run, in the state language's flow-step vocabulary.</summary>
     public static readonly ImmutableArray<string> States = ["done", "next", "blocked", "stale", "in-review", "stopped", "off"];
@@ -173,6 +174,18 @@ public static class FlowPosition
 
         /// <summary>True when it reruns from a fresh assignment: stale, reopened by a failure route, or rerun after one.</summary>
         public bool Rerun { get; init; }
+
+        /// <summary>
+        /// Why a stopped step waits on a person, one of <see cref="FlowStops.Kinds"/> (design/flow.md § 8): a person holds its role or
+        /// its assignment, it is a reserved act, or required attention arises; null when it is not stopped.
+        /// </summary>
+        public string? Stop { get; init; }
+
+        /// <summary>
+        /// For a reserved step that is next, the exact command the operator runs, computed from the records as they stand now and never
+        /// before the step is next (design/release-procedure.md § 6); null for every other step.
+        /// </summary>
+        public string? Command { get; init; }
     }
 
     /// <summary>A run's position.</summary>
@@ -198,6 +211,22 @@ public static class FlowPosition
         /// impossible. Each fences the run's dispatch until the sponsor answers its ask.
         /// </summary>
         public IReadOnlyList<Attention> RunAttention { get; init; } = [];
+
+        /// <summary>
+        /// The run's stops, in the order the flow reaches them (design/flow.md § 8): each step, review or run-wide matter that waits on a
+        /// person, with who it waits on, why and how it reaches them, at most three delivered to each person at a time.
+        /// </summary>
+        public IReadOnlyList<FlowStops.RunStop> Stops { get; init; } = [];
+    }
+
+    /// <summary>
+    /// Whether a principal holds a reserved act (design/flow.md § 8; design/operating-modes.md § 6): a person with the operator role. No
+    /// grant of a reserved act takes effect before ID-04 makes its scope a checked name, so no agent holds one in this build.
+    /// </summary>
+    public static bool HoldsReservedAct(EstateModel model, string? principal)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return GoalRules.IsPerson(model, principal) && model.HasRole(principal, Roles.Operator);
     }
 
     /// <summary>Derives a run's position from the records at a time (due times, watches and backoffs read it); nothing is stored.</summary>
@@ -225,7 +254,8 @@ public static class FlowPosition
             deriving.All();
         }
 
-        return new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention() };
+        var position = new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention() };
+        return position with { Stops = FlowStops.Of(model, position, at) };
     }
 
     /// <summary>A return of the run to an earlier step by a failure route: the step, its instance (null for every one), when, and why.</summary>
@@ -432,13 +462,15 @@ public static class FlowPosition
             List<RecordEnvelope> reviews = reviewing.GetValueOrDefault(reference) ?? [];
             RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
             RecordEnvelope? result = holder is null ? null : LatestResult(holder);
-            List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p))).ToList();
+            // A reserved act's done predicates count only the records of a principal who holds it, the operator (design/flow.md § 8).
+            Func<RecordEnvelope, bool>? admit = Admit(step);
+            List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p, admit))).ToList();
             string? outcome = result is null ? null : EstateModel.BodyString(result, "outcome");
             Closing completion = Completion(step, item, assignments, reviews, result, done);
             (bool complete, List<Output> outputs, List<ItemState> items, RecordEnvelope? review, RecordEnvelope? findings, string? pending) =
                 (completion.Complete, completion.Outputs, completion.Items, completion.Review, completion.Findings, completion.Pending);
             bool doneMet = done.All(d => d.Verdict.Value == "met");
-            DateTimeOffset? doneAt = complete ? new[] { result, review }.Concat(outputs.Select(o => o.Carrier)).Concat(done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate)))
+            DateTimeOffset? doneAt = complete ? new[] { step.Reserved is null ? result : null, review }.Concat(outputs.Select(o => o.Carrier)).Concat(done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)))
                 .OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max() : null;
             List<Input> inputs = Inputs(step, item, holder, complete && holder is null ? doneAt : null);
             List<AttemptState> attempts = AttemptsOf(assignments);
@@ -458,7 +490,7 @@ public static class FlowPosition
             // before anything would rerun it, stale, reopened or waiting.
             if (Uncertain(step, result, carried, done) is Attention uncertain)
             {
-                StepInstance stopped = Shaped(new StepInstance(step, item, "stopped", [$"required attention: {uncertain.Summary}"], Who(holder), holder, result, review, outputs, items, inputs, done, null));
+                StepInstance stopped = Shaped(new StepInstance(step, item, "stopped", [$"required attention: {uncertain.Summary}"], Who(holder), holder, result, review, outputs, items, inputs, done, null)) with { Stop = "attention" };
                 return step.IsRouted ? stopped with { Attention = uncertain } : stopped;
             }
 
@@ -497,7 +529,9 @@ public static class FlowPosition
                 blocked.Add(briefDue);
             }
 
-            if (stale)
+            // A reserved act whose input changed after it was done waits on the operator again, with the command the records give now.
+            bool actAgain = stale && step.Reserved is not null && blocked.Count == 0;
+            if (stale && !actAgain)
             {
                 List<string> changed = inputs.Where(i => i.Change is not null).Select(i => i.Change!).ToList();
                 changed.AddRange(blocked);
@@ -520,9 +554,29 @@ public static class FlowPosition
             StepInstance Make(string state, string reason, string? principal = null) =>
                 Shaped(new(step, item, state, pending is null || state is "in-review" ? [reason] : [reason, pending], principal ?? Who(holder), holder, result, review, outputs, items, inputs, done, null));
 
+            // A reserved act is never run: it stops for the operator, and its exact command is computed now, from the records as they
+            // stand, only because the step is next (design/flow.md § 8; design/release-procedure.md § 6).
             if (step.Reserved is string act)
             {
-                return Make("stopped", $"a reserved act, {act}: it waits on a person who holds it, the operator, and no agent carries it without a grant in force within its bounds, none of which this build issues");
+                (string? command, IReadOnlyList<string> unbound) = CommandOf(step, bindings, inputs);
+                if (command is null)
+                {
+                    return Shaped(new StepInstance(step, item, "blocked", [$"its command cannot be computed from the records now: {string.Join("; ", unbound)}"], Who(holder), holder, result, review, outputs, items, inputs, done, null));
+                }
+
+                var waiting = new List<string> { $"a reserved act, {act}: it waits on a person who holds it, the operator, and no agent carries it without a grant in force within its bounds, none of which this build issues" };
+                if (actAgain)
+                {
+                    waiting.AddRange(inputs.Where(i => i.Change is not null).Select(i => i.Change! + ", so the act is carried again"));
+                }
+
+                if (pending is not null)
+                {
+                    waiting.Add(pending);
+                }
+
+                waiting.AddRange(done.Where(d => d.Verdict.Value != "met").Select(d => "it is done once the operator's act is recorded: " + d.Verdict.Reason));
+                return Shaped(new StepInstance(step, item, "stopped", waiting, Who(holder), holder, result, review, outputs, items, inputs, done, null)) with { Stop = "reserved", Command = command };
             }
 
             // Reopened by a later step's failure route: it reruns from a fresh assignment, routed by its role, within its attempts.
@@ -553,7 +607,7 @@ public static class FlowPosition
                 string spent = $"its retry budget is spent: its work has had {used.ToString(CultureInfo.InvariantCulture)} of the {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} runs the goal's attempts per step grant"
                     + (findings is not null ? $", and review {findings.Id} found what to change in result {result!.Id}" : failedRuns.Count > 0 ? $", and run {failedRuns[^1].Id} failed" : string.Empty)
                     + "; the sponsor is asked, and only what depends on it waits";
-                return Make("stopped", "required attention: " + spent) with { Attention = new Attention("exhausted", trigger, spent) };
+                return Make("stopped", "required attention: " + spent) with { Attention = new Attention("exhausted", trigger, spent), Stop = "attention" };
             }
 
             if (agent && failedRuns.Count > 0 && !running)
@@ -585,7 +639,7 @@ public static class FlowPosition
                 TimeSpan limit = FlowContract.ParseDuration(TJson.Text(watch, "limit")) ?? TimeSpan.Zero;
                 string watched = done.FirstOrDefault(d => d.Verdict.Value != "met")?.Verdict.Reason ?? "its done predicates";
                 return started is DateTimeOffset since && since + limit < at
-                    ? Make("stopped", $"the watch passed its limit at {Time(since + limit)} without its done predicates holding ({watched}): required attention")
+                    ? Make("stopped", $"the watch passed its limit at {Time(since + limit)} without its done predicates holding ({watched}): required attention") with { Stop = "attention" }
                     : Make("next", $"watched every {TJson.Text(watch, "every")} until its done predicates hold ({watched}){(started is DateTimeOffset begin ? $", until {Time(begin + limit)}" : string.Empty)}");
             }
 
@@ -594,7 +648,7 @@ public static class FlowPosition
             {
                 string retry = failedRuns.Count > 0 ? $" after run {failedRuns[^1].Id} failed ({Observed(failedRuns[^1])}), within its attempts ({used.ToString(CultureInfo.InvariantCulture)} of {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} used)" : string.Empty;
                 return GoalRules.IsPerson(model, holding)
-                    ? Make("stopped", $"a person holds it: assigned to {Routing.NameOf(model, holding)} by assignment {holder!.Id}{(findings is null ? string.Empty : $", whose result {result!.Id} review {findings.Id} sent back")}")
+                    ? Make("stopped", $"a person holds it: assigned to {Routing.NameOf(model, holding)} by assignment {holder!.Id}{(findings is null ? string.Empty : $", whose result {result!.Id} review {findings.Id} sent back")}") with { Stop = "person" }
                     : Make("next", findings is null
                         ? $"{Routing.NameOf(model, holding)} holds it by assignment {holder!.Id} and goes on with it{retry}"
                         : $"review {findings.Id} found what to change in result {result!.Id}: {Routing.NameOf(model, holding)} goes on with another attempt, within its attempts ({used.ToString(CultureInfo.InvariantCulture)} of {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} used)");
@@ -617,12 +671,13 @@ public static class FlowPosition
                     first is null ? Make(state, text, who) : Shaped(new StepInstance(step, item, state, [first, text], who, holder, result, review, outputs, items, inputs, done, null));
                 if (step.Kind is "effect" or "exchange" or "flow")
                 {
-                    return Shown("stopped", reason, principal);
+                    return Shown("stopped", reason, principal) with { Stop = "person" };
                 }
 
+                // No one named for the role is a stall the sponsor settles by naming one; a person named holds the step.
                 if (principal is null || GoalRules.IsPerson(model, principal))
                 {
-                    return Shown("stopped", reason, principal);
+                    return Shown("stopped", reason, principal) with { Stop = principal is null ? "attention" : "person" };
                 }
 
                 return Shown("next", step.Kind is "operation" or "decision"
@@ -656,7 +711,7 @@ public static class FlowPosition
                 }
 
                 string spent = $"its retry budget is spent: its work has had {used.ToString(CultureInfo.InvariantCulture)} of the {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} runs the goal's attempts per step grant, and it is to run again; the sponsor is asked, and only what depends on it waits";
-                return Shaped(new StepInstance(step, item, "stopped", ["required attention: " + spent], next, holder, result, review, outputs, items, inputs, done, null)) with { Attention = new Attention("exhausted", trigger, spent) };
+                return Shaped(new StepInstance(step, item, "stopped", ["required attention: " + spent], next, holder, result, review, outputs, items, inputs, done, null)) with { Attention = new Attention("exhausted", trigger, spent), Stop = "attention" };
             }
 
             // A failed step takes its failure route (design/flow.md § 7): a stop for the sponsor, an earlier step the run returns to, or a branch.
@@ -665,7 +720,7 @@ public static class FlowPosition
                 string first = $"it failed: {failure.Summary}";
                 StepInstance Stop(string why) =>
                     Shaped(new StepInstance(step, item, "stopped", [first, "required attention: " + why], Who(holder), holder, result, review, outputs, items, inputs, done, null))
-                    with { Attention = new Attention("failed", failure.Record, $"step {reference} failed: {failure.Summary}; {why}"), Failed = failure };
+                    with { Attention = new Attention("failed", failure.Record, $"step {reference} failed: {failure.Summary}; {why}"), Failed = failure, Stop = "attention" };
                 StepInstance Wait(string why) =>
                     Shaped(new StepInstance(step, item, "blocked", [first, why], Who(holder), holder, result, review, outputs, items, inputs, done, null)) with { Failed = failure };
                 StepInstance Again(string why) => Fresh($"{first}; {why}", failure.Record) with { Failed = failure };
@@ -799,7 +854,7 @@ public static class FlowPosition
             List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p))).ToList();
             foreach (FlowOutput output in step.Outputs.Where(o => o.Kind != "file"))
             {
-                if (Resolve(output, result, done).Output is Output value)
+                if (Resolve(step, output, result, done).Output is Output value)
                 {
                     subjects.Add(model.Chain(value.Carrier));
                 }
@@ -957,6 +1012,53 @@ public static class FlowPosition
                 : null;
         }
 
+        /// <summary>The records a step's done predicates count: for a reserved act only those of a principal who holds it; every record otherwise.</summary>
+        private Func<RecordEnvelope, bool>? Admit(FlowStep step) => step.Reserved is null ? null : record => HoldsReservedAct(model, record.By);
+
+        /// <summary>
+        /// A reserved step's exact command, its declared action with each placeholder bound from the records as they stand now: the run's
+        /// subject, instance, goal and work order, and the id or hash of each of its inputs as handed on. Null, with why, when a value is
+        /// missing or is not one a command takes unquoted, so that no bound text can change what the command does.
+        /// </summary>
+        private static (string? Command, IReadOnlyList<string> Unbound) CommandOf(FlowStep step, IReadOnlyDictionary<string, string> bindings, List<Input> inputs)
+        {
+            if (step.Action is not string action)
+            {
+                return (null, ["the step declares no action"]);
+            }
+
+            var unbound = new List<string>();
+            string command = FlowContract.Placeholder().Replace(action, match =>
+            {
+                string name = match.Groups["name"].Value;
+                string? value;
+                if (name.StartsWith("input.", StringComparison.Ordinal) && name.Split('.') is [_, string input, string part])
+                {
+                    Input? handed = inputs.FirstOrDefault(i => i.Name == input);
+                    value = part == "id" ? handed?.Carrier?.Id : part == "hash" ? handed?.Hash : null;
+                }
+                else
+                {
+                    value = bindings.GetValueOrDefault(name);
+                }
+
+                if (value is null)
+                {
+                    unbound.Add($"{{{name}}} has no value in the records");
+                    return match.Value;
+                }
+
+                if (!CommandValue().IsMatch(value))
+                {
+                    unbound.Add($"{{{name}}} is a value with characters a command never takes unquoted, so it is not put in");
+                    return match.Value;
+                }
+
+                return value;
+            });
+            return unbound.Count == 0 ? (command, []) : (null, unbound);
+        }
+
         /// <summary>Every attempt under a step's assignments, oldest first, each with its result at its current revision.</summary>
         private List<AttemptState> AttemptsOf(IEnumerable<RecordEnvelope> assignments) =>
             assignments.SelectMany(a => WorkView.AttemptsOf(model, a).Select(t => new AttemptState(a, t, WorkView.ResultOf(model, t))))
@@ -981,6 +1083,18 @@ public static class FlowPosition
         {
             bool doneMet = done.All(d => d.Verdict.Value == "met");
             IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
+
+            // A reserved act closes only on the records of the operator's act: its done predicates, counted from the operator's records,
+            // and its items; a result counts only when the operator recorded it. No agent's work or claim closes it (design/flow.md § 8).
+            if (step.Reserved is not null)
+            {
+                RecordEnvelope? own = result is not null && HoldsReservedAct(model, result.By) ? result : null;
+                List<ItemState> acted = step.Outputs.Select(o => Judge(step, o, own, done, assignments, reviews, authors, null)).ToList();
+                ItemState? unmet = acted.FirstOrDefault(i => !i.Satisfied && i.State != "off");
+                return new Closing(doneMet && unmet is null, acted.Where(i => i.Value is not null && i.State != "off").Select(i => i.Value!).ToList(), acted, null, null,
+                    unmet is null ? null : $"item {unmet.Declared.Name} is {unmet.State}: {unmet.Reasons[0]}", []);
+            }
+
             RecordEnvelope? findings = null;
             RecordEnvelope? stepReview = null;
             bool failed = false;
@@ -1091,7 +1205,7 @@ public static class FlowPosition
             }
             else
             {
-                (value, missing) = Resolve(output, result, done);
+                (value, missing) = Resolve(step, output, result, done);
             }
 
             FlowReview? requirement = step.Kind == "review" ? null : ReviewOf(step, output);
@@ -1318,7 +1432,7 @@ public static class FlowPosition
         /// the done predicates count: an observation an operation observed to succeed or an observation record, a verification that
         /// passed, a decision, an attestation or a record of its declared type.
         /// </summary>
-        private (Output? Output, string? Missing) Resolve(FlowOutput output, RecordEnvelope? result, List<Check> done)
+        private (Output? Output, string? Missing) Resolve(FlowStep step, FlowOutput output, RecordEnvelope? result, List<Check> done)
         {
             if (output.Kind == "file")
             {
@@ -1331,7 +1445,7 @@ public static class FlowPosition
             }
 
             string[] types = (output.Counts ?? string.Empty).Split('|');
-            RecordEnvelope? record = done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate))
+            RecordEnvelope? record = done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, Admit(step)))
                 .Where(r => types.Contains(r.Type, StringComparer.Ordinal) && (output.RecordKind is null || EstateModel.BodyString(r, "kind") == output.RecordKind))
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
             if (record is not null && output.Kind == "verification" && EstateModel.BodyString(record, "outcome") != "passed")
@@ -1342,6 +1456,12 @@ public static class FlowPosition
             if (record is not null && output.Kind == "observation" && record.Type == "operation" && EstateModel.BodyString(record, "status") != "observed-success")
             {
                 return (null, $"operation {record.Id} is {EstateModel.BodyString(record, "status")}, not observed to succeed");
+            }
+
+            if (record is null && step.Reserved is not null && done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate))
+                .Where(r => types.Contains(r.Type, StringComparer.Ordinal)).Select(r => r.Id).Distinct(StringComparer.Ordinal).ToList() is { Count: > 0 } refused)
+            {
+                return (null, $"no {string.Join(" or ", types)} record of the operator's act its done predicates count is its item {output.Name}; {string.Join(", ", refused)}, recorded by a principal who does not hold the act, does not count");
             }
 
             return record is null
@@ -1552,6 +1672,10 @@ public static class FlowPosition
 
     private static string Time(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
+    /// <summary>A value a command takes unquoted: letters, digits and . _ : / @ + = , -, not starting with a dash, so a bound value is never an option or a shell word.</summary>
+    [GeneratedRegex(@"^[A-Za-z0-9._:/@+=,][A-Za-z0-9._:/@+=,\-]{0,499}$")]
+    private static partial Regex CommandValue();
+
     /// <summary>The run's position as text: the flow, its configuration and every step with its state and why.</summary>
     public static string RenderText(EstateModel model, Position position)
     {
@@ -1582,6 +1706,8 @@ public static class FlowPosition
         {
             text.Append("  Required attention (").Append(attention.Kind).Append("): ").Append(attention.Summary).Append(" [").Append(attention.Trigger.Type).Append(' ').Append(attention.Trigger.Id).Append("]\n");
         }
+
+        FlowStops.AppendText(text, model, position.Stops, "  ");
 
         int index = 0;
         foreach (StepInstance step in position.Steps)
@@ -1651,6 +1777,7 @@ public static class FlowPosition
         json["complete"] = position.Complete;
         json["attention"] = new JsonArray(position.RunAttention.Select(a => (JsonNode)AttentionJson(a)).ToArray());
         json["next"] = new JsonArray(position.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray());
+        json["stops"] = FlowStops.RenderJson(model, position.Stops);
         json["steps"] = new JsonArray(position.Steps.Select(s => (JsonNode)new JsonObject
         {
             ["key"] = s.Step.Key,
@@ -1661,6 +1788,8 @@ public static class FlowPosition
             ["required"] = s.Step.Required,
             ["reserved"] = s.Step.Reserved,
             ["state"] = s.State,
+            ["stop"] = s.Stop,
+            ["command"] = s.Command,
             ["reasons"] = new JsonArray(s.Reasons.Select(r => (JsonNode)r).ToArray()),
             ["principal"] = s.Principal,
             ["principalName"] = s.Principal is null ? null : Routing.NameOf(model, s.Principal),

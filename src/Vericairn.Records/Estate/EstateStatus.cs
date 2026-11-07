@@ -135,7 +135,12 @@ public static class EstateStatus
             }
         }
 
-        if (OperatorRequests.Open(model).Count > 0) text.Append(OperatorRequests.RenderText(model));
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        OperatorRequests.Waiting queue = OperatorRequests.WaitingOf(model, null, now);
+        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0) text.Append(OperatorRequests.RenderText(model, null, now));
+
+        // A run's position and its stops (design/flow.md § 8): every surface shows the same, from the records.
+        text.Append(FlowStops.RunsText(model, FlowStops.Runs(model, now)));
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -221,9 +226,11 @@ public static class EstateStatus
         ArgumentNullException.ThrowIfNull(checks);
         RecordEnvelope? estate = model.CurrentEstate;
         RecordEnvelope? observed = LastObservationByPerson(model);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         var status = new JsonObject
         {
-            ["operatorRequests"] = OperatorRequests.Derive(model),
+            ["operatorRequests"] = OperatorRequests.Derive(model, null, now),
+            ["runs"] = FlowStops.RunsJson(model, FlowStops.Runs(model, now)),
             ["lastObservedByPerson"] = observed is null ? null : new JsonObject
             {
                 ["at"] = EstateModel.BodyString(observed, "asOf"),

@@ -215,7 +215,10 @@ public class FlowConfigurationTests
     public void AReservedStepOrAPersonsRoleIsNeverAssignedToAnAgent()
     {
         JsonObject song = FlowFixture.Song();
-        song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "review-lyrics")["reserved"] = "security-review";
+        JsonObject review = song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "review-lyrics");
+        review["reserved"] = "security-review";
+        review["action"] = "example-provider review --goal {goal}";
+        review["done"] = new JsonArray(FlowFixture.Marker("REVIEWED"));
         using var run = new FlowFixture(song);
         RecordEnvelope reserved = run.Assign("review-lyrics", run.Estate.BuilderId);
         RecordEnvelope person = run.Assign("listen", run.Estate.BuilderId);

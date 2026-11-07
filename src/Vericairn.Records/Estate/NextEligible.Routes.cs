@@ -27,10 +27,13 @@ public static partial class NextEligible
     /// agent carries it, in a run), person (a person is assigned it and asked), reserved (a reserved action: a person who holds it is
     /// assigned it and asked), unavailable (no principal is available, and the sponsor is asked), running (a run of it is in flight),
     /// assigned (with the person it is assigned to), review (an agent's result awaits review), asked (an ask about it waits),
-    /// answered (no principal is available, and the principal asked answered, so is not asked again) and attention (a run's step raised
-    /// required attention: its sponsor is asked, design/flow.md §§ 7 and 8).
+    /// answered (no principal is available, and the principal asked answered, so is not asked again), attention (a run's step raised
+    /// required attention: its sponsor is asked, design/flow.md §§ 7 and 8), and for a run's reserved act (design/flow.md § 8): request
+    /// (an operator request with its exact command is recorded for the operator), requested (that request waits on the operator) and
+    /// closed (a request carrying that command was closed, and is not made again while the command holds); and queued (three stops of
+    /// the run already reach its person, and it follows in order, design/cohesion-contract.md § 5).
     /// </summary>
-    public static readonly ImmutableArray<string> RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered", "attention"];
+    public static readonly ImmutableArray<string> RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered", "attention", "request", "requested", "closed", "queued"];
 
     /// <summary>The route states the one-step operation acts on; every other state holds the step.</summary>
     public static readonly ImmutableArray<string> Dispatching = ["agent", "person", "reserved", "unavailable"];
@@ -50,7 +53,8 @@ public static partial class NextEligible
     /// <param name="Custody">For an agent, the custody guard here: why an unattended run of the goal may not launch; empty when nothing stands in the way.</param>
     /// <param name="Reason">Why it takes this route, or what it waits for, in words.</param>
     /// <param name="Exception">For an agent the custody guard refuses here, the sponsor's custody exception in force for the goal, which lifts the refusal.</param>
-    public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception = null)
+    /// <param name="Request">For a run's reserved act, the operator request that carries it, or that carried its command and was closed.</param>
+    public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception = null, RecordEnvelope? Request = null)
     {
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Dispatching.IndexOf(State) >= 0;

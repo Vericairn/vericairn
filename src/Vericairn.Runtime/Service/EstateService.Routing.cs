@@ -142,6 +142,11 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
+            if (route.State == "request")
+            {
+                return RequestStep(model, current, taken, request);
+            }
+
             if (route.State != "agent")
             {
                 return Ask(model, current, taken, request);

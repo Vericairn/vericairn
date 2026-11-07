@@ -12,7 +12,8 @@ internal sealed class AttentionDerivation(
     Func<ProgressResponse> readProgress,
     Func<string?, AsksResponse> readAsks,
     Func<IReadOnlyList<GoalRow>> readGoals,
-    Func<RunsResponse> readRuns)
+    Func<RunsResponse> readRuns,
+    Func<string?, OperatorRequestsResponse>? readRequests = null)
 {
     private readonly Dictionary<string, IReadOnlyList<RecordResponse>> lists = new(StringComparer.Ordinal);
     private readonly Dictionary<string, RecordResponse?> records = new(StringComparer.Ordinal);
@@ -294,6 +295,31 @@ internal sealed class AttentionDerivation(
 
     private void Requests(string? recipient)
     {
+        // The runtime's queue delivers a run's request only while its step waits on the operator with that exact command (0.9.2); an
+        // older runtime without the queue read is derived from the records, as before.
+        if (QueueOf(recipient) is JsonElement queue)
+        {
+            List<JsonElement> delivered = RequiredArray(queue, "delivered");
+            List<JsonElement> queued = RequiredArray(queue, "queued");
+            foreach (JsonElement item in delivered)
+            {
+                string id = Str(item, "revision") ?? throw new InvalidOperationException("A delivered request has no revision.");
+                JsonElement body = item.TryGetProperty("body", out JsonElement b) ? b : default;
+                string text = $"Recommendation: {Str(body, "recommendation")}\n  Action: {Str(body, "action")}\n  Why: {Str(body, "why")}\n  Destination: {Str(body, "destination")}\n  If unanswered: {Str(body, "consequence")}\n";
+                JsonElement subject = item.TryGetProperty("subject", out JsonElement s) ? s : default;
+                items.Add(new CommunicationAttention("operator-request", text, id, "operator-request")
+                {
+                    Hash = Str(item, "hash"), Subject = subject.ValueKind == JsonValueKind.Object ? new AttentionReference(Str(subject, "type") ?? "?", Str(subject, "id") ?? "?", Str(subject, "hash")) : null,
+                    State = "open", AsOf = Str(item, "at"), Command = "vericairn operator list", Target = new AttentionReference("operator-request", id, Str(item, "hash")),
+                });
+            }
+
+            if (queued.Count > 0)
+                items.Add(new CommunicationAttention("operator-request", "Requests waiting in order: " + string.Join(", ", queued.Select(q => Str(q, "revision"))), RecordType: "operator-request")
+                { State = "queued", Command = "vericairn operator list" });
+            return;
+        }
+
         IReadOnlyList<RecordResponse> closes = Current("operator-request-close");
         IReadOnlyList<RecordResponse> observations = Current("observation");
         List<RecordResponse> open = Current("operator-request").Where(r => (recipient is null || Str(Body(r), "to") == recipient) &&
@@ -312,6 +338,14 @@ internal sealed class AttentionDerivation(
         if (open.Count > 3)
             items.Add(new CommunicationAttention("operator-request", "Requests waiting in order: " + string.Join(", ", open.Skip(3).Select(r => r.Id)), RecordType: "operator-request")
             { State = "queued", Command = "vericairn operator list" });
+    }
+
+    // Unsupported by an older implementation, the queue is derived from the records instead.
+    private JsonElement? QueueOf(string? recipient)
+    {
+        if (readRequests is null) return null;
+        try { return readRequests(recipient).Json is { ValueKind: JsonValueKind.Object } json && json.TryGetProperty("delivered", out _) ? json : null; }
+        catch (Exception exception) when (exception is NotSupportedException or InvalidOperationException or System.Net.Http.HttpRequestException or IOException or JsonException) { return null; }
     }
 
     private (string? At, string Id) First(RecordResponse record)

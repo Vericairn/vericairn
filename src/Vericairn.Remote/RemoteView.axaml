@@ -182,6 +182,20 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasStops}" Text="Stops of runs: what waits on a person" />
+              <ListBox ItemsSource="{Binding Stops}" IsVisible="{Binding HasStops}" AutomationProperties.Name="Stops of runs, with the operator's next reserved step and its exact command">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:StopRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Foreground="{DynamicResource BrandAttention}" Text="{Binding KindLabel}" TextWrapping="Wrap" />
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock FontWeight="SemiBold" Text="Local drafts and original submissions" />
               <ListBox ItemsSource="{Binding DecisionDrafts}" SelectedItem="{Binding SelectedDraft}" AutomationProperties.Name="Drafts and submissions for this exact phone connection">
                 <ListBox.ItemTemplate>

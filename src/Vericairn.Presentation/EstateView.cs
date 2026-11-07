@@ -34,6 +34,13 @@ public sealed record OperationRow(string Identity, string? Provider, string? Act
     public string StatusLabel => StateLanguage.Label("operation", Status);
 }
 
+/// <summary>A run of a flow as status shows it: its goal, flow, position and stops, the same stops the goal view shows.</summary>
+public sealed record FlowRunRow(string Goal, string Title, string Status, string Flow, int Done, int Steps, IReadOnlyList<string> Next, IReadOnlyList<StopRow> Stops)
+{
+    /// <summary>The run and its position, in words.</summary>
+    public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}";
+}
+
 /// <summary>A finding as a surface lists it.</summary>
 public sealed record FindingRow(string Severity, string Code, string Location, string Message);
 
@@ -111,6 +118,12 @@ public sealed class EstateView
     /// <summary>Reconcile tasks.</summary>
     public IReadOnlyList<FindingRow> Reconcile { get; private set; } = [];
 
+    /// <summary>The runs of flows status shows, each with its stops.</summary>
+    public IReadOnlyList<FlowRunRow> Runs { get; private set; } = [];
+
+    /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
+    public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
+
     /// <summary>Attention items derived from the above, most urgent first.</summary>
     public IReadOnlyList<AttentionItem> Attention { get; private set; } = [];
 
@@ -152,6 +165,14 @@ public sealed class EstateView
         view.Releases = Rows(document, "releases", e => new ReleaseRowView(Str(e, "version"), Str(e, "status"), Str(e, "commit"), Str(e, "id") ?? string.Empty));
         view.Operations = Rows(document, "operations", e => new OperationRow(Str(e, "identity") ?? "?", Str(e, "provider"), Str(e, "action"), Str(e, "status"), Str(e, "id") ?? string.Empty));
         view.Findings = Rows(document, "findings", e => new FindingRow(Str(e, "severity") ?? "info", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
+        view.Runs = Rows(document, "runs", e =>
+        {
+            JsonElement goal = e.TryGetProperty("goal", out JsonElement g) ? g : default;
+            JsonElement pin = e.TryGetProperty("pin", out JsonElement p) ? p : default;
+            List<string> next = e.TryGetProperty("next", out JsonElement n) && n.ValueKind == JsonValueKind.Array ? n.EnumerateArray().Select(x => x.GetString() ?? "?").ToList() : [];
+            return new FlowRunRow(Str(goal, "id") ?? "?", Str(goal, "title") ?? "?", Str(goal, "status") ?? "?", pin.ValueKind == JsonValueKind.Object ? $"flow {Str(pin, "id")} {Str(pin, "version")}" : "no flow",
+                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default));
+        });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Attention = DeriveAttention(view);
         return view;

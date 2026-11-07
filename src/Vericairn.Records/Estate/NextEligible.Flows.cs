@@ -23,8 +23,11 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 public static partial class NextEligible
 {
-    /// <summary>The route states the one-step operation acts on for a run: an agent's run, a person's assignment and ask, or the sponsor's ask for required attention.</summary>
-    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention"];
+    /// <summary>
+    /// The route states the one-step operation acts on for a run: an agent's run, a person's assignment and ask, the sponsor's ask for
+    /// required attention, or the operator request of a reserved act.
+    /// </summary>
+    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention", "request"];
 
     /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step, a review before hand-off, or required attention.</summary>
     /// <param name="Step">The step instance and its derived state.</param>
@@ -93,6 +96,14 @@ public static partial class NextEligible
                 continue;
             }
 
+            // A reserved act is never routed to a contributor: it waits on the operator as an operator request carrying its exact command,
+            // computed only now that the step is next (design/flow.md § 8; design/release-procedure.md § 6).
+            if (position.Work is not null && position.Flow is not null && instance.State == "stopped" && instance.Stop == "reserved")
+            {
+                steps.Add(new FlowStepRoute(instance, RequestRoute(model, current, status, instance, position.Stops.FirstOrDefault(s => s.Kind == "reserved" && s.Step == instance.Ref))));
+                continue;
+            }
+
             // A review before hand-off is routed to its reviewer role, from its own assignments and asks.
             if (position.Work is not null && position.Flow is not null && instance.State == "in-review" && instance.Reviews.Count > 0)
             {
@@ -131,8 +142,55 @@ public static partial class NextEligible
             steps.Add(new FlowStepRoute(instance, route));
         }
 
+        // At most three stops of a run reach one person at a time (design/cohesion-contract.md § 5): those already delivered count first,
+        // then each route that would deliver one, in the flow's order; the rest wait queued until one settles.
+        Dictionary<string, int> reaching = position.Stops.Where(s => s.Delivery == "delivered" && s.Principal is not null).GroupBy(s => s.Principal!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        for (int index = 0; index < steps.Count; index++)
+        {
+            if (steps[index] is not { Dispatches: true, Route: { State: not "agent", Principal: string principal } route })
+            {
+                continue;
+            }
+
+            int count = reaching.GetValueOrDefault(principal);
+            if (count >= FlowStops.PerDelivery)
+            {
+                steps[index] = steps[index] with { Route = route with { State = "queued", Reason = $"{route.Reason}; {Routing.NameOf(model, principal)} already has {count.ToString(System.Globalization.CultureInfo.InvariantCulture)} stops of this run delivered, at most {FlowStops.PerDelivery.ToString(System.Globalization.CultureInfo.InvariantCulture)} at a time, so it waits queued and is delivered in order as one settles" } };
+            }
+            else
+            {
+                reaching[principal] = count + 1;
+            }
+        }
+
         List<AttentionRoute> attentions = position.RunAttention.Select(a => new AttentionRoute(a, AttentionOf(model, current, status, "sponsor", a, machine))).ToList();
         return new FlowRunRoutes(current, status, ledger, fenced, position, steps, Routing.AsksOf(model, current)) { Attention = attentions };
+    }
+
+    /// <summary>
+    /// The route of a run's reserved act (design/flow.md § 8): an operator request put to the operator with the step's exact command,
+    /// recorded by the one-step operation (request); waiting on the operator once recorded (requested); not made again once a request
+    /// carrying that command was closed (closed); queued behind three stops already reaching the operator; and unavailable when no
+    /// person with the operator role is named to put it to. No contributor is a candidate: a reserved act is never dispatched.
+    /// </summary>
+    private static Route RequestRoute(EstateModel model, RecordEnvelope goal, string status, FlowPosition.StepInstance instance, FlowStops.RunStop? stop)
+    {
+        IReadOnlyList<string> fence = status == "active" ? [] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+        var source = new Routing.Source(null, "the operator, who holds every reserved act in this build");
+        string act = instance.Step.Reserved!;
+        string? principal = stop?.Principal ?? FlowStops.RequestTo(model, goal, instance.Step);
+        string name = principal is null ? "the operator" : Routing.NameOf(model, principal);
+        (string state, string reason) = stop?.Delivery switch
+        {
+            "delivered" => ("requested", $"a reserved act, {act}: operator request {stop.Record!.Id} waits on {name} with the step's exact command; no agent carries it, and the step is done once the operator's act is recorded"),
+            "closed" => ("closed", $"a reserved act, {act}: operator request {stop.Record!.Id} carrying this command was closed, and it is not made again while the command holds; the step is done once the operator's act is recorded"),
+            "queued" => ("request", $"a reserved act, {act}: an operator request with its exact command is recorded for {name}, who holds it; no agent carries it, and nothing is dispatched"),
+            "outside" => ("unavailable", $"a reserved act, {act}: the estate names no person with the operator role to put its request to"),
+            _ when principal is null => ("unavailable", $"a reserved act, {act}: the estate names no person with the operator role to put its request to"),
+            _ => ("request", $"a reserved act, {act}: an operator request with its exact command is recorded for {name}, who holds it; no agent carries it, and nothing is dispatched"),
+        };
+        return new Route(instance.Step.Role, act, source, [], state, principal, null, null, null, null, fence, [], reason, Request: stop?.Record);
     }
 
     /// <summary>The current asks of a goal that name one of a step's assignments, oldest first.</summary>
@@ -322,6 +380,7 @@ public static partial class NextEligible
                 ["launcher"] = route.Launcher,
                 ["reason"] = route.Reason,
                 ["ask"] = route.Ask?.Id,
+                ["request"] = route.Request?.Id,
                 ["run"] = route.Run?.Id,
                 ["budget"] = new JsonObject { ["allows"] = route.BudgetAllows, ["reasons"] = Strings(route.Budget) },
                 ["custody"] = route.State == "agent" ? new JsonObject

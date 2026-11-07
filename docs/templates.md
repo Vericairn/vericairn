@@ -448,6 +448,7 @@ every template.
       "outputs": [{ "name": "clip", "kind": "file", "required": true, "provenance": { "inputs": ["master"] } }] },
     { "key": "publish", "title": "Publish", "kind": "operation", "role": "decider",
       "optional": true, "default": "on", "reserved": "publish", "recovery": "Reconcile first.",
+      "action": "example-publisher publish --product {subject.product} --version {subject.version}",
       "done": [{ "type": "release", "subject": "{subject.product}",
                  "fields": { "version": "{subject.version}", "status": "published" } }] }
   ]
@@ -506,6 +507,20 @@ every template.
     `review` option. A configuration sets only that option, so it never lowers
     the default review of an item that feeds a reserved step. A review in a role
     the flow marks `person` is only ever a person's.
+- A step with `reserved` (0.9.2) declares its `action`, the exact command the
+  operator runs, and its `done` predicates, the records of the operator's act.
+  The command's placeholders bind `{subject.<field>}` (a record field's id or a
+  text field's value), `{instance}` in an `each` step, `{goal}`, `{work}`, and
+  `{input.<name>.id}` and `{input.<name>.hash}` for one of the step's own inputs:
+  the id of the record that carries it and its exact hash. Other braces are
+  literal text. The command is bound only when the step is next, from the records
+  as they stand, and a value with characters outside letters, digits and
+  `. _ : / @ + = , -`, or one starting with a dash, holds the step as `blocked`
+  rather than being put in. Its done predicates and record items count only
+  records an operator recorded, and a result only when an operator recorded it,
+  so no agent's record or claim closes a reserved step. The
+  [operator guide](operator-guide.md#stops-and-their-surfaces-092) shows the
+  request that carries it.
 - `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
   watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
   predicates hold; a work or review step has no watch.
