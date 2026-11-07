@@ -1,4 +1,4 @@
-<!-- mcp-name: io.github.vericairn/vericairn -->
+<!-- mcp-name: io.github.Vericairn/vericairn -->
 # Vericairn Community
 
 Vericairn is a local-first creation and operations platform. It helps you, alone or as an organization,

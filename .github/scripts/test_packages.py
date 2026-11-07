@@ -103,8 +103,17 @@ class McpPackageVerificationTests(unittest.TestCase):
             variable["isRequired"] = True
 
     def test_missing_readme_verification_line_fails(self):
-        self.readme = self.readme.replace("<!-- mcp-name: io.github.vericairn/vericairn -->", "")
+        self.readme = self.readme.replace("<!-- mcp-name: io.github.Vericairn/vericairn -->", "")
         self.write()
+        with self.assertRaisesRegex(SystemExit, "mcp-name"):
+            verify_mcp_package(self.package)
+
+    def test_releases_before_0_9_2_keep_their_lowercase_name_when_re_verified(self):
+        self.nuspec = self.nuspec.replace("<version>1.2.3</version>", "<version>0.9.1</version>")
+        self.manifest = json.loads(json.dumps(self.manifest).replace("1.2.3", "0.9.1").replace("io.github.Vericairn/", "io.github.vericairn/"))
+        self.readme = self.readme.replace("io.github.Vericairn/", "io.github.vericairn/")
+        self.write()
+        self.assertEqual("io.github.vericairn/vericairn", verify_mcp_package(self.package, allow_legacy=True)["name"])
         with self.assertRaisesRegex(SystemExit, "mcp-name"):
             verify_mcp_package(self.package)
 

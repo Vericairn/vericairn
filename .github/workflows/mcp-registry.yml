@@ -1,6 +1,6 @@
 name: mcp-registry
 
-# Lists the published dotnet-vc package in the official MCP Registry as io.github.vericairn/vericairn, using GitHub's OIDC
+# Lists the published dotnet-vc package in the official MCP Registry as io.github.Vericairn/vericairn, using GitHub's OIDC
 # identity for this repository, so no person's token is involved. Only the operator's publication of a release starts it;
 # a person may also name a published, immutable release by its id, for a release published before this workflow existed or
 # whose run could not finish. The manifest is the exact .mcp/server.json inside that release's checksum-verified package.
@@ -128,5 +128,5 @@ jobs:
         shell: bash
         run: |
           set -eu
-          curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.vericairn/vericairn" \
-            | python3 -c 'import json,os,sys; servers=[s.get("server",s) for s in json.load(sys.stdin).get("servers",[])]; found=[s for s in servers if s.get("name")=="io.github.vericairn/vericairn" and s.get("version")==os.environ["PACKAGE_VERSION"]]; print(json.dumps(found, indent=1)); sys.exit(0 if found else 1)'
+          curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.Vericairn/vericairn" \
+            | python3 -c 'import json,os,sys; servers=[s.get("server",s) for s in json.load(sys.stdin).get("servers",[])]; found=[s for s in servers if s.get("name")=="io.github.Vericairn/vericairn" and s.get("version")==os.environ["PACKAGE_VERSION"]]; print(json.dumps(found, indent=1)); sys.exit(0 if found else 1)'

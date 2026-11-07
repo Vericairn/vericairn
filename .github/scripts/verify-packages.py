@@ -10,7 +10,9 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 
-MCP_NAME = "io.github.vericairn/vericairn"
+MCP_NAME = "io.github.Vericairn/vericairn"
+# Before 0.9.2 the name was lowercase, which the registry refuses (FIX-101); re-verifying those immutable releases accepts it.
+LEGACY_MCP_NAME = "io.github.vericairn/vericairn"
 MCP_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 
 
@@ -35,14 +37,15 @@ def verify_mcp_package(path, allow_legacy=False):
                 return None
             if sorted(types) != ["DotnetTool", "McpServer"]:
                 raise ValueError("expected both DotnetTool and McpServer package types")
+            name = LEGACY_MCP_NAME if (allow_legacy and release and tuple(map(int, release.groups())) < (0, 9, 2)) else MCP_NAME
             readme = metadata.findtext("{*}readme")
-            marker = f"<!-- mcp-name: {MCP_NAME} -->"
+            marker = f"<!-- mcp-name: {name} -->"
             if not readme or package.read(readme).decode("utf-8-sig").splitlines().count(marker) != 1:
                 raise ValueError("package README must carry the mcp-name line exactly once")
             manifest = json.loads(package.read(".mcp/server.json"))
             if not version or manifest["version"] != version:
                 raise ValueError("server version must equal the package version")
-            if manifest["$schema"] != MCP_SCHEMA or manifest["name"] != MCP_NAME:
+            if manifest["$schema"] != MCP_SCHEMA or manifest["name"] != name:
                 raise ValueError("unexpected registry schema or server name")
             # The registry's schema bounds a server's description to between 1 and 100 characters.
             description = manifest.get("description")
