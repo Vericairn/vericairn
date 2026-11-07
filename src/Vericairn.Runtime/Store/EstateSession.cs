@@ -180,6 +180,67 @@ public sealed class EstateSession : IDisposable
         return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache), snapshot.ByPath);
     }
 
+    /// <summary>
+    /// A cheap account of the canonical records and the manifest as they are now: equal stamps mean that records read when the stamp was
+    /// taken are still the canonical ones. Under the local-only profile it is the live store's snapshot, which a write here and another
+    /// connection's commit replace, so the caller holds the lock this session is used under; under the repository-synced profile it is
+    /// <see cref="TreeStamp"/>. Neither refreshes the live cache or its metadata.
+    /// </summary>
+    internal CanonicalStamp Stamp() => Profile == "repository-synced" ? TreeStamp() : new(Live.Snapshot().Generation, string.Empty, FileStamp(ManifestPath));
+
+    /// <summary>
+    /// The repository-synced profile's stamp, taken from the working tree alone, so without the live store or its lock: every record
+    /// file's path, size and modification time, as the live store's sync compares them, and the manifest's. A tree changing while it is
+    /// stamped gives a stamp equal to no other.
+    /// </summary>
+    internal CanonicalStamp TreeStamp() => new(0, FilesStamp(Path.Combine(Root, EstateLayout.RecordsDirectory)), FileStamp(ManifestPath));
+
+    /// <summary>The canonical record files as they are now, read as <see cref="Read"/> reads them; the caller holds this session's lock.</summary>
+    internal IReadOnlyList<RecordFile> CanonicalFiles() => Profile == "repository-synced" ? EstateLoader.EnumerateRecordFiles(Root) : Live.Snapshot().Files;
+
+    /// <summary>What <see cref="Stamp"/> gives: the live store's snapshot generation, or a digest of the record files, and the manifest's size and time.</summary>
+    internal readonly record struct CanonicalStamp(long Snapshot, string Files, string Manifest);
+
+    private string ManifestPath => Path.Combine(Root, EstateLayout.ManifestPath);
+
+    private static string FileStamp(string path)
+    {
+        var file = new FileInfo(path);
+        return file.Exists ? file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + file.LastWriteTimeUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) : "absent";
+    }
+
+    private static string FilesStamp(string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory)) return "absent";
+            var files = new List<(string Path, long Length, long Written)>();
+            foreach (FileInfo file in new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                files.Add((file.FullName, file.Length, file.LastWriteTimeUtc.Ticks));
+            }
+
+            files.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
+            using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            Span<byte> numbers = stackalloc byte[17];
+            foreach ((string path, long length, long written) in files)
+            {
+                digest.AppendData(Encoding.UTF8.GetBytes(path));
+                numbers[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(numbers[1..], length);
+                System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(numbers[9..], written);
+                digest.AppendData(numbers);
+            }
+
+            return Convert.ToHexStringLower(digest.GetHashAndReset());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A file removed or replaced while the tree was walked: the records are changing, so this stamp matches nothing.
+            return "changing:" + Guid.NewGuid().ToString("N");
+        }
+    }
+
     /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
     {

@@ -20,6 +20,8 @@ public sealed class LiveStore : IDisposable
     private readonly string? profile;
     private FileSnapshot? snapshot;
     private long snapshotVersion;
+    // Numbers every snapshot taken in this process, so a snapshot's number says which records it holds whichever store took it.
+    private static long snapshots;
 
     // Deterministic work counters for first-screen regression tests, independent of machine timing.
     internal long FilesRead { get; private set; }
@@ -107,13 +109,14 @@ public sealed class LiveStore : IDisposable
         if (snapshot is null || snapshotVersion != version)
         {
             IReadOnlyList<RecordFile> files = Files();
-            snapshot = new FileSnapshot(files, files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+            snapshot = new FileSnapshot(files, files.ToDictionary(f => f.Path, StringComparer.Ordinal), Interlocked.Increment(ref snapshots));
             snapshotVersion = version;
         }
         return snapshot;
     });
 
-    internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath);
+    /// <summary>The record files held at one moment, numbered by a generation that is new for every snapshot taken and only for a new one.</summary>
+    internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath, long Generation);
 
     /// <summary>Number of record files held.</summary>
     public long Count() => Guard(() =>

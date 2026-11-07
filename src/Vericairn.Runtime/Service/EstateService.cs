@@ -1830,13 +1830,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>The encoded public key of a device that is current and admitted now, or null; what request authentication relies on.</summary>
+    /// <summary>
+    /// The encoded public key of a device that is current and admitted now, or null; what request authentication relies on. Read as
+    /// <see cref="Standing(string)"/> reads, so a revocation counts from the next call on.
+    /// </summary>
     public string? AdmittedDevicePublicKey(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-        lock (gate)
+        EstateModel model = StandingModel();
+        lock (standingJudgment)
         {
-            EstateModel model = session.Load();
             if (!model.ById.TryGetValue(deviceId, out RecordEnvelope? record) || record.Type != "device")
             {
                 return null;
@@ -1849,17 +1852,60 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// A device as request authentication sees it now, by the id of any of its records: its identity, principal, current key,
-    /// permitted profiles and admission (admitted, revoked or not admitted); null when the id names no device. Read afresh from
-    /// the records on every call, so a revocation counts from the next request on.
+    /// permitted profiles and admission (admitted, revoked or not admitted); null when the id names no device. Read from the canonical
+    /// records as they are at the call, so a revocation counts from the next request on, whichever process records it; the records are
+    /// read again only when they have changed, so a request that has proved nothing yet never makes the runtime reload the estate.
     /// </summary>
     public DeviceStanding? Standing(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        EstateModel model = StandingModel();
+        lock (standingJudgment)
+        {
+            return Standing(model, deviceId);
+        }
+    }
+
+    // The model device standing is read from, with the stamp of the records it was read from. A request authenticates before it has
+    // proved anything, so it never reloads the estate: the records are read again only when their stamp changes, which a write here,
+    // another process's write or a pull does. Authentication also precedes read-only submission checks, so the canonical records are
+    // observed without refreshing the live cache or its metadata.
+    private sealed record StandingSource(EstateSession.CanonicalStamp Stamp, EstateModel Model);
+
+    private StandingSource? standingSource;
+    private long standingLoads;
+    // A kept model is shared by concurrent requests and judged by one at a time, as every other model is judged under the gate.
+    private readonly object standingJudgment = new();
+
+    /// <summary>How many times device standing has read the records afresh: once per change to them, never once per request.</summary>
+    internal long StandingLoads => Interlocked.Read(ref standingLoads);
+
+    private EstateModel StandingModel()
+    {
+        // A working tree is stamped without the gate, so a request naming an unchanged estate does not wait for the estate's operations.
+        if (session.Profile == "repository-synced" && Volatile.Read(ref standingSource) is { } kept && kept.Stamp == session.TreeStamp())
+        {
+            return kept.Model;
+        }
+
         lock (gate)
         {
-            // Authentication also precedes read-only submission checks: observe canonical records without
-            // refreshing the live cache or its metadata. Revocations still take effect on the next read.
-            return Standing(session.Read(), deviceId);
+            // The live store is reached under the gate; its stamp is a snapshot generation and costs no read while nothing changed.
+            EstateSession.CanonicalStamp stamp = session.Stamp();
+            if (standingSource is { } current && current.Stamp == stamp)
+            {
+                return current.Model;
+            }
+
+            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles());
+            Interlocked.Increment(ref standingLoads);
+            // Kept only when nothing changed while the records were read, so a kept model is never older than its stamp says.
+            if (session.Stamp() == stamp)
+            {
+                Volatile.Write(ref standingSource, new StandingSource(stamp, model));
+            }
+
+            return model;
         }
     }
 

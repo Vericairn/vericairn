@@ -151,6 +151,7 @@ internal sealed class RequestAuthenticator
             return freshness;
         }
 
+        // Read from the model kept for the records as they are now: a request that has proved nothing yet does not reload the estate.
         DeviceStanding? admitted = service.Standing(device);
         if (admitted is null || admitted.Admission != "admitted")
         {
@@ -226,6 +227,12 @@ internal sealed class RequestAuthenticator
         string? signature = Header(request, RequestSigning.SignatureHeader);
         X509Certificate2? certificate = context.Connection.ClientCertificate;
         if (device is null || signedAt is null || signature is null)
+        {
+            return Denied(NotPaired);
+        }
+
+        // Without a client certificate the refusal is the same whatever the records say, so they are not consulted.
+        if (certificate is null)
         {
             return Denied(NotPaired);
         }
