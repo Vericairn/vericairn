@@ -445,4 +445,4 @@ fault's source names only what the index held. A record carries only candidates 
 selection that omits others says so in `limited`, without a count. Validation refuses a hash that does not match, a candidate
 of another audience, more candidates or selections than these limits, an out-of-order rank and any field not listed here.
 The context manifest that holds a package's selections is `vericairn.context-manifest/2`; it is a derived artifact, not a
-record. Because the operation's field descriptions change, the generic record reader advances to `vericairn.records/readers/8`.
+record. Because the operation's field descriptions change, the generic record reader advances to `vericairn.records/readers/9`.

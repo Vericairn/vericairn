@@ -298,7 +298,7 @@ it has some.
 selection limits, `Hash`, `ListDigest`, `Validate` and `ValidateObserved`. Record format remains 3; the additive
 `execution.contextSelections` and `searchesObserved` of `agent-run` operations are in
 [record format 3](record-format-v3.md#search-selections-in-agent-runs-092). The operation type's field descriptions change,
-so the generic record reader advances its implementation identity to `vericairn.records/readers/8`. Its hash changes;
+so the generic record reader advances its implementation identity to `vericairn.records/readers/9`. Its hash changes;
 declarations pinned to an earlier implementation need the ordinary explicit generator update before regeneration, and earlier
 golden fixtures remain. The generator id and contract version 1 are unchanged.
 
