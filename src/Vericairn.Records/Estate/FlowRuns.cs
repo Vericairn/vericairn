@@ -562,6 +562,42 @@ public static class FlowRuns
         return bindings;
     }
 
+    /// <summary>
+    /// The values one step instance binds: the run's, the id of the record that carries each of its inputs now ({input.&lt;name&gt;.id}),
+    /// and for a reserved step its operator request ({request}): the first revision of the newest current request whose flowStep names
+    /// the run and this step instance. A binding the records do not give is left out, so a predicate naming it holds for no record.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> Bindings(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, string? item, Func<FlowInput, RecordEnvelope?> carrier)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(carrier);
+        var bindings = new Dictionary<string, string>(Bindings(model, goal, flow, item), StringComparer.Ordinal);
+        foreach (FlowInput input in step.Inputs)
+        {
+            if (carrier(input) is RecordEnvelope record)
+            {
+                bindings["input." + input.Name + ".id"] = record.Id;
+            }
+        }
+
+        if (step.Reserved is not null && Request(model, goal, step.Key, item) is RecordEnvelope request)
+        {
+            bindings["request"] = model.Chain(request)[0];
+        }
+
+        return bindings;
+    }
+
+    /// <summary>The newest current operator request that carries a run's step instance, by its flowStep: the run's first revision, the key and the instance.</summary>
+    internal static RecordEnvelope? Request(EstateModel model, RecordEnvelope goal, string key, string? item)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        string first = model.Chain(goal)[0];
+        return model.Current("operator-request")
+            .Where(r => TJson.Object(r.Body, "flowStep") is { ValueKind: JsonValueKind.Object } step && TJson.Text(step, "goal") == first && TJson.Text(step, "key") == key && TJson.Text(step, "instance") == item)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
     /// <summary>The instances a run's subject list field names, in order.</summary>
     internal static IReadOnlyList<string> Items(RecordEnvelope goal, string field) =>
         TJson.Strings(TJson.Object(Plan(goal), "subject"), field).ToList();

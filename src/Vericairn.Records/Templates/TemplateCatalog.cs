@@ -21,6 +21,7 @@ public static class TemplateCatalog
     {
         foreach (TemplateDefinition definition in PresentationTemplates.Definitions) Register(definition);
         foreach (TemplateDefinition definition in FirstPartyTemplates.Definitions) Register(definition);
+        foreach (TemplateDefinition definition in SoftwareFlows.Definitions) Register(definition);
     }
 
     /// <summary>Registers immutable content. Retirement hides a version from new-instance selection but keeps it readable.</summary>

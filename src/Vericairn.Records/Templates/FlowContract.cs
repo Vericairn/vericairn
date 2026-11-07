@@ -266,15 +266,18 @@ public static partial class FlowContract
             }
         }
 
+        // A predicate may name the record that carries one of the step's own inputs, {input.<name>.id}; a reserved step's done predicates
+        // may also name its operator request, {request}, whose close by the operator is the record of an act that leaves no other.
+        HashSet<string> declaredInputs = TJson.Array(step.Element, "inputs").Select(i => TJson.Text(i, "name")).OfType<string>().ToHashSet(StringComparer.Ordinal);
         foreach (BodyReader predicate in step.NestedArray("requires", false, allowEmpty: false) ?? [])
         {
-            Predicate(predicate, subject, extension, each is not null);
+            Predicate(predicate, subject, extension, each is not null, declaredInputs);
         }
 
         IReadOnlyList<BodyReader> done = step.NestedArray("done", false, allowEmpty: false) ?? [];
         foreach (BodyReader predicate in done)
         {
-            Predicate(predicate, subject, extension, each is not null);
+            Predicate(predicate, subject, extension, each is not null, declaredInputs, request: reserved is not null);
         }
 
         if (kind is not null && Routed.IndexOf(kind) < 0 && done.Count == 0)
@@ -289,9 +292,12 @@ public static partial class FlowContract
         {
             string? name = trap.Text("name", true, 100, Patterns.Slug, "a trap name");
             trap.Text("summary", true, 2000);
-            foreach (BodyReader predicate in trap.NestedArray("holds", true, allowEmpty: false) ?? [])
+            // A trap is record predicates the position reads, or a named check the step's action runs on its machine before it acts and
+            // refuses on, such as release submit's release.client-build objection, or both; a check alone is never evaluated from records.
+            string? check = trap.Text("check", false, 200, CheckPattern(), "a check or objection name, such as release.client-build");
+            foreach (BodyReader predicate in trap.NestedArray("holds", check is null, allowEmpty: false) ?? [])
             {
-                Predicate(predicate, subject, extension, each is not null);
+                Predicate(predicate, subject, extension, each is not null, declaredInputs);
             }
 
             trap.NoOtherKeys();
@@ -750,9 +756,12 @@ public static partial class FlowContract
 
     /// <summary>
     /// A record predicate over the run (the goal completion language of design/goals.md § 5), whose string values may name the run's
-    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {instance} in an each step, {goal} and {work}.
+    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {instance} in an each step, {goal}, {work},
+    /// {input.&lt;name&gt;.id} for one of the step's own inputs (the id of the record that carries it), and, as a reserved step's done
+    /// predicate's subject only, {request}: the step's operator request.
     /// </summary>
-    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool instance)
+    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool instance,
+        IReadOnlySet<string>? inputs = null, bool request = false)
     {
         string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
         if (type is not null && RecordTypeRegistry.Find(type) is null)
@@ -761,13 +770,13 @@ public static partial class FlowContract
         }
 
         string? named = predicate.Text("subject", false, 100);
-        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, instance, record: true))
+        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, instance, record: true, inputs, request))
         {
-            predicate.Error("flow.binding", "subject", "A predicate's subject is a record id or a record binding of the run: {subject.<record field>}, {goal} or {work}.");
+            predicate.Error("flow.binding", "subject", "A predicate's subject is a record id or a record binding of the run: {subject.<record field>}, {goal}, {work}, {input.<its input>.id}, or {request} in a reserved step's done predicate.");
         }
 
         string? product = predicate.Text("product", false, 100);
-        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, instance, record: true))
+        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, instance, record: true, inputs))
         {
             predicate.Error("flow.binding", "product", "A predicate's product is a product id or a record binding of the run.");
         }
@@ -787,9 +796,9 @@ public static partial class FlowContract
                 {
                     fields.Error("body.type", field.Name, "A predicate compares a body field with a string value.");
                 }
-                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, instance, record: false))
+                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, instance, record: false, inputs))
                 {
-                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {instance} in an each step, {goal} or {work}.");
+                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {instance} in an each step, {goal}, {work} or {input.<its input>.id}.");
                 }
             }
         }
@@ -817,7 +826,8 @@ public static partial class FlowContract
         predicate.NoOtherKeys();
     }
 
-    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool instance, bool record)
+    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool instance, bool record,
+        IReadOnlySet<string>? inputs = null, bool request = false)
     {
         Match match = Binding().Match(value);
         if (!match.Success)
@@ -829,6 +839,16 @@ public static partial class FlowContract
         if (name is "goal" or "work")
         {
             return true;
+        }
+
+        if (name == "request")
+        {
+            return request && record;
+        }
+
+        if (name.StartsWith("input.", StringComparison.Ordinal))
+        {
+            return inputs is not null && inputs.Contains(name["input.".Length..^".id".Length]);
         }
 
         if (name == "instance")
@@ -903,9 +923,13 @@ public static partial class FlowContract
         }
     }
 
-    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal} or {work}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work)\}$")]
+    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal}, {work}, {input.&lt;name&gt;.id} or {request}.</summary>
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}$")]
     internal static partial Regex Binding();
+
+    /// <summary>A check or objection a step's action runs: lower-case words joined by dots, hyphens or a slash, such as release.client-build.</summary>
+    [GeneratedRegex(@"^[a-z0-9]+([.\-/][a-z0-9]+)*$")]
+    private static partial Regex CheckPattern();
 
     /// <summary>A step key, or a step key and an item name joined by a dot.</summary>
     [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)?$")]

@@ -162,7 +162,7 @@ public static class FlowStops
         ArgumentNullException.ThrowIfNull(position);
         ArgumentNullException.ThrowIfNull(instance);
         FlowDefinition flow = position.Flow ?? throw new InvalidOperationException("The run's flow does not resolve here.");
-        IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, position.Goal, flow, instance.Instance);
+        IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, position.Goal, flow, instance.Step, instance.Instance, input => instance.Inputs.FirstOrDefault(i => i.Name == input.Name)?.Carrier);
         var parts = new List<string> { $"Step {instance.Name}, {instance.Step.Title}, of the run of flow {flow.Pin.Id} {flow.Pin.Version} is next: every step it waits on is done, and it is a reserved act, {instance.Step.Reserved}, which no agent carries without a grant in force within its bounds, none of which this build issues" };
         List<string> holding = instance.Step.Requires.Select(p => GoalPredicates.EvaluatePredicate(model, FlowRuns.Bind(p, bindings))).Select(v => $"{v.Value}: {v.Reason}").ToList();
         if (holding.Count > 0)

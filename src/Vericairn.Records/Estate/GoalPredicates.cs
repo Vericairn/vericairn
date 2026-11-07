@@ -15,7 +15,7 @@ namespace Vericairn.Records.Estate;
 /// The record-predicate language of a goal's completion conditions and its evaluator (the estate's design/goals.md § 5): a predicate
 /// counts the current records of one type that match it and holds when the count is within its bounds. A record matches when it is
 /// about the predicate's subject (any revision of it), belongs to its product (living documents), has every body field it names
-/// equal to the string it gives, and is in the state it names, the state status derives. Without bounds a predicate asks that at
+/// equal to the string it gives (a field may be a dotted path into nested objects, such as placement.carrier), and is in the state it names, the state status derives. Without bounds a predicate asks that at
 /// least one record match. Every verdict is met, not-met or unknown, the last when the records cannot decide it here, and names the
 /// records it read at their exact hashes.
 /// </summary>
@@ -107,7 +107,7 @@ public static class GoalPredicates
         List<RecordEnvelope> candidates = model.Current(type)
             .Where(r => subjectIdentity is null || (r.Subject is not null && LivingDocuments.ProductIdentity(model, r.Subject.Id) == subjectIdentity))
             .Where(r => product is null || (type == "living-document" && LivingDocuments.NamesProduct(model, r, product)))
-            .Where(r => fields.All(f => EstateModel.BodyString(r, f.Name) == f.Value))
+            .Where(r => fields.All(f => FieldString(r, f.Name) == f.Value))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
 
@@ -172,6 +172,41 @@ public static class GoalPredicates
             .Select(r => r.Reference).ToList();
         return (new Verdict(value, reason.ToString(), references), admitted);
     }
+
+    /// <summary>
+    /// A body field's string value as a predicate compares it: a top-level field, or a dotted path into nested objects, such as
+    /// placement.carrier, target.version or facts.version; null when it is absent or not a string. A record body never has a key with a
+    /// dot in it, so a top-level field and a path never collide.
+    /// </summary>
+    public static string? FieldString(RecordEnvelope record, string name)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(name);
+        if (EstateModel.BodyString(record, name) is string value)
+        {
+            return value;
+        }
+
+        string[] parts = name.Split('.');
+        if (parts.Length is < 2 or > MaximumPathDepth || parts.Any(p => p.Length == 0))
+        {
+            return null;
+        }
+
+        JsonElement current = record.Body;
+        foreach (string part in parts)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == JsonValueKind.String ? current.GetString() : null;
+    }
+
+    /// <summary>The deepest dotted field path a predicate names.</summary>
+    public const int MaximumPathDepth = 8;
 
     /// <summary>A completion condition in words: what a record predicate counts and its bounds, or an evidence statement and its check.</summary>
     public static string Describe(JsonElement condition)

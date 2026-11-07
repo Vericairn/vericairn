@@ -449,7 +449,7 @@ public static partial class FlowPosition
                 return Off(step, item, off);
             }
 
-            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, item);
+            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             if (flow.BranchOf(step.Key) is FlowBranch branch && !entered.Contains(branch.Name) && Failing(branch.When, bindings) is { Count: > 0 } entering)
             {
                 return Off(step, item, $"its branch {branch.Name} is not entered: {entering[0]}");
@@ -511,7 +511,7 @@ public static partial class FlowPosition
             {
                 if (Failing(trap.Holds, bindings) is { Count: > 0 } sprung)
                 {
-                    blocked.Add($"trap {trap.Name}: {trap.Summary} ({sprung[0]})");
+                    blocked.Add($"trap {trap.Name}: {trap.Summary} ({sprung[0]}){Sprung(trap, bindings)}");
                 }
             }
 
@@ -853,7 +853,7 @@ public static partial class FlowPosition
             IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
             Func<string, bool> judges = Judges(step, item);
             var subjects = new List<IReadOnlyList<string>> { model.Chain(model.Latest(result)) };
-            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, item);
+            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p))).ToList();
             foreach (FlowOutput output in step.Outputs.Where(o => o.Kind != "file"))
             {
@@ -1544,6 +1544,11 @@ public static partial class FlowPosition
         /// <summary>The instance of an input's producing step: the same item for a step that runs over the same list, or its one instance.</summary>
         private StepInstance? Producer(FlowInput input, string? item) => input.Step is null ? null : InstanceOf(input.Step, item);
 
+        /// <summary>The record that carries an input now: the subject field's record, or the producing step instance's output.</summary>
+        private RecordEnvelope? Carrier(FlowInput input, string? item) => input.From == "subject"
+            ? TJson.Text(TJson.Object(TJson.Object(FlowRuns.Plan(goal), "subject"), input.Field!), "id") is string id && model.ById.TryGetValue(id, out RecordEnvelope? record) ? record : null
+            : Producer(input, item)?.Outputs.FirstOrDefault(o => o.Name == input.Output)?.Carrier;
+
         private StepInstance? InstanceOf(string key, string? item) =>
             derived.GetValueOrDefault(new FlowRuns.StepRef(key, flow.Step(key)?.Each is null ? null : item));
 
@@ -1579,17 +1584,17 @@ public static partial class FlowPosition
                     string? before = now.Kind == "file" && model.ById.TryGetValue(pinned.Id, out RecordEnvelope? carrier)
                         ? TJson.Text(TJson.Array(carrier.Body, "outputs").FirstOrDefault(o => TJson.Text(o, "name") == input.Output), "hash")
                         : pinned.Hash;
-                    if (now.Kind == "file" ? before != now.Hash : (pinned.Id != now.Carrier.Id || pinned.Hash != now.Hash))
+                    if (now.Kind == "file" ? before != now.Hash : (pinned.Id != now.Carrier.Id || pinned.Hash != now.Hash) && Published(now.Carrier)?.Id != pinned.Id)
                     {
                         change = $"its input {input.Name} changed after use: its brief pinned {pinned.Type} {pinned.Id}{(before is null ? string.Empty : " at " + before)}, and {source} is now {now.Hash} in {now.Carrier.Type} {now.Carrier.Id}";
                     }
                 }
-                else if (now is not null && pinned is null && holder is not null && now.Carrier.AtTime > holder.AtTime)
+                else if (now is not null && pinned is null && holder is not null && now.Carrier.AtTime > holder.AtTime && !(Published(now.Carrier)?.AtTime <= holder.AtTime))
                 {
                     // An assignment made without a pin of the input cannot have used an output recorded after it.
                     change = $"its input {input.Name} changed after use: {source} is now {now.Carrier.Type} {now.Carrier.Id} of {now.Carrier.At}, after assignment {holder.Id}, which pins no input {input.Name}, was made";
                 }
-                else if (now is not null && usedAt is DateTimeOffset used && now.Carrier.AtTime > used)
+                else if (now is not null && usedAt is DateTimeOffset used && now.Carrier.AtTime > used && !(Published(now.Carrier)?.AtTime <= used))
                 {
                     change = $"its input {input.Name} changed after use: {source} is now {now.Carrier.Type} {now.Carrier.Id} of {now.Carrier.At}, after the step was done at {Time(used)}";
                 }
@@ -1599,6 +1604,15 @@ public static partial class FlowPosition
 
             return inputs;
         }
+
+        /// <summary>
+        /// The candidate a release record publishes, when it is the publication of its direct predecessor (ReleaseType.IsPublicationOf):
+        /// it differs from the candidate only in its status, publication time and address, and an acceptance of the candidate applies to it
+        /// by design, so it is no change of an input a step used as the candidate. Null for any other record.
+        /// </summary>
+        private RecordEnvelope? Published(RecordEnvelope carrier) =>
+            carrier.Type == "release" && carrier.Supersedes is string previous && model.ById.TryGetValue(previous, out RecordEnvelope? candidate) && ReleaseType.IsPublicationOf(candidate, carrier)
+                ? candidate : null;
 
         /// <summary>The review an item takes, as <see cref="FlowRuns.ReviewRequirement"/> derives it for this run's configuration.</summary>
         private FlowReview ReviewOf(FlowStep step, FlowOutput? output) => FlowRuns.ReviewRequirement(flow, configuration, step, output);
@@ -1645,6 +1659,26 @@ public static partial class FlowPosition
 
         private List<string> Failing(IEnumerable<JsonElement> predicates, IReadOnlyDictionary<string, string> bindings) =>
             predicates.Select(p => GoalPredicates.EvaluatePredicate(model, FlowRuns.Bind(p, bindings))).Where(v => v.Value != "met").Select(v => $"{v.Value}: {v.Reason}").ToList();
+
+        /// <summary>
+        /// What sprang a trap, in its own words: the summary of the newest record a bounded predicate of it counts beyond its bound, such as a
+        /// failed check that lists each location it found; empty when the records say nothing more.
+        /// </summary>
+        private string Sprung(FlowTrap trap, IReadOnlyDictionary<string, string> bindings)
+        {
+            foreach (JsonElement predicate in trap.Holds.Where(p => p.TryGetProperty("max", out _)))
+            {
+                JsonElement bound = FlowRuns.Bind(predicate, bindings);
+                IReadOnlyList<RecordEnvelope> matching = GoalPredicates.Matching(model, bound);
+                if (GoalPredicates.EvaluatePredicate(model, bound).Value != "met" && matching.Count > 0 && EstateModel.BodyString(matching[^1], "summary") is string summary)
+                {
+                    RecordEnvelope found = matching[^1];
+                    return $": {found.Type} {found.Id} says: {(summary.Length > 1000 ? summary[..1000] + "..." : summary)}";
+                }
+            }
+
+            return string.Empty;
+        }
 
         private static string? Who(RecordEnvelope? holder) => holder is null ? null : EstateModel.BodyString(holder, "contributor");
 
@@ -1826,6 +1860,13 @@ public static partial class FlowPosition
             ["done"] = new JsonArray(s.Done.Select(d => (JsonNode)new JsonObject { ["description"] = GoalPredicates.DescribePredicate(d.Predicate), ["verdict"] = d.Verdict.Value, ["reason"] = d.Verdict.Reason }).ToArray()),
             ["doneAt"] = s.DoneAt is DateTimeOffset doneAt ? Time(doneAt) : null,
             ["recovery"] = s.Step.Recovery,
+            ["traps"] = new JsonArray(s.Step.Traps.Select(t => (JsonNode)new JsonObject
+            {
+                ["name"] = t.Name,
+                ["summary"] = t.Summary,
+                ["check"] = t.Check,
+                ["records"] = t.Holds.Count > 0,
+            }).ToArray()),
             ["failure"] = s.Step.Kind == "work" ? s.Step.FailureRoute.Route : null,
             ["rerun"] = s.Rerun,
             ["attemptsUsed"] = s.AttemptsUsed,
