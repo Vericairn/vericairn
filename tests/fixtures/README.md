@@ -19,5 +19,6 @@ keys; it retains no private keys and touches neither the format-1 fixture nor fr
 
 `canonical-status/` holds the canonical status JSON (`EstateStatus.RenderJson` without repository checks) of each estate
 above, as main rendered it before PROC-06 (0.9.2). An estate without runs keeps these exact bytes, and so the
-`statusHash` a person's observation pins; a test renders each estate with the current build and compares. A later
+`statusHash` a person's observation pins; a test renders each estate with the current build and compares, the
+policy estate's `documents` member apart, since its living document names a generator only tests install. A later
 change to canonical status for estates without runs updates these files deliberately.
