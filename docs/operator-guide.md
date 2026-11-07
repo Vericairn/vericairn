@@ -577,6 +577,37 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
+### Security reports hold a release (0.9.2)
+
+From 0.9.2 (OPS-11), the security advisories filed against a product's repositories reach you as required attention within minutes, and one you have not triaged holds every release. GitHub raises no issue, discussion or notification for a draft advisory or a private vulnerability report, so Vericairn reads them itself.
+
+**Turning it on.** As the operator, record a product revision that declares the repositories to read, at most eight `repository` resources located on GitHub:
+
+```json
+"securityReports": {"provider": "github-security-advisories", "repositories": ["<repository resource id>"]}
+```
+
+GitHub keeps repository advisories only for public repositories and answers a private one's listing with "not found", which the reader refuses, so declare the public repositories where reports are filed. Write the whole current product body with the declaration added to a file, then run `vericairn records new product --by <operator> --body <file> --supersedes <current product id>`. Only you declare, change or remove it; a revision by anyone else that touches it is refused (`product.security-reports-author`). While any product declares it, every release of the estate waits for it.
+
+**How they are read.** The `github-security-advisories` reader runs `gh api` with your own `gh` login, read-only. It lists every advisory of each declared repository in every state, drafts and private reports (state `triage`) included. It posts nothing, and Vericairn never reads, stores or logs your token. GitHub shows drafts and private reports only to a repository's administrators, so a login that is not an administrator is refused rather than reported as having seen everything. A read starts only while GitHub's core allowance keeps at least a fifth of its limit, and at least 100 requests, for your own use; each read costs one request per repository and one per page of 100 advisories. The daemon reads 30 seconds after it starts and then every 5 minutes, and `vericairn security-reports poll --by <operator>` reads now. Without a running daemon, the next poll or release check reads them.
+
+**What is kept.** Each advisory is kept as its identifier, repository, state, severity and a hash of GitHub's response for it, in this machine's live store under your own Vericairn home. Its summary, description, reporter and credits never reach a record, a log or any surface.
+
+**Attention.** Each new or changed advisory is an `incident` in your attention, in human `vericairn status`, Workbench and Remote, naming its identifier, state and severity, until your triage names its current revision. A declared repository that cannot be read completely, or has had no complete read for 15 minutes, is a `failed check` that says why. Only the operator sees either; to any other principal they do not exist, and `security-reports poll` refuses them alike.
+
+**The hold.** `release submit` and `release submit --check` read the declared repositories again, unless a complete read is less than a minute old; a check keeps what it read in memory and leaves this machine's observations as they were. They refuse while any advisory's current revision is untriaged (`release.security-report`, naming it with the exact triage command) or any declared repository cannot be read completely (`release.security-reports-unavailable`). A missing or logged-out `gh`, a login that is not an administrator, a network failure and a rate-limit stop each refuse, with the reason. A principal other than the operator gets one objection, `release.security-reports`, which names and counts nothing. There is no override: to release without the reader, record a product revision without the declaration, which is your recorded act, and declare it again afterwards.
+
+**Triage.** Review the advisory on GitHub, then record your triage of the exact revision that the attention notice or `poll` shows:
+
+```sh
+vericairn security-reports poll --by <operator>
+vericairn security-reports triage <GHSA identifier> --repository <owner/name> --expected <content hash> --disposition security --by <operator>
+```
+
+The disposition is `security` (a vulnerability to fix), `duplicate`, or `no-action`, which needs `--reason`. The triage is an `observation` of kind `triage` that pins the repository resource and names the advisory only by identifier, repository and content hash, with the disposition and your reason. Write the reason in your own words, never the report's text. Any later change to the advisory, such as a new state or severity, is a new revision that needs triage again, and a published advisory is a new state too. Only the operator triages a security report, since no security role exists yet.
+
+**Limits.** Observations belong to the machine that read them, and another machine reads for itself before it releases. A triage record names the advisory's identifier, so in an estate whose records are public it shows that a report existed and when it was triaged: declare security reports only where the estate's records are private. The estate's GitHub App replaces this reader in a later release.
+
 ### Withdrawal and moving planned work (0.8.3)
 
 Withdraw a candidate at the exact revision you inspected:
@@ -1589,7 +1620,9 @@ per-principal presentation state that clears when the notice changes; there is n
 
 Canonical status JSON derives attention from records alone and is identical on machines with the same
 records. Progress also reads this runtime's worker observations; human status, progress and Workbench
-label additional concerns `Local worker observations`. No reader can infer another machine's unrecorded
+label additional concerns `Local worker observations`. From 0.9.2, the operator's attention in human status,
+Workbench and Remote also shows this machine's security-report observations, which canonical status leaves out
+([security reports](#security-reports-hold-a-release-092)). No reader can infer another machine's unrecorded
 facts. The estate observation's existing status-hash contract is unchanged; these API v1 projections add
 no record fields, CLI commands or permissions.
 

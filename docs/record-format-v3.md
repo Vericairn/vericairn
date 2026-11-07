@@ -397,3 +397,22 @@ its review from `review` records of that exact hash; see the
 [operator guide](operator-guide.md#runs-of-a-flow-092). `records describe goal`,
 `records describe assignment`, `records describe result` and `records describe
 operation` include these contracts.
+
+## Security reports (0.9.2)
+
+OPS-11 adds one optional product field and one observation kind within format 3, and no record type. A product without
+`securityReports` behaves as before, and no migration rewrites a record. What the reader observes about each advisory
+(identifier, state, severity and content hash) is machine-local state in the live store, not a record.
+
+| Record | Additive contract |
+| --- | --- |
+| `product` | Optional `securityReports: {provider, repositories}`. `provider` is a provider id (a lower-case slug; the shipped reader is `github-security-advisories`), and `repositories` lists one to eight distinct `resource` ids, each a `repository` with a `github` location. Declaring, changing or removing it is the operator's alone: any other author's revision that changes it is refused (`product.security-reports-author`). While any current product declares it, release submission reads those repositories and refuses while one cannot be read completely or an observed advisory revision has no triage. |
+| `observation` | Kind `triage`, by the operator only (`triage.author`). Its subject pins the exact `repository` resource on GitHub whose advisory it names (`triage.subject`), and its `facts` carry exactly `advisory` (a GHSA identifier), `repository` (owner/name, matching the subject's location), `contentHash` (the reader's hash of the provider's response for that advisory), `disposition` (`security`, `duplicate` or `no-action`) and `reason` (at most 500 characters, required for `no-action`). Any other fact is refused (`triage.facts`), so an advisory's summary, description, reporter and credits cannot enter it. |
+
+A triage names one revision: it clears the hold and the attention notice only while the advisory's observed content hash is
+the one it names, so a later change of state, severity or text needs another triage. A triage the estate check refuses, or
+one by any principal other than the operator, clears nothing. A reader that lacks the kind refuses the record, and a
+product's `securityReports` in an earlier format is refused as a later format's field. `records describe product` and
+`records describe observation` include these contracts. The generic record reader advances to `vericairn.records/readers/8`
+because the product schema changed.
+

@@ -205,3 +205,43 @@ stopped, and none is started where none served. Its `--json` output, the `Upgrad
 and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, with a mismatch on stderr. Older clients
 ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
 No record type, record format or generated document changes.
+
+## Security reports before a release (OPS-11)
+
+Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
+implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
+`POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
+`disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
+of `SecurityReportRow`, `held`, `triage`, `problem`). `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
+acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
+`ClientOperation.Deadline` gives `SecurityReportsPoll` and `ReleaseCheck` three minutes, since a check may now read GitHub;
+`ReleaseCheck` had the 30-second default.
+
+`release submit`, `POST /v1/releases/check` and `release_submit_check` are unchanged in shape. While a current product
+declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an untriaged revision, named) and
+`release.security-reports-unavailable` (a repository that could not be read completely), or, for any principal other than
+the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
+intent. Without a declaration, nothing is read and no objection is added.
+
+`AttentionGet` adds, for the operator only, notices of kind `incident` with subject type `security-report` (subject id
+`<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
+`security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
+and `GET /v1/status` are unchanged. `GET /v1/providers` adds rows of kind `security-advisories`.
+
+`Vericairn.Runtime` adds the contract `vericairn.provider.security-advisories/1`: `Providers.ISecurityAdvisoryReader`,
+`SecurityAdvisory` (with `States`, `Severities` and `Validate`), `SecurityAdvisoryListing` and the in-memory
+`MemorySecurityAdvisoryReader`; `ProviderRegistry.Register(ISecurityAdvisoryReader)`, `RegisterIfAbsent`,
+`SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
+`SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.
+`Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
+the command line. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+`TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
+`ObservationType.Kinds` adds `triage`, and `ProductType.Fields` adds `securityReports`. Record format remains 3; the record
+additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader advances its
+implementation identity to `vericairn.records/readers/8`, since the product schema changed its explanations; earlier
+golden fixtures remain retained. The command line adds `security-reports poll` and `security-reports triage`
+([CLI](cli.md#vericairn-security-reports-092)).
+

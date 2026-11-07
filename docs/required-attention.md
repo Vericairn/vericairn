@@ -90,6 +90,14 @@ may address a recipient's asks without changing canonical JSON.
 The status hash in an estate observation still covers its existing record-derived
 snapshot; the added attention projection does not alter that record contract.
 
+From 0.9.2 (OPS-11), a principal's attention (`AttentionGet`, which human status,
+Workbench and Remote show) also carries, for the operator only, an `incident` for
+each security-report revision not yet triaged and a `failed check` for each
+declared repository whose reports could not be read completely. They come from
+this machine's observations, so they never appear in status or progress JSON,
+and no other principal's attention shows them. See
+[security reports](operator-guide.md#security-reports-hold-a-release-092).
+
 `CommunicationAttention` keeps its existing `kind`, `text`, `record` and
 `recordType` fields and adds `hash`, `subject`, `state`, `asOf`, `command` and
 `target`. `subject` and `target` use `AttentionReference` (`type`, `id`, `hash`).
