@@ -35,10 +35,12 @@ internal static class HandoffAssembly
         Dictionary<string, RecordFile> byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
         List<ContextAssembly.Source> sources = model.Records.Select(record => ContextAssembly.Record(record, byPath[record.ExpectedPath], true, "Review before continuing from this hand-over.")).ToList();
 
+        // A run's position is the records' own, as of their newest record, so a package never depends on when it was prepared.
+        DateTimeOffset recorded = FlowStops.RecordedTime(model);
         var lead = new StringBuilder(ProgressReport.Render(model, null));
         foreach (RecordEnvelope goal in model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal))
         {
-            lead.Append('\n').Append(GoalView.RenderText(model, goal));
+            lead.Append('\n').Append(GoalView.RenderText(model, goal, recorded));
         }
 
         foreach (RecordEnvelope order in model.Current("work-order").OrderBy(r => r.Id, StringComparer.Ordinal))
@@ -95,7 +97,7 @@ internal static class HandoffAssembly
     internal static JsonObject State(EstateModel model) => new()
     {
         ["status"] = JsonNode.Parse(EstateStatus.RenderJson(model, new FindingList())),
-        ["goals"] = new JsonArray(model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(GoalView.RenderJson(model, r))).ToArray()),
+        ["goals"] = new JsonArray(model.Current("goal").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(GoalView.RenderJson(model, r, FlowStops.RecordedTime(model)))).ToArray()),
         ["work"] = new JsonArray(model.Current("work-order").OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => JsonNode.Parse(WorkView.RenderBriefJson(model, r))).ToArray()),
         ["asks"] = JsonNode.Parse(Asks.RenderJson(model)),
         ["decisions"] = Current(model, "decision"),

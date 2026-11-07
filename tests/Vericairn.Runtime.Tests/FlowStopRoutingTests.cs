@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -141,7 +142,7 @@ public class FlowStopRoutingTests
         Assert.Equal(second, revision.Body.GetProperty("content")[0].GetProperty("text").GetString());
         queue = run.Service.OperatorRequests();
         Assert.Equal(revision.Id, Assert.Single(queue.Json.GetProperty("delivered").EnumerateArray()).GetProperty("revision").GetString());
-        Assert.Empty(queue.Json.GetProperty("withdrawn").EnumerateArray());
+        Assert.False(queue.Json.TryGetProperty("withdrawn", out _));
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -227,6 +228,41 @@ public class FlowStopRoutingTests
         Assert.Equal(("ask", "clip[bridge]"), (bridge.Outcome, bridge.Step));
         Assert.Equal(["assigned", "assigned", "assigned", "queued"], Routes(run, goal).Skip(1));
         Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void CanonicalStatusOfARunIsByteIdenticalWheneverItIsReadWhileLiveReadsFollowTheClock()
+    {
+        // Publication falls due a day after acceptance, so a live read before then and one after it differ.
+        JsonObject song = FlowFixture.Song();
+        song["steps"]!.AsArray().Select(s => s!.AsObject()).Single(s => s["key"]!.GetValue<string>() == "publish")["when"] =
+            new JsonObject { ["due"] = new JsonObject { ["after"] = "P1D", ["from"] = "accept" } };
+        using var run = new FlowFixture(song, new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), "text/markdown"));
+        run.Review(run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(FlowFixture.PinOf(lyrics, "lyrics"))), "completed", ("master", FlowFixture.Hash('b'), null)));
+        RecordEnvelope accepted = run.Marked("ACCEPTED");
+        string publish = $"example-provider publish --recording {run.Work.Id} --work {run.Work.Id}";
+        using EstateService service = EstateService.Open(run.Estate.Root);
+
+        service.FlowClock = new Fixed(accepted.AtTime.AddHours(1));
+        StatusResponse early = service.Status();
+        JsonElement earlyRoute = Route(service.GoalNext(run.Goal.Id)!, "publish");
+        service.FlowClock = new Fixed(accepted.AtTime.AddDays(2));
+        StatusResponse late = service.Status();
+
+        // The canonical document is the same at both readings; the live reads follow the clock.
+        Assert.Equal(early.Json.GetRawText(), late.Json.GetRawText());
+        Assert.Equal(JsonValueKind.Null, earlyRoute.ValueKind);
+        Assert.Equal("request", Route(service.GoalNext(run.Goal.Id)!, "publish").GetProperty("state").GetString());
+        Assert.DoesNotContain(publish, early.Text, StringComparison.Ordinal);
+        Assert.Contains("    command: " + publish, late.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(publish, late.Json.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains(publish, service.Goal(run.Goal.Id)!.Json.GetRawText(), StringComparison.Ordinal);
+    }
+
+    private sealed class Fixed(DateTimeOffset at) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => at;
     }
 
     private static void Options(JsonObject body) =>

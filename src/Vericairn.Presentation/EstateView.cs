@@ -34,11 +34,14 @@ public sealed record OperationRow(string Identity, string? Provider, string? Act
     public string StatusLabel => StateLanguage.Label("operation", Status);
 }
 
-/// <summary>A run of a flow as status shows it: its goal, flow, position and stops, the same stops the goal view shows.</summary>
-public sealed record FlowRunRow(string Goal, string Title, string Status, string Flow, int Done, int Steps, IReadOnlyList<string> Next, IReadOnlyList<StopRow> Stops)
+/// <summary>
+/// A run of a flow as canonical status shows it: its goal, flow, position and stops as of the estate's newest record, the time
+/// <paramref name="AsOf"/> names, so that canonical status never depends on when it is read.
+/// </summary>
+public sealed record FlowRunRow(string Goal, string Title, string Status, string Flow, int Done, int Steps, IReadOnlyList<string> Next, IReadOnlyList<StopRow> Stops, string? AsOf = null)
 {
     /// <summary>The run and its position, in words.</summary>
-    public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}";
+    public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}{(AsOf is null ? string.Empty : $"; as of {AsOf}, the newest record")}";
 }
 
 /// <summary>A finding as a surface lists it.</summary>
@@ -171,7 +174,7 @@ public sealed class EstateView
             JsonElement pin = e.TryGetProperty("pin", out JsonElement p) ? p : default;
             List<string> next = e.TryGetProperty("next", out JsonElement n) && n.ValueKind == JsonValueKind.Array ? n.EnumerateArray().Select(x => x.GetString() ?? "?").ToList() : [];
             return new FlowRunRow(Str(goal, "id") ?? "?", Str(goal, "title") ?? "?", Str(goal, "status") ?? "?", pin.ValueKind == JsonValueKind.Object ? $"flow {Str(pin, "id")} {Str(pin, "version")}" : "no flow",
-                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default));
+                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"));
         });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Attention = DeriveAttention(view);

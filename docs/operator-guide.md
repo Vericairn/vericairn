@@ -1477,7 +1477,8 @@ step whose input changed after it was done waits on the operator again, with the
 
 Every surface shows a run's stops the same way, from the records:
 
-- status: its text and the canonical JSON's `runs`, each with its goal, flow, steps done, next steps and `stops`;
+- status: its text, read now, and the canonical JSON's `runs` when there are runs, each with its goal, flow, steps done,
+  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
 - `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
 - the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
 - Workbench's home and its Goals workspace;

@@ -120,7 +120,10 @@ run's steps recorded it, and no earlier request carries the step. Otherwise it i
 not delivered. It is `settled` once the step is done from the records of the
 operator's own act, and `withdrawn` when the step no longer waits on it or its
 command is no longer the one the records give. The JSON list names each such
-request under `withdrawn`, with its state and why, and the text says so too. It
+request under `withdrawn`, with its state and why, and the text says so too; a
+list without one has no `withdrawn`. `operator list` reads the run now, and
+canonical status as of its newest record. A request's events follow the same
+delivery: `open` while it is delivered, then `withdrawn`, `settled` or `closed`. It
 stays open, so close it with `done` or `dismiss` when you wish. Closing a request
 never completes its step, whoever closes it: the step is done only once the
 operator's act is recorded. See

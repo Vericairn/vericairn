@@ -276,12 +276,20 @@ step that is next, its exact command; otherwise null). Each stop has `kind`, `na
 adds `request`, `requested`, `closed` and `queued`, and each route adds `request`, the operator request it names.
 `POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; its outcome may be `request`, and it adds the init-only `Request`,
 serialized as `request` only when this call wrote an operator request. The OpenAPI schema `GoalStepResponse` adds `request`.
-`GET /v1/status` adds `runs` to its canonical JSON, each active, paused, budget-limited or blocked run of a flow with its
-`goal`, `pin`, `available`, `unavailable`, `done`, `steps`, `complete`, `next` and `stops`, and its text adds a `Runs:` section
-when there is one. The operator request queue, in `GET /v1/operator/requests`, status's `operatorRequests` and required
-attention, delivers a request that names a run's step (`flowStep`) only while it is due, and adds `withdrawn`: each open request
-a run no longer waits on, with `id`, `revision`, `hash`, `state` (`settled` or `withdrawn`) and `reason`. Its text adds the
-step's command to a delivered step's request, and a line for each open request that is not delivered. Older clients ignore the
+`GET /v1/status` adds `runs` to its canonical JSON when the estate has a run of a flow that is active, paused, budget-limited or
+blocked: each with its `goal`, `pin`, `asOf`, `available`, `unavailable`, `done`, `steps`, `complete`, `next` and `stops`. Its
+text adds a `Runs:` section when there is one. The operator request queue, in `GET /v1/operator/requests`, status's
+`operatorRequests` and required attention, delivers a request that names a run's step (`flowStep`) only while it is due. It adds
+`withdrawn` only when a run no longer waits on an open request: each such request with `id`, `revision`, `hash`, `state`
+(`settled` or `withdrawn`) and `reason`. Its text adds the step's command to a delivered step's request, and a line for each open
+request that is not delivered. An estate without runs therefore keeps its earlier canonical status bytes, and the `statusHash` a
+person's observation pins. Canonical status reads no clock: a run, its stops, and the delivery of its requests in
+`operatorRequests` and in status's attention are derived as of the newest record (`asOf`), so the document is byte-identical
+whenever and wherever it is read. Human status, `GET /v1/goals/{id}`, `/next`, `GET /v1/operator/requests`, `GET /v1/attention`
+and progress's attention read a run now, so a due time, backoff or watch limit shows there at once, and in canonical status once a
+later record is written. A hand-over package derives a run's position as of the newest record too. `request` events follow the
+queue's delivery: a run's request is `open` while it is delivered, `withdrawn` or `settled` otherwise, with category
+`information` once it is not delivered. Older clients ignore the
 added members and values; older servers omit them, which is not evidence that a run has no stops. The SDK's and the MCP
 server's goal, next, status and request reads carry the same JSON; no tool is added and no description changes.
 
@@ -294,10 +302,11 @@ derives it from the records otherwise.
 `Vericairn.Records` adds public types and members:
 
 - `Estate.FlowStops`: `Kinds`, `Deliveries`, `RequestStates` and `PerDelivery`; the records `RunStop`, `FlowStepReference` and
-  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `Of`, `Runs`, `RenderJson`,
-  `AppendText`, `RunsJson` and `RunsText`.
-- `Estate.FlowPosition.HoldsReservedAct`; `StepInstance.Stop` and `Command`; and `Position.Stops`. `FlowPosition` is now
-  `partial`.
+  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `RecordedTime`, `Of`, `Runs`,
+  `RenderJson`, `AppendText`, `RunsJson` and `RunsText`.
+- `Estate.FlowPosition.HoldsReservedAct`; `StepInstance.Stop` and `Command`; and `Position.Stops` and `At`. `FlowPosition` is
+  now `partial`.
+- `Estate.EstateStatus.Render` and `Estate.GoalView.RenderText` and `RenderJson` overloads at a time.
 - `Estate.GoalPredicates.EvaluatePredicate` and `Matching` overloads taking the records a rule admits.
 - `Estate.OperatorRequests.Held`, `Waiting`, `WaitingOf`, and `Derive` and `RenderText` overloads at a time; `Open` now
   leaves out a run's request that is not due.

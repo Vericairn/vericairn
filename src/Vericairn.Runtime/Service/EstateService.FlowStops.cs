@@ -21,6 +21,12 @@ namespace Vericairn.Runtime.Service;
 /// </summary>
 public sealed partial class EstateService
 {
+    /// <summary>
+    /// The clock a run's live reads use: goal show, goal next, goal step's routes, human status, the operator request queue and required
+    /// attention. Canonical status reads none: it derives a run at the records' own time (<see cref="FlowStops.RecordedTime"/>).
+    /// </summary>
+    internal TimeProvider FlowClock { get; set; } = TimeProvider.System;
+
     /// <summary>Records the operator request of a run's reserved act; no assignment, ask or run.</summary>
     private GoalStepResponse RequestStep(EstateModel model, RecordEnvelope goal, Taken taken, GoalStepRequest request)
     {

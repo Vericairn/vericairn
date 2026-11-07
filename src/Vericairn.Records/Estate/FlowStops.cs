@@ -238,6 +238,18 @@ public static class FlowStops
         return Queue(stops);
     }
 
+    /// <summary>
+    /// The records' own time: the newest record's, from which canonical status derives a run's position, its stops and the delivery of a
+    /// run's operator requests, so that the same records give the same document whenever and wherever it is read, as a policy evaluated
+    /// at its recorded time is. A due time, backoff or watch limit that passes after it shows in canonical status once a later record is
+    /// written; a live read shows it at once.
+    /// </summary>
+    public static DateTimeOffset RecordedTime(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return model.Records.Count == 0 ? DateTimeOffset.UnixEpoch : model.Records.Max(r => r.AtTime);
+    }
+
     /// <summary>The runs status shows: every current goal that is a run and is active, paused, budget-limited or blocked, oldest first, with its position.</summary>
     public static IReadOnlyList<FlowPosition.Position> Runs(EstateModel model, DateTimeOffset at)
     {
@@ -308,6 +320,7 @@ public static class FlowStops
             return (JsonNode)new JsonObject
             {
                 ["goal"] = new JsonObject { ["id"] = run.Goal.Id, ["hash"] = run.Goal.ComputedHash, ["title"] = EstateModel.BodyString(run.Goal, "title"), ["status"] = GoalRules.Status(model, run.Goal) },
+                ["asOf"] = RecordParser.FormatTimestamp(run.At),
                 ["pin"] = pin is null ? null : new JsonObject { ["id"] = pin.Id, ["version"] = pin.Version, ["hash"] = pin.Hash },
                 ["available"] = run.Flow is not null,
                 ["unavailable"] = run.Unavailable,

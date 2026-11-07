@@ -21,7 +21,8 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
-            return new(Requests.RenderText(model, principal), Element(Requests.Derive(model, principal)), model.Findings.HasErrors);
+            DateTimeOffset now = FlowClock.GetUtcNow();
+            return new(Requests.RenderText(model, principal, now), Element(Requests.Derive(model, principal, now)), model.Findings.HasErrors);
         }
     }
 

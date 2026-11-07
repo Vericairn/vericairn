@@ -114,7 +114,7 @@ public static class OperatorRequests
     {
         Waiting queue = WaitingOf(model, to, at);
         IReadOnlyList<RecordEnvelope> open = queue.Open;
-        return new JsonObject
+        var derived = new JsonObject
         {
             ["format"] = "vericairn.operator-requests/1", ["perDelivery"] = PerDelivery, ["to"] = to, ["waiting"] = open.Count,
             ["delivered"] = new JsonArray(open.Take(PerDelivery).Select(r => (JsonNode)Item(model, r)).ToArray()),
@@ -122,11 +122,18 @@ public static class OperatorRequests
             {
                 ["id"] = model.Chain(r)[0], ["revision"] = r.Id, ["hash"] = r.ComputedHash,
             }).ToArray()),
-            ["withdrawn"] = new JsonArray(queue.Withdrawn.Select(h => (JsonNode)new JsonObject
+        };
+
+        // Only a run's open request that is no longer delivered adds a member, so a queue without one keeps its earlier bytes.
+        if (queue.Withdrawn.Count > 0)
+        {
+            derived["withdrawn"] = new JsonArray(queue.Withdrawn.Select(h => (JsonNode)new JsonObject
             {
                 ["id"] = model.Chain(h.Request)[0], ["revision"] = h.Request.Id, ["hash"] = h.Request.ComputedHash, ["state"] = h.State, ["reason"] = h.Reason,
-            }).ToArray()),
-        };
+            }).ToArray());
+        }
+
+        return derived;
     }
 
     /// <summary>The recommendation first, with every remaining identity visible behind the delivery.</summary>

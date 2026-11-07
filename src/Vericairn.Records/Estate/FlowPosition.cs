@@ -217,6 +217,9 @@ public static partial class FlowPosition
         /// person, with who it waits on, why and how it reaches them, at most three delivered to each person at a time.
         /// </summary>
         public IReadOnlyList<FlowStops.RunStop> Stops { get; init; } = [];
+
+        /// <summary>The time the position was derived at: the read's, or for canonical status the records' own (<see cref="FlowStops.RecordedTime"/>).</summary>
+        public DateTimeOffset At { get; init; }
     }
 
     /// <summary>
@@ -239,7 +242,7 @@ public static partial class FlowPosition
         RecordEnvelope? work = FlowRuns.Work(model, current);
         if (flow is null)
         {
-            return new Position(current, null, unavailable, null, work, []);
+            return new Position(current, null, unavailable, null, work, []) { At = at };
         }
 
         FlowRuns.Configuration configuration = FlowRuns.Configure(model, current, flow);
@@ -254,7 +257,7 @@ public static partial class FlowPosition
             deriving.All();
         }
 
-        var position = new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention() };
+        var position = new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention(), At = at };
         return position with { Stops = FlowStops.Of(model, position, at) };
     }
 
