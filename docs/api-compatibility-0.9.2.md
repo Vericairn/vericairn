@@ -302,7 +302,9 @@ Two routes are added, each with its protocol types and an `IEstateApi` member wi
 implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
 `POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
 `disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
-of `SecurityReportRow`, `held`, `triage`, `problem`). `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether it is a report, an advisory in
+`triage` or `draft` state or an unknown state, which holds every release until triaged; a published, closed or withdrawn
+advisory holds nothing. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
 which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
 `CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
 acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
@@ -311,18 +313,21 @@ acting device, and a principal other than the operator receives the same `denied
 
 `release submit`, `POST /v1/releases/check` and `release_submit_check` are unchanged in shape. While a current product
 declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
-minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an untriaged revision, named) and
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (a report untriaged at its current revision, named) and
 `release.security-reports-unavailable` (a repository that could not be read completely), or, for any principal other than
 the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
 intent. Without a declaration, nothing is read and no objection is added.
 
-`AttentionGet` adds, for the operator only, notices of kind `incident` with subject type `security-report` (subject id
+`AttentionGet` adds, for the operator only, notices of kind `incident` (an untriaged report) or `information` (a new or
+changed published, closed or withdrawn advisory, for seven days) with subject type `security-report` (subject id
 `<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
 `security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
-and `GET /v1/status` are unchanged. `GET /v1/providers` adds rows of kind `security-advisories`.
+and `GET /v1/status` are unchanged. Through WATCH-05's event journal they become attention events for the operator alone,
+categories `incident`, `information` and `failed-check`, whose subjects are opaque keyed names rather than these ids; a
+stored read asks the journal to derive at once. `GET /v1/providers` adds rows of kind `security-advisories`.
 
 `Vericairn.Runtime` adds the contract `vericairn.provider.security-advisories/1`: `Providers.ISecurityAdvisoryReader`,
-`SecurityAdvisory` (with `States`, `Severities` and `Validate`), `SecurityAdvisoryListing` and the in-memory
+`SecurityAdvisory` (with `States`, `Severities`, `SettledStates` and `Validate`), `SecurityAdvisoryListing` and the in-memory
 `MemorySecurityAdvisoryReader`; `ProviderRegistry.Register(ISecurityAdvisoryReader)`, `RegisterIfAbsent`,
 `SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
 `SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.

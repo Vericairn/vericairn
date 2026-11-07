@@ -468,7 +468,8 @@ A script that follows `events watch` and runs `goal step` acts with its own prin
 
 Reads the security advisories of the repositories a product's `securityReports` declaration names, drafts and private
 reports included, and records the operator's triage of one observed revision (OPS-11). While a declared repository cannot be
-read completely, or any observed revision is untriaged, `release submit` and its `--check` refuse. Both commands are the
+read completely, or a report (an advisory in `triage` or `draft` state, or an unknown state) is untriaged at its current
+revision, `release submit` and its `--check` refuse. A published, closed or withdrawn advisory holds nothing and needs no triage. Both commands are the
 operator's alone; any other principal is refused with the same answer whatever exists. See the
 [operator's guide](operator-guide.md#security-reports-hold-a-release-092).
 
@@ -479,14 +480,14 @@ vericairn security-reports triage <GHSA identifier> --repository <owner/name> --
 
 | Command and option | Meaning |
 |---|---|
-| `poll --by <id>` | Read every declared repository now through its reader and print, per repository, whether the read completed, and per advisory its identifier, state, severity, content hash and triage. Records and posts nothing. |
+| `poll --by <id>` | Read every declared repository now through its reader and print, per repository, whether the read completed, and per advisory its identifier, state, severity, content hash, and its triage, whether it holds every release untriaged, or that it holds nothing. Records and posts nothing. |
 | `triage <advisory>` | The advisory's GHSA identifier, as `poll` or the attention notice shows it. |
 | `triage --repository <owner/name>` | Required. The advisory's repository. |
 | `triage --expected <hash>` | Required. The observed revision's content hash. A different current revision is refused as a conflict; review it, then triage that one. |
 | `triage --disposition <value>` | Required. `security` (a vulnerability to fix), `duplicate` or `no-action`. |
 | `triage --reason <text>` | Your reason, at most 500 characters and in your own words, never the report's text. Required for `no-action`. |
 | `triage --by <id>` | Required. The operator, on an admitted device. |
-| `--json` | Print the complete `SecurityReportsResponse`: `reads`, `reports`, `held`, any `triage` record written and any `problem`. |
+| `--json` | Print the complete `SecurityReportsResponse`: `reads`, `reports` (each with `holds`), `held`, any `triage` record written and any `problem`. |
 
 Exit 0 means a completed read or a recorded triage, and 1 a refusal: another principal, an unknown advisory, a changed
 revision or an invalid disposition. A read that could not complete still exits 0 and names the cause on its repository's

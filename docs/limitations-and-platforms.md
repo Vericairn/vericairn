@@ -695,7 +695,9 @@ Observations stay on the machine that read them, in its live store: another mach
 and reads again before a release. An advisory absent from a later complete listing is no longer observed and no longer
 holds. The daemon reads every 5 minutes, and an embedded command only when it polls or checks a release, so attention on a
 machine without a running daemon is as fresh as its last read and says when that was. Each advisory revision is told apart
-by a hash of the whole response, so any edit to it, its text or credits included, needs a new triage. Triage is the
+by a hash of the whole response, so any edit to a report, its text or credits included, needs a new triage. Only reports, in
+`triage` or `draft` state or a state this release does not know, hold a release; a published, closed or withdrawn advisory is
+information for a week and holds nothing, whoever changed it. Triage is the
 operator's alone until a security role exists; agents and other principals cannot record one, see one, or learn from a
 refusal whether a report exists. A triage record names the advisory's identifier and repository, so an estate whose records
 are public should not declare security reports. The estate's GitHub App replaces this reader in a later release, with the
