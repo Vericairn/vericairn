@@ -122,3 +122,18 @@ command line, the daemon, the SDK and a device-prepared record) with the finding
 `error` in the response's problem. The operator's acceptances are unchanged. Validation and the estate check report an
 acceptance already in the estate that names such a review with the same code at severity `info`; it adds no error and the
 acceptance keeps accepting its subject. Record format remains 3, and no record body changes.
+
+## A release basis keeps evidence files by hash (FIX-95)
+
+No route, interface member or protocol type is added or changed. A basis that submission retains now has format
+`vericairn.release-basis/3`, the shape of `vericairn.release-basis/2`, and `ReleaseBasisEvidence.Format` carries that value.
+The basis retains as objects only the files read from a working tree; each file of a repository read at an exact commit is
+named by path and hash. `GET /v1/release-bases/{hash}`, the SDK, the CLI and the `release_basis_get` tool still return the
+complete evidence, reading each such file's bytes from a clone registered on the serving machine at its commit. When none
+holds it and no earlier copy is retained, the file is a `release-basis.missing` finding whose message names the repository's
+Git objects at the recorded commit. Servers before 0.9.2 answer HTTP 404 for a format-3 basis, as for any unsupported object.
+
+Release admission, through `release submit --check`, `POST /v1/releases/check` and submission, adds the objection
+`release.basis-retained` with its next action when a basis would retain more than 4,096 files or 67,108,864 bytes;
+`release.basis-file-size` now applies only to files the basis retains. Bases of formats 1 and 2 read as before, and a format-2
+basis whose exact-commit copies are absent from the estate reads those files, and any evidence object of the same hash, from Git.

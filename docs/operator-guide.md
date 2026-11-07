@@ -539,6 +539,14 @@ hashes retain HTTP 404 and SDK null. Check the identifier for the latter; for a 
 use the named references to recover the exact retained bytes. Replacing them with current source
 bytes does not restore the historical basis. Reading a recovered basis grants no submission authority.
 
+From 0.9.2 (FIX-95), a basis keeps the files of a repository read at an exact commit, such as an
+evidence repository a duty result names, by path and hash alone, and `release basis` reads them from
+that repository's Git objects at the commit, through its registered clone. A source finding whose
+revision is a commit means no clone registered here holds that commit at that path and hash; register one
+with `vericairn sources clone <path> --resource <id>`. Submission writes only the estate's own working-tree
+files beside the basis object; commit them with it. Copies of exact-commit files that 0.9.1 and earlier
+wrote are no longer needed to read their bases. See [estate policies](policies.md) for the retention bound.
+
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
 4,194,304 characters per stdout or stderr stream. The deadline includes launch, concurrent output reads
