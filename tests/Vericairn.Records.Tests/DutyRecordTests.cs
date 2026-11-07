@@ -37,6 +37,25 @@ public class DutyRecordTests
         PolicyRecordsTests.Has(f, review, "signature.required");
     }
 
+    [Fact]
+    public void AReviewIsDutyEvidenceByItsSubjectResultsDutiesNotByItsReadList()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope policy = f.Policy();
+        Due(f);
+        // An ordinary result's review may carry exact evidence references unsigned: read alone never makes it duty evidence (FIX-94).
+        RecordEnvelope ordinary = f.Result(sign: false);
+        RecordEnvelope read = f.Review(ordinary, new JsonArray(PolicyFixture.Ref(ordinary), PolicyFixture.Ref(f.Decision)), sign: false);
+        Assert.DoesNotContain(f.Estate.Load().Findings, x => x.Location.StartsWith(read.ExpectedPath, StringComparison.Ordinal));
+        f.AssertValid();
+        // A duty result's review stays signed duty evidence, with or without read.
+        RecordEnvelope duty = f.Result(f.DutyLink(policy));
+        RecordEnvelope unread = f.Review(duty, sign: false);
+        PolicyRecordsTests.Has(f, unread, "signature.required");
+        RecordEnvelope withRead = f.Review(duty, new JsonArray(PolicyFixture.Ref(policy)), sign: false);
+        PolicyRecordsTests.Has(f, withRead, "signature.required");
+    }
+
     [Theory]
     [InlineData("hash")]
     [InlineData("future")]

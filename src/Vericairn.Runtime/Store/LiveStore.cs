@@ -9,12 +9,14 @@ namespace Vericairn.Runtime.Store;
 /// <summary>
 /// The runtime's live store for one estate on one machine: a SQLite database that holds the record files
 /// (the canonical copy under the local-only profile, a derived copy under the repository-synced profile),
-/// never committed and never opened over a shared filesystem.
+/// never committed and never opened over a shared filesystem. A SQLite failure leaves it as a bounded
+/// <see cref="IOException"/> that names the storage profile and its recovery route (FIX-93).
 /// </summary>
 public sealed class LiveStore : IDisposable
 {
     private readonly SqliteConnection connection;
     private readonly SqliteReadSnapshot? readSnapshot;
+    private readonly string? profile;
     private FileSnapshot? snapshot;
     private long snapshotVersion;
 
@@ -24,45 +26,55 @@ public sealed class LiveStore : IDisposable
     /// <summary>Opens (creating when needed) the live store database.</summary>
     public LiveStore(string databasePath) : this(databasePath, false) { }
 
-    internal LiveStore(string databasePath, bool readOnly, bool transient = false)
+    internal LiveStore(string databasePath, bool readOnly, bool transient = false, string? profile = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         Path = System.IO.Path.GetFullPath(databasePath);
+        this.profile = profile;
         if (!readOnly) Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
         readSnapshot = readOnly && !transient ? new SqliteReadSnapshot(Path) : null;
         connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = transient ? ":memory:" : readSnapshot?.Path ?? Path, Mode = transient ? SqliteOpenMode.Memory : readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
-        try { connection.Open(); }
+        try
+        {
+            connection.Open();
+            if (readOnly && !transient) return;
+            Execute("PRAGMA journal_mode = WAL;");
+            Execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, bytes BLOB NOT NULL);");
+            Execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+        }
+        catch (SqliteException exception)
+        {
+            connection.Dispose();
+            readSnapshot?.Dispose();
+            throw LiveStoreException.From(Path, profile, exception);
+        }
         catch { connection.Dispose(); readSnapshot?.Dispose(); throw; }
-        if (readOnly && !transient) return;
-        Execute("PRAGMA journal_mode = WAL;");
-        Execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, bytes BLOB NOT NULL);");
-        Execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
     }
 
     /// <summary>Database file path.</summary>
     public string Path { get; }
 
     /// <summary>A metadata value, or null.</summary>
-    public string? Meta(string key)
+    public string? Meta(string key) => Guard(() =>
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT value FROM meta WHERE key = $key;";
         command.Parameters.AddWithValue("$key", key);
         return command.ExecuteScalar() as string;
-    }
+    });
 
     /// <summary>Sets a metadata value.</summary>
-    public void SetMeta(string key, string value)
+    public void SetMeta(string key, string value) => Guard(() =>
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "INSERT INTO meta (key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value;";
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$value", value);
-        command.ExecuteNonQuery();
-    }
+        return command.ExecuteNonQuery();
+    });
 
     /// <summary>Every record file held, in path order.</summary>
-    public IReadOnlyList<RecordFile> Files()
+    public IReadOnlyList<RecordFile> Files() => Guard(() =>
     {
         var files = new List<RecordFile>();
         using SqliteCommand command = connection.CreateCommand();
@@ -74,12 +86,12 @@ public sealed class LiveStore : IDisposable
             FilesRead++;
         }
 
-        return files;
-    }
+        return (IReadOnlyList<RecordFile>)files;
+    });
 
     // Private original bytes for the loader. Public Files() still returns independent buffers. Local writes invalidate this
     // snapshot; SQLite's data_version also catches another connection changing the canonical local-only store.
-    internal FileSnapshot Snapshot()
+    internal FileSnapshot Snapshot() => Guard(() =>
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "PRAGMA data_version;";
@@ -91,48 +103,54 @@ public sealed class LiveStore : IDisposable
             snapshotVersion = version;
         }
         return snapshot;
-    }
+    });
 
     internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath);
 
     /// <summary>Number of record files held.</summary>
-    public long Count()
+    public long Count() => Guard(() =>
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM files;";
         return (long)(command.ExecuteScalar() ?? 0L);
-    }
+    });
 
     /// <summary>True when a path is held.</summary>
-    public bool Has(string path)
+    public bool Has(string path) => Guard(() =>
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT 1 FROM files WHERE path = $path;";
         command.Parameters.AddWithValue("$path", path);
         return command.ExecuteScalar() is not null;
-    }
+    });
 
     /// <summary>Stores or replaces a record file.</summary>
     public void Put(string path, byte[] bytes, long mtime = 0)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "INSERT INTO files (path, size, mtime, bytes) VALUES ($path, $size, $mtime, $bytes) ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, bytes = excluded.bytes;";
-        command.Parameters.AddWithValue("$path", path);
-        command.Parameters.AddWithValue("$size", bytes.LongLength);
-        command.Parameters.AddWithValue("$mtime", mtime);
-        command.Parameters.AddWithValue("$bytes", bytes);
-        command.ExecuteNonQuery();
+        Guard(() =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO files (path, size, mtime, bytes) VALUES ($path, $size, $mtime, $bytes) ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, bytes = excluded.bytes;";
+            command.Parameters.AddWithValue("$path", path);
+            command.Parameters.AddWithValue("$size", bytes.LongLength);
+            command.Parameters.AddWithValue("$mtime", mtime);
+            command.Parameters.AddWithValue("$bytes", bytes);
+            return command.ExecuteNonQuery();
+        });
         snapshot = null;
     }
 
     /// <summary>Removes a record file; true when it was held.</summary>
     public bool Remove(string path)
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM files WHERE path = $path;";
-        command.Parameters.AddWithValue("$path", path);
-        bool removed = command.ExecuteNonQuery() > 0;
+        bool removed = Guard(() =>
+        {
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM files WHERE path = $path;";
+            command.Parameters.AddWithValue("$path", path);
+            return command.ExecuteNonQuery() > 0;
+        });
         if (removed) { snapshot = null; }
         return removed;
     }
@@ -145,6 +163,11 @@ public sealed class LiveStore : IDisposable
     public int SyncFromDirectory(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        return Guard(() => Sync(root));
+    }
+
+    private int Sync(string root)
+    {
         string recordsRoot = System.IO.Path.Combine(root, EstateLayout.RecordsDirectory);
         var onDisk = new Dictionary<string, (long Size, long Mtime, string Full)>(StringComparer.Ordinal);
         if (Directory.Exists(recordsRoot))
@@ -194,6 +217,13 @@ public sealed class LiveStore : IDisposable
     {
         connection.Dispose();
         readSnapshot?.Dispose();
+    }
+
+    // A SQLite failure, such as a malformed database, leaves the store as a bounded diagnostic, never an unhandled exception.
+    private T Guard<T>(Func<T> operation)
+    {
+        try { return operation(); }
+        catch (SqliteException exception) { throw LiveStoreException.From(Path, profile, exception); }
     }
 
     private void Execute(string sql)

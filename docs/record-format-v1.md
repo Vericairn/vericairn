@@ -173,6 +173,9 @@ is not the effect; `vericairn release submit` and `release observe` write these 
 - Acceptance pins an exact subject hash. Milestones are accepted by the operator; ordinary work may be
   self-accepted only under the `self-accept-ordinary-work` authority scope, or accepted by another principal
   under `accept-work`. If the subject changes afterwards, a current acceptance is reported as unresolved, not invalid.
+  From 0.9.2, a principal other than the operator accepts only on reviews that passed: a new acceptance whose
+  `basis` names a review with outcome `findings` or `fail` is refused (`acceptance.basis-outcome`). An acceptance
+  already in the estate keeps its reading and is reported as information. The operator's acceptance is unchanged.
 - A current record whose subject is pinned to a revision that has been superseded since is reported as referring to an
   earlier revision (`record.subject-stale`, a warning), unless the latest revision answers it, as the publication
   of the exact release candidate and the withdrawal of the release do; an admission follows its device across

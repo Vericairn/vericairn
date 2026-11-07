@@ -10,7 +10,7 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class OperatorRequestCommandTests
 {
-    private static readonly string[] Commands = ["list", "record", "close", "request", "carry", "done", "dismiss"];
+    private static readonly string[] Commands = ["list", "record", "unfinished", "close", "request", "carry", "done", "dismiss"];
     public OperatorRequestCommandTests() => _ = CliHarness.BuiltExecutable;
 
     [Fact]
