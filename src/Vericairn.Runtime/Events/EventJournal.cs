@@ -775,12 +775,41 @@ internal sealed class EventJournal : IDisposable
     private static byte[] NamingKey(string journalPath)
     {
         string path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(journalPath)!, KeyFileName);
+        try
+        {
+            return StoredNamingKey(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A key file that can be neither read nor replaced costs only names that stay the same across openings: this opening
+            // names subjects under a key of its own, which no file holds, and the next one tries the file again. Events still flow.
+            return RandomNumberGenerator.GetBytes(32);
+        }
+    }
+
+    private static byte[] StoredNamingKey(string path)
+    {
         for (int attempt = 0; attempt < 2; attempt++)
         {
             if (File.Exists(path))
             {
-                byte[] existing = File.ReadAllBytes(path);
-                if (existing.Length == 32)
+                byte[]? existing = null;
+                try
+                {
+                    // Kept owner-only even if an earlier build or a copy left it wider, as the journal's own files are.
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+
+                    existing = File.ReadAllBytes(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Unreadable: replaced below by a new key, as a key of the wrong length is.
+                }
+
+                if (existing is { Length: 32 })
                 {
                     return existing;
                 }
