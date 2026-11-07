@@ -382,41 +382,25 @@ the estate. The existing `ask`, `progress`, `status` and record-writing commands
 
 ## MCP Registry publication
 
-Starting with 0.8.2, publish `io.github.vericairn/vericairn` to the
-[official MCP Registry](https://registry.modelcontextprotocol.io/) only after the accepted
-release's `dotnet-vc` package is published on nuget.org. This is a separate operator action;
-the release and NuGet workflows do not publish a registry entry.
+`io.github.vericairn/vericairn` is listed in the
+[official MCP Registry](https://registry.modelcontextprotocol.io/) from the accepted release's
+`dotnet-vc` package. From 0.9.2, the `mcp-registry` workflow does it when the operator publishes
+the release: it verifies the release's `dotnet-vc` package against `SHA256SUMS`, checks the
+package's embedded `.mcp/server.json`, waits until nuget.org serves that version, and publishes
+the manifest with a pinned `mcp-publisher`, signing in with the repository's GitHub OIDC identity.
+No personal token is involved. Publishing the release is the operator's act, and the listing follows it.
 
-1. Confirm the release's NuGet publishing run succeeded and the exact version is available on
-   [nuget.org](https://www.nuget.org/packages/dotnet-vc). Download that release's `.nupkg` and
-   `SHA256SUMS` and verify the package against its checksum. Use the accepted release's package,
-   without rebuilding it or substituting a manifest from a checkout.
-2. In a fresh working directory containing that package, extract its manifest. For 0.9.1:
+For a release published before the workflow existed, or one whose run did not finish, the operator
+dispatches the workflow with that release's id; it lists only a published, immutable release:
 
-   ```sh
-   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.9.1.nupkg").read(".mcp/server.json"))'
-   ```
+```sh
+gh workflow run mcp-registry.yml -R Vericairn/vericairn -f release_id=<release id>
+```
 
-   Inspect `server.json`: the server name must be `io.github.vericairn/vericairn`, both versions
-   must be `0.9.1`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
-   principal inputs as placeholders. For a later release, use that release's version throughout.
-3. Install the registry's `mcp-publisher` from its
-   [official release](https://github.com/modelcontextprotocol/registry/releases), following
-   that release's installation and verification instructions. In the directory with `server.json`,
-   log in with a GitHub identity authorized to publish in the `io.github.vericairn` namespace,
-   then publish:
-
-   ```sh
-   mcp-publisher login github
-   mcp-publisher publish
-   ```
-
-   The publisher checks the manifest and the NuGet README's
-   `<!-- mcp-name: io.github.vericairn/vericairn -->` line. If GitHub login does not authorize
-   that namespace, resolve the identity with the operator before publishing under it.
-4. Observe the exact name and version in the official registry and confirm that it points to
-   `dotnet-vc` at the same version with stdio transport and both required inputs. Check
-   [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc)
-   after indexing, and exercise the [dnx command](mcp.md#discovery-and-dnx) against a test estate.
-   Record the observations and publication result. If a publish command has an uncertain outcome,
-   inspect the existing entry for that name and version before retrying.
+Afterwards, observe the exact name and version in the official registry and confirm that it points
+to `dotnet-vc` at the same version with stdio transport and both required inputs. Check
+[nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc)
+after indexing, and exercise the [dnx command](mcp.md#discovery-and-dnx) against a test estate.
+A version the registry already lists is reported, not replaced. The interactive
+`mcp-publisher login github` cannot publish under the organization's namespace, because it
+cannot read organization roles; use the workflow.
