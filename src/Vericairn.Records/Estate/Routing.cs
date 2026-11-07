@@ -69,6 +69,27 @@ public static class Routing
         return EstateModel.BodyString(order, "role") ?? DefaultRole;
     }
 
+    /// <summary>
+    /// The role an assignment is carried in: for a run's step, the role its flow gives the step; otherwise its work order's role. Null
+    /// for a run's step whose flow does not resolve here, which nothing runs.
+    /// </summary>
+    public static string? RoleOf(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (WorkView.OrderOfAssignment(model, assignment) is not RecordEnvelope order)
+        {
+            return DefaultRole;
+        }
+
+        if (FlowRuns.StepOf(assignment) is not FlowRuns.StepRef step)
+        {
+            return RoleOf(model.Latest(order));
+        }
+
+        return FlowRuns.RunOf(model, order) is RecordEnvelope run && FlowRuns.Resolve(model, run).Flow?.Step(step.Key) is Templates.FlowStep declared ? declared.Role : null;
+    }
+
     /// <summary>The reserved action a role holds, or null for a role whose steps are not reserved actions.</summary>
     public static string? ReservedAction(string role) => ReservedRoles.TryGetValue(role, out string? action) ? action : null;
 
@@ -165,8 +186,8 @@ public static class Routing
 
     /// <summary>
     /// When an assignment is a hand-over (design/goals.md § 6, step 4), the assignment it takes the step over from: the latest assignment
-    /// of the same work order, by any revision, recorded before it, when that one's contributor is an agent or a service and this one's
-    /// is a person. Null for any other assignment.
+    /// of the same work order, by any revision, and of the same flow step for a run's, recorded before it, when that one's contributor is
+    /// an agent or a service and this one's is a person. Null for any other assignment.
     /// </summary>
     public static RecordEnvelope? TakesOverFrom(EstateModel model, RecordEnvelope assignment)
     {
@@ -179,7 +200,7 @@ public static class Routing
 
         IReadOnlyList<string> orders = model.Chain(model.Latest(order));
         RecordEnvelope? previous = model.OfType("assignment")
-            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
+            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
         string kind = previous is not null && model.CurrentPrincipal(EstateModel.BodyString(previous, "contributor")) is RecordEnvelope holder ? EstateModel.BodyString(holder, "kind") ?? "?" : "?";
@@ -330,6 +351,17 @@ public static class Routing
         IReadOnlyList<string> chain = model.Chain(model.Latest(order));
         return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// The current assignments that hold one step: of a run's work order, those that name that flow step and item; of any other work
+    /// order, those that name no step. Oldest first; the last one holds the step.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order, FlowRuns.StepRef? step)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return Assignments(model, order).Where(a => FlowRuns.StepOf(a) == step).ToList();
     }
 
     /// <summary>

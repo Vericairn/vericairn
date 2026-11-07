@@ -142,7 +142,108 @@ internal sealed class GoalOperations(CommandContext context)
             body["limits"] = new Json.JsonObject { ["deadline"] = proposal.Deadline };
         }
 
-        return context.WithApi(root, api => context.ReportOutcome(api.GoalPropose(new GoalProposeRequest(proposal.By, CommandJson.Element(body), proposal.Supersedes)), json));
+        if (proposal.Flow is null && ((proposal.Subject?.Length ?? 0) > 0 || (proposal.FlowOptions?.Length ?? 0) > 0 || proposal.Until is not null))
+        {
+            return context.Fail("--subject, --flow-option and --until configure a run, and go with --flow.");
+        }
+
+        return context.WithApi(root, api =>
+        {
+            if (proposal.Flow is not null)
+            {
+                string? problem = RunPlan(api, proposal, body);
+                if (problem is not null)
+                {
+                    return context.Fail(problem);
+                }
+            }
+
+            return context.ReportOutcome(api.GoalPropose(new GoalProposeRequest(proposal.By, CommandJson.Element(body), proposal.Supersedes)), json);
+        });
+    }
+
+    /// <summary>
+    /// The plan of a run (the estate's design/flow.md § 12): the flow's exact pin, read from the templates this runtime offers, the
+    /// subject bound by the kinds of the flow's subject fields, the goal's own options and the step it ends at; null, or what is wrong.
+    /// </summary>
+    private static string? RunPlan(IEstateApi api, GoalProposal proposal, Json.JsonObject body)
+    {
+        int at = proposal.Flow!.LastIndexOf('@');
+        string id = at > 0 ? proposal.Flow[..at] : proposal.Flow;
+        string? version = at > 0 ? proposal.Flow[(at + 1)..] : null;
+        TemplatesResponse templates = api.Templates();
+        if (templates.Problem is not null)
+        {
+            return templates.Problem.Message;
+        }
+
+        List<TemplateDto> flows = templates.Templates.Where(t => t.Pin.Id == id && (version is null || t.Pin.Version == version)
+            && t.Definition.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "flow").ToList();
+        if (flows.Count != 1)
+        {
+            return flows.Count == 0
+                ? $"--flow names no flow this runtime offers: {proposal.Flow}; vericairn templates list shows the templates, flows among them."
+                : $"--flow {proposal.Flow} names several versions of the flow; name one as id@version.";
+        }
+
+        if (proposal.WorkOrders.Length != 1)
+        {
+            return "A run's work is one work order: give exactly one --work-order with --flow.";
+        }
+
+        TemplateDto flow = flows[0];
+        Dictionary<string, (string Type, string? RecordType)> fields = flow.Definition.TryGetProperty("subject", out JsonElement declared) && declared.TryGetProperty("fields", out JsonElement named) && named.ValueKind == JsonValueKind.Array
+            ? named.EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!, f => (f.GetProperty("type").GetString()!, f.TryGetProperty("recordType", out JsonElement type) ? type.GetString() : null), StringComparer.Ordinal)
+            : new Dictionary<string, (string Type, string? RecordType)>(StringComparer.Ordinal);
+        var subject = new Json.JsonObject();
+        foreach (string entry in proposal.Subject ?? [])
+        {
+            int equals = entry.IndexOf('=', StringComparison.Ordinal);
+            string name = equals > 0 ? entry[..equals] : entry;
+            string value = equals > 0 ? entry[(equals + 1)..] : string.Empty;
+            if (equals <= 0 || !fields.TryGetValue(name, out (string Type, string? RecordType) field))
+            {
+                return $"--subject is name=value with a field of the flow's subject ({string.Join(", ", fields.Keys)}): '{entry}'.";
+            }
+
+            int colon = value.IndexOf(':', StringComparison.Ordinal);
+            subject[name] = field.Type switch
+            {
+                "record" => new Json.JsonObject { ["type"] = colon > 0 ? value[..colon] : field.RecordType, ["id"] = colon > 0 ? value[(colon + 1)..] : value },
+                "list" => new Json.JsonArray(value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(i => (Json.JsonNode)i).ToArray()),
+                _ => value,
+            };
+        }
+
+        var options = new Json.JsonObject();
+        foreach (string entry in proposal.FlowOptions ?? [])
+        {
+            int equals = entry.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                return $"--flow-option is name=value, such as step.shorts=off: '{entry}'.";
+            }
+
+            options[entry[..equals]] = entry[(equals + 1)..];
+        }
+
+        var run = new Json.JsonObject
+        {
+            ["pin"] = new Json.JsonObject { ["id"] = flow.Pin.Id, ["version"] = flow.Pin.Version, ["hash"] = flow.Pin.Hash },
+            ["subject"] = subject,
+        };
+        if (options.Count > 0)
+        {
+            run["options"] = options;
+        }
+
+        if (proposal.Until is not null)
+        {
+            run["until"] = proposal.Until;
+        }
+
+        body["plan"]!["flow"] = run;
+        return null;
     }
 
     /// <summary>Activates, pauses, resumes or stops a goal.</summary>

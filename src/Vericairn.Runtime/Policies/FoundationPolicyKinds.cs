@@ -19,6 +19,7 @@ internal static partial class FoundationPolicyKinds
     internal const string RevisionLine = "vericairn.estate/revision-line";
     internal const string Consistency = "vericairn.estate/work-state-consistency";
     internal const string Blocked = BlockedTerms.Kind;
+    internal const string FlowSteps = FlowRuns.PolicyKind;
 
     internal static void Validate(PolicyRuleContext context)
     {
@@ -33,6 +34,7 @@ internal static partial class FoundationPolicyKinds
             RevisionLine => Revisions(context, parametersOnly: true),
             Consistency => Consistencies(context, parametersOnly: true),
             Blocked => BlockedTermFindings(context, parametersOnly: true),
+            FlowSteps => RequiredSteps(context, parametersOnly: true),
             _ => throw new PolicyParameterException("This foundation parameter reader does not recognize the kind."),
         };
         _ = validation.ToArray();
@@ -49,6 +51,7 @@ internal static partial class FoundationPolicyKinds
             RevisionLine => Revisions(context),
             Consistency => Consistencies(context),
             Blocked => BlockedTermFindings(context),
+            FlowSteps => RequiredSteps(context),
             _ => [context.Unavailable("The exact rule kind and version are not installed.")],
         };
         PolicyFinding[] findings = results.ToArray();
@@ -100,6 +103,77 @@ internal static partial class FoundationPolicyKinds
             yield return context.Finding(PolicyWork.Target(context.Model, record), "terms", "unmet", $"This {record.Type} record, written after the policy began, holds a blocked term.",
                 "No blocked term outside a structured model selector.", "Leave the record unchanged; keep the term out of its successor and of new records.");
         }
+    }
+
+    // The steps of a flow an estate requires (design/flow.md § 5). Validation refuses a configuration that turns one off or ends a run
+    // before it; this reports each run in scope that leaves one out anyway, such as a run recorded before the policy, which goes on
+    // without the step until its sponsor revises it. A run whose flow does not resolve here is unavailable, never an empty pass.
+    private static IEnumerable<PolicyFinding> RequiredSteps(PolicyRuleContext context, bool parametersOnly = false)
+    {
+        Shape(context.Parameters, ["flow"], "steps", "items");
+        string flow = String(context.Parameters, "flow");
+        if (!Patterns.Contribution.IsMatch(flow)) throw new PolicyParameterException("The flow is named namespace/name.");
+        string[] steps = Get(context.Parameters, "steps").ValueKind == JsonValueKind.Undefined ? [] : Strings(context.Parameters, "steps");
+        string[] items = Get(context.Parameters, "items").ValueKind == JsonValueKind.Undefined ? [] : Strings(context.Parameters, "items");
+        if (steps.Length + items.Length == 0 || steps.Any(s => !Patterns.Slug.IsMatch(s)) || items.Any(i => i.Split('.') is not [string step, string name] || !Patterns.Slug.IsMatch(step) || !Patterns.Slug.IsMatch(name))
+            || steps.Concat(items).Distinct(StringComparer.Ordinal).Count() != steps.Length + items.Length)
+            throw new PolicyParameterException("The required steps are distinct step keys and the required items distinct step.item names, at least one of them.");
+        if (parametersOnly) yield break;
+        JsonElement selection = Get(context.Policy.Body, "appliesTo");
+        string? product = Text(selection, "kind") == "product" ? LivingDocuments.ProductIdentity(context.Model, String(selection, "product")) : null;
+        DateTimeOffset at = context.Basis.Time!.Value;
+        List<Vericairn.Records.Templates.TemplateDefinition> retained = Templates(context);
+        foreach (RecordEnvelope goal in context.Model.Records.Where(r => r.Type == "goal" && PolicyWork.CurrentAt(context.Model, r, at) && FlowRuns.Pin(r)?.Id == flow).OrderBy(r => r.Id, StringComparer.Ordinal))
+        {
+            Vericairn.Records.Templates.FlowDefinition? resolved = null;
+            string? unavailable = null;
+            try
+            {
+                resolved = Vericairn.Records.Templates.FlowDefinition.Resolve(Vericairn.Records.Templates.TemplateCatalog.Resolve(FlowRuns.Pin(goal)!, retained),
+                    pin => Vericairn.Records.Templates.TemplateCatalog.Resolve(pin, retained));
+            }
+            catch (InvalidOperationException error)
+            {
+                unavailable = "flow does not resolve from the basis: " + error.Message;
+            }
+
+            if (resolved is not null && product is not null && FlowRuns.Product(context.Model, goal, resolved) != product) continue;
+            FlowRuns.Configuration? configuration = resolved is null ? null : FlowRuns.Configure(context.Model, goal, resolved);
+            foreach (string step in steps.Concat(items))
+            {
+                string[] parts = step.Split('.');
+                bool item = parts.Length == 2;
+                (string verdict, string actual) = resolved is null ? ("unavailable", $"The run's {unavailable}.")
+                    : resolved.Step(parts[0]) is not { } declared || item && declared.Outputs.All(o => o.Name != parts[1]) ? ("unmet", $"Flow {resolved.Pin.Id} {resolved.Pin.Version} has no {(item ? "item" : "step")} {step}.")
+                    : configuration!.Off.TryGetValue(parts[0], out string? why) ? ("unmet", $"The run leaves out {parts[0]}: {why}.")
+                    : item && configuration.ItemsOff.TryGetValue(step, out string? itemWhy) ? ("unmet", $"The run leaves out item {step}: {itemWhy}.")
+                    : ("satisfied", $"The run carries {(item ? "item " : string.Empty)}{step}.");
+                yield return context.Finding(PolicyWork.Target(context.Model, goal), step, verdict, actual, $"Every run of flow {flow} in scope carries {(item ? "item" : "step")} {step}.",
+                    "Revise the run's plan so that it carries it, or retire the run; configuration never turns off what a policy requires.", goal);
+            }
+        }
+    }
+
+    /// <summary>The template content the basis retains from the estate's working tree; content that does not read is left out, and its runs are unavailable.</summary>
+    private static List<Vericairn.Records.Templates.TemplateDefinition> Templates(PolicyRuleContext context)
+    {
+        string? estate = context.Model.CurrentEstate is { } record ? PolicyWork.Identity(context.Model, record) : context.Model.Manifest?.Estate;
+        var templates = new List<Vericairn.Records.Templates.TemplateDefinition>();
+        foreach (PolicyFile file in context.Basis.Repositories.Where(r => r.Identity == estate && !r.Evidence).SelectMany(r => r.Files)
+            .Where(f => f.Available && f.Path.StartsWith("docs/templates/", StringComparison.Ordinal) && f.Path.EndsWith(".json", StringComparison.Ordinal)))
+        {
+            try
+            {
+                using JsonDocument content = Vericairn.Records.Canonical.CanonicalJson.Parse(file.Bytes.AsMemory());
+                templates.Add(Vericairn.Records.Templates.TemplateDefinition.Read(content.RootElement));
+            }
+            catch (Exception error) when (error is InvalidOperationException or Vericairn.Records.Canonical.CanonicalJsonException or JsonException)
+            {
+                // A file that is not a valid contract resolves no run; the runs that need it are reported unavailable.
+            }
+        }
+
+        return templates;
     }
 
     private static IEnumerable<PolicyFinding> Families(PolicyRuleContext context, bool parametersOnly = false)

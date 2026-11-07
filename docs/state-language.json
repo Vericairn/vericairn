@@ -124,6 +124,24 @@
       "review",
       "asked",
       "answered"
+    ],
+    "flow-step": [
+      "done",
+      "next",
+      "blocked",
+      "stale",
+      "in-review",
+      "stopped",
+      "off"
+    ],
+    "flow-item": [
+      "satisfied",
+      "missing",
+      "unproven",
+      "unverified",
+      "in-review",
+      "stale",
+      "off"
     ]
   }
 }

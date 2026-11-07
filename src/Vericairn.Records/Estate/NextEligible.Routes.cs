@@ -124,9 +124,18 @@ public static partial class NextEligible
     private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, RecordEnvelope order, IReadOnlyList<RecordEnvelope> assignments, List<AgentRuns.Run> runs, Routing.Machine machine)
     {
         string role = Routing.RoleOf(order);
-        string? reserved = Routing.ReservedAction(role);
+        return RouteOf(model, goal, status, ledger, role, Routing.ReservedAction(role), assignments, Routing.AsksAbout(model, goal, order), runs, machine, null);
+    }
+
+    /// <summary>
+    /// The route of a step carried in a role, from the assignments that hold it and the asks about it, or what holds it; a flow's step
+    /// passes its own assignments and asks, and admits only the candidates its role allows.
+    /// </summary>
+    private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, string role, string? reserved, IReadOnlyList<RecordEnvelope> assignments,
+        IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit)
+    {
+        admit ??= candidate => candidate;
         (IReadOnlyList<string> principals, Routing.Source source) = Routing.Principals(model, goal, role);
-        IReadOnlyList<RecordEnvelope> asks = Routing.AsksAbout(model, goal, order);
         RecordEnvelope? latestAsk = asks.Count == 0 ? null : asks[^1];
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
         RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
@@ -162,14 +171,14 @@ public static partial class NextEligible
         if (holder is not null)
         {
             // The step stays with the agent that holds it: an assignment to another agent would start its attempts afresh.
-            Routing.Candidate going = Routing.Evaluate(model, goal, ledger, contributor!, role, holder, machine);
+            Routing.Candidate going = admit(Routing.Evaluate(model, goal, ledger, contributor!, role, holder, machine));
             string again = findings is null ? "goes on with another run" : $"goes on with another attempt, since review {findings.Id} found what to change in its result {result!.Id}";
             return going.Available
                 ? Agent(going, holder, [going], $"{going.Name} holds it by assignment {holder.Id} and {again}")
                 : Unavailable([going], $"{going.Name} holds it by assignment {holder.Id} and cannot go on from here ({string.Join("; ", going.Reasons)}); it is never given to another contributor without the sponsor");
         }
 
-        List<Routing.Candidate> candidates = principals.Select(p => Routing.Evaluate(model, goal, ledger, p, role, null, machine)).ToList();
+        List<Routing.Candidate> candidates = principals.Select(p => admit(Routing.Evaluate(model, goal, ledger, p, role, null, machine))).ToList();
         if (candidates.FirstOrDefault(c => c.Available) is Routing.Candidate first)
         {
             if (first.IsAgent)

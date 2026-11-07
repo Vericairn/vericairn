@@ -63,6 +63,11 @@ public static class TemplateRecords
             if (TemplateCatalog.Pin(context.Record) is not { } pin) return;
             TemplateDefinition definition = TemplateCatalog.Resolve(context.Model, pin);
             resolved = true;
+            if (definition.IsFlow)
+            {
+                context.Error("template.kind", "A flow is a role process a goal runs, not a document's sections; a living document pins a document template.");
+                return;
+            }
             Dictionary<string, JsonElement> allowed = TemplateDefinition.OptionDefinitions(definition.Content);
             JsonElement values = TJson.Object(template.Element, "options");
             if (values.ValueKind == JsonValueKind.Object)
@@ -281,7 +286,16 @@ public static class TemplateRecords
             if (type == "template-defaults")
             {
                 JsonElement template = TJson.Object(body, "template");
-                TemplateCatalog.Resolve(model, new(TJson.Text(template, "id") ?? "", TJson.Text(template, "version") ?? "", TJson.Text(template, "hash") ?? ""));
+                TemplateDefinition definition = TemplateCatalog.Resolve(model, new(TJson.Text(template, "id") ?? "", TJson.Text(template, "version") ?? "", TJson.Text(template, "hash") ?? ""));
+                if (definition.IsFlow) FlowDefinition.Resolve(definition, pin => TemplateCatalog.Resolve(model, pin));
+            }
+            // A run names a flow this machine resolves with every base it extends; a reader without it shows the goal and runs nothing.
+            if (type == "goal" && TJson.Object(TJson.Object(body, "plan"), "flow") is { ValueKind: JsonValueKind.Object } flow)
+            {
+                JsonElement pin = TJson.Object(flow, "pin");
+                try { FlowDefinition.Resolve(model, new(TJson.Text(pin, "id") ?? "", TJson.Text(pin, "version") ?? "", TJson.Text(pin, "hash") ?? "")); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+                { return "A run names a flow this machine resolves exactly, with every base it extends: " + error.Message; }
             }
             if (type == "document-review" && subject is not null && model.ById.TryGetValue(subject.Id, out RecordEnvelope? declaration) && TemplateCatalog.Pin(declaration) is not null)
             {

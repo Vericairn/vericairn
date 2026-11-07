@@ -2457,9 +2457,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
             string status = order is null ? "planned" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
             bool routing = journal.Records.Any(r => r.Type == "assignment");
+            // A run's work order holds its steps one by one: the batch is moot once its own step is held again.
+            FlowRuns.StepRef? flowStep = stored.Where(r => r.Type == "assignment").Select(r => FlowRuns.StepOf(model.ById[r.Id])).FirstOrDefault(s => s is not null);
             bool moot = stored.Count == 0 || missing.Count == 0 || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
-                 || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"))));
+                 || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)
             {
                 journal.Close();

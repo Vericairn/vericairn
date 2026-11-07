@@ -53,6 +53,16 @@ public sealed class TemplateDefaultsType : IRecordType
         try
         {
             var definition = TemplateCatalog.Resolve(context.Model, new(TJson.Text(template.Element, "id")!, TJson.Text(template.Element, "version")!, TJson.Text(template.Element, "hash")!));
+            if (definition.IsFlow)
+            {
+                // A flow's defaults configure its options and optional steps at the scope (design/flow.md § 5); none turns off a
+                // required step, a reserved marking or a step an estate policy requires.
+                FlowDefinition flow = FlowDefinition.Resolve(definition, pin => TemplateCatalog.Resolve(context.Model, pin));
+                string? product = TJson.Text(scope.Element, "kind") == "product" && TJson.Text(scope.Element, "target") is string target ? Estate.LivingDocuments.ProductIdentity(context.Model, target) : null;
+                foreach ((string code, string message) in Estate.FlowRuns.ConfigurationRefusals(context.Model, flow, choices?.Element ?? default, product, context.Record))
+                    context.Error(code, message);
+                return;
+            }
             var allowed = TemplateDefinition.OptionDefinitions(definition.Content);
             if (choices is not null) foreach (var choice in choices.Element.EnumerateObject())
                 if (choice.Value.ValueKind != System.Text.Json.JsonValueKind.String || !allowed.TryGetValue(choice.Name, out var option)

@@ -65,6 +65,24 @@
     "batch.unreadable",
     "communication.conflict"
   ],
+  "Vericairn.Records.Estate.FlowPosition.ItemStates": [
+    "satisfied",
+    "missing",
+    "unproven",
+    "unverified",
+    "in-review",
+    "stale",
+    "off"
+  ],
+  "Vericairn.Records.Estate.FlowPosition.States": [
+    "done",
+    "next",
+    "blocked",
+    "stale",
+    "in-review",
+    "stopped",
+    "off"
+  ],
   "Vericairn.Records.Estate.GoalPredicates.Verdicts": [
     "met",
     "not-met",
@@ -90,6 +108,11 @@
     "person",
     "reserved",
     "unavailable"
+  ],
+  "Vericairn.Records.Estate.NextEligible.FlowDispatching": [
+    "agent",
+    "person",
+    "reserved"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -140,6 +163,60 @@
     "macos-secure-enclave",
     "ios-secure-enclave",
     "android-keystore"
+  ],
+  "Vericairn.Records.Templates.FlowContract.Holders": [
+    "person",
+    "agent",
+    "either"
+  ],
+  "Vericairn.Records.Templates.FlowContract.ItemKinds": [
+    "file",
+    "record",
+    "observation",
+    "verification",
+    "decision",
+    "attestation"
+  ],
+  "Vericairn.Records.Templates.FlowContract.OnOff": [
+    "on",
+    "off"
+  ],
+  "Vericairn.Records.Templates.FlowContract.ReservedActs": [
+    "accept-release",
+    "publish",
+    "spend",
+    "use-credential",
+    "security-review"
+  ],
+  "Vericairn.Records.Templates.FlowContract.Reviews": [
+    "none",
+    "self",
+    "independent",
+    "other-harness",
+    "person"
+  ],
+  "Vericairn.Records.Templates.FlowContract.Routed": [
+    "work",
+    "review"
+  ],
+  "Vericairn.Records.Templates.FlowContract.Routes": [
+    "api",
+    "person",
+    "browser"
+  ],
+  "Vericairn.Records.Templates.FlowContract.StepKinds": [
+    "work",
+    "review",
+    "operation",
+    "effect",
+    "decision",
+    "exchange",
+    "flow"
+  ],
+  "Vericairn.Records.Templates.FlowContract.SubjectTypes": [
+    "record",
+    "text",
+    "list"
   ],
   "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
     "work-order",

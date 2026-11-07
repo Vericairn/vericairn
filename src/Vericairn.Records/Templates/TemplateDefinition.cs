@@ -30,8 +30,12 @@ public sealed class TemplateDefinition
     public string Hash { get; }
     /// <summary>The complete contract, including sections and fields in source order.</summary>
     public JsonElement Content { get; }
-    /// <summary>Every section and field in depth-first order.</summary>
+    /// <summary>Every section and field in depth-first order; a flow has none.</summary>
     public IReadOnlyList<JsonElement> Elements => Flatten(Content).ToArray();
+    /// <summary>The template's kind: document, or flow (design/flow.md § 5).</summary>
+    public string Kind => TJson.Text(Content, "kind") ?? "document";
+    /// <summary>True for a template of kind flow, a declared role process rather than a document's sections.</summary>
+    public bool IsFlow => Kind == FlowContract.Kind;
 
     /// <summary>Reads a contract, refusing unknown properties, ambiguous structure and unavailable primitives.</summary>
     public static TemplateDefinition Read(JsonElement content)
@@ -53,7 +57,13 @@ public sealed class TemplateDefinition
             findings.Error("template.shape", "template", "A template is an object.");
             return findings.ToArray();
         }
+        if (FlowContract.IsFlow(content))
+        {
+            FlowContract.Validate(body);
+            return findings.ToArray();
+        }
         body.Enum("format", true, "vericairn.template/1");
+        body.Enum("kind", false, "document");
         body.Text("id", true, 200, Patterns.Contribution, "namespace/name");
         body.Text("version", true, 100, Patterns.SemanticVersion, "a semantic version");
         body.Text("purpose", true, 4000);

@@ -43,8 +43,10 @@ public static class TemplateCatalog
         ArgumentNullException.ThrowIfNull(model);
         Dictionary<(string Id, string Version), TemplateDefinition> definitions;
         lock (Installed) definitions = new(Installed);
+        // A records-only snapshot, such as a policy basis, has no root: its retained content is read from the snapshot, never from the
+        // process's working directory.
         string directory = Path.Combine(model.Root, "docs", "templates");
-        if (Directory.Exists(directory))
+        if (!string.IsNullOrEmpty(model.Root) && Directory.Exists(directory))
         {
             // Refuse redirected roots and members; templates are ordinary content, never executable loaders.
             GeneratedDocumentVerification.SafeFile(model.Root, "docs/templates");
@@ -75,6 +77,22 @@ public static class TemplateCatalog
     {
         ArgumentNullException.ThrowIfNull(pin);
         TemplateDefinition? definition = All(model, includeRetired: true).SingleOrDefault(d => d.Id == pin.Id && d.Version == pin.Version);
+        if (definition is null || definition.Hash != pin.Hash)
+            throw new InvalidOperationException("The exact pinned template content is unavailable or has changed.");
+        return definition;
+    }
+
+    /// <summary>
+    /// Resolves an exact pin from the installed contracts, including a retired version, or from retained content read elsewhere, such
+    /// as a policy basis's inventory; refuses a missing or changed contract.
+    /// </summary>
+    public static TemplateDefinition Resolve(TemplatePin pin, IEnumerable<TemplateDefinition> retained)
+    {
+        ArgumentNullException.ThrowIfNull(pin);
+        ArgumentNullException.ThrowIfNull(retained);
+        TemplateDefinition? definition;
+        lock (Installed) definition = Installed.GetValueOrDefault((pin.Id, pin.Version));
+        definition ??= retained.FirstOrDefault(d => d.Id == pin.Id && d.Version == pin.Version && d.Hash == pin.Hash);
         if (definition is null || definition.Hash != pin.Hash)
             throw new InvalidOperationException("The exact pinned template content is unavailable or has changed.");
         return definition;
