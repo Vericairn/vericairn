@@ -41,7 +41,7 @@ Agents built with LangGraph, CrewAI or AutoGen connect through their frameworks'
 
 From 0.8.2, the `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
 and an embedded `.mcp/server.json` for the official MCP Registry name
-`io.github.vericairn/vericairn`. The manifest's server and NuGet package versions are generated
+`io.github.Vericairn/vericairn`. The manifest's server and NuGet package versions are generated
 from the package version when packing. The package README carries the registry's `mcp-name`
 verification line.
 

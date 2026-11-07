@@ -382,7 +382,7 @@ the estate. The existing `ask`, `progress`, `status` and record-writing commands
 
 ## MCP Registry publication
 
-`io.github.vericairn/vericairn` is listed in the
+`io.github.Vericairn/vericairn` is listed in the
 [official MCP Registry](https://registry.modelcontextprotocol.io/) from the accepted release's
 `dotnet-vc` package. From 0.9.2, the `mcp-registry` workflow does it when the operator publishes
 the release: it verifies the release's `dotnet-vc` package against `SHA256SUMS`, checks the
@@ -404,3 +404,6 @@ after indexing, and exercise the [dnx command](mcp.md#discovery-and-dnx) against
 A version the registry already lists is reported, not replaced. The interactive
 `mcp-publisher login github` cannot publish under the organization's namespace, because it
 cannot read organization roles; use the workflow.
+
+The registry grants the namespace exactly as GitHub spells the organization, `io.github.Vericairn`. Releases
+before 0.9.2 carry the server name in lowercase, which the registry refuses, so they are not listed (FIX-101).
