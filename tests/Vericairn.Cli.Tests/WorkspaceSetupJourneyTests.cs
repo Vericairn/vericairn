@@ -69,12 +69,22 @@ public sealed class WorkspaceSetupJourneyTests : IDisposable
             Assert.Equal(2, CliHarness.Run("worker", "configure", "--repository", repository, "--setup-command", "make", "--setup-timeout", "601").Code);
             Assert.Equal(2, CliHarness.Run("worker", "configure", "--repository", repository, "--setup-command", "make", "--model", "model-a").Code);
             Assert.Equal(2, CliHarness.Run("worker", "configure", "--launcher", "no-such-launcher", "--setup-command", "make").Code);
-            JsonElement configured = CliHarness.Ok("--json", "worker", "configure", "--repository", repository, "--setup-command", FakeHarness.Setting("setup-install", setup), "--setup-timeout", "120").Json;
+            Assert.Equal(2, CliHarness.Run("worker", "configure", "--repository", repository, "--setup-variable", "PERSON_SETTING").Code);
+            Assert.Equal(2, CliHarness.Run("worker", "configure", "--repository", repository, "--setup-command", "make", "--setup-variable", "VERICAIRN_HOME").Code);
+            Assert.Equal(2, CliHarness.Run("worker", "configure", "--repository", repository, "--clear-setup", "--setup-variable", "PERSON_SETTING").Code);
+            JsonElement unnamed = CliHarness.Ok("--json", "worker", "configure", "--repository", repository, "--setup-command", "make").Json;
+            Assert.Empty(unnamed.GetProperty("variables").EnumerateArray());
+            Assert.Contains($"Workspace setup for repository {repository}: [\"make\"], deadline 300 seconds, with a harness's environment.",
+                CliHarness.Ok("worker", "configure", "--repository", repository).Out, StringComparison.Ordinal);
+            JsonElement configured = CliHarness.Ok("--json", "worker", "configure", "--repository", repository, "--setup-command", FakeHarness.Setting("setup-install", setup), "--setup-timeout", "120",
+                "--setup-variable", "PERSON_SETTING", "--setup-variable", "NPM_CONFIG_REGISTRY").Json;
             Assert.Equal(repository, configured.GetProperty("repository").GetString());
             Assert.Equal(120, configured.GetProperty("timeoutSeconds").GetInt32());
             Assert.Equal(FakeHarness.Command("setup-install", setup), configured.GetProperty("command").EnumerateArray().Select(a => a.GetString()!));
+            Assert.Equal(["PERSON_SETTING", "NPM_CONFIG_REGISTRY"], configured.GetProperty("variables").EnumerateArray().Select(a => a.GetString()!));
             Assert.Contains(CliHarness.Ok("--json", "worker", "configure").Json.GetProperty("setup").EnumerateArray(), e => e.GetProperty("repository").GetString() == repository);
             Assert.Contains($"Workspace setup for repository {repository}: [", CliHarness.Ok("worker", "configure").Out, StringComparison.Ordinal);
+            Assert.Contains("passing PERSON_SETTING, NPM_CONFIG_REGISTRY beside a harness's environment.", CliHarness.Ok("worker", "configure").Out, StringComparison.Ordinal);
 
             CliHarness.Ok(run);
             JsonElement recorded = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());

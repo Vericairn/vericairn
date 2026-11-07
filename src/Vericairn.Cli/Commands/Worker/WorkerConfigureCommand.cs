@@ -20,7 +20,8 @@ internal sealed class WorkerConfigureCommand : Command
         var adapter = new Option<string?>("--adapter") { Description = "Operator-only efficiency-adapter admission: local-lossless or disabled. Separate from launcher defaults. Do not enable before its security review." };
         var adapterLaunchers = new Option<string[]>("--allow-launcher") { Description = "Launcher admitted for --adapter local-lossless: codex or claude-code; repeatable.", AllowMultipleArgumentsPerToken = false };
         var repository = new Option<string?>("--repository") { Description = "The repository resource a setup command belongs to; alone, show its setup command." };
-        var setupCommand = new Option<string?>("--setup-command") { Description = "An executable, or a JSON array of it and its arguments, that the worker runs in a run's workspace before the agent starts, as you and outside the agent's sandbox, for --launcher or --repository; a repository's comes before a launcher's. Only its status, exit code and duration are recorded." };
+        var setupCommand = new Option<string?>("--setup-command") { Description = "An executable, or a JSON array of it and its arguments, that the worker runs in a run's workspace before the agent starts, as you and outside the agent's sandbox, for --launcher or --repository; a repository's comes before a launcher's. The workspace holds the work branch, which an earlier run's agent may have changed, so a command that runs the branch's own scripts runs that content as you. It receives the environment a harness would, without credential or loader variables, and only the variables --setup-variable names besides. Only its status, exit code and duration are recorded." };
+        var setupVariables = new Option<string[]>("--setup-variable") { Description = "A variable of the worker's environment that the --setup-command it is given with receives besides a harness's own, as the worker holds it, even a credential; repeatable, never a VERICAIRN_ variable.", AllowMultipleArgumentsPerToken = false };
         var setupTimeout = new Option<int?>("--setup-timeout") { Description = $"The setup command's deadline in seconds, 1 through {Vericairn.Runtime.Workers.WorkspaceSetupConfiguration.MaximumTimeoutSeconds}; {Vericairn.Runtime.Workers.WorkspaceSetupConfiguration.DefaultTimeoutSeconds} when omitted." };
         var clearSetup = new Option<bool>("--clear-setup") { Description = "Remove the setup command of --launcher or --repository." };
         Options.Add(launcher);
@@ -34,17 +35,19 @@ internal sealed class WorkerConfigureCommand : Command
         Options.Add(repository);
         Options.Add(setupCommand);
         Options.Add(setupTimeout);
+        Options.Add(setupVariables);
         Options.Add(clearSetup);
         SetAction(result =>
         {
             bool launcherChoices = result.GetValue(workspaces) is not null || result.GetValue(model) is not null || result.GetValue(effort) is not null
                 || result.GetValue(models) is { Length: > 0 } || result.GetValue(efforts) is { Length: > 0 };
-            bool setup = result.GetValue(repository) is not null || result.GetValue(setupCommand) is not null || result.GetValue(setupTimeout) is not null || result.GetValue(clearSetup);
+            bool setup = result.GetValue(repository) is not null || result.GetValue(setupCommand) is not null || result.GetValue(setupTimeout) is not null
+                || result.GetValue(setupVariables) is { Length: > 0 } || result.GetValue(clearSetup);
             if (result.GetValue(adapter) is not null || result.GetValue(adapterLaunchers) is { Length: > 0 })
                 return operations.Adapter(result.GetValue(adapter), result.GetValue(adapterLaunchers) ?? [], result.GetValue(launcher) is not null || launcherChoices || setup, result.GetValue(context.JsonOption));
             return setup
-                ? operations.Setup(result.GetValue(launcher), result.GetValue(repository), result.GetValue(setupCommand), result.GetValue(setupTimeout), result.GetValue(clearSetup),
-                    launcherChoices, result.GetValue(context.JsonOption))
+                ? operations.Setup(result.GetValue(launcher), result.GetValue(repository), result.GetValue(setupCommand), result.GetValue(setupTimeout),
+                    result.GetValue(setupVariables) ?? [], result.GetValue(clearSetup), launcherChoices, result.GetValue(context.JsonOption))
                 : operations.Configure(result.GetValue(launcher), result.GetValue(model), result.GetValue(effort),
                     result.GetValue(models) ?? [], result.GetValue(efforts) ?? [], result.GetValue(workspaces), result.GetValue(context.JsonOption));
         });
