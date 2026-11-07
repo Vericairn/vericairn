@@ -336,6 +336,8 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
 
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews that passed: a new one whose basis names a review with outcome `findings` or `fail` is refused (`acceptance.basis-outcome`), whatever authority scope it holds. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none, on the operator's own judgment. The rule is prospective. Acceptances already in the estate keep their reading and still accept their subject; `estate check` and `records validate` report each one that names such a review as information, with the review and its outcome.
+
 ### Closing finished steps (0.8.4)
 
 The per-release closing scripts are retired. `vericairn operator close` lists every latest

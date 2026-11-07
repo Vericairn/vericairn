@@ -50,3 +50,12 @@ The generic record reader advances its implementation identity to `vericairn.rec
 field of results and operations and an assignment's `step` change their schema explanations. Its hash changes;
 declarations pinned to an earlier implementation require the ordinary explicit generator update before regeneration, and
 earlier golden fixtures remain retained. The generator id and contract version 1 are unchanged.
+
+## An acceptance rests only on reviews that passed (FIX-85)
+
+No route, interface member or protocol type is added or changed. A new acceptance by a principal other than the operator
+whose `basis` names a review of its subject with outcome `findings` or `fail` is now refused at every write surface (the
+command line, the daemon, the SDK and a device-prepared record) with the finding `acceptance.basis-outcome` at severity
+`error` in the response's problem. The operator's acceptances are unchanged. Validation and the estate check report an
+acceptance already in the estate that names such a review with the same code at severity `info`; it adds no error and the
+acceptance keeps accepting its subject. Record format remains 3, and no record body changes.

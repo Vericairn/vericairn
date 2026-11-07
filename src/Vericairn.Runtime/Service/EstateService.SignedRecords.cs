@@ -58,6 +58,8 @@ public sealed partial class EstateService
             if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
                 record.Envelope.At, record.RelativePath) is { } timeProblem)
                 return new(false, Problem: timeProblem);
+            if (record.Envelope.Type == "acceptance" && AcceptanceType.BasisOutcomeFinding(model, record.Envelope, record.RelativePath) is { } outcome)
+                return new(false, Problem: new("rejected", outcome.Message, [new FindingDto("error", outcome.Code, outcome.Location, outcome.Message)]));
             draft = draft with { At = record.Envelope.AtTime };
 
             foreach ((string id, PreparedRecord lapsed) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray()) preparedRecords.TryRemove(id, out _);
