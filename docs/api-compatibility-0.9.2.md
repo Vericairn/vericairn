@@ -180,10 +180,11 @@ record. No record type, record format or generated document changes.
 ## A new record names a known principal as its author (FIX-98)
 
 No route, interface member, protocol type or public member is added or changed. A new record whose envelope `by` names no
-record, names a record of a type other than `principal`, or names a principal recorded after the new record's `at` is now
-refused at every write surface (`NewRecord` and the typed operations, a batch, a device-prepared record, the command line,
-the daemon, the SDK and MCP) with the finding `record.author` at severity `error` in the response's problem. Before, any
-well-formed ULID was accepted for a record type with no author check of its own, such as a resource. The root operator's
-self-authored principal record is unchanged. Validation and the estate check report a record already in the estate whose
-author does not resolve under the same code at severity `info`; it adds no error and the record keeps its reading.
-Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body changes.
+record, or names a record of a type other than `principal`, is now refused at every write surface (`NewRecord` and the typed
+operations, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP) with the finding
+`record.author` at severity `error` in the response's problem. The check is made when the record is written, whatever `at`
+it states. Before, any well-formed ULID was accepted for a record type with no author check of its own, such as a resource.
+The root operator's self-authored principal record is unchanged. Validation and the estate check report a record already in
+the estate whose author does not resolve under the same code at severity `info`; it adds no error and the record keeps its
+reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
+changes.

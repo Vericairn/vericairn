@@ -43,22 +43,17 @@ public sealed class RecordAuthorshipWriteTests
     }
 
     [Fact]
-    public void ANewRecordDatedBeforeItsPrincipalIsRefusedNamingBothTimes()
+    public void ANewRecordDatedBeforeItsPrincipalIsWrittenBecauseTheAuthorIsKnownWhenItIsWritten()
     {
         using var estate = new TestEstate(3);
         using EstateService service = EstateService.Open(estate.Root);
         string early = RecordParser.FormatTimestamp(estate.Builder.AtTime.AddSeconds(-1));
 
-        WriteOutcome refused = service.NewRecord(new("resource", estate.BuilderId, Json(ResourceBody), At: early));
+        WriteOutcome written = service.NewRecord(new("resource", estate.BuilderId, Json(ResourceBody), At: early));
 
-        Assert.False(refused.Ok);
-        FindingDto finding = AssertAuthorError(refused.Problem!, estate.BuilderId);
-        Assert.Contains(estate.Builder.At, finding.Message, StringComparison.Ordinal);
-        Assert.Contains(early, finding.Message, StringComparison.Ordinal);
-        Assert.Empty(service.Session.Load().OfType("resource"));
-
-        WriteOutcome atItsTime = service.NewRecord(new("resource", estate.BuilderId, Json(ResourceBody), At: estate.Builder.At));
-        Assert.True(atItsTime.Ok, atItsTime.Problem?.Message);
+        Assert.True(written.Ok, written.Problem?.Message);
+        Assert.Equal(early, service.Session.Load().ById[written.Written!.Id].At);
+        Assert.DoesNotContain(service.Validate().Findings, f => f.Code == Code);
     }
 
     [Fact]

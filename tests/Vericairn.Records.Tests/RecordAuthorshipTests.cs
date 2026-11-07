@@ -55,24 +55,20 @@ public sealed class RecordAuthorshipTests : IDisposable
     }
 
     [Fact]
-    public void AHistoricalRecordDatedBeforeItsPrincipalIsInformationNamingBothTimes()
+    public void ARecordDatedBeforeItsPrincipalNamesAKnownPrincipal()
     {
+        // The author is checked when the record is written, whatever time the record states (decision 01M6V8HVFTD3EKWKVQNMTKK8XF).
         using var estate = new TestEstate(3);
         DateTimeOffset early = estate.Clock;
         RecordEnvelope reviewer = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Late Reviewer","roles":["reviewer"]}""");
         estate.SetClock(early.AddSeconds(-5));
         RecordEnvelope resource = estate.Add("resource", reviewer.Id, ResourceBody);
-        // A later supersession by a known author leaves the earlier record's reading as it was.
-        estate.SetClock(reviewer.AtTime);
-        estate.Add("resource", reviewer.Id, ResourceBody.Replace("Site", "Website", StringComparison.Ordinal), supersedes: resource.Id);
+        Assert.True(string.CompareOrdinal(resource.At, reviewer.At) < 0);
 
         EstateModel model = estate.Load();
 
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
-        Finding finding = Assert.Single(model.Findings, f => f.Code == Code);
-        Assert.Equal(resource.ExpectedPath + "#by", finding.Location);
-        Assert.Contains(reviewer.At, finding.Message, StringComparison.Ordinal);
-        Assert.Contains(resource.At, finding.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(model.Findings, f => f.Code == Code);
     }
 
     [Theory]

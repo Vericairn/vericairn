@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
-using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Runtime.Service;
 
@@ -25,9 +24,8 @@ public class ProgressJourneyTests
         string scratch = CliHarness.TempDirectory("notes-current-results-scratch");
         try
         {
-            // The history below is dated before today, so its principals are recorded before it (FIX-98).
-            string op = InitBefore(root);
-            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--at", Before, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string op = Init(root);
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
             Publish(root, scratch, op, product, "0.1.0", "2026-09-01T01:00:00Z");
             Worked(root, scratch, op, builder, "W-1", "2026-09-01T02:00:00Z", accepted: false);
@@ -66,9 +64,8 @@ public class ProgressJourneyTests
         string? copy = null;
         try
         {
-            // The history below is dated before today, so its principals are recorded before it (FIX-98).
-            string op = InitBefore(root);
-            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--at", Before, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string op = Init(root);
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
 
             // W-1 is accepted before 0.1.0 is published; W-2 before 0.2.0, and W-3's result is not accepted.
@@ -222,12 +219,6 @@ public class ProgressJourneyTests
             CliHarness.Delete(root);
         }
     }
-
-    private const string Before = "2026-08-01T00:00:00Z";
-
-    /// <summary>An estate whose operator and charter are recorded at <see cref="Before"/>, so the dated history the journeys write has a known author.</summary>
-    private static string InitBefore(string root) => EstateInitializer.Initialize(root, new EstateInitialization("Example", "example", "Progress.", "Operator", "Example", null,
-        "Vericairn/vericairn", Commit, DateTimeOffset.Parse(Before, System.Globalization.CultureInfo.InvariantCulture))).Operator.Id;
 
     private static string Init(string root) =>
         CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Progress.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
