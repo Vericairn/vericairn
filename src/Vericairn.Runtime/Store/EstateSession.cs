@@ -22,6 +22,8 @@ public sealed class EstateSession : IDisposable
     private readonly RecordParseCache parseCache = new();
     private bool readOnly;
     private LiveStore.FileSnapshot? loadedFiles;
+    // Held shared while writable, so a cache rebuild can see that this runtime has the estate open (FIX-93).
+    private FileStream? writers;
 
     internal long ParsedFiles => parseCache.ParsedFiles;
     internal bool IsReadOnly => readOnly;
@@ -62,6 +64,7 @@ public sealed class EstateSession : IDisposable
         Objects.Dispose();
         Live = writable.Live;
         Objects = writable.Objects;
+        writers = writable.writers;
         readOnly = false;
     }
 
@@ -82,21 +85,26 @@ public sealed class EstateSession : IDisposable
             throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
         }
 
-        var live = new LiveStore(LiveStorePath(root, manifest.Estate, manifest.Profile), readOnly, transient: readOnly && manifest.Profile == "repository-synced");
-        if (!readOnly)
-        {
-            live.SetMeta("estate", manifest.Estate);
-            live.SetMeta("profile", manifest.Profile);
-            live.SetMeta("root", root);
-        }
+        string databasePath = LiveStorePath(root, manifest.Estate, manifest.Profile);
+        // The writer lock is taken before the store opens, so no session opens a cache while it is being rebuilt.
+        FileStream? writerLock = readOnly ? null : LiveStoreRecovery.ShareWriterLock(databasePath);
+        LiveStore? live = null;
         try
         {
+            live = new LiveStore(databasePath, readOnly, transient: readOnly && manifest.Profile == "repository-synced", manifest.Profile);
+            if (!readOnly)
+            {
+                live.SetMeta("estate", manifest.Estate);
+                live.SetMeta("profile", manifest.Profile);
+                live.SetMeta("root", root);
+            }
+
             IObjectStore objects = manifest.Profile == "local-only"
                 ? new SqliteObjectStore(Path.Combine(Path.GetDirectoryName(live.Path)!, "objects.db"), readOnly)
                 : new FileObjectStore(Path.Combine(root, EstateLayout.ObjectsDirectory));
-            return new EstateSession(root, manifest, live, objects) { readOnly = readOnly };
+            return new EstateSession(root, manifest, live, objects) { readOnly = readOnly, writers = writerLock };
         }
-        catch { live.Dispose(); throw; }
+        catch { live?.Dispose(); writerLock?.Dispose(); throw; }
     }
 
     // Submission checks read the canonical source without refreshing or touching the live cache.
@@ -180,5 +188,6 @@ public sealed class EstateSession : IDisposable
     {
         Objects.Dispose();
         Live.Dispose();
+        writers?.Dispose();
     }
 }
