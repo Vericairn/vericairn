@@ -47,8 +47,9 @@ verification line.
 
 After package publication and indexing, find `dotnet-vc` through
 [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
-The [official MCP Registry](https://registry.modelcontextprotocol.io/) listing also requires
-the operator's [separate publication](operator-actions.md#mcp-registry-publication).
+The [official MCP Registry](https://registry.modelcontextprotocol.io/) listing follows the
+release's publication through the `mcp-registry` workflow from 0.9.2, or a dispatch for an
+earlier release ([MCP Registry publication](operator-actions.md#mcp-registry-publication)).
 Preparing these files does not establish that either public listing exists.
 
 With the .NET 10 SDK and published package version, the client's stdio command is:

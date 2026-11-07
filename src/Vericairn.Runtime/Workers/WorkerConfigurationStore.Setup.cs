@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Identity;
 using Vericairn.Runtime.Providers;
@@ -10,7 +11,9 @@ namespace Vericairn.Runtime.Workers;
 
 /// <summary>
 /// A machine-local command the worker runs in a run's workspace before dispatch, as the person and outside the harness's sandbox, for
-/// one launcher or one repository. It is never recorded and never reaches a harness; only its outcome enters the run's intent.
+/// one launcher or one repository. It is never recorded and never reaches a harness; only its outcome enters the run's intent. The
+/// workspace holds the work branch, which an earlier run's agent may have committed to, so a command that runs the branch's own
+/// scripts runs that content as the person: it receives a harness's filtered environment and only the variables it names besides.
 /// </summary>
 public sealed record WorkspaceSetupConfiguration
 {
@@ -20,11 +23,22 @@ public sealed record WorkspaceSetupConfiguration
     /// <summary>The deadline when none is given.</summary>
     public const int DefaultTimeoutSeconds = 300;
 
+    /// <summary>The most variables a setup command names.</summary>
+    public const int MaximumVariables = 64;
+
     /// <summary>The executable followed by its arguments, copied on initialization.</summary>
     public IReadOnlyList<string> Command { get; init => field = OptionCollections.List(value); } = [];
 
     /// <summary>The deadline for the command and every process it starts, in seconds.</summary>
     public int TimeoutSeconds { get; init; } = DefaultTimeoutSeconds;
+
+    /// <summary>
+    /// The worker's variables that pass to the command beside a harness's own, by name, copied on initialization; null when none does.
+    /// A named variable passes as the worker holds it, even one whose name marks a credential or a loader directive, which a harness
+    /// never receives; no variable named <c>VERICAIRN_</c> may be named.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Variables { get; init => field = OptionCollections.OptionalList(value); }
 }
 
 /// <summary>A configured setup command and what it applies to: a launcher or a repository resource, never both.</summary>
@@ -145,6 +159,10 @@ public sealed partial class WorkerConfigurationStore
             || string.IsNullOrWhiteSpace(configuration.Command[0]) || configuration.Command.Sum(a => (long)a.Length) > 32768
             || configuration.TimeoutSeconds is < 1 or > WorkspaceSetupConfiguration.MaximumTimeoutSeconds)
             throw new ProviderRefusedException($"A setup command is an executable and at most 127 arguments, 32768 characters in all and none holding a NUL character, with a deadline from 1 through {WorkspaceSetupConfiguration.MaximumTimeoutSeconds} seconds.");
+        if (configuration.Variables is { } variables && (variables.Count > WorkspaceSetupConfiguration.MaximumVariables
+            || variables.Any(v => v is null || !WorkerEnvironment.IsVariableName(v) || v.StartsWith("VERICAIRN_", StringComparison.OrdinalIgnoreCase))
+            || variables.Distinct(WorkerEnvironment.Names).Count() != variables.Count))
+            throw new ProviderRefusedException($"A setup command names at most {WorkspaceSetupConfiguration.MaximumVariables} variables to pass, each once, by a portable name of letters, digits, underscores and parentheses of at most 160 characters, and none starting with VERICAIRN_.");
     }
 
     [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}\\z", RegexOptions.CultureInvariant)]

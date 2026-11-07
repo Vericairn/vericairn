@@ -310,6 +310,8 @@ vericairn work result <attempt id> --by <builder id> --body result.json
 {"outcome": "completed", "summary": "What was done and how it was verified.", "outputs": [{"name": "widget.txt", "hash": "sha256:...", "bytes": 123, "location": "widget.txt"}], "evidence": [{"summary": "Continuous integration run 123 passed on three platforms."}], "checks": [{"name": "tests", "outcome": "passed", "summary": "42 tests."}], "limitations": ["What the result does not establish."], "unresolvedEffects": [], "nextStep": "What follows."}
 ```
 
+An output's `location` is a repository-relative path. From 0.9.2 a new result whose output location carries a URL scheme, such as `https:` or `file:`, is refused (`result.output-scheme`); put the reference in `evidence`, whose `location` may be a URL, and name an output held elsewhere by its hash and bytes without a `location`. Results already in the estate keep their reading, and `estate check` reports each one as a warning naming its outputs with a scheme.
+
 Outcomes are `completed`, `partial`, `blocked` or `abandoned`; a partial result with a next step is how an agent hands over cleanly. `vericairn work brief W-1` includes the measured mandatory originals, complete withheld list and latest result's next step. It can read verified document originals as well as records; a missing required source refuses preparation rather than silently shortening the brief. Section 20 covers context allocation and pinned retrieval. `vericairn work observe W-1` shows the assignments, attempts, results, amendments, reviews and acceptances of an order. A change of scope is an amendment (`work amend <assignment> --by --body`), which authorizes nothing until a decision admits it. An agent can also make progress claims through MCP; section 23 distinguishes those claims from observation and acceptance.
 
 ## 6. Review and acceptance
@@ -339,6 +341,8 @@ vericairn records new acceptance --by <operator id> --subject work-order:<order 
 ```
 
 `basis` lists reviews of the same subject (a review of a result is not a basis for accepting the work order; a review of the order is); it may be empty for an operator's acceptance. `self` must be true when the accepting principal authored the subject. The operator can accept ordinary work; another principal needs `self-accept-ordinary-work` for its own ordinary work or `accept-work` for another principal's. Milestones and releases remain the operator's. The subject hash comes from the record file or from `--json` output of the command that wrote it; `vericairn records hash <file>` prints it. A refused acceptance lists every reason at once and writes nothing.
+
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews that passed: a new one whose basis names a review with outcome `findings` or `fail` is refused (`acceptance.basis-outcome`), whatever authority scope it holds. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none, on the operator's own judgment. The rule is prospective. Acceptances already in the estate keep their reading and still accept their subject; `estate check` and `records validate` report each one that names such a review as information, with the review and its outcome.
 
 ### Closing finished steps (0.8.4)
 
@@ -538,6 +542,14 @@ The API returns this same response with HTTP 200 and the SDK preserves it. Unkno
 hashes retain HTTP 404 and SDK null. Check the identifier for the latter; for a resolution problem,
 use the named references to recover the exact retained bytes. Replacing them with current source
 bytes does not restore the historical basis. Reading a recovered basis grants no submission authority.
+
+From 0.9.2 (FIX-95), a basis keeps the files of a repository read at an exact commit, such as an
+evidence repository a duty result names, by path and hash alone, and `release basis` reads them from
+that repository's Git objects at the commit, through its registered clone. A source finding whose
+revision is a commit means no clone registered here holds that commit at that path and hash; register one
+with `vericairn sources clone <path> --resource <id>`. Submission writes only the estate's own working-tree
+files beside the basis object; commit them with it. Copies of exact-commit files that 0.9.1 and earlier
+wrote are no longer needed to read their bases. See [estate policies](policies.md) for the retention bound.
 
 The repository adapter and release provider share one bounded runner: 30 seconds per adapter Git
 command, two minutes per provider gh command, and
@@ -784,6 +796,20 @@ vericairn estate check
 `estate cache rebuild` moves `live.db` and its `-wal`, `-shm` and any `-journal` file together, unchanged, into a new `failed-cache/<UTC time>` directory beside the cache, for diagnosis. It then reads every record file in the repository into a new cache and reports how many it read. The record files are not changed. It refuses while a daemon answers for the estate, and while another command of 0.9.2 or later has the estate open. Every writable session holds the estate's writer lock, `live.lock`, shared, and the rebuild holds it alone. A command that starts during a rebuild is refused until it finishes. A daemon of an earlier release takes no such lock, so stop it first. The cache also keeps notes that exist only on this machine: interim progress notes, attention acknowledgments and an unfinished operator action's checkpoint. The rebuilt cache starts without them, and they stay in the kept files. Finish an operator action before rebuilding where you can. Delete a kept directory once it is no longer needed.
 
 A local-only estate's database is never moved, deleted or rebuilt as a cache, and `estate cache rebuild` refuses it without changing anything. Stop every daemon and command that uses it, and keep `live.db` with its `-wal` and `-shm` files together. Then recover from a backup of that directory or from an earlier `estate export`. `estate restore` restores an export as a repository-synced estate.
+
+### One writer per working tree (0.9.2)
+
+From 0.9.2 (FIX-99), one writer at a time writes a working tree. Every runtime that writes records takes an exclusive write lock in the working tree's own `.vericairn/write-lock/` directory, whether it is a daemon or an embedded command and whatever its Vericairn home. It holds the lock from judging the write against the tree's current record files until the records and their companions are stored. A second writer therefore judges against the records the first one stored, and the ordinary rules refuse it before it writes anything, for example with `operation.duplicate-identity`. A writer that cannot take the lock within 30 seconds is refused with a `conflict` that names the holder: its process id, host, a digest of its Vericairn home and when it took the lock. The holder records these beside the lock in `holder.json`, never as a path. The operating system releases the lock when its process ends, so a stopped command leaves no lock behind. A local-only estate keeps its records in the live store under the Vericairn home, so its writers take the same lock beside that store instead.
+
+The lock covers one working tree on one machine. It is separate from the per-home `live.lock`, which guards a cache rebuild, and it makes no claim across clones or machines. Two clones still meet at merge, where duplicates are reported for reconciliation. Keep to one writer anyway: route writes through one daemon per working tree, or run embedded commands from one home, and do not edit record files while a writer runs. A runtime of an earlier release takes no lock, so do not run one beside 0.9.2 on the same tree.
+
+Duplicates written before this rule, by two writers of an earlier release or by two merged clones, are never repaired automatically. While such an error stands, the runtime refuses further writes. To recover:
+
+1. Stop the extra writer. Run `vericairn records validate` or `vericairn estate reconcile` to list the conflicting records, and read both files and any records that cite them. Dispatch nothing under a duplicated operation identity until it is settled.
+2. Keep one: the one later records already cite, or else the earlier one.
+3. Supersede the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key.
+
+Some record types have no revision that clears the conflict. In 0.9.2 that includes two current operations under one identity: a revision keeps its identity, and a reconciliation settles only revisions of one record. Leave both files unchanged and report the case to Vericairn's maintainer; no record settles it in this release.
 
 ## 11. The daemon
 
@@ -1597,6 +1623,18 @@ member publication recovers from its original journal when the estate reopens.
 The queue and one-step command are not MCP tools.
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
+
+From 0.9.2, an action that stopped after its merge, for example while main's
+check was still running, is finished from its own records. Once the merge is
+recorded, resuming observes only the target run at the merge commit; it never
+recreates the deleted branch, signs or commits again, and leaves the clone on
+whatever branch it is on, usually main. `operator unfinished` shows the clone's
+unfinished action: its record id, type and subject, branch, head, pull request,
+stage, and what finishing it needs. `operator unfinished --finish --by <operator>`
+finishes it once the target checks pass. Starting the next `operator record`
+does the same first, then proceeds; that next action tolerates the finished
+action's own uncommitted receipts. An action that has not merged still refuses
+a new one, and the refusal names its record id, type and subject.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or

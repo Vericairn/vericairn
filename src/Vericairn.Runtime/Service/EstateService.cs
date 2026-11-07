@@ -34,8 +34,9 @@ namespace Vericairn.Runtime.Service;
 /// </summary>
 public sealed partial class EstateService : IEstateApi, IDisposable
 {
-    // The gate serializes this service's readers and writers through judgment and commit. It does not coordinate another service
-    // instance, an embedded CLI process or a repository sync. Hosts must use one writer; daemon discovery is not a writer lease.
+    // The gate serializes this service's readers and writers through judgment and commit. Another service instance or an embedded CLI
+    // process, whatever its home, is held off by the working tree's write lock, which every write takes inside the gate from judgment
+    // until its records are stored (FIX-99); a repository sync is not. Daemon discovery is not a writer lease.
     private readonly object gate = new();
     private readonly EstateSession session;
     private readonly EstateRecordAccess recordAccess;
@@ -77,7 +78,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public static EstateService Open(string root) => Open(root, null);
 
     // Worker options given here apply from the start, so startup settlement recovery uses them (its clock, for tests).
-    internal static EstateService Open(string root, WorkerOptions? workerOptions)
+    internal static EstateService Open(string root, WorkerOptions? workerOptions) => Open(root, workerOptions, null);
+
+    // A test opens two runtimes with different homes on one working tree in one process; a host uses the process's home.
+    internal static EstateService Open(string root, WorkerOptions? workerOptions, string? home)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
@@ -85,7 +89,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        var service = new EstateService(EstateSession.Open(root));
+        var service = new EstateService(home is null ? EstateSession.Open(root) : EstateSession.Open(root, false, home));
         try
         {
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
@@ -2222,6 +2226,45 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(refusal!);
         }
 
+        return UnderWriteLock(() => StoreAuthoredLocked(record, current), WriteOutcome.Fail);
+    }
+
+    /// <summary>
+    /// Runs a write under the working tree's write lock (FIX-99), so that its judgment reads the files another writer stored before it
+    /// and nothing changes them until it has stored its own; or the conflict naming the writer that kept the lock past the wait.
+    /// </summary>
+    private T UnderWriteLock<T>(Func<T> write, Func<Problem, T> busy)
+    {
+        if (EnterWriteLock(out WorkingTreeLock.Hold? hold) is Problem conflict) return busy(conflict);
+        using (hold)
+        {
+            return write();
+        }
+    }
+
+    /// <summary>
+    /// Takes the working tree's write lock, or says which writer kept it past the wait. A read-only session takes none; its store
+    /// refuses the write as before. Caller holds the gate.
+    /// </summary>
+    private Problem? EnterWriteLock(out WorkingTreeLock.Hold? hold)
+    {
+        hold = null;
+        if (session.WriteLock is null) return null;
+        try
+        {
+            hold = session.HoldWriteLock();
+            return null;
+        }
+        catch (WorkingTreeLockException exception)
+        {
+            hold = null;
+            return new Problem("conflict", exception.Message, []);
+        }
+    }
+
+    /// <summary>Judges an authored record against the tree's current files and stores it with its companions. Caller holds the gate and the write lock.</summary>
+    private WriteOutcome StoreAuthoredLocked(AuthoredRecord record, EstateModel current)
+    {
         if (JudgeProposedLocked([record]) is Problem rejected)
         {
             return WriteOutcome.Fail(rejected);
@@ -2341,7 +2384,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         => StoreTogetherLocked(records, purpose, workOrder, null);
 
     private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder,
-        Func<EstateModel, Problem?>? precondition, IReadOnlyList<DocumentOutputChange>? additionalOutputs = null)
+        Func<EstateModel, Problem?>? precondition, IReadOnlyList<DocumentOutputChange>? additionalOutputs = null) =>
+        UnderWriteLock(() => StoreTogetherUnderLock(records, purpose, workOrder, precondition, additionalOutputs), problem => ((IReadOnlyList<RecordWritten>)[], (Problem?)problem));
+
+    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherUnderLock(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder,
+        Func<EstateModel, Problem?>? precondition, IReadOnlyList<DocumentOutputChange>? additionalOutputs)
     {
         if (RequestDeviceRefusal(session.Load()) is Problem denied)
         {
@@ -2550,9 +2597,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, a decision dated after its own record, a record whose author is no principal known at its time, and a result whose
-    /// output no longer has the bytes it claims. Records not stored yet get the content checks a stored file gets, on their canonical
-    /// bytes, since the checks of stored files cannot see them.
+    /// themselves, a decision dated after its own record, an acceptance by a principal other than the operator on a review that did
+    /// not pass, a record whose author is no principal known at its time, a result whose output location carries a URL scheme, and a
+    /// result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored file gets, on
+    /// their canonical bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
@@ -2579,6 +2627,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new acceptance by a principal other than the operator rests only on reviews that passed (FIX-85).
+        foreach (Finding finding in model.Findings.Where(f => f.Code == AcceptanceType.BasisOutcomeCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.basis")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new result's output locations carry no URL scheme (FIX-97); results already in the estate keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Code == ResultType.OutputSchemeCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.outputs")))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

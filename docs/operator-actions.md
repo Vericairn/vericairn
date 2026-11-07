@@ -296,6 +296,37 @@ alone never permits a retry. If the host still cannot establish the outcome, fol
 operator reconciliation procedure in [Checked repository changes](changes.md). Another action
 cannot displace an unfinished action's checkpoint. Keep the original body until the action completes.
 
+### Finishing an action after its merge (0.9.2)
+
+From 0.9.2, an action whose merge is recorded is finished from its own records. A pull request often
+merges while the target branch's run is still pending, and the host may delete the merged branch.
+Once the confirmed merge operation is in the estate, resuming the action observes only the target run
+at the merge commit, under the merge's original identity. It does not recreate the branch, sign,
+commit, push, open or merge again, and it leaves the clone's branch and files as they are, usually on
+main after the operator updated it. A passing target run completes the action and clears the clone's
+unfinished mark; a pending, failed or incomplete one keeps it.
+
+```sh
+vericairn operator unfinished
+vericairn operator unfinished --finish --by <operator-id>
+```
+
+The first command reads the clone's checkpoint and records and writes nothing. It shows the action's
+record id, type and subject, branch, head, pull request and stage (`prepared`, `recorded`, `committed`,
+`pushed`, `opened`, `merge-failed`, `merge-uncertain` or `merged`), the merge commit and latest target
+check verdict, and what finishing it needs. For an action that has not merged, that is the original
+`operator record` command, to be run with the body of its stored record (`vericairn records show
+<record-id>`) and, after a known failure, `--reconciliation`. `--finish` finishes a merged action once
+its target checks pass, waiting up to `--wait-seconds` (default 120, at most 240) while they are pending;
+a failed target run must first be rerun or corrected on the host. Only the action's own operator
+finishes it, on their admitted device.
+
+Starting the next `operator record` finishes a merged action the same way before it starts, and then
+proceeds. That next action tolerates the finished action's own untracked receipts, including the
+target-run observation just recorded, beside its own; commit them all separately afterwards, as
+always. An action that has not merged still refuses a new one, and the refusal names its record id,
+type and subject.
+
 The action's commit contains only its signed record and required generated register members.
 Operation revisions, observations and any target-failure ask stay in the estate as separate,
 uncommitted records. A resumed action tolerates
@@ -336,47 +367,40 @@ principal; all authoring, signature, authority and presence checks remain in for
 seconds. When a request is aborted, the daemon passes the abort to the action, which stops at its
 next recorded step, before any merge. The same command with the same body then resumes it.
 
+From 0.9.2, `GET /v1/operator/unfinished` and `VericairnClient.OperatorUnfinished()` return
+`OperatorUnfinishedResponse`, whose `action` is null when the clone has no unfinished action. Otherwise
+it carries `identity`, `recordId`, `type`, `subject`, `by`, `record`, `branch`, `head`, `stage`,
+`pullRequest`, `merge`, `mergeCommit`, `checkStatus`, `targetObservation`, `ask`, `finishable`, `summary`
+and `nextStep`. `POST /v1/operator/unfinished` and `OperatorFinish(OperatorFinishRequest)` accept `by`
+and `waitSeconds` and return `OperatorRecordResponse`; `completed` with `ok` means the action finished,
+and `none` with `ok` means nothing was unfinished. Both have cancellable counterparts; neither is offered
+through MCP.
+
 Record errors retain the unresolved items and findings but remove authoring commands. The new CLI
 command returns 0 for a valid read, 1 when the record snapshot has errors, and 2 when it cannot read
 the estate. The existing `ask`, `progress`, `status` and record-writing commands keep their contracts.
 
 ## MCP Registry publication
 
-Starting with 0.8.2, publish `io.github.vericairn/vericairn` to the
-[official MCP Registry](https://registry.modelcontextprotocol.io/) only after the accepted
-release's `dotnet-vc` package is published on nuget.org. This is a separate operator action;
-the release and NuGet workflows do not publish a registry entry.
+`io.github.vericairn/vericairn` is listed in the
+[official MCP Registry](https://registry.modelcontextprotocol.io/) from the accepted release's
+`dotnet-vc` package. From 0.9.2, the `mcp-registry` workflow does it when the operator publishes
+the release: it verifies the release's `dotnet-vc` package against `SHA256SUMS`, checks the
+package's embedded `.mcp/server.json`, waits until nuget.org serves that version, and publishes
+the manifest with a pinned `mcp-publisher`, signing in with the repository's GitHub OIDC identity.
+No personal token is involved. Publishing the release is the operator's act, and the listing follows it.
 
-1. Confirm the release's NuGet publishing run succeeded and the exact version is available on
-   [nuget.org](https://www.nuget.org/packages/dotnet-vc). Download that release's `.nupkg` and
-   `SHA256SUMS` and verify the package against its checksum. Use the accepted release's package,
-   without rebuilding it or substituting a manifest from a checkout.
-2. In a fresh working directory containing that package, extract its manifest. For 0.9.1:
+For a release published before the workflow existed, or one whose run did not finish, the operator
+dispatches the workflow with that release's id; it lists only a published, immutable release:
 
-   ```sh
-   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.9.1.nupkg").read(".mcp/server.json"))'
-   ```
+```sh
+gh workflow run mcp-registry.yml -R Vericairn/vericairn -f release_id=<release id>
+```
 
-   Inspect `server.json`: the server name must be `io.github.vericairn/vericairn`, both versions
-   must be `0.9.1`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
-   principal inputs as placeholders. For a later release, use that release's version throughout.
-3. Install the registry's `mcp-publisher` from its
-   [official release](https://github.com/modelcontextprotocol/registry/releases), following
-   that release's installation and verification instructions. In the directory with `server.json`,
-   log in with a GitHub identity authorized to publish in the `io.github.vericairn` namespace,
-   then publish:
-
-   ```sh
-   mcp-publisher login github
-   mcp-publisher publish
-   ```
-
-   The publisher checks the manifest and the NuGet README's
-   `<!-- mcp-name: io.github.vericairn/vericairn -->` line. If GitHub login does not authorize
-   that namespace, resolve the identity with the operator before publishing under it.
-4. Observe the exact name and version in the official registry and confirm that it points to
-   `dotnet-vc` at the same version with stdio transport and both required inputs. Check
-   [nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc)
-   after indexing, and exercise the [dnx command](mcp.md#discovery-and-dnx) against a test estate.
-   Record the observations and publication result. If a publish command has an uncertain outcome,
-   inspect the existing entry for that name and version before retrying.
+Afterwards, observe the exact name and version in the official registry and confirm that it points
+to `dotnet-vc` at the same version with stdio transport and both required inputs. Check
+[nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc)
+after indexing, and exercise the [dnx command](mcp.md#discovery-and-dnx) against a test estate.
+A version the registry already lists is reported, not replaced. The interactive
+`mcp-publisher login github` cannot publish under the organization's namespace, because it
+cannot read organization roles; use the workflow.

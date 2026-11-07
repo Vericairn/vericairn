@@ -24,6 +24,9 @@ public sealed class EstateSession : IDisposable
     private LiveStore.FileSnapshot? loadedFiles;
     // Held shared while writable, so a cache rebuild can see that this runtime has the estate open (FIX-93).
     private FileStream? writers;
+    // Taken around each write, so one writer at a time writes the working tree, whatever its home (FIX-99).
+    private WorkingTreeLock? writeLock;
+    private string home = VericairnHome.Path();
 
     internal long ParsedFiles => parseCache.ParsedFiles;
     internal bool IsReadOnly => readOnly;
@@ -59,12 +62,13 @@ public sealed class EstateSession : IDisposable
     internal void EnableWrites()
     {
         if (!readOnly) return;
-        EstateSession writable = Open(Root);
+        EstateSession writable = Open(Root, false, home);
         Live.Dispose();
         Objects.Dispose();
         Live = writable.Live;
         Objects = writable.Objects;
         writers = writable.writers;
+        writeLock = writable.writeLock;
         readOnly = false;
     }
 
@@ -74,10 +78,15 @@ public sealed class EstateSession : IDisposable
     /// <summary>Opens the estate at a root; the manifest decides the profile.</summary>
     public static EstateSession Open(string root) => Open(root, false);
 
-    internal static EstateSession Open(string root, bool readOnly)
+    internal static EstateSession Open(string root, bool readOnly) => Open(root, readOnly, VericairnHome.Path());
+
+    /// <summary>Opens the estate with its machine-local state under a given Vericairn home.</summary>
+    internal static EstateSession Open(string root, bool readOnly, string home)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentException.ThrowIfNullOrWhiteSpace(home);
         root = Path.GetFullPath(root);
+        home = Path.GetFullPath(home);
         var findings = new FindingList();
         EstateManifest? manifest = EstateManifest.Load(root, findings);
         if (manifest is null)
@@ -85,7 +94,7 @@ public sealed class EstateSession : IDisposable
             throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
         }
 
-        string databasePath = LiveStorePath(root, manifest.Estate, manifest.Profile);
+        string databasePath = EstateLocations.LiveStorePath(root, manifest.Estate, manifest.Profile, home);
         // The writer lock is taken before the store opens, so no session opens a cache while it is being rebuilt.
         FileStream? writerLock = readOnly ? null : LiveStoreRecovery.ShareWriterLock(databasePath);
         LiveStore? live = null;
@@ -102,7 +111,11 @@ public sealed class EstateSession : IDisposable
             IObjectStore objects = manifest.Profile == "local-only"
                 ? new SqliteObjectStore(Path.Combine(Path.GetDirectoryName(live.Path)!, "objects.db"), readOnly)
                 : new FileObjectStore(Path.Combine(root, EstateLayout.ObjectsDirectory));
-            return new EstateSession(root, manifest, live, objects) { readOnly = readOnly, writers = writerLock };
+            return new EstateSession(root, manifest, live, objects)
+            {
+                readOnly = readOnly, writers = writerLock, home = home,
+                writeLock = readOnly ? null : WorkingTreeLock.For(root, manifest.Profile, databasePath, home),
+            };
         }
         catch { live?.Dispose(); writerLock?.Dispose(); throw; }
     }
@@ -132,11 +145,29 @@ public sealed class EstateSession : IDisposable
         return model;
     }
 
-    /// <summary>Stores a new record where the profile keeps records; never overwrites. Returns the record's path.</summary>
+    /// <summary>
+    /// The working tree's write lock (FIX-99), held by this session's writes; null for a read-only session. A runtime holds it from
+    /// judging records against the tree's current files until they are stored.
+    /// </summary>
+    internal WorkingTreeLock? WriteLock => writeLock;
+
+    /// <summary>
+    /// Takes the working tree's write lock, or enters it again on the thread that holds it. Throws an <see cref="IOException"/> naming
+    /// the holder when another writer keeps it past the wait.
+    /// </summary>
+    internal WorkingTreeLock.Hold HoldWriteLock() =>
+        (writeLock ?? throw new InvalidOperationException("This session is read-only.")).Enter();
+
+    /// <summary>
+    /// Stores a new record where the profile keeps records; never overwrites. Returns the record's path. From 0.9.2 it stores under the
+    /// working tree's write lock, taking it when the caller does not hold it, and throws an <see cref="IOException"/> naming the holder
+    /// when another writer keeps it past the wait.
+    /// </summary>
     public string Write(AuthoredRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
+        using WorkingTreeLock.Hold hold = HoldWriteLock();
         if (Profile == "repository-synced")
         {
             RecordAuthor.Write(Root, record);
@@ -159,6 +190,7 @@ public sealed class EstateSession : IDisposable
     {
         ArgumentNullException.ThrowIfNull(record);
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
+        using WorkingTreeLock.Hold hold = HoldWriteLock();
         if (Profile == "repository-synced")
         {
             string full = Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -188,6 +220,7 @@ public sealed class EstateSession : IDisposable
     {
         Objects.Dispose();
         Live.Dispose();
+        writeLock?.Dispose();
         writers?.Dispose();
     }
 }

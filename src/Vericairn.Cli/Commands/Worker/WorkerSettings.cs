@@ -79,14 +79,15 @@ internal sealed class WorkerSettings(CommandContext context)
     }
 
     /// <summary>Sets, clears or shows the workspace setup command of one launcher or one repository resource on this machine.</summary>
-    public int Setup(string? launcher, string? repository, string? command, int? timeout, bool clear, bool otherChoices, bool json)
+    public int Setup(string? launcher, string? repository, string? command, int? timeout, IReadOnlyList<string> variables, bool clear, bool otherChoices, bool json)
     {
         if (Environment.GetEnvironmentVariable("VERICAIRN_RUN") is not null)
             return context.Fail("A workspace setup command runs outside the agent's sandbox, so only a person outside a worker run may configure one.");
         if (otherChoices) return context.Fail("Set a workspace setup command separately from launcher defaults and workspace placement.");
         if ((launcher is null) == (repository is null)) return context.Fail("A workspace setup command belongs to exactly one --launcher or --repository.");
-        if (clear && (command is not null || timeout is not null)) return context.Fail("--clear-setup removes the setup command; give it without --setup-command or --setup-timeout.");
+        if (clear && (command is not null || timeout is not null || variables.Count > 0)) return context.Fail("--clear-setup removes the setup command; give it without --setup-command, --setup-timeout or --setup-variable.");
         if (timeout is not null && command is null) return context.Fail("--setup-timeout is the deadline of the --setup-command it is given with.");
+        if (variables.Count > 0 && command is null) return context.Fail("--setup-variable names a variable the --setup-command it is given with receives.");
         if (launcher is not null && ProviderRegistry.Current.Launcher(launcher) is null)
             return context.Fail($"No launcher '{launcher}' is available here; available: {string.Join(", ", ProviderRegistry.Current.Launchers.Select(l => l.Launcher))}.");
         try
@@ -99,6 +100,7 @@ internal sealed class WorkerSettings(CommandContext context)
                 {
                     Command = WorkerConfigurationStore.SetupCommand(command),
                     TimeoutSeconds = timeout ?? WorkspaceSetupConfiguration.DefaultTimeoutSeconds,
+                    Variables = variables.Count > 0 ? variables : null,
                 });
             }
 
@@ -124,13 +126,15 @@ internal sealed class WorkerSettings(CommandContext context)
         repository = entry.Repository,
         command = entry.Setup?.Command,
         timeoutSeconds = entry.Setup?.TimeoutSeconds,
+        variables = entry.Setup is null ? null : entry.Setup.Variables ?? [],
         problem = entry.Problem,
     };
 
     private static string Describe(WorkspaceSetupEntry entry)
     {
         string owner = entry.Launcher is not null ? "launcher " + entry.Launcher : "repository " + entry.Repository;
-        return entry.Setup is { } setup ? $"Workspace setup for {owner}: {JsonSerializer.Serialize(setup.Command, Shown)}, deadline {setup.TimeoutSeconds} seconds."
+        return entry.Setup is { } setup ? $"Workspace setup for {owner}: {JsonSerializer.Serialize(setup.Command, Shown)}, deadline {setup.TimeoutSeconds} seconds, " +
+                (setup.Variables is { Count: > 0 } named ? $"passing {string.Join(", ", named)} beside a harness's environment." : "with a harness's environment.")
             : entry.Problem is not null ? $"Workspace setup for {owner}: {entry.Problem}"
             : $"Workspace setup for {owner}: none.";
     }

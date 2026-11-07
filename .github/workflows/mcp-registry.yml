@@ -1,0 +1,132 @@
+name: mcp-registry
+
+# Lists the published dotnet-vc package in the official MCP Registry as io.github.vericairn/vericairn, using GitHub's OIDC
+# identity for this repository, so no person's token is involved. Only the operator's publication of a release starts it;
+# a person may also name a published, immutable release by its id, for a release published before this workflow existed or
+# whose run could not finish. The manifest is the exact .mcp/server.json inside that release's checksum-verified package.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: The id of a published, immutable release whose dotnet-vc package to list.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the release's dotnet-vc package, verify it and extract its manifest
+        timeout-minutes: 10
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ github.event.release.id || inputs.release_id }}
+          DISPATCHED: ${{ github.event_name == 'workflow_dispatch' }}
+        # Address the release by its id so a moved or reused tag cannot select another release.
+        run: |
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          repository = os.environ["GH_REPO"]
+          release_id = int(os.environ["RELEASE_ID"])
+          release = json.loads(subprocess.check_output(["gh", "api", f"repos/{repository}/releases/{release_id}"]))
+          if release["id"] != release_id or release["draft"] or not release["published_at"]:
+              raise SystemExit("The release is not published.")
+          if os.environ["DISPATCHED"] == "true" and release.get("immutable") is not True:
+              raise SystemExit("A dispatched run lists only a published, immutable release.")
+          version = re.fullmatch(r"v(\d+\.\d+\.\d+)", release["tag_name"])
+          if not version:
+              raise SystemExit(f"Unexpected release tag: {release['tag_name']}")
+          version = version[1]
+          package_name = f"dotnet-vc.{version}.nupkg"
+          wanted = {"SHA256SUMS", package_name}
+          assets = {asset["name"]: asset for asset in release["assets"] if asset["name"] in wanted}
+          if set(assets) != wanted:
+              raise SystemExit(f"The release lacks {sorted(wanted - set(assets))}.")
+          directory = Path("registry")
+          directory.mkdir()
+          for name, asset in assets.items():
+              with (directory / name).open("xb") as output:
+                  subprocess.run(["gh", "api", f"repos/{repository}/releases/assets/{asset['id']}",
+                                  "--header", "Accept: application/octet-stream"], stdout=output, check=True)
+          sums = {}
+          for line in (directory / "SHA256SUMS").read_text().splitlines():
+              match = re.fullmatch(r"([a-fA-F0-9]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._-]*)", line)
+              if match:
+                  sums[match[2]] = match[1].lower()
+          digest = hashlib.sha256((directory / package_name).read_bytes()).hexdigest()
+          if sums.get(package_name) != digest:
+              raise SystemExit(f"Checksum mismatch or missing entry: {package_name}")
+          spec = importlib.util.spec_from_file_location("verify_packages", ".github/scripts/verify-packages.py")
+          verifier = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(verifier)
+          manifest = verifier.verify_mcp_package(directory / package_name)
+          if manifest is None or manifest["version"] != version:
+              raise SystemExit("The package carries no MCP manifest for this release.")
+          import zipfile
+          with zipfile.ZipFile(directory / package_name) as package:
+              (directory / "server.json").write_bytes(package.read(".mcp/server.json"))
+          print(f"Verified {package_name}; manifest {manifest['name']} {manifest['version']}")
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"PACKAGE_VERSION={version}\n")
+      - name: Wait until nuget.org serves the package
+        timeout-minutes: 30
+        shell: bash
+        # The registry checks the published NuGet package, and nuget.org indexes a push after some minutes.
+        run: |
+          set -eu
+          for attempt in $(seq 1 56); do
+            if curl -fsS "https://api.nuget.org/v3-flatcontainer/dotnet-vc/index.json" | python3 -c 'import json,os,sys; sys.exit(0 if os.environ["PACKAGE_VERSION"] in json.load(sys.stdin)["versions"] else 1)'; then
+              echo "nuget.org serves dotnet-vc $PACKAGE_VERSION"; exit 0
+            fi
+            sleep 30
+          done
+          echo "nuget.org does not serve dotnet-vc $PACKAGE_VERSION yet; rerun this workflow later."; exit 1
+      - name: Install the pinned registry publisher
+        timeout-minutes: 10
+        shell: bash
+        # modelcontextprotocol/registry v1.8.4; the digest is that release's published checksum for this archive.
+        run: |
+          set -eu
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.4/mcp-publisher_linux_amd64.tar.gz"
+          echo "5dc2fd415369c73551259f31cd33e2aacc9e0d1021e7f08fef1492d93b781628  mcp-publisher.tar.gz" | sha256sum -c -
+          mkdir publisher
+          tar -xzf mcp-publisher.tar.gz -C publisher mcp-publisher
+      - name: Validate, sign in with this repository's OIDC identity and publish
+        timeout-minutes: 10
+        shell: bash
+        working-directory: registry
+        # A version the registry already lists is reported, not replaced, so a rerun completes a listing that stopped part way.
+        run: |
+          set -eu
+          ../publisher/mcp-publisher validate server.json
+          ../publisher/mcp-publisher login github-oidc
+          ../publisher/mcp-publisher publish server.json
+      - name: Observe the listing
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -eu
+          curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.vericairn/vericairn" \
+            | python3 -c 'import json,os,sys; servers=[s.get("server",s) for s in json.load(sys.stdin).get("servers",[])]; found=[s for s in servers if s.get("name")=="io.github.vericairn/vericairn" and s.get("version")==os.environ["PACKAGE_VERSION"]]; print(json.dumps(found, indent=1)); sys.exit(0 if found else 1)'

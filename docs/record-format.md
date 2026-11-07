@@ -97,6 +97,29 @@ and does not inject wall-clock or cached release knowledge into canonical status
 lines known is reported explicitly. Legacy dependency observations and the shared latest-release
 cache retain their `current/stable` meaning; other lines use published release records.
 
+## Acceptance on passing reviews (0.9.2)
+
+From 0.9.2, an acceptance by a principal other than the operator rests only on reviews of its subject whose
+`outcome` is `pass`. The rule is prospective, as 0.9.1's rule for decision times is: it adds no field and no format
+number, and it binds the records written by a runtime that has it. Such a runtime refuses a new acceptance whose
+`basis` names a review with outcome `findings` or `fail` (`acceptance.basis-outcome`, an error), in every record
+format, whatever authority scope its author holds. An acceptance already in the estate keeps its reading: it still
+accepts its subject, and `estate check` and `records validate` report it as information naming each such review and
+its outcome. The operator's acceptance is unchanged; it may rest on any review of the subject, or on none.
+
+## Output locations carry no scheme (0.9.2)
+
+From 0.9.2, a result output's `location` names a repository-relative path and never carries a URL
+scheme: letters, digits, `+`, `-` or `.` before a colon at its start, as in `https:`, `file:` or `s3:`.
+The rule is prospective, as 0.9.1's rule for decision times is: it adds no field and no format number,
+and it binds the results written by a runtime that has it. Such a runtime refuses a new result, a
+correction included, whose output location carries a scheme (`result.output-scheme`, an error), in
+every record format and at every write surface. A result already in the estate keeps its reading:
+`estate check` and `records validate` report it as one warning naming each such output, and the result
+stays valid. A reference outside the repository goes in the result's `evidence`, whose `location` may be a
+URL; an output held elsewhere is named by its hash and bytes without a `location`. Rooted paths,
+backslashes and `..` remain errors (`result.output-path`), as before.
+
 ## Record authors (0.9.2)
 
 An envelope's `by` names the authoring principal by its id, the id of that principal's first

@@ -93,6 +93,90 @@ reader's schema explanation, that reader advances to `vericairn.records/readers/
 pinned to an earlier implementation need the ordinary explicit generator update before regeneration. Earlier golden
 fixtures remain. The generator id and contract version 1 are unchanged.
 
+## Finishing an operator action after its merge (FIX-89)
+
+`IEstateApi` adds `OperatorUnfinished()` and `OperatorFinish(OperatorFinishRequest)`, with their cancellable counterparts
+`OperatorUnfinishedAsync` and `OperatorFinishAsync`; each has a default implementation, so existing implementers stay
+source-compatible. The daemon adds `GET /v1/operator/unfinished` and `POST /v1/operator/unfinished`, the SDK's `VericairnClient`
+implements all four, and `OperatorFinish` has the 15-minute deadline `OperatorRecord` has. The protocol adds
+`OperatorFinishRequest`, `OperatorUnfinishedResponse` and `OperatorUnfinishedAction`. The command line adds `operator
+unfinished`; no MCP tool is added.
+
+`IRecordCommitAdapter` in `Vericairn.Runtime` adds overloads of `Prepare` and `Branch` that take the untracked receipts to
+tolerate: those of the earlier action the runtime finished from its records. Their default implementations call the existing
+members and tolerate none, so an adapter that does not override them refuses those receipts, as before.
+`GitRecordCommitAdapter` overrides both.
+
+`POST /v1/operator/record` keeps `OperatorRecordRequest` and `OperatorRecordResponse`. Its behavior changes: an action whose
+merge is recorded resumes by observing its target run only, without branch, commit, push, opening or merge, wherever the clone
+is; and while an earlier action is unfinished, a new one first finishes it when its merge is recorded and its target checks
+pass, and otherwise is refused with `status` `refused`, naming the earlier action's record id, type and subject. The local
+checkpoint, which is machine state and no record, also keeps the action's type, subject and author and the finished action
+whose receipts the next one tolerates; checkpoints written by earlier builds are read as before.
+
+## An acceptance rests only on reviews that passed (FIX-85)
+
+No route, interface member or protocol type is added or changed. A new acceptance by a principal other than the operator
+whose `basis` names a review of its subject with outcome `findings` or `fail` is now refused at every write surface (the
+command line, the daemon, the SDK and a device-prepared record) with the finding `acceptance.basis-outcome` at severity
+`error` in the response's problem. The operator's acceptances are unchanged. Validation and the estate check report an
+acceptance already in the estate that names such a review with the same code at severity `info`; it adds no error and the
+acceptance keeps accepting its subject. Record format remains 3, and no record body changes.
+
+## A release basis keeps evidence files by hash (FIX-95)
+
+No route, interface member or protocol type is added or changed. A basis that submission retains now has format
+`vericairn.release-basis/3`, the shape of `vericairn.release-basis/2`, and `ReleaseBasisEvidence.Format` carries that value.
+The basis retains as objects only the files read from a working tree; each file of a repository read at an exact commit is
+named by path and hash. `GET /v1/release-bases/{hash}`, the SDK, the CLI and the `release_basis_get` tool still return the
+complete evidence, reading each such file's bytes from a clone registered on the serving machine at its commit. When none
+holds it and no earlier copy is retained, the file is a `release-basis.missing` finding whose message names the repository's
+Git objects at the recorded commit. Servers before 0.9.2 answer HTTP 404 for a format-3 basis, as for any unsupported object.
+
+Release admission, through `release submit --check`, `POST /v1/releases/check` and submission, adds the objection
+`release.basis-retained` with its next action when a basis would retain more than 4,096 files or 67,108,864 bytes;
+`release.basis-file-size` now applies only to files the basis retains. Bases of formats 1 and 2 read as before, and a format-2
+basis whose exact-commit copies are absent from the estate reads those files, and any evidence object of the same hash, from Git.
+
+## A workspace setup command runs with a filtered environment (FIX-96)
+
+No route or protocol type changes. `Vericairn.Runtime.Workers.WorkspaceSetupConfiguration` adds `Variables`, an optional list of
+variable names (null when none), and the constant `MaximumVariables` (64). A setup file holds `variables` only when it names some,
+so files without them keep 0.9.1's shape and read in either version; a file naming `variables` is refused by 0.9.1 as an unknown
+field. `WorkerConfigurationStore.WriteSetup` and `ReadSetup` refuse a list of more than 64 names, a name given twice, a name that is
+not a portable variable name, or one starting with `VERICAIRN_`.
+
+The setup command's environment changes: it is the one `WorkerEnvironment.Build` gives a harness, without launcher names, plus the
+worker's variables the configuration names, and never a `VERICAIRN_` variable. In 0.9.1 it was the worker's whole environment less
+the `VERICAIRN_` variables, so a setup command that relied on another ambient variable needs it named. The command line adds
+`worker configure --setup-variable <name>`, repeatable and given with `--setup-command`; `worker configure --json` adds `variables` to
+each setup entry, an empty array when the command names none and null when its file cannot be read.
+
+## Output locations carry no scheme (FIX-97)
+
+No route, interface member, protocol type or public member is added or changed. A new result whose `outputs[].location`
+begins with a URL scheme (letters, digits, `+`, `-` or `.` before a colon, such as `https:` or `file:`) is now refused at
+every write surface (`NewRecord`, `Result`, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP)
+with the finding `result.output-scheme` at severity `error` in the response's problem; before, such a location was accepted.
+Validation and the estate check report a result already in the estate with such a location under the same code at severity
+`warning`, once per result, at `#body.outputs`, naming each such output and its scheme; it adds no error and the result
+keeps its reading. Evidence locations, which may be URLs, are unchanged. Record
+format remains 3, and no record body or field description changes.
+
+## One writer at a time per working tree (FIX-99)
+
+No route, interface member or protocol type is added or changed. Every record write of a writable `EstateSession`, through
+`EstateService` in the daemon or an embedded command, now takes an exclusive write lock in the working tree's
+`.vericairn/write-lock/` directory, whatever the runtime's Vericairn home, and holds it from judging the proposed records
+until they and their companions are stored. A write that cannot take the lock within 30 seconds fails with a `conflict`
+problem whose message names the holder's process id, host, home digest and the time it took the lock; the daemon answers
+it with HTTP 409 on `WriteOutcome` routes, and a composite response carries it as its problem. The public
+`EstateSession.Write` and `EstateSession.Discard` take the same lock when their caller does not hold it, and throw an
+`IOException` naming the holder after the wait. A local-only estate, whose records live in the live store, takes the
+same lock in `write-lock/` beside that store. Read-only sessions take no lock. The lock is separate from FIX-93's
+per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
+record. No record type, record format or generated document changes.
+
 ## A new record names a known principal as its author (FIX-98)
 
 No route, interface member, protocol type or public member is added or changed. A new record whose envelope `by` names no

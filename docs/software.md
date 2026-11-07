@@ -244,6 +244,11 @@ through a separate service can reconcile and remove a batch journal, so it must 
 Do not overlap daemon startup, embedded commands or repository synchronization. Neither the instance gate
 nor an atomic file rename makes the whole estate a multi-process transaction; grouped writes can still
 stop between records, and independent repository readers can observe a partly committed batch.
+From 0.9.2 (FIX-99), every writer, whatever its Vericairn home, also takes the working tree's exclusive write lock
+in `.vericairn/write-lock/` from judgment until its records are stored, so a second writer on the same working tree
+judges against what the first stored and is refused by the ordinary rules, or with a `conflict` naming the holder
+when it cannot take the lock within 30 seconds. The lock covers one working tree on one machine; the rest of this
+paragraph still holds for readers, repository synchronization and other clones.
 
 `status`, `check` and `estate reconcile` report an unreadable, malformed or incomplete journal as
 `batch.unreadable`. Its location is a safe local identifier: `batch-journal:<ULID>` for a generated filename,
@@ -901,9 +906,17 @@ nothing and keeps the person's workspace.
 
 **A setup command.** A command configured on the machine that runs the worker, for a launcher or for a repository (see
 workspace setup commands, under explicit execution below), runs before every run that uses it. After the workspace is
-prepared and before the intent, the worker runs it in the workspace as the person, outside the agent's sandbox. Its
-environment is the worker's own, less every variable whose name starts with `VERICAIRN_`, so it is handed neither the
-Vericairn home nor a run's bindings. It runs in its own process group (a Job Object on Windows) under its deadline; its
+prepared and before the intent, the worker runs it in the workspace as the person, outside the agent's sandbox. The
+workspace holds the work branch, which an earlier run's agent may have committed to, so the command runs work-branch
+content as the person, outside the sandbox: an installer that runs the branch's own scripts, such as `npm install`, runs
+what an agent committed there with the person's account. From 0.9.2 (FIX-96), its environment is the one a harness
+receives, by the same allowlist and filters: the path, the home and temporary directories, the locale and the platform's
+own variables, and never a variable whose name marks a credential or a loader directive. Besides those, only the
+variables its configuration names with `--setup-variable` pass, as the worker holds them, even a credential. No variable
+whose name starts with `VERICAIRN_` passes, so it is handed neither the Vericairn home nor a run's bindings. Name only
+what the command needs, prefer an installer's options that run no scripts, and read what an agent changed on the branch
+before its next run starts. In 0.9.1 the command received the worker's whole environment less the `VERICAIRN_`
+variables. It runs in its own process group (a Job Object on Windows) under its deadline; its
 output is discarded, and whatever it leaves running is ended when it exits. The workspace must then still be the
 branch's own repository, and the checks above follow, from the workspace as it was just before setup, or as it was
 prepared when a checkpoint exists: no new link, a complete inventory, and no change outside the permitted paths. When
@@ -1816,7 +1829,7 @@ any `.agents` marker in the root or an ancestor refuses that root, even an empty
 repository resource:
 
 ```sh
-vericairn worker configure --repository <resource> --setup-command '["npm","ci","--ignore-scripts","--no-bin-links"]' [--setup-timeout <seconds>]
+vericairn worker configure --repository <resource> --setup-command '["npm","ci","--ignore-scripts","--no-bin-links"]' [--setup-timeout <seconds>] [--setup-variable <name>]...
 vericairn worker configure --launcher <id> --setup-command <executable>
 vericairn worker configure --repository <resource> --clear-setup
 vericairn worker configure
@@ -1824,15 +1837,19 @@ vericairn worker configure
 
 `--setup-command` is one executable, or a JSON array of the executable and its arguments; nothing is passed to a shell.
 `--setup-timeout` is its deadline, from 1 through 600 seconds, 300 when omitted, and is given with `--setup-command`.
-`--clear-setup` removes the command of that launcher or repository. Each is given with exactly one of `--launcher` (a
+From 0.9.2, `--setup-variable <name>`, repeatable and given with `--setup-command`, names a variable of the worker's
+environment that the command receives beside a harness's own, such as a registry setting or a token an installer needs;
+at most 64 names, each once, and none starting with `VERICAIRN_`. Without it, the command has no credential or loader
+variable. `--clear-setup` removes the command of that launcher or repository. Each is given with exactly one of `--launcher` (a
 launcher available here) or `--repository`, and separately from launcher defaults, workspace placement and adapter
 admission. `--repository` alone shows that repository's command; `worker configure` with no choices shows the workspace
 root and every setup command, and `--json` adds them as `setup`, each with its `launcher` or `repository`, `command`,
-`timeoutSeconds` and, when its file cannot be read, `problem`. A run uses its repository's command when it has one,
+`timeoutSeconds`, from 0.9.2 `variables`, and, when its file cannot be read, `problem`. A run uses its repository's command when it has one,
 under any of the resource's revisions, otherwise its launcher's. The command is stored owner-only under
 `VericairnHome`, as `worker/setup-repository-<resource>.json` or `worker/setup-launcher-<id>.json`, with the same atomic
 replacement, link refusal and repository and estate exclusion as the other worker files; unknown fields and duplicate
-keys refuse. It never enters a record or reaches a harness. A file that cannot be read refuses the run, naming the file,
+keys refuse; the file holds `variables` only when the command names some, so a file without them reads in 0.9.1 too.
+It never enters a record or reaches a harness. A file that cannot be read refuses the run, naming the file,
 and nothing is used in its place. A worker run refuses to configure one, since the command runs outside the agent's
 sandbox.
 

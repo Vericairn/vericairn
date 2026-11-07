@@ -58,6 +58,10 @@ public sealed partial class EstateService
             if (record.Envelope.Type == "decision" && DecisionRecordTimeProblem(EstateModel.BodyString(record.Envelope, "decidedAt"),
                 record.Envelope.At, record.RelativePath) is { } timeProblem)
                 return new(false, Problem: timeProblem);
+            if (record.Envelope.Type == "acceptance" && AcceptanceType.BasisOutcomeFinding(model, record.Envelope, record.RelativePath) is { } outcome)
+                return new(false, Problem: new("rejected", outcome.Message, [new FindingDto("error", outcome.Code, outcome.Location, outcome.Message)]));
+            if (record.Envelope.Type == "result" && ResultType.OutputSchemeFinding(record.Envelope, record.RelativePath) is { } scheme)
+                return new(false, Problem: new("rejected", scheme.Message, [new FindingDto("error", scheme.Code, scheme.Location, scheme.Message)]));
             if (RecordAuthorship.Unresolved(model, record.Envelope) is { } author)
                 return new(false, Problem: new("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
             draft = draft with { At = record.Envelope.AtTime };
