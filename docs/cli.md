@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 10, November 7, 2026. Add the runtime step of `estate upgrade` and the serving release in `runtime status` and `status` in the development build.
+
 Revision 9, November 7, 2026. Add `worker configure --setup-variable` and the setup command's filtered environment in the development build.
 
 Revision 8, November 6, 2026. Add `estate cache rebuild` in the development build.
@@ -390,4 +392,28 @@ existed) and `retainedFiles`. See the [operator's guide](operator-guide.md#a-dam
 vericairn runtime stop
 vericairn estate cache rebuild --json
 vericairn estate check
+```
+
+## `vericairn estate upgrade` and the serving runtime (0.9.2)
+
+Applying `vericairn estate upgrade --to <version> --by <id>`, or running it again once applied, ends with a runtime step
+(OPS-05). When a daemon of a release older than the new pin serves the estate on this machine, the upgrade stops it and,
+when its own command line is the pinned release's build (its version and the source commit the pinned release names),
+starts that release's daemon in its place. It never touches a daemon of
+the pinned or a newer release, or one serving another estate or root, and it starts none where none served. `--check`
+leaves the runtime alone. A `runtime:` line on stdout says what it found or did; whatever still stands, with exactly what to
+run, goes to stderr as a `warning:`, and the exit code stays 0, since the upgrade's records and pin stand either way. With
+`--json`, an applied upgrade adds `runtime`: `outcome` is `none`, `pinned`, `kept`, `replaced`, `stopped`, `not-stopped`,
+`unreachable` or `unchecked`; `served` and `started` give a daemon's `processId` and `release`, or null; `done` and `warning`
+carry the two texts, or null. See the [operator's guide](operator-guide.md#the-serving-runtime-after-an-upgrade-092).
+
+`vericairn runtime status` adds a `release` line with the serving daemon's release against the estate's pin and, while they
+differ, a `mismatch:` line with the commands that settle it. Its `--json` adds `servingRelease`, `pin` (the manifest's pin as
+`estate upgrade` describes it), `pinnedRelease` (null for a source pin) and `mismatch` (null when they agree or no daemon
+serves). Human `vericairn status` ends, when a daemon served it, with `Serving runtime (this machine):` and any `Mismatch:`
+line. `status --json` stays the canonical document, identical on every machine, and a mismatch goes to stderr.
+
+```sh
+vericairn estate upgrade --to <published-version> --by <principal id>
+vericairn runtime status
 ```
