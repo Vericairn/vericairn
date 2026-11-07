@@ -446,6 +446,35 @@ public class SearchTests
     }
 
     [Fact]
+    public void ADeviceSignedSearchIsJudgedOnTheCurrentEstateAndARevokedDeviceIsDeniedAtOnce()
+    {
+        using var estate = new SearchEstate();
+        using EstateService service = estate.Open();
+        RecordWritten operatorDevice = RunEstate.Ok(service.DeviceCreate(new DeviceCreateRequest(SearchEstate.Operator, "Operator's laptop", "file")));
+        RunEstate.Ok(service.DeviceAdmit(new AdmitRequest(operatorDevice.Id, SearchEstate.Operator, "The first authority.")));
+        RecordWritten builderDevice = RunEstate.Ok(service.DeviceCreate(new DeviceCreateRequest(SearchEstate.Builder, "Builder's device", "file")));
+        RunEstate.Ok(service.DeviceAdmit(new AdmitRequest(builderDevice.Id, SearchEstate.Operator, "The builder searches.")));
+        DeviceStanding standing = service.Standing(builderDevice.Id)!;
+        using (EstateService.RequestDeviceScope request = service.ForDeviceRequest(standing.Identity, standing.PublicKey))
+        {
+            SearchResponse allowed = service.Search(new SearchRequest("keyword index"));
+            Assert.Null(allowed.Problem);
+            Assert.Equal(SearchEstate.Builder, allowed.Selection!.Value.GetProperty("reader").GetProperty("principal").GetString());
+        }
+
+        Assert.True(service.DeviceRevoke(new RevokeRequest(builderDevice.Id, SearchEstate.Operator, "Withdraw the builder's device.")).Ok);
+        using (EstateService.RequestDeviceScope request = service.ForDeviceRequest(standing.Identity, standing.PublicKey))
+        {
+            SearchResponse denied = service.Search(new SearchRequest("keyword index"));
+            Assert.Equal("denied", denied.Problem!.Code);
+            Assert.Empty(denied.Candidates);
+            Assert.Null(denied.Selection);
+            Assert.Equal("denied", service.SearchIndex(new SearchIndexRequest()).Problem!.Code);
+            Assert.Equal("denied", service.SearchReplay(new SearchReplayRequest(Record: SearchEstate.Operator)).Problem!.Code);
+        }
+    }
+
+    [Fact]
     public void AReadOnlyRuntimeSearchesAnIndexInMemoryAndCreatesNoFile()
     {
         using var estate = new SearchEstate();

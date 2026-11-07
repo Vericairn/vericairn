@@ -33,9 +33,10 @@ public sealed partial class EstateService
     /// <summary>
     /// The audiences a principal may read in search, or null for every segment. Today every admitted reader reads the whole estate,
     /// so the rule answers null; Knowledge, read-only participation and network access bring finer audiences. A test narrows it to
-    /// exercise the segments. A null principal is the machine's own caller.
+    /// exercise the segments. A null principal is the machine's own caller. A rule that needs the estate asks the provider for the
+    /// judged estate, loaded only then.
     /// </summary>
-    internal Func<EstateModel, string?, IReadOnlyList<string>?> SearchAudienceRule { get; set; } = static (_, _) => null;
+    internal Func<Func<EstateModel>, string?, IReadOnlyList<string>?> SearchAudienceRule { get; set; } = static (_, _) => null;
 
     /// <summary>Where the index lives: beside the live store, or nowhere (in memory) for a read-only runtime that creates no durable state.</summary>
     internal string? SearchIndexPath => session.IsReadOnly ? null : Path.Combine(Path.GetDirectoryName(session.Live.Path)!, KeywordIndex.FileName);
@@ -49,8 +50,9 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         lock (gate)
         {
-            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadSnapshot();
-            if (RequestDeviceRefusal(model) is not null) return SearchRefusal("denied", ContextDenied);
+            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadIdentities();
+            Func<EstateModel> judged = Judged();
+            if (DeviceRefusal(judged) is not null) return SearchRefusal("denied", ContextDenied);
             if (request.Method is not (null or "keyword"))
                 return request.Method == "semantic"
                     ? SearchRefusal("search-method-unavailable", "Semantic search needs a semantic search Adapter, and none is installed or enabled on this machine; the keyword method answers without one. Nothing was sent anywhere.")
@@ -68,7 +70,7 @@ public sealed partial class EstateService
                     KeywordIndex index = SearchStore();
                     SearchSnapshot snapshot = Snapshot(model, files);
                     bool current = Freshen(index, snapshot, request.AllowStale ? DateTimeOffset.UtcNow + SearchBudget : null);
-                    SearchReader reader = Reader(model, index, request.Principal);
+                    SearchReader reader = Reader(judged, index, request.Principal);
                     SearchRunner.Found found = SearchRunner.Run(index, snapshot, query!, reader, limit);
                     IReadOnlyList<KeywordIndex.SegmentBasis> bases = index.Bases(reader.Audiences);
                     string commit = SearchCommit(KeywordIndex.Revision(bases), current, reader);
@@ -96,8 +98,9 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         lock (gate)
         {
-            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadSnapshot();
-            if (RequestDeviceRefusal(model) is not null) return IndexRefusal("denied", ContextDenied);
+            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadIdentities();
+            Func<EstateModel> judged = Judged();
+            if (DeviceRefusal(judged) is not null) return IndexRefusal("denied", ContextDenied);
             var watch = Stopwatch.StartNew();
             for (int attempt = 0; ; attempt++)
             {
@@ -110,7 +113,7 @@ public sealed partial class EstateService
                     KeywordIndex.UpdateResult? result = index.Matches(fingerprint, model.Root) ? null
                         : index.Update(model, files, snapshot.Pins, fingerprint, snapshot.Bytes, null);
                     long elapsed = watch.ElapsedMilliseconds;
-                    SearchReader reader = Reader(model, index, null);
+                    SearchReader reader = Reader(judged, index, null);
                     IReadOnlyList<KeywordIndex.SegmentBasis> bases = index.Bases(reader.Audiences);
                     IReadOnlySet<string> indexed = index.IndexedDocuments();
                     long sourceBytes = files.Values.Sum(f => f.Bytes.LongLength)
@@ -137,8 +140,9 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         lock (gate)
         {
-            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadSnapshot();
-            if (RequestDeviceRefusal(model) is not null) return new(ContextDenied + "\n", [], new Problem("denied", ContextDenied, []));
+            (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = session.LoadIdentities();
+            Func<EstateModel> judged = Judged();
+            if (DeviceRefusal(judged) is not null) return new(ContextDenied + "\n", [], new Problem("denied", ContextDenied, []));
             var selections = new List<JsonElement>();
             if (request.Selection is JsonElement given && given.ValueKind == JsonValueKind.Object)
             {
@@ -167,7 +171,7 @@ public sealed partial class EstateService
             var outcomes = new List<SearchReplayOutcome>();
             foreach (JsonElement selection in selections)
             {
-                try { outcomes.Add(ReplayOne(model, files, selection)); }
+                try { outcomes.Add(ReplayOne(model, files, judged, selection)); }
                 catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
                 {
                     ResetSearchStore();
@@ -192,6 +196,17 @@ public sealed partial class EstateService
         ArgumentNullException.ThrowIfNull(request);
         return ReadBrief(request.WorkOrder, false, request.MaxBytes, request.Recipient, request.Assignment, request.View, request.Search, request.Principal);
     }
+
+    // Search reads identities, which need no judgment; who is asking, and what they may read, is always judged on the full estate,
+    // loaded at most once per operation and only when something asks.
+    private Func<EstateModel> Judged()
+    {
+        EstateModel? judged = null;
+        return () => judged ??= session.Load();
+    }
+
+    // A device-signed request is judged on the full, current estate, never on parsed identities. Other callers carry no device.
+    private Problem? DeviceRefusal(Func<EstateModel> judged) => requestDevice.Value is { Closed: false } ? RequestDeviceRefusal(judged()) : null;
 
     private static bool IsUlid(string value) => Ulid.TryParse(value, out Ulid parsed) && parsed.Value == value;
 
@@ -219,11 +234,11 @@ public sealed partial class EstateService
 
     // The reader's audiences: what the named principal may read, narrowed by what the caller may read, so naming a principal can
     // only narrow a search. A reader of every segment searches all of them and can be told the results are complete for its scope.
-    private SearchReader Reader(EstateModel model, KeywordIndex index, string? principal)
+    private SearchReader Reader(Func<EstateModel> judged, KeywordIndex index, string? principal)
     {
-        string? caller = RequestPrincipal(model);
-        IReadOnlyList<string>? forPrincipal = principal is null ? null : SearchAudienceRule(model, principal);
-        IReadOnlyList<string>? forCaller = SearchAudienceRule(model, caller);
+        string? caller = requestDevice.Value is { Closed: false } ? RequestPrincipal(judged()) : null;
+        IReadOnlyList<string>? forPrincipal = principal is null ? null : SearchAudienceRule(judged, principal);
+        IReadOnlyList<string>? forCaller = SearchAudienceRule(judged, caller);
         IReadOnlyList<string>? effective = forPrincipal is null ? forCaller : forCaller is null ? forPrincipal : forPrincipal.Intersect(forCaller, StringComparer.Ordinal).ToList();
         IEnumerable<string> audiences = effective ?? index.Audiences().Concat(SearchAudiences.Standard);
         return new SearchReader(principal ?? caller, SearchAudiences.Ordered(audiences).ToList(), effective is null);
@@ -307,7 +322,7 @@ public sealed partial class EstateService
             return (null, null, new Problem("search-index-stale", "The search index could not be brought up to date before preparation, so nothing was prepared. Run vericairn search index, then prepare again.", []));
         }
 
-        SearchReader reader = Reader(model, index, principal);
+        SearchReader reader = Reader(() => model, index, principal);
         var keys = new HashSet<string>(explicitSources.Select(SourceKey).OfType<string>(), StringComparer.Ordinal);
         var sources = new List<ContextAssembly.Source>();
         var selections = new JsonArray();
@@ -392,7 +407,7 @@ public sealed partial class EstateService
         return copy;
     }
 
-    private SearchReplayOutcome ReplayOne(EstateModel model, IReadOnlyDictionary<string, RecordFile> files, JsonElement selection)
+    private SearchReplayOutcome ReplayOne(EstateModel model, IReadOnlyDictionary<string, RecordFile> files, Func<EstateModel> judged, JsonElement selection)
     {
         string hash = SelectionHash(selection);
         var findings = new FindingList();
@@ -407,7 +422,7 @@ public sealed partial class EstateService
         KeywordIndex index = SearchStore();
         SearchSnapshot snapshot = Snapshot(model, files);
         Freshen(index, snapshot, null);
-        SearchReader caller = Reader(model, index, null);
+        SearchReader caller = Reader(judged, index, null);
         string[] audiences = selection.GetProperty("reader").GetProperty("audiences").EnumerateArray().Select(a => a.GetString()!).ToArray();
         if (!caller.Complete && audiences.Any(a => !caller.Audiences.Contains(a, StringComparer.Ordinal)))
             return new(hash, false, null, "unavailable", "This reader cannot replay that selection; completeness cannot be confirmed.", []);

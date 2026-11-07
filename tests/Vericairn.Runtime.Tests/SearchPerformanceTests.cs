@@ -60,7 +60,7 @@ public sealed class SearchPerformanceTests
 
         // Query time is the index's own work for a query: matching, scoring, rechecking and excerpting, apart from loading the estate.
         KeywordIndex index = service.SearchStoreForTests();
-        (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = service.Session.LoadSnapshot();
+        (EstateModel model, IReadOnlyDictionary<string, RecordFile> files) = service.Session.LoadIdentities();
         var snapshot = new SearchSnapshot(model, files, SearchSnapshot.CurrentPins(model), pin => ContextSelection.LocalOriginal(model.Root, pin.Path, pin.ByteHash, null, pin.HashMode));
         var reader = new SearchReader(null, ["Internal", "Members only", "Public"], true);
         // Each query's time is the least of three runs, so a test machine busy with other suites measures the search's own work.
@@ -86,7 +86,7 @@ public sealed class SearchPerformanceTests
         for (int write = 0; write < 3; write++)
         {
             estate.Add("decision", SearchEstate.Decision("A new decision", Words(60), Words(5)));
-            (model, files) = service.Session.LoadSnapshot();
+            (model, files) = service.Session.LoadIdentities();
             snapshot = new SearchSnapshot(model, files, SearchSnapshot.CurrentPins(model), pin => ContextSelection.LocalOriginal(model.Root, pin.Path, pin.ByteHash, null, pin.HashMode));
             var update = Stopwatch.StartNew();
             string fingerprint = snapshot.Fingerprint();
