@@ -139,9 +139,10 @@ public sealed partial class EstateService
                 last = Stopwatch.GetTimestamp();
                 took = Stopwatch.GetElapsedTime(started, last);
             }
-            catch (Exception exception) when (exception is ObjectDisposedException || exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (exception is OperationCanceledException && cancellationToken.IsCancellationRequested
+                || exception is ObjectDisposedException && (closeRequested || journal is not { Closed: false }))
             {
-                // The runtime is closing.
+                // The runtime or its journal is closing. Anything else disposed is an ordinary failed pass, below.
                 break;
             }
             catch (Exception exception) when (!Fatal(exception))

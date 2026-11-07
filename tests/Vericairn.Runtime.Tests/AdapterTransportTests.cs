@@ -118,7 +118,7 @@ public class AdapterTransportTests
     }
 
     [Fact]
-    public async Task UnclassifiedRequestsAreForwardedVerbatimAndTeardownClosesThePort()
+    public async Task UnclassifiedRequestsAreForwardedVerbatimAndTeardownStopsForwarding()
     {
         using var upstream = new CountingAdapterUpstream();
         var adapter = new LoopbackAdapter(upstream.Address, b => RequestReduction.Reduce(b, AdapterRepresentationTests.Original));
@@ -129,8 +129,20 @@ public class AdapterTransportTests
         using HttpResponseMessage response = await client.PostAsync(new Uri(address, "responses"), Json(body), TestContext.Current.CancellationToken);
         Assert.Equal(body, Assert.Single(upstream.Requests).Body);
         adapter.Dispose();
-        using var socket = new TcpClient();
-        await Assert.ThrowsAnyAsync<SocketException>(() => socket.ConnectAsync(IPAddress.Loopback, address.Port, TestContext.Current.CancellationToken).AsTask());
+
+        // The disposed adapter forwards nothing more. Its freed port may already belong to another process on a busy machine, so
+        // the test checks what the adapter does rather than whether that port refuses connections.
+        using HttpClient late = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
+        try
+        {
+            using HttpResponseMessage after = await late.PostAsync(new Uri(address, "responses"), Json(body), TestContext.Current.CancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException && !TestContext.Current.CancellationToken.IsCancellationRequested)
+        {
+            // Refused, reset or unanswered: nothing serves the adapter's address any longer.
+        }
+
+        Assert.Single(upstream.Requests);
     }
 
     internal static HttpClient Client() => new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(15) };
