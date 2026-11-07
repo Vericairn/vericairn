@@ -338,6 +338,29 @@ retrieval. If the client disconnects or cancels, the runtime lets the current re
 settle and stops before the next effect. Wait for that operation to settle, then resume the same
 input to inspect its recorded outcome. The SDK's `OperatorRecordAsync` accepts a cancellation token.
 
+## A release's reserved steps (0.9.2)
+
+When a release runs on the software pack's release flow
+([operator guide](operator-guide.md#the-software-release-and-upgrade-flows-092)), each act that stays the operator's waits in
+`operator list` as an operator request, delivered only when its step is next, with the exact command the records give then:
+
+| Step | The request's command | What completes the step |
+| --- | --- | --- |
+| `accept` (`accept-release`) | `vericairn records new acceptance --by <operator-id> --subject release:<candidate id>:<hash> --body accept-release.json` | Your signed acceptance of that exact candidate |
+| `publish` (`publish`) | `gh release edit v<version> -R <owner/name> --draft=false --latest && vericairn release observe <version> --by <operator-id>` | Your signed observation of the publication, the candidate's published revision |
+| `delete-draft` (`publish`), after a withdrawal | `gh release delete v<version> -R <owner/name> --yes` | Your own close of the step's request: `vericairn operator done <request> --by <operator-id> --link <url>` |
+
+No command of a later step appears before its step is next: publication's never shows while the acceptance that names the
+candidate is missing. Closing a request completes nothing by itself, except for a step whose record of your act is that close,
+such as a draft's deletion or an announcement; even then an agent's close citing your words completes nothing, and `goal step`
+asks you again. Only records you signed count: an agent's acceptance, publication observation or close is kept and shown as
+not counting.
+
+Vericairn's own estate adds three such steps after publication in its first-party extension: the MCP Registry listing (below),
+whose request shows `gh run list -R Vericairn/vericairn --workflow mcp-registry.yml --event release --limit 1`, and the
+announcement on GitHub Discussions and on your X account, whose requests name the reviewed drafts by hash. Each is done once you
+close its request with `operator done --link` and the observed address.
+
 ## Presentation and API
 
 Human output follows the existing communication settings, defaulting to the estate's root operator.

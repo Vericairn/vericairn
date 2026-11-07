@@ -355,3 +355,35 @@ beside the live store, and the key that names subjects that are not records in `
 owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
+
+## The software pack's release and upgrade flows (PROC-07)
+
+`IEstateApi`, the daemon's routes, the OpenAPI document and the SDK are unchanged. The template catalogue adds two built-in flow
+versions, `vericairn.software/release` 1.0.0 and `vericairn.software/upgrade` 1.0.0, which `GET /v1/templates`, `templates list`
+and `templates show` now include.
+
+`Vericairn.Records` adds public types and members:
+
+- `Templates.SoftwareFlows`: `Release`, `Upgrade`, `Version`, `Definitions`, `ReleaseFlow` and `UpgradeFlow`.
+- `Templates.FlowTrap.Check`, an optional trailing parameter: a check a step's action runs, for a trap with or without `holds`.
+- `Estate.GoalPredicates.FieldString` and `MaximumPathDepth`: a predicate's `fields` may name a nested field by a dotted path.
+- `Estate.FlowRuns.PolicyRequired`, an overload taking a resolved `FlowDefinition`.
+
+Behavior changes, each within record format 3:
+
+- A predicate field name with dots, such as `placement.carrier`, reads the nested field; before, it matched no record. Record
+  bodies have no keys with dots, so a top-level field and a path never collide.
+- Flow content may bind `{input.<name>.id}` in a step's own predicates and `{request}` as a reserved step's done predicate's
+  subject; content that names either did not validate before. A trap may declare `check` instead of, or beside, `holds`.
+- A sprung trap's reason ends with the summary of the record that sprang it, when it has one.
+- An input whose record is now the published revision of the candidate a step used, as `ReleaseType.IsPublicationOf` defines
+  it, is no change after use: a step that used the candidate stays done.
+- An estate policy's `vericairn.estate/flow-steps` rule holds for runs of every flow that extends the flow it names, in goal
+  validation and in policy evaluation, which now reports those runs too.
+- For a reserved step whose done predicate names `{request}`, only the addressed operator's own close of its request keeps
+  `goal step` from asking again; an agent's close citing the operator's words leaves it due.
+
+The command line adds `docs pass --before`, with `--documents`, `--guides`, `--previous` and `--record`, and `estate verify`.
+Each records ordinary `verification` records through the existing record route, with methods
+`vericairn.software/prior-version-tokens`, `vericairn.software/preparation-wording`, `vericairn.software/serving-runtime` and
+`vericairn.software/estate-check`. No record type, field or MCP tool is added.

@@ -535,6 +535,38 @@ of other unaccepted work appear under **Work recorded, not yet accepted**. Froze
 Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
+## The release and upgrade flows (0.9.2)
+
+From 0.9.2 (PROC-07) the software pack declares a release and an estate's upgrade as flows, built-in template versions every
+estate has without copying files: `vericairn.software/release` 1.0.0 and `vericairn.software/upgrade` 1.0.0. A release runs as a
+goal on the release flow, from its placed work to its closed carrier; each step's state is read from the records, so a step
+done by hand outside the run counts once its record exists, and a restored clone derives the same position. The
+[operator guide](operator-guide.md#the-software-release-and-upgrade-flows-092) has every step, its owner and its traps.
+
+The release flow's steps are `placed-work`, `docs-before-freeze`, `docs-set`, `release-commit`, `reviews-at-commit`, `gate`,
+`submit`, `candidate`, `review`, `accept` (reserved `accept-release`), `publish` (reserved `publish`), `observe`,
+`upgrade-estate` (optional, off by default), `docs-after` and `close`, with the `withdraw` branch's `withdraw`, `delete-draft`
+(reserved `publish`) and `observe-withdrawal`. Each trap that earlier releases taught is checked before the step it guards:
+
+| Trap | Step | Read from |
+| --- | --- | --- |
+| A guide naming an earlier release as current, or preparation wording | `docs-before-freeze` | `docs pass --before --record`'s verifications |
+| A set frozen before the guides' pass; notes rendered before the carrier's work closed; a security section the operator has not approved | `docs-set` | The guides' verifications; the carrier's work orders; asks about the carrier |
+| A declared document changed after its clearing review | `reviews-at-commit` | The product's living documents |
+| A client of another build than the serving runtime, a clone without a default head, a held document | `gate` | `release submit --check`'s objections, which its action runs |
+| A withdrawn candidate's draft left at the provider | `gate` | The repository's draft-deletion intents |
+| An uncertain submission | `submit` | The submission's operation |
+| A publication command before the acceptance names the candidate, or for another channel | `publish` | The operator's acceptance; the candidate's channel |
+| A runtime of an older release serving the estate after an upgrade | the upgrade's `runtime` | `estate verify`'s verifications |
+
+Two commands record what the flows read. `vericairn docs pass <version> --before --documents docs/releases/documents.json --record --by <principal>`
+checks the version-tracking guides and records each check's outcome as a verification of the product at the guides' commit;
+`vericairn estate verify --by <principal>` records which runtime serves the estate here and whether the estate check passes with
+it. Both supersede their earlier verification of the same check and version, so the latest outcome is the current one
+([CLI](cli.md#vericairn-docs-pass---before-092)). Accepting, publishing and deleting a withdrawn draft remain the operator's:
+each waits as an operator request whose exact command appears only when the step is next, and only records an operator signed
+complete it.
+
 ## Preparing a release review (0.8.4)
 
 `vericairn release review-brief <version>` writes the candidate's review brief from the

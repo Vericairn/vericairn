@@ -481,7 +481,20 @@ every template.
 - `requires` keeps a step's preconditions; `requires`, `done`, a trap's `holds`
   and a branch's `when` are record predicates in the goal completion language.
   Their string values may bind the run: `{subject.<field>}`, `{instance}` in an
-  `each` step, `{goal}` and `{work}`.
+  `each` step, `{goal}` and `{work}`. From 0.9.2 (PROC-07) a step's own
+  predicates may also bind `{input.<name>.id}`, the id of the record that carries
+  one of its inputs now, and a reserved step's `done` predicate may name
+  `{request}` as its `subject`: the step's operator request, the first revision
+  of the newest one whose `flowStep` names the run and the step. A predicate's
+  `fields` may name a nested field by a dotted path, such as `placement.carrier`,
+  `target.version` or `facts.version`.
+- A trap (`name`, `summary`) declares `holds`, record predicates the position
+  reads, or from 0.9.2 `check`, the named check or objection the step's action
+  runs on its machine before it acts and refuses on, such as
+  `release.client-build`, or both. A check alone is never read from the records:
+  the position lists it under the step's traps, and the action enforces it. A
+  sprung trap's reason quotes the summary of the record that sprang it, such as
+  the locations a failed check found.
 - `inputs` name a subject field or an earlier step's item. `outputs` lists the
   items the step must produce or collect before it closes, each with its
   completion requirements:
@@ -563,7 +576,10 @@ declares optional. It never redeclares a base step or role, so it never turns of
 a required step or item, removes a reserved marking or changes who may hold a
 role; a branch takes in only the extension's own steps, and turning off a step or
 an item never leaves a required step without its input. Resolution checks the
-whole chain, up to eight bases.
+whole chain, up to eight bases. From 0.9.2 an estate policy's
+`vericairn.estate/flow-steps` rule that names a flow holds for runs of every
+extension of it too, so an extension never turns off a step a policy requires of
+its base.
 
 A run's configuration is the flow's defaults, then `template-defaults` for the
 exact flow pin at the estate, at the flow's `domain` and at the run's product
@@ -578,6 +594,34 @@ that turns off a step or item an active estate policy requires, by a
 refused, as is a run whose wider configuration leaves one off or whose `until`
 ends it before one. `docs new` and `docs adopt` refuse a flow, and a living
 document never pins one.
+
+### The software pack's flows (0.9.2)
+
+The software pack ships two flows as built-in template versions, available
+through `templates list` and `templates show` without copying files into an
+estate: `vericairn.software/release` 1.0.0, a software product's release from
+its placed work to its closed carrier with its `withdraw` branch, and
+`vericairn.software/upgrade` 1.0.0, an estate's upgrade to a published
+Vericairn release. Their steps, owners, reserved acts, done predicates and
+traps are in the
+[operator guide](operator-guide.md#the-software-release-and-upgrade-flows-092).
+The release flow's subject is `carrier` (a work order, by its original
+identity), `product`, `version` and `repository` (`owner/name`); the upgrade
+flow's is `version`. The release flow's `upgrade-estate` step runs the upgrade
+flow by its exact pin and is optional, off by default, for an estate that runs
+the product it releases. Its `review` option (`none`, `self` or `independent`,
+`none` by default) sets the review of the set's and the merge's items, which the
+candidate's release review covers.
+
+An estate extends them in its own `docs/templates`, as Vericairn's estate does
+with `vericairn.first-party/release`: a flow that names the shipped pin in
+`extends` and adds steps `following` a named step, such as a package
+observation after `observe`, a reserved `publish` step after `publish` whose
+`done` predicate is the operator's close of its request,
+`{"type":"operator-request-close","subject":"{request}","fields":{"outcome":"done"}}`,
+or a document review after `docs-after`. Such an extension names its estate's
+own destinations, so it stays that estate's content and pins the base it
+extends by hash.
 
 ## Client and extension contract
 

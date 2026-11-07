@@ -459,6 +459,9 @@ publishes a release automatically.
 
 ### Release procedure
 
+From 0.9.2 a release can run as a goal on the software pack's release flow, which orders the steps below and checks the traps of
+earlier releases before each ([the software release and upgrade flows](#the-software-release-and-upgrade-flows-092)).
+
 A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.1 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
 A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
@@ -1499,6 +1502,90 @@ At most three stops of a run reach one person at a time, in the order the flow r
 `queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it, or its
 request is settled or withdrawn. Remote shows the stops and each reserved step's command. It answers asks as before, and it
 carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
+
+### The software release and upgrade flows (0.9.2)
+
+From 0.9.2 (PROC-07) the software pack ships two flows as built-in template versions, so a release and an estate's upgrade run
+on declared steps rather than on per-release scripts: `vericairn.software/release` 1.0.0, a product's release from its placed
+work to its closed carrier, and `vericairn.software/upgrade` 1.0.0, an estate's upgrade to a published Vericairn release.
+`templates list` shows both. A run of either is a goal as [runs of a flow](#runs-of-a-flow-092) describes; each step's state
+comes from the records alone, each reserved step waits on the operator as [stops](#stops-and-their-surfaces-092) describe, and
+each step names its traps: the checks of earlier releases' lessons, read from the records where a record says it, or named as
+the check the step's action runs before it acts. `goal show` lists each step's traps, with `check` for one its action runs.
+
+The release flow's subject binds the carrier by its original identity, the identity placements name, the product, the
+version and the repository its release is published from:
+
+```sh
+vericairn goal propose --by <sponsor> --title "Release 1.2.0" --objective "Release the product from its placed work to its closed carrier." \
+  --done '{"type":"acceptance","subject":"<carrier id>"}' --work-order <carrier id> --budget wallMinutes=2400 --budget attemptsPerStep=3 \
+  --flow vericairn.software/release@1.0.0 --subject carrier=<carrier id> --subject product=<product id> \
+  --subject version=1.2.0 --subject repository=owner/name
+```
+
+| Step | Owner | Done from the records | Traps |
+| --- | --- | --- | --- |
+| `placed-work` | release manager | Every work order placed in the carrier accepted, none planned, active, paused, submitted or revised since acceptance | |
+| `docs-before-freeze` | release manager | `docs pass --before --record` passed both checks for this version | `prior-version-tokens`, `preparation-wording` |
+| `docs-set` | release manager, work | Its result hands on the set's manifest and notes by hash | `guides-revised`, `notes-window`, `security-section` |
+| `release-commit` | release manager, work | Its result hands on the frozen index at the merge commit | |
+| `reviews-at-commit` | release manager | The submission's intent is recorded | `documents-cleared` |
+| `gate` | release manager | The submission's intent is recorded | `client-build`, `default-head`, `document-hold` (checked by `release submit --check`), `withdrawn-draft` |
+| `submit` | submitter | The submission dispatched, neither not started, uncertain, failed nor canceled | `uncertain-submission` |
+| `candidate` | release manager | A release record of the version exists | |
+| `review` | reviewer | A passing review of the exact candidate | `not-withdrawn` |
+| `accept` | decider, reserved `accept-release` | The operator's acceptance of the candidate | `reviewed`, `not-withdrawn` |
+| `publish` | publisher, reserved `publish` | The operator's observation of the publication: the published revision | `accepted`, `stable-channel`, `not-withdrawn` |
+| `observe` | release manager | The release is published; package destinations observed with `packages observe` | |
+| `upgrade-estate` | release manager, optional, off by default | The estate's observation of the published version, from a run of the upgrade flow | |
+| `docs-after` | release manager | No living document of the product due, after `docs pass <version>` | |
+| `close` | decider | The carrier's acceptance | `placed-work-accepted`, `nothing-due` |
+
+The traps carry the lessons of 0.8.1 to 0.8.4. A guide still naming the release before last, as 0.8.4's notes-window
+sentence named 0.8.2, stops `docs-before-freeze` with its location. A set frozen before that pass, as 0.8.4's first one was,
+cannot be made: `docs-set` waits on it and takes the check as its input, so a newer check makes the set stale. Notes rendered
+before the carrier's work closed, as 0.8.3's were, and a security section the operator has not approved through an ask about
+the carrier hold the set. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
+withdrawn candidate's draft left at the provider stops `gate`, as do the objections `release submit --check` names, such as a
+client of another build than the serving runtime (0.8.4's stale daemon) or a clone without a default head (0.8.3). An uncertain
+submission stops `submit` until a reconciliation reads the release record. The publication command is computed only once the
+operator's acceptance names the candidate, never early, as it was for 0.8.3; a candidate of another channel than stable never
+shows this command. The publication is the candidate's own revision, so the steps that used the candidate stay done.
+
+Accepting and publishing stay the operator's. `accept` shows
+`vericairn records new acceptance --by <operator-id> --subject release:<candidate id>:<hash> --body accept-release.json`, and
+`publish` shows `gh release edit v<version> -R <owner/name> --draft=false --latest && vericairn release observe <version> --by <operator-id>`,
+each only when it is next. Only records an operator signed count for them.
+
+The `withdraw` branch is entered by the candidate's withdrawal (`release withdraw`, which records the draft's deletion intent).
+`delete-draft` is reserved `publish`: its request carries `gh release delete v<version> -R <owner/name> --yes`, and it is done once
+the operator closes that request with `vericairn operator done <request> --by <operator> --link <url>`; an agent's close citing the
+operator's words completes nothing, and `goal step` asks the operator again. `observe-withdrawal` then records the dispatch under
+the intent and observes the draft's absence with `release observe --withdrawal`. A corrective candidate is a new version: the
+sponsor revises the goal's `version` (and its carrier, after `work move-plan`), and every step the version keys derives afresh,
+starting with `docs-before-freeze`, since the corrective version's guides must name it, and then the set, which is stale.
+
+The upgrade flow's subject is the version the estate upgrades to:
+
+| Step | Done from the records | Traps |
+| --- | --- | --- |
+| `check` | The upgrade it checked is recorded: `estate upgrade --to <version> --check` records nothing | |
+| `upgrade` | The estate's observation of the version, from `estate upgrade --to <version>` | |
+| `runtime` | `estate verify` found the pinned release's runtime serving the estate here | `older-runtime` |
+| `verify` | `estate verify` found the estate check and status passing with it | `estate-check` |
+| `docs` | No living document due | |
+
+An upgrade with a runtime of an older release still serving the estate stops at `runtime` until it is replaced: the upgrade's own
+runtime step (OPS-05) replaces it where it can, and `estate verify --by <you>` records what serves the estate on this machine.
+
+An estate extends either flow with steps of its own, in a flow under its `docs/templates` that names the shipped version in
+`extends` and places each step `following` a named step ([templates](templates.md#the-software-packs-flows-092)). An extension
+never turns off a required step, a reserved marking or a step an estate policy requires of the flow or of any flow it extends.
+Vericairn's own estate keeps its first-party extension there, `vericairn.first-party/release`: it adds the NuGet packages'
+observation after `observe`, the announcement's drafts with their independent review, the MCP Registry listing and the
+announcement on GitHub Discussions and on the operator's X account as reserved `publish` steps after `publish`, each done only
+once the operator closes its request with the observed link, and the profile repository's documents after `docs-after`. Its
+destinations are that estate's own, so it is never part of the software pack.
 
 ## 19. Pairing, local-network connections and revocation
 
