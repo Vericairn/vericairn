@@ -710,7 +710,7 @@ internal sealed class RunAdmissionService(
         IReadOnlyList<(string Code, string Message)> refusals = AgentRuns.StartRefusals(model, goal, assignment.Id, Element(cap));
         if (refusals.Count > 0)
         {
-            IReadOnlyList<string> step = model.Chain(assignment);
+            IReadOnlyList<string> step = AgentRuns.StepAssignments(model, assignment.Id);
             bool crossed = Crossed(ledger).Count > 0 || ledger.Attempts(step) >= ledger.AttemptsPerStep;
             return (null, string.Join(" ", refusals.Select(r => r.Message)), crossed && GoalRules.Status(model, goal) == "active" ? goal : null);
         }

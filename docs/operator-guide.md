@@ -647,7 +647,9 @@ Install the target release, then restart any daemon serving the estate before ch
 the upgrade. From the estate directory on the daemon's machine, using that installed release, run
 `vericairn runtime stop`, then `vericairn runtime start`. Installing a binary leaves an existing daemon
 running its previous release. Restart running workers with the new release after their active work
-has settled. The upgrade command does not stop the daemon or workers itself.
+has settled. The upgrade command does not restart workers itself; from 0.9.2 it replaces a daemon of
+an older release than the new pin, as [the serving runtime after an upgrade](#the-serving-runtime-after-an-upgrade-092)
+describes.
 
 ```sh
 vericairn estate upgrade --to <published-version> --check
@@ -732,6 +734,43 @@ its independently reviewed conversion; changing the manifest alone does not conv
 See [record format 3](record-format-v3.md), [policy adoption](policy-adoption.md) and
 [the adoption proposals](policy-adoption-proposals.md).
 
+### The serving runtime after an upgrade (0.9.2)
+
+From 0.9.2 (OPS-05), no runtime of an older release keeps serving an estate on its machine after an
+upgrade. Applying the upgrade, or running it again once applied, ends with a runtime step; `--check`
+leaves the runtime alone. The step reads the daemon that serves the estate here, as its endpoint file
+and its health describe it, and compares its release, without build metadata, with the release the
+manifest now pins:
+
+| Found | What the upgrade does |
+| --- | --- |
+| No daemon serves the estate | Nothing. It starts no daemon where none ran. |
+| A daemon of the pinned release | Nothing; `runtime:` names it. |
+| A daemon of an older release | Stops it. When the upgrade's own command line is the pinned release's build, with its version and the source commit its release record or dependency observation names, starts that release's daemon from it and names both on a `runtime:` line. Otherwise it names the one it stopped and warns with the command that starts the pinned release's. |
+| A daemon of a newer release, or one whose release cannot be ordered | Leaves it running and warns with the mismatch. |
+| A daemon that serves another estate or another root | Leaves it running and warns. |
+| A daemon that refuses this user's connection, or that cannot be stopped | Leaves it running and warns with exactly what to run. |
+
+A daemon that refuses the stop request, such as another user's, or that still answers 15 seconds after
+it was asked to stop, is named with its process and release. The warning says to run
+`vericairn --estate <root> runtime stop` as the user that started it, with that release's command line
+or the current one, and to end the process if it still answers. Then start the pinned release's runtime
+with `./bootstrap runtime start` in the estate's directory (`.\bootstrap.ps1 runtime start` on Windows),
+which fetches and verifies exactly the pinned release, or with `vericairn runtime start` from that
+release's command line. The upgrade's observation, migration record and manifest are the same whatever
+the step finds, and a warning from it leaves the exit code at 0.
+
+The step runs after the upgrade's own runtime has answered or closed, so neither the upgrade nor the
+daemon it stops holds the working tree's write lock ([one writer per working tree](#one-writer-per-working-tree-092))
+while the new daemon opens the estate. A daemon installed as a per-user service starts the command line
+it was installed with at the next login; after an upgrade, run `vericairn runtime uninstall`, then
+`vericairn runtime install`, with the pinned release's command line. Workers are not restarted.
+
+`vericairn runtime status` shows the serving daemon's release against the pin on a `release` line and,
+while they differ, a `mismatch:` line with the commands that settle it. Human `vericairn status` ends,
+when a daemon served it, with a `Serving runtime (this machine):` line and any `Mismatch:` line; the
+canonical `status --json` document is unchanged, and a mismatch goes to stderr as a warning.
+
 
 ## 10. Export, restore, recovery and divergence
 
@@ -778,6 +817,8 @@ the unreadable journal's write hold. This is local recovery state, not a new rec
 
 Objects are content-addressed bytes beside the records: `objects put <file>`, `objects list`, `objects verify` reads every object and checks its bytes against its name.
 
+An object holds at most 8 MiB (8,388,608 bytes), and an export carries nothing held outside the estate repository. From 0.9.2, [Large private artifacts](large-artifacts.md) shows how to keep a private artifact above that limit in a private store with exact-byte custody, using existing records, and how to prove a cold recovery by reading its bytes back.
+
 ### A damaged live store (0.9.2)
 
 Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
@@ -807,9 +848,19 @@ Duplicates written before this rule, by two writers of an earlier release or by 
 
 1. Stop the extra writer. Run `vericairn records validate` or `vericairn estate reconcile` to list the conflicting records, and read both files and any records that cite them. Dispatch nothing under a duplicated operation identity until it is settled.
 2. Keep one: the one later records already cite, or else the earlier one.
-3. Supersede the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key.
+3. Settle the other under its record type's rules. Divergent revisions of one record take a reconciliation record that keeps one and withdraws the others. A duplicated work-order key takes a revision of the other order under a new key. Two current operations under one identity take a reconciliation that keeps one and withdraws the other, as below.
 
-Some record types have no revision that clears the conflict. In 0.9.2 that includes two current operations under one identity: a revision keeps its identity, and a reconciliation settles only revisions of one record. Leave both files unchanged and report the case to Vericairn's maintainer; no record settles it in this release.
+From 0.9.2 (FIX-100), a reconciliation settles operations recorded independently under one identity, as it settles independent first communication profiles. Its subject is one of them; `kept` names the latest revision of the operation that stands, `withdrawn` names the latest revision of each other one, and `note` gives your reason:
+
+```sh
+vericairn records new reconciliation --by <operator id> --subject operation:<kept id>:<kept hash> --body reconciliation.json
+```
+
+```json
+{"kept": "<kept id>", "withdrawn": ["<other id>"], "note": "Both runtimes recorded the intent; the first stands, and the second was never dispatched."}
+```
+
+Only the operator or a principal with the `local-engineering` scope, the authority that records operations, settles them, and the reconciliation is signed by an admitted device of that principal, whatever the charter's signature policy. Every record it names must be an operation under the subject's identity and the latest revision of its own operation. Neither operation is rewritten: the withdrawn one stays in the estate and counts as superseded by the kept one, `operation.duplicate-identity` is no longer reported, and writes proceed. Nothing settles duplicates automatically. A withdrawn operation whose effect may have happened still needs its own observation before anything is retried under that identity.
 
 ## 11. The daemon
 
@@ -822,6 +873,8 @@ vericairn runtime stop
 vericairn runtime install --plan
 vericairn runtime install
 ```
+
+From 0.9.2 (OPS-05) `runtime status` also shows the serving daemon's release against the estate's pin, with a `mismatch:` line and the commands that settle it while they differ; `--json` adds `servingRelease`, `pin`, `pinnedRelease` and `mismatch`. An upgrade replaces a daemon of an older release than its new pin ([section 9](#the-serving-runtime-after-an-upgrade-092)).
 
 `runtime serve` runs the daemon in the foreground until stopped; `start` runs it in the background with streams of its own, its output going to `daemon.log` beside the estate's live store, and waits until it answers; when the daemon stops before it serves, `start` exits with an error that quotes what the daemon wrote to its log and says where the log is; `stop` asks it to stop (closing a client never does). `install --plan` prints the per-user service unit (a launchd agent, a systemd user unit or a logon task) and the commands without installing; `install` registers it so the daemon starts at login; `uninstall` removes it. The daemon serves a local socket (or a named pipe on Windows), whose trust boundary is the operating-system user, and a loopback TLS endpoint pinned to its own certificate, where requests are signed by an admitted device. A configured local-network listener adds mutual TLS for paired devices (section 19); `--no-loopback` disables loopback only, not that listener. Signing and authority are checked by the runtime; `api-v1.md` has the details and `api-reference.md` every operation. Workbench's runtime workspace (section 13) does the same through this command line and shows the plan before it installs or uninstalls.
 
@@ -995,7 +1048,7 @@ vericairn goal accept <goal> --by <sponsor> --statement "I accept this goal from
 
 For record predicates the runtime supplies the evaluation's verdict and records read. For evidence conditions the evaluator supplies `--verdict n:met:reason` (or `not-yet` or `impossible`) and `--read n:<record id>`; numbering starts at one, and a met evidence condition must name a record. The evaluator cannot have authored any step. Acceptance needs the current evaluation of the exact goal revision, every condition met, and every record predicate still holding. The accepter is neither the evaluator nor a step's author: the sponsor when a person, an operator when an agent sponsors it, or the sponsor's named delegate holding `accept-work` for an ordinary goal without reserved actions. A delegate never accepts a goal involving a release or milestone.
 
-`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, and `limits.consecutiveFailures` are validated and recorded but not yet enforced. Monitor them and act explicitly. Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
+`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. For a run of a flow, `goal next` and `goal step` hold the run for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
 
 ## 18. Routing, asks and the worker
 
@@ -1264,8 +1317,10 @@ recovery, and prohibits what the goal's constraints, the reserved effects and th
 an operation may record its own `provenance` (its inputs by hash, provider, tool and settings) where an item requires it. A
 person can take over a step an agent holds with `work takeover`, which carries the same step and pins. A step of a role the flow marks `person` never reaches an agent. A review that clears a step
 is a `review` record whose subject names the item's exact hash (a result's for a file), by a principal other than its author
-and the step's own holders, of the item's reviewer role with its independence: in this build, an operator or an agent. A
-review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
+and the step's own holders, with the item's independence and of its reviewer role: a principal the role names, or for a
+review that names none a principal of the estate's `reviewer` role or an operator, or the contributor of a review assignment
+of that item ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). In this build such a review is an operator's or an
+agent's. A review step closes only on a review by a principal its role names, through the goal's roles or the roster, or by the
 contributor of its own assignment. A verification an item names is a `verification` record of that exact subject that
 passed. Evidence is any passing verification of the exact subject by the declared method, whoever recorded it, the item's
 producer included; independence is what an item's review requires, not its evidence. A provenance that names a principal
@@ -1277,6 +1332,74 @@ predicates hold, recorded by whoever carries it. In this build an exchange's exp
 has no API or browser route, and nothing takes a run's next steps automatically; a person carries them. A stop is shown in the
 run's position and in `goal step`'s message; its operator request, and its place in status, Workbench and Remote, are not
 built yet, and a step with no available principal is reported rather than asked of the sponsor.
+
+### Hand-offs, reviews and failure routes (0.9.2)
+
+Each step hands on exact outputs and the next step pins them. A step's assignment pins each input by the record that carries
+it, and its brief names each one as handed on: a file by its name and content hash in the result that carries it, a record by
+its id and hash. When an upstream output changes after a step used it, that step is `stale` and reruns from a fresh assignment
+that pins the new version; the earlier assignment, attempts and results stay recorded.
+
+An item is handed on only after its review. An item of a work step that declares no review, in a step that declares none,
+takes an `independent` review when it feeds a reserved step or leaves the estate, through an `effect` or `exchange` step or a
+step whose items do; a configuration of the flow's `review` option never lowers it. A work step's review is a routed step; an
+item of another kind of step is reviewed by whoever carries the step, with a `review` record of its exact hash. `goal next` lists
+it as `<step> review`, routed to the reviewer role the item names, or to the estate's `reviewer` role. Each candidate must meet
+the review's independence against the step's authors, who are the contributors of its assignments and whoever recorded an
+attempt or a result under one. An author is never offered a review that is not `self`. A `person` review goes only to a
+person, an `other-harness` review only to an agent on a harness none of the authors used, and a person without the operator
+role is not offered one, since only an operator records a review of another's work as a person. A review in a role the flow
+marks `person` is a person's: an agent the roster names in it is never offered it, and its pass, findings or failure count for
+nothing. `goal step` assigns the
+review as an assignment of the run's work order whose `step.review` names the items and the exact subject that carries them.
+An agent reviewer gets a run of its own, counted against the review's attempts, and a person an assignment and an ask. The
+record type refuses a review assignment to an author, to a principal its independence does not admit, or of a subject that
+does not carry the items. A pass by its contributor at that hash hands the items on. Findings send the step back to its author
+for another attempt, and a review that fails it takes its failure route. Findings and failures count only from principals who
+judge the step: an operator, the reviewer roles of its items and of review steps that review it, and its review assignments'
+contributors.
+
+Retries go by outcome, within the goal's `attemptsPerStep`, which counts every agent run of a step's work across all of its
+assignments, so that a fresh assignment never starts the count again; a review's runs count apart.
+
+- An uncertain effect stops the step for its sponsor until it is reconciled by reading. That is a result naming
+  `unresolvedEffects`, a run of its work left `uncertain`, or, for a step carried by its action, an `operation` its done
+  predicates read left `uncertain`. It stops the step even when the step is stale or reopened, so nothing reruns it first. A
+  result with unresolved effects closes nothing; revise it without them once each effect is settled. Until then the record type
+  refuses any run of the step, on any of its assignments and however it is started (`operation.unreconciled`).
+- A run that fails with no result recorded since backs off before the next one. The wait is a minute after the first failed
+  run, doubling with each failed run in a row up to an hour, and the step shows `blocked` until then.
+- Findings start another attempt by the same holder.
+- A failed step, one whose latest result is `blocked` or `abandoned` or whose review fails, takes its failure route. A route to
+  an earlier step reopens that step, which reruns from a fresh assignment, and the failed step reruns once it is done again. A
+  route to a branch enters the branch, and reopens its steps from the failure even when they ran before, so a branch entered
+  again runs again; once they are done the run returns to the branch's `returnTo`. A stop, the route of a step that declares
+  none, stops it for the sponsor, and so does a route that cannot move because the step it returns to is off in this run.
+- When a step must run again and its work has had every run its attempts per step grant, its retry budget is spent and it
+  stops for the sponsor.
+
+Each of these stops is required attention. `goal next` routes it to who decides for the goal, its sponsor, as the route state
+`attention`, and `goal step` records one ask about the record that raised it, with a recommendation, and dispatches nothing for
+it. Only what depends on the step waits, and the run's other steps go on. While the ask waits the route is `asked`; once a
+decision answers it, it is `answered` and is not asked again. The step goes on when its records change, for example when a
+person takes it over with `work takeover`, a result is revised, or a revision of the goal grants more attempts and is activated.
+Two kinds of attention hold the whole run instead: the goal's `limits.consecutiveFailures` reached by failed steps in a row,
+and an evaluation that judges a condition impossible. `goal step` asks the sponsor once and dispatches nothing more until a
+decision answers the ask.
+
+`goal next` and `goal step` hold these stops, the backoff, a failed step's route and the run's own attention. A run started
+directly with `worker start` is the starter's explicit act and is not held by them; the record type still refuses one beyond the
+step's attempts per step or while an effect of its work is unreconciled.
+
+A role may name the estate's own copy of its brief, a file such as `docs/roles/writer.md`, in the flow's `document`. Each
+brief for the role then names that file and its content hash and says whether a living document declares it and whether it is
+due. The file is read only when it is a plain file of one byte to 1 MiB with no link on its path; a link, a directory, a device,
+a FIFO or an empty file is not read, and the brief says so and keeps the flow's own brief. Declared and due at level `refuse`, it holds as `blocked` each step of the role that is still to be briefed, unassigned or
+to rerun from a fresh assignment, until a revision or a review clears it; a holder already briefed goes on.
+
+`goal show` and `goal next` show all of this. Each step lists its attempts under every assignment, with their results, and how
+many runs of its attempts per step it has used. They also show its reviews before hand-off, its required attention, the
+failure its latest work stands on, and whether it reruns from a fresh assignment. A run lists its own required attention.
 
 ## 19. Pairing, local-network connections and revocation
 
@@ -1493,7 +1616,9 @@ by the person asked and accepts no work.
 ## 24. Release notices and upgrades
 
 After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
-commands and coordination steps in section 9 before using the upgraded CLI against that estate.
+commands and coordination steps in section 9 before using the upgraded CLI against that estate. From
+0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
+what to run when it cannot.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
 enabled by default. It asks GitHub's `Vericairn/vericairn` latest-release endpoint for the newest

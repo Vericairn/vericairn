@@ -398,6 +398,32 @@ its review from `review` records of that exact hash; see the
 `records describe assignment`, `records describe result` and `records describe
 operation` include these contracts.
 
+### Hand-offs, reviews and failure routes (0.9.2)
+
+PROC-10 adds one optional field within format 3, and no record type. An
+assignment without `step.review` behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `assignment` | Optional `step.review: {items?, subject}` marks an assignment of a step's review before hand-off rather than of the step itself. `items` names the step's items it reviews, omitted for a step that declares none, whose result it reviews; `subject` is the exact `{type, id, hash}` of the record that carries them: a result of the step's own work for a file or the step's result, or a record of the type a record item is counted from. Its contributor reviews, and is never among the step's authors. |
+| `goal` | `limits.consecutiveFailures` holds a run of a flow in `goal next` and `goal step`: that many failed steps in a row hold the run until its sponsor answers. A run started directly with `worker start` is not held by it, and for any other goal it is still recorded and not enforced. |
+| `operation` | An `agent-run` intent on an assignment of a run's flow step is refused (`operation.unreconciled`) while a result of that step's work, under any of its assignments, names `unresolvedEffects` at its current revision; revise the result once each effect is reconciled. Assignments of other work keep their earlier reading. |
+
+Validation refuses a review assignment of a review step, of items the step does
+not declare or of items that take different review requirements, and one whose
+subject is not what carries its items. Its contributor is refused when it is an
+author of the step's work (a contributor of one of the step's assignments, or
+whoever recorded an attempt or a result under one), unless every item it reviews
+takes a `self` review; when the review is a person's and it is not a person;
+when the review is on another harness and it is not an agent whose harness none
+of the authors used; when it is a person without the operator role, who records
+no review of another's work in this build; and when it is an agent and the
+review's role is one the flow marks `person`. A flow's `failure` route and a
+role's `document` are template content, not record fields; see
+[Templates](templates.md#flows-092). `records describe assignment` and
+`records describe goal` include these contracts, and the generic record reader
+advances to `vericairn.records/readers/8`.
+
 ## Search selections in agent runs (0.9.2)
 
 CONTEXT-02 adds two optional fields to `agent-run` operations within format 3, and no record type. A run without them is

@@ -26,10 +26,11 @@ public static partial class NextEligible
     /// The route an eligible step takes from this machine, or what holds it, in the state language's step-route vocabulary: agent (an
     /// agent carries it, in a run), person (a person is assigned it and asked), reserved (a reserved action: a person who holds it is
     /// assigned it and asked), unavailable (no principal is available, and the sponsor is asked), running (a run of it is in flight),
-    /// assigned (with the person it is assigned to), review (an agent's result awaits review), asked (an ask about it waits) and
-    /// answered (no principal is available, and the principal asked answered, so is not asked again).
+    /// assigned (with the person it is assigned to), review (an agent's result awaits review), asked (an ask about it waits),
+    /// answered (no principal is available, and the principal asked answered, so is not asked again) and attention (a run's step raised
+    /// required attention: its sponsor is asked, design/flow.md §§ 7 and 8).
     /// </summary>
-    public static readonly ImmutableArray<string> RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered"];
+    public static readonly ImmutableArray<string> RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered", "attention"];
 
     /// <summary>The route states the one-step operation acts on; every other state holds the step.</summary>
     public static readonly ImmutableArray<string> Dispatching = ["agent", "person", "reserved", "unavailable"];
@@ -132,10 +133,10 @@ public static partial class NextEligible
     /// passes its own assignments and asks, and admits only the candidates its role allows.
     /// </summary>
     private static Route RouteOf(EstateModel model, RecordEnvelope goal, string status, AgentRuns.Ledger ledger, string role, string? reserved, IReadOnlyList<RecordEnvelope> assignments,
-        IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit)
+        IReadOnlyList<RecordEnvelope> asks, List<AgentRuns.Run> runs, Routing.Machine machine, Func<Routing.Candidate, Routing.Candidate>? admit, (IReadOnlyList<string> Principals, Routing.Source Source)? named = null)
     {
         admit ??= candidate => candidate;
-        (IReadOnlyList<string> principals, Routing.Source source) = Routing.Principals(model, goal, role);
+        (IReadOnlyList<string> principals, Routing.Source source) = named ?? Routing.Principals(model, goal, role);
         RecordEnvelope? latestAsk = asks.Count == 0 ? null : asks[^1];
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
         RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
@@ -248,26 +249,30 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
-    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null, string? line = null, string? channel = null) => context.WithApi(root, api =>
+    public int Upgrade(string root, string version, string? by, bool check, bool json, string? from = null, string? buildIdentity = null, string? line = null, string? channel = null)
     {
-        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText(), Line = line, Channel = channel });
-        if (plan is null)
+        UpgradeResponse? upgraded = null;
+        int code = context.WithApi(root, api =>
         {
-            if (problem is not null && problem.Findings.Count > 0)
+            (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check) { From = from is null ? null : Path.GetFullPath(from), ClientBuild = buildIdentity ?? VersionText(), Line = line, Channel = channel });
+            if (plan is null)
             {
-                context.Error.WriteLine(problem.Message);
-                return context.ReportFindings(new FindingsResponse("not upgraded", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
+                if (problem is not null && problem.Findings.Count > 0)
+                {
+                    context.Error.WriteLine(problem.Message);
+                    return context.ReportFindings(new FindingsResponse("not upgraded", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
+                }
+
+                return context.Fail(problem?.Message ?? "refused");
             }
 
-            return context.Fail(problem?.Message ?? "refused");
-        }
+            upgraded = plan;
+            if (json)
+            {
+                // Printed once the runtime step below has run, with what it found.
+                return Clean;
+            }
 
-        if (json)
-        {
-            context.Output.WriteLine(JsonSerializer.Serialize(plan, ProtocolJson.Options));
-        }
-        else
-        {
             context.Output.WriteLine($"{(plan.Applied ? "upgraded" : "would upgrade")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release}");
             context.Output.WriteLine($"  followed line: {plan.Line}; channel: {plan.Channel}");
             foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
@@ -293,10 +298,84 @@ internal sealed class EstateOperations(CommandContext context)
             {
                 context.Output.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");
             }
+
+            return Clean;
+        }, readOnly: check, upgrade: true);
+        if (upgraded is null)
+        {
+            return code;
         }
 
-        return Clean;
-    }, readOnly: check, upgrade: true);
+        // A check changes nothing, so it leaves the runtime alone. An applied upgrade, or a rerun of one already applied, is
+        // followed by the runtime step (OPS-05): no runtime of an older release keeps serving the estate on this machine.
+        RuntimeReplacement? replacement = check ? null : ReplaceOlderRuntime(root, upgraded.Release);
+        if (json)
+        {
+            JsonObject output = JsonSerializer.SerializeToNode(upgraded, ProtocolJson.Options)!.AsObject();
+            if (replacement is not null)
+            {
+                output["runtime"] = JsonSerializer.SerializeToNode(new
+                {
+                    outcome = replacement.Outcome,
+                    served = replacement.Served is { } served ? new { processId = served.ProcessId, release = served.Release } : null,
+                    started = replacement.Started is { } started ? new { processId = started.ProcessId, release = started.Release } : null,
+                    done = replacement.Done,
+                    warning = replacement.Warning,
+                }, ProtocolJson.Options);
+            }
+
+            context.Output.WriteLine(output.ToJsonString(ProtocolJson.Options));
+        }
+        else if (replacement?.Done is { } done)
+        {
+            context.Output.WriteLine("runtime: " + done);
+        }
+
+        if (replacement?.Warning is { } warning)
+        {
+            context.Error.WriteLine("warning: " + warning);
+        }
+
+        return code;
+    }
+
+    // The source commit of the release record or dependency observation an upgrade pinned, read from the records once no runtime
+    // serves the estate; null when it names none or cannot be read.
+    private static string? PinnedCommit(string root, string release)
+    {
+        try
+        {
+            using EstateSession session = EstateSession.Open(root, readOnly: true);
+            if (!session.Load().ById.TryGetValue(release, out RecordEnvelope? record) || record.Body is not { ValueKind: JsonValueKind.Object } body)
+            {
+                return null;
+            }
+
+            if (body.TryGetProperty("facts", out JsonElement facts) && facts.ValueKind == JsonValueKind.Object)
+            {
+                body = facts;
+            }
+
+            return body.TryGetProperty("commit", out JsonElement commit) && commit.ValueKind == JsonValueKind.String ? commit.GetString() : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private RuntimeReplacement ReplaceOlderRuntime(string root, string release)
+    {
+        try
+        {
+            return new DaemonLifecycle(context).ReplaceOlderRuntime(root, () => PinnedCommit(root, release));
+        }
+        catch (Exception exception) when (!context.CancellationToken.IsCancellationRequested
+            && exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
+        {
+            return new("unchecked", null, null, null, $"the runtime serving this estate on this machine could not be checked ({ServingRuntime.Reason(exception)}). The upgrade is applied. See 'vericairn --estate {ServingRuntime.Quote(Path.GetFullPath(root))} runtime status'.");
+        }
+    }
 
     public int Reconcile(string root, bool json) => context.WithApi(root, api =>
     {

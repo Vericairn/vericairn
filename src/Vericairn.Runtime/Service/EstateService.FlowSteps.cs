@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Estate;
@@ -12,15 +13,19 @@ using static Vericairn.Runtime.Service.EstateServiceValues;
 namespace Vericairn.Runtime.Service;
 
 /// <summary>
-/// One step of a run per command (the estate's design/flow.md §§ 6 and 10): routing's assignment of a flow's work or review step names
-/// the step and item, and its brief pins each input the step takes by type, id and hash, so a later change to an upstream output shows
-/// the step stale. The brief carries the step's role brief, its hand-off contract, its recovery and the flow's never lines.
+/// One step of a run per command (the estate's design/flow.md §§ 5, 6 and 10): routing's assignment of a flow's work or review step
+/// names the step and item, and its brief pins each input the step takes by type, id and hash, so a later change to an upstream output
+/// shows the step stale. The brief carries the step's role brief, the estate's living copy of it where the role names one, its hand-off
+/// contract, its recovery and the flow's never lines. A review before hand-off is an assignment of its own, naming the step, the items
+/// and the exact subject it reviews.
 /// </summary>
 public sealed partial class EstateService
 {
     /// <summary>The assignment routing writes for the step it takes: a work order's, or a run's flow step's.</summary>
     private static JsonObject Routed(EstateModel model, RecordEnvelope goal, Taken taken, string workspace, string routedWith) =>
-        taken.Step is null ? RoutedAssignment(model, goal, taken.Order, taken.Route, workspace, routedWith) : RoutedFlowAssignment(model, goal, taken, workspace, routedWith);
+        taken.Step is null ? RoutedAssignment(model, goal, taken.Order, taken.Route, workspace, routedWith)
+            : taken.Review is not null ? RoutedReviewAssignment(model, goal, taken, workspace, routedWith)
+            : RoutedFlowAssignment(model, goal, taken, workspace, routedWith);
 
     /// <summary>
     /// The assignment of a run's step: of the run's work order, naming the step and item and pinning its inputs; its brief from the
@@ -48,19 +53,27 @@ public sealed partial class EstateService
             new JsonObject { ["type"] = "goal", ["id"] = goal.Id, ["hash"] = goal.ComputedHash });
         var pins = new JsonArray();
         var cited = new HashSet<string>(StringComparer.Ordinal) { order.Id, goal.Id };
+        var handed = new List<string>();
         foreach (FlowPosition.Input input in instance.Inputs.Where(i => i.Carrier is not null))
         {
             RecordEnvelope pinned = input.Carrier!;
             pins.Add(new JsonObject { ["name"] = input.Name, ["type"] = pinned.Type, ["id"] = pinned.Id, ["hash"] = pinned.ComputedHash });
+            handed.Add(input.Hash is string exact && exact != pinned.ComputedHash ? $"{input.Name}, {input.Source} at {exact} in {pinned.Type} {pinned.Id}" : $"{input.Name}, {input.Source}: {pinned.Type} {pinned.Id} at {pinned.ComputedHash}");
             if (cited.Add(pinned.Id))
             {
                 sources.Add(new JsonObject { ["type"] = pinned.Type, ["id"] = pinned.Id, ["hash"] = pinned.ComputedHash });
             }
         }
 
-        string role = flow.Role(step.Role)?.Brief is string brief ? $" The {step.Role} role's brief: {brief}" : string.Empty;
+        (string role, RecordEnvelope? living) = RoleBrief(model, flow, step.Role);
+        if (living is not null && cited.Add(living.Id))
+        {
+            sources.Add(new JsonObject { ["type"] = living.Type, ["id"] = living.Id, ["hash"] = living.ComputedHash });
+        }
+
+        string inputs = handed.Count == 0 ? string.Empty : $" Its inputs, exactly as handed on: {string.Join("; ", handed)}; use these and no other version.";
         // Each item the step closes on, with what it must show: its kind, its provenance, its evidence and its review.
-        List<string> outputs = instance.Items.Where(i => i.State != "off").Select(i => Clip(Describe(step, i.Declared), 2000)).ToList();
+        List<string> outputs = instance.Items.Where(i => i.State != "off").Select(i => Clip(Describe(step, i.Declared, i.Requirement), 2000)).ToList();
         if (outputs.Count == 0)
         {
             outputs.AddRange(Strings(order.Body, "deliverables"));
@@ -88,7 +101,7 @@ public sealed partial class EstateService
         string granted = string.Join(", ", Caps.Granted(goal.Body.TryGetProperty("budget", out JsonElement budget) ? budget : default).Where(g => g.Cap is not null).Select(g => $"{g.Unit} {g.Cap}"));
         var body = new JsonObject
         {
-            ["outcome"] = Clip($"{instance.Name} {step.Title}: the {step.Kind} step of flow {flow.Pin.Id} {flow.Pin.Version} that goal {EstateModel.BodyString(goal, "title")} runs, carried as its {step.Role}.{(step.Action is null ? string.Empty : " " + step.Action)}{role}", 4000),
+            ["outcome"] = Clip($"{instance.Name} {step.Title}: the {step.Kind} step of flow {flow.Pin.Id} {flow.Pin.Version} that goal {EstateModel.BodyString(goal, "title")} runs, carried as its {step.Role}.{(step.Action is null ? string.Empty : " " + step.Action)}{inputs}{role}", 4000),
             ["sources"] = sources,
             ["permittedChanges"] = new JsonArray(Strings(order.Body, "scope").Select(s => (JsonNode)Clip(s, 2000)).ToArray()),
             ["prohibitedEffects"] = new JsonArray(constraints.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
@@ -119,8 +132,167 @@ public sealed partial class EstateService
         };
     }
 
-    /// <summary>One item of a step in words, with every requirement it declares and the review it takes, its step's when it declares none.</summary>
-    private static string Describe(FlowStep step, FlowOutput output)
+    /// <summary>
+    /// The assignment of a step's review before hand-off (design/flow.md § 6): of the run's work order, naming the step, its instance and
+    /// the review, the items it covers and the exact subject that carries them; its brief asks for a review of that exact subject with
+    /// the requirement's independence, carries the reviewer role's brief, and prohibits changing the work it reviews.
+    /// </summary>
+    private static JsonObject RoutedReviewAssignment(EstateModel model, RecordEnvelope goal, Taken taken, string workspace, string routedWith)
+    {
+        FlowPosition.StepInstance instance = taken.Step!;
+        FlowPosition.PendingReview review = taken.Review!;
+        FlowDefinition flow = taken.Flow!.Flow!;
+        FlowStep step = instance.Step;
+        NextEligible.Route route = taken.Route;
+        RecordEnvelope order = taken.Order;
+        string orderKey = EstateModel.BodyString(order, "key") ?? order.Id;
+        List<string> constraints = Strings(goal.Body, "constraints");
+        constraints.Add(ReservedEffects);
+        constraints.Add($"no change to the work it reviews: findings go back to its author, and a review by an author of step {instance.Name}'s work clears nothing{(review.Requirement.Independence == "self" ? " but a self review" : string.Empty)}");
+        constraints.AddRange(flow.Never);
+        var sources = new JsonArray(
+            new JsonObject { ["type"] = "work-order", ["id"] = order.Id, ["hash"] = order.ComputedHash },
+            new JsonObject { ["type"] = "goal", ["id"] = goal.Id, ["hash"] = goal.ComputedHash },
+            new JsonObject { ["type"] = review.Subject.Type, ["id"] = review.Subject.Id, ["hash"] = review.Hash });
+        (string role, RecordEnvelope? living) = RoleBrief(model, flow, review.Role);
+        if (living is not null)
+        {
+            sources.Add(new JsonObject { ["type"] = living.Type, ["id"] = living.Id, ["hash"] = living.ComputedHash });
+        }
+
+        string independence = review.Requirement.Independence switch
+        {
+            "self" => "the author's own review, labeled self",
+            "person" => "a person's review, by a person other than its authors",
+            "other-harness" => "an independent review by an agent on another harness than its authors used",
+            _ => "an independent review, by a principal other than its authors",
+        };
+        List<string> criteria = step.Outputs.Where(o => review.Items.Contains(o.Name, StringComparer.Ordinal)).Select(o => Clip(Describe(step, o, review.Requirement), 2000)).ToList();
+        criteria.Insert(0, $"Record a review of {review.Subject.Type} {review.Subject.Id} at {review.Hash} with outcome pass, findings or fail: pass hands {review.What} on, findings send step {instance.Name} back to its author for another attempt, and fail takes its failure route ({step.FailureRoute}).");
+        criteria.AddRange(instance.Done.Select(d => "Its done predicate holds: " + GoalPredicates.DescribePredicate(d.Predicate) + "."));
+        string granted = string.Join(", ", Caps.Granted(goal.Body.TryGetProperty("budget", out JsonElement budget) ? budget : default).Where(g => g.Cap is not null).Select(g => $"{g.Unit} {g.Cap}"));
+        var body = new JsonObject
+        {
+            ["outcome"] = Clip($"{instance.Name} review: review {review.What} at {review.Hash}, from step {instance.Name} {step.Title} of flow {flow.Pin.Id} {flow.Pin.Version} that goal {EstateModel.BodyString(goal, "title")} runs, before it is handed on. It takes {independence}, carried as its {review.Role}.{role}", 4000),
+            ["sources"] = sources,
+            ["permittedChanges"] = new JsonArray(Strings(order.Body, "scope").Select(s => (JsonNode)Clip(s, 2000)).ToArray()),
+            ["prohibitedEffects"] = new JsonArray(constraints.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
+            ["workspace"] = new JsonArray(Clip(workspace, 500)),
+            ["limits"] = new JsonArray(Clip($"within the budget goal {goal.Id} grants: {granted}", 2000)),
+            ["expectedOutputs"] = new JsonArray(Clip($"a review record of {review.Subject.Type} {review.Subject.Id} at {review.Hash}, with its independence stated honestly", 2000)),
+            ["reviewCriteria"] = new JsonArray(criteria.Select(c => (JsonNode)Clip(c, 2000)).ToArray()),
+            ["recovery"] = Clip($"A review names the exact hash it read; if the subject changes before it is recorded, routing gives the new version a review of its own. Whoever continues starts from this assignment's brief and vericairn work brief {orderKey}, never from a conversation.", 4000),
+        };
+        var named = new JsonObject { ["key"] = step.Key };
+        if (instance.Instance is not null)
+        {
+            named["instance"] = instance.Instance;
+        }
+
+        var reviewed = new JsonObject { ["subject"] = new JsonObject { ["type"] = review.Subject.Type, ["id"] = review.Subject.Id, ["hash"] = review.Hash } };
+        if (review.Items.Count > 0)
+        {
+            reviewed["items"] = new JsonArray(review.Items.Select(i => (JsonNode)i).ToArray());
+        }
+
+        named["review"] = reviewed;
+        return new JsonObject
+        {
+            ["contributor"] = route.Principal,
+            ["brief"] = body,
+            ["note"] = Clip($"Routed by roster ({route.Role}, from {route.Source.Description}) for the review of step {instance.Name} of flow {flow.Pin.Id} {flow.Pin.Version} before it is handed on: {route.Reason}.", 4000),
+            ["step"] = named,
+            ["routedWith"] = routedWith,
+        };
+    }
+
+    /// <summary>
+    /// A role's brief as a step's brief carries it (design/process-profiles.md § 11): the brief the flow ships, and where the role names
+    /// the estate's own copy, a living document in its repository, that file's path and exact content hash, read before the work starts,
+    /// with its due state; and the declaration of that living document, for the brief's sources. The file's content never enters a record.
+    /// </summary>
+    private static (string Text, RecordEnvelope? Declaration) RoleBrief(EstateModel model, FlowDefinition flow, string role)
+    {
+        if (flow.Role(role) is not FlowRole declared)
+        {
+            return (string.Empty, null);
+        }
+
+        string text = $" The {role} role's brief: {declared.Brief}";
+        if (declared.Document is not string path)
+        {
+            return (text, null);
+        }
+
+        (string? hash, bool refused) = RoleDocumentHash(model.Root, path);
+        LivingDocuments.State? state = LivingDocuments.Derive(model).FirstOrDefault(d => d.Path == path && d.Repository is null);
+        text += refused
+            ? $" The estate's copy at {path} is not a plain file of at most {RoleDocumentLimit / 1024} KiB (a link, a directory, a device or an empty file), so it is not read and the flow's brief stands."
+            : hash is null
+            ? $" The estate keeps no copy of it at {path}, so the flow's brief stands."
+            : $" The estate keeps it as a living document at {path} ({hash}): read it before you start{(state is { Due: true } ? $"; it is due, {state.Describe()}" : state is null ? "; no living-document declaration covers it" : string.Empty)}.";
+        return (text, state?.Declaration);
+    }
+
+    /// <summary>The largest role brief document whose hash a brief carries.</summary>
+    private const long RoleDocumentLimit = 1024 * 1024;
+
+    /// <summary>
+    /// The content hash of the estate's copy of a role brief, read through one handle opened only on a plain file: no link on its path,
+    /// no directory or device, and a length from one byte to <see cref="RoleDocumentLimit"/>, so that a FIFO, a socket or a device, which
+    /// report no length, is never opened. The handle's length must match, and the file is hashed as it streams; a file that changes
+    /// while it is read, or becomes a link, is refused. Null with refused false when the file does not exist.
+    /// </summary>
+    private static (string? Hash, bool Refused) RoleDocumentHash(string root, string path)
+    {
+        try
+        {
+            string full = GeneratedDocumentVerification.SafeFile(root, path);
+            var info = new FileInfo(full);
+            if (!info.Exists && !Directory.Exists(full) && info.LinkTarget is null)
+            {
+                return (null, false);
+            }
+
+            if (!info.Exists || info.LinkTarget is not null || (info.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0
+                || info.Length is <= 0 or > RoleDocumentLimit)
+            {
+                return (null, true);
+            }
+
+            using var stream = new FileStream(full, new FileStreamOptions { Mode = FileMode.Open, Access = FileAccess.Read, Share = FileShare.Read, Options = FileOptions.SequentialScan });
+            if (RandomAccess.GetLength(stream.SafeFileHandle) != info.Length)
+            {
+                return (null, true);
+            }
+
+            using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[81920];
+            long read = 0;
+            int count;
+            while ((count = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                read += count;
+                if (read > info.Length)
+                {
+                    return (null, true);
+                }
+
+                sha.AppendData(buffer, 0, count);
+            }
+
+            return read != info.Length || new FileInfo(full).LinkTarget is not null
+                ? (null, true)
+                : ("sha256:" + Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant(), false);
+        }
+        catch (Exception error) when (error is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return (null, true);
+        }
+    }
+
+    /// <summary>One item of a step in words, with every requirement it declares and the review it takes, as the run derives it when given.</summary>
+    private static string Describe(FlowStep step, FlowOutput output, FlowReview? requirement = null)
     {
         var text = new System.Text.StringBuilder();
         text.Append(output.Name).Append(output.Required ? string.Empty : " (optional)").Append(": ").Append(output.Kind switch
@@ -147,7 +319,7 @@ public sealed partial class EstateService
             text.Append("; evidence ").Append(evidence.Name).Append(": a passing verification by ").Append(evidence.Method).Append(evidence.Command is null ? string.Empty : " running " + evidence.Command).Append(" at its exact hash");
         }
 
-        if (step.Kind != "review" && (output.Review ?? step.Review) is FlowReview review && review.Independence != "none")
+        if (step.Kind != "review" && (requirement ?? output.Review ?? step.Review) is FlowReview review && review.Independence != "none")
         {
             text.Append("; reviewed (").Append(review.Independence).Append(review.Role is null ? string.Empty : ", in the " + review.Role + " role").Append(") at its exact hash before the step closes");
         }
@@ -163,8 +335,13 @@ public sealed partial class EstateService
             return $"Nothing to take: every step of goal {goal}'s run is done or off; its evaluation and acceptance remain, as for any goal.";
         }
 
+        if (routes.Held)
+        {
+            return $"Nothing to dispatch: goal {goal}'s run is held for its required attention until the sponsor answers. {string.Join(" ", routes.Attention.Where(a => a.Route.State is "attention" or "asked").Select(a => a.Route.Reason + "."))}";
+        }
+
         IEnumerable<string> held = routes.Steps.Where(s => s.Step.State is not ("done" or "off"))
-            .Select(s => s.Route is NextEligible.Route route ? $"{s.Step.Name} is {s.Step.State}, {route.State}: {route.Reason}." : $"{s.Step.Name} is {s.Step.State}: {s.Step.Reasons[0]}.");
+            .Select(s => s.Route is NextEligible.Route route ? $"{s.Name} is {s.Step.State}, {route.State}: {route.Reason}." : $"{s.Name} is {s.Step.State}: {s.Step.Reasons[0]}.");
         return $"Nothing to dispatch: no step of goal {goal}'s run is one goal step takes now. {string.Join(" ", held)}";
     }
 }

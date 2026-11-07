@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class RuntimeStatusCommand : Command
 {
     public RuntimeStatusCommand(CommandContext context)
-        : base("status", "Whether a daemon serves the estate and where, or whether commands run the embedded runtime.")
+        : base("status", "Whether a daemon serves the estate and where, with its release against the estate's pin and any mismatch, or whether commands run the embedded runtime.")
     {
         var operations = new DaemonLifecycle(context);
         SetAction(parseResult => operations.RuntimeStatus(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(context.JsonOption)));

@@ -189,6 +189,83 @@ the estate whose author does not resolve under the same code at severity `info`;
 reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
 changes.
 
+## An upgrade replaces an older runtime (OPS-05)
+
+No route, interface member, protocol type or public member is added, removed or changed. `GET /v1/health` keeps its
+`HealthResponse`, whose `vericairn` the command line now compares, without build metadata, with the release the estate's
+manifest pins. Comparison follows SemVer precedence, so a prerelease of the pinned version is older than it.
+
+The command line changes. `estate upgrade`, when it applies an upgrade or runs again once applied, ends with a runtime step:
+a daemon serving the estate on this machine whose release is older than the new pin is asked to stop through the existing
+`POST /v1/shutdown`, and when the command line is the pinned release's build, by version and by the source commit the
+pinned release record or dependency observation names, it starts that release's daemon as `runtime start` does. A daemon of the pinned or a newer release, of another estate or root, or one that refuses the connection is not
+stopped, and none is started where none served. Its `--json` output, the `UpgradeResponse` as before, adds `runtime` with
+`outcome`, `served`, `started`, `done` and `warning`; `--check` adds nothing. `runtime status --json` adds
+`servingRelease`, `pin`, `pinnedRelease` and `mismatch`. Human `status` adds a final `Serving runtime (this machine):` line,
+and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, with a mismatch on stderr. Older clients
+ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
+No record type, record format or generated document changes.
+
+## A reconciliation settles operations that share an identity (FIX-100)
+
+No route, interface member or protocol type is added or changed. A `reconciliation` whose subject is an operation and whose
+`kept` and `withdrawn` records are not revisions of that subject now settles operations recorded independently under one
+identity: each named record must be an operation under the subject's identity and the latest revision of its own operation,
+or the finding `reconciliation.identity` is an error; it is accepted only from the operator or under the `local-engineering`
+scope (`reconciliation.author`) and only when signed by an admitted device (`signature.required`), whatever the charter's
+signature policy. The withdrawn operations then read as superseded by the kept one. Before, such a reconciliation was
+refused with `reconciliation.successor`. Reconciliations of revisions of one record are unchanged.
+`EstateStatus.ReconcileCodes` adds `operation.duplicate-identity`, so status's `reconcile` list, `estate reconcile` and the
+required-attention incidents include it. Record format remains 3; the reconciliation type's summary and field descriptions,
+and with them the generic record reader's identity, are unchanged.
+
+## Hand-offs, reviews and failure routes (PROC-10)
+
+No route, interface member or protocol type is added or changed. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds the
+run's `attention`, and each step instance adds `failure` (a work step's failure route), `rerun`, `attemptsUsed`,
+`attemptsAllowed`, `attempts` (each with its assignment, attempt, result and outcome), `reviews` (each review before hand-off
+with its items, independence, role, subject and assignment), `attention` and `failed`. `GET /v1/goals/{id}/next` keeps
+`vericairn.next/1`; for a run it adds `attention` and `held`, each step entry adds `review` and `attention`, a review before
+hand-off is a step entry of its own whose `next` name is `<step> review`, and the route vocabulary adds `attention`.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; for required attention its `outcome` is `ask` with no
+assignment, and its `step` is the step, or `the run` for the run's own attention. Older clients ignore the added members and
+values. The SDK's and the MCP server's goal reads carry the same JSON; no tool is added. The state language's `step-route`
+vocabulary adds `attention`.
+
+`Vericairn.Records` adds public types and members:
+
+- `Templates.FlowContract.FailureRoutes`; `Templates.FlowFailure` with `Stop`; `FlowStep.Failure`, an optional trailing
+  parameter, and `FlowStep.FailureRoute`; and `FlowRole.Document`, an optional trailing parameter.
+- `Estate.FlowRuns.ReviewRef`, `ReviewOf`, `ReviewRequirement`, `Consequential`, `Authors`, `Harness` and
+  `ReviewerRefusals`; `FlowRuns.StepRef` gains an optional trailing `Review` parameter and `Work`, and its `ToString` adds
+  `review` for a review's step.
+- `Estate.FlowPosition.AttentionKinds`, `RetryBackoff`, `RetryBackoffLimit` and the records `AttemptState`,
+  `PendingReview`, `Attention` and `Failure`; `StepInstance.Attempts`, `AttemptsUsed`, `AttemptsAllowed`, `Reviews`,
+  `Attention`, `Failed` and `Rerun`; `ItemState.Requirement`; and `Position.RunAttention`. `Position.Find` finds a review's
+  step by its step.
+- `NextEligible.AttentionRoute`; `FlowStepRoute.Review`, an optional trailing parameter, `Name` and `Attention`;
+  `FlowRunRoutes.Attention`, `Held` and `AttentionNext`. `NextEligible.RouteStates` and `FlowDispatching` add `attention`.
+- `AgentRuns.StepAssignments`, the assignments whose runs count as one step's attempts.
+
+Behavior changes to the runs that PROC-05 adds, each within record format 3. A run's attempts per step count every agent run
+of a step's work across all of its assignments: a stale, reopened or rerun step's fresh assignment no longer starts the
+count again, and the record type refuses a run beyond them. Findings and failures that send a run's work back count only
+from principals who judge the step. A review that names no reviewer role clears an item only when it is by a principal of
+the estate's `reviewer` role, an operator, or the contributor of a review assignment of that item; PROC-05 accepted any
+principal other than the authors. A review in a role the flow marks `person` counts only from a person. A result naming
+`unresolvedEffects` no longer closes its step, and stops it even when stale or reopened; the record type refuses an
+`agent-run` intent on any assignment of that step while such a result is current (`operation.unreconciled`). The
+consequential independent default and routed reviews apply to work steps only. A failure route that returns to an `effect`
+or `exchange` step, and a failure route through a branch whose `returnTo` is a step after the failed one, are refused with
+the flow. `goal next` and `goal step` hold a failed step's route, its backoff and the run's `limits.consecutiveFailures`; a
+run started directly with `worker start` is not held by them. Record format remains 3; its addition, an assignment's
+`step.review`, and these rules are in [record format 3](record-format-v3.md#hand-offs-reviews-and-failure-routes-092).
+
+The generic record reader advances its implementation identity to `vericairn.records/readers/8`: an assignment's `step` and
+a goal's `limits` change their schema explanations. Its hash changes; declarations pinned to an earlier implementation
+require the ordinary explicit generator update before regeneration, and earlier golden fixtures remain retained. The
+generator id and contract version 1 are unchanged.
+
 ## Keyword search and search-selected context (CONTEXT-02)
 
 `IEstateApi` adds `Search(SearchRequest)`, `SearchIndex(SearchIndexRequest)`, `SearchReplay(SearchReplayRequest)`,

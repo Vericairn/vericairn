@@ -13,7 +13,7 @@ internal sealed class EstateUpgradeCommand : Command
     }
 
     internal EstateUpgradeCommand(CommandContext context, string versionText)
-        : base("upgrade", "Pin the estate to a published release and apply record-format migrations as one reviewable change with a migration record.")
+        : base("upgrade", "Pin the estate to a published release and apply record-format migrations as one reviewable change with a migration record. Then a daemon of an older release serving the estate on this machine is stopped, and the pinned release's started in its place when this command line is that release, or the commands to run are named; --check leaves the runtime alone.")
     {
         var operations = new EstateOperations(context);
         var toVersionOption = new Option<string>("--to") { Description = "Published version within the followed line and channel or more stable, using that release's command line.", Required = true };

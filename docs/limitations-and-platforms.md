@@ -144,7 +144,7 @@ nuget.org availability or account-holder qualification claim.
 - FIX-12 checks the work order's current holder for every run, before workspace preparation and again under the write lock before intent. A new run on an assignment displaced by hand-over is refused whether explicitly named or routed, with nothing recorded or charged. The check grants no new authority and does not certify containment of an existing run.
 - Asks deliver at most three per principal in a read response, with the remainder queued. A stalled run can record an attention ask, but there is no external notification delivery here. A decision by the principal asked answers it; reading, dismissing or waiting does not.
 - Settlement withdraws the run's still-open or notified process attention asks, including stall and command-audit asks, as no longer needed. Withdrawals pin the exact settlement and preserve the question and observations; already answered asks stay answered. Closed asks no longer produce stale-subject warnings. The new `attempt-missing` and `scope-settlement` asks remain open for review, pinned to the settled operation's exact revision and hash. The settlement, new asks and withdrawals are validated together and journaled; interrupted storage still requires reconciliation. Withdrawal is not an answer by the person asked and accepts no work.
-- Pausing or abandoning a goal prevents new launches; it does not stop runs already in flight. `goal stop` records abandonment; use `worker stop` for each run that must stop and inspect the stop facts. `limits.deadline` and `limits.consecutiveFailures` are validated and recorded but not yet enforced by the routing or worker code. Operators must monitor and act on them.
+- Pausing or abandoning a goal prevents new launches; it does not stop runs already in flight. `goal stop` records abandonment; use `worker stop` for each run that must stop and inspect the stop facts. `limits.deadline` is validated and recorded but not yet enforced by the routing or worker code, and so is `limits.consecutiveFailures` for a goal that runs no flow; operators must monitor and act on them. From 0.9.2, `goal next` and `goal step` hold a run of a flow that reaches its `limits.consecutiveFailures` in failed steps in a row until its sponsor answers; a run started directly with `worker start` is not held by it.
 - Resumption and goal revision do not erase run charges: the ledger includes runs naming any revision of that goal. Concurrency defaults to one when not stated; omitted token or currency allowance is not unlimited spending authority.
 
 ## Worker launchers, limits and custody
@@ -358,6 +358,12 @@ can leave earlier verified files in the destination; the operation does not repo
 failed destination and preserve it as needed before choosing another empty directory. The inventory
 does not establish who produced an export or grant authority. Record signatures are checked separately,
 and no private keys travel with the export.
+
+An export carries the estate repository only: records, native objects and documents. A payload held in an
+external store, and a release's files, are not in it, and the export doesn't list their references. Restored
+records name such a payload; they don't recover its bytes. From 0.9.2, [Large private artifacts](large-artifacts.md)
+describes the store's own backup and the readback verification that a cold recovery needs. A typed custody
+descriptor and an export list of external references are planned (DESIGN-42).
 
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
