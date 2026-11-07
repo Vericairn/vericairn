@@ -1088,9 +1088,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             using JsonDocument json = JsonDocument.Parse(global::Vericairn.Records.Estate.Asks.RenderJson(model, principal));
+            // A device's cursor is its own principal's; on the local socket the user reads for the principal asked, when one is.
             return new AsksResponse(global::Vericairn.Records.Estate.Asks.RenderText(model, principal), json.RootElement.Clone())
             {
-                EventsCursor = EventsCursorLocked(model, null, new EventPass { Asks = true }),
+                EventsCursor = EventsCursorLocked(model, RequestPrincipal(model) ?? (model.CurrentPrincipal(principal) is null ? null : principal), new EventPass { Asks = true }),
             };
         }
     }

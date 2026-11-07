@@ -847,14 +847,18 @@ and reconnects by itself. Start it before reading the state it complements, or r
 return, and no change is missed. A `reset` line means the cursor could not be honored, for example a client
 back after more than a week or after a restore: re-read the state, then continue. The journal keeps at most
 seven days and 100,000 events in an owner-only file beside the live store; a clean restart keeps it, and a
-crash or a lost file starts a new epoch, after which every older cursor resets. The embedded runtime keeps
+crash or a lost file starts a new epoch, after which every older cursor resets. A copy of a cleanly
+stopped journal restored from a backup is not detected and continues its epoch, so a client that read past
+the copy can miss events: after restoring the runtime's state directory, stop the daemon, delete
+`events.db` beside the live store and start it again, so every cursor resets. The embedded runtime keeps
 no journal, so `events watch` needs a running daemon.
 
 A paired device reads events only for its own principal and with its own signature; a device stream ends
 after 60 minutes and reconnects. Each event passes the audience check before it is delivered: a principal's
 attention and its acknowledgments reach only that principal, and what a reader may not read is dropped
 without any count, error or timing that would show it. Revoking a device closes its streams before the next
-event. A device holds at most four streams, the runtime 16. A script that follows `events watch` and runs
+event. A device holds at most four streams, one principal's devices eight and all devices 16; the local
+socket keeps two more for itself, so paired devices never lock out the runtime machine's own user. A script that follows `events watch` and runs
 `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092).
 

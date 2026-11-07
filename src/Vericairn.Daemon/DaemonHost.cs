@@ -768,7 +768,15 @@ public sealed class DaemonHost : IAsyncDisposable
 
             if (deriving is not null)
             {
-                await deriving.ConfigureAwait(false);
+                try
+                {
+                    await deriving.ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    // The event journal's derivation never stops the daemon from stopping cleanly.
+                    Log($"the event derivation ended with {exception.GetType().Name}: {exception.Message}");
+                }
             }
         }
         finally

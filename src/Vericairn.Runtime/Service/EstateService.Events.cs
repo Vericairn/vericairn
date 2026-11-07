@@ -44,6 +44,9 @@ public sealed partial class EstateService
     /// <summary>Told after each derivation pass commits; tests wait on it rather than on time.</summary>
     internal Action? EventsDerived { get; set; }
 
+    /// <summary>A test's hook at the start of each derivation pass, where it injects a fault.</summary>
+    internal Action? EventPassStarting { get; set; }
+
     /// <summary>True when this runtime keeps an event journal: the daemon enables it.</summary>
     public bool EventsEnabled => journal is not null;
 
@@ -141,9 +144,10 @@ public sealed partial class EstateService
                 // The runtime is closing.
                 break;
             }
-            catch (Exception exception) when (exception is IOException or SqliteException or InvalidOperationException or JsonException or UnauthorizedAccessException)
+            catch (Exception exception) when (!Fatal(exception))
             {
-                log?.Invoke($"the event journal could not derive what changed: {exception.Message}");
+                // Whatever a projection throws, the pump goes on: the next signal or tick tries again, and the daemon still stops cleanly.
+                log?.Invoke($"the event journal could not derive what changed: {exception.GetType().Name}: {exception.Message}");
                 last = Stopwatch.GetTimestamp();
             }
         }
@@ -193,7 +197,7 @@ public sealed partial class EstateService
             {
                 DeriveEventsLocked(model, pass);
             }
-            catch (Exception exception) when (exception is SqliteException or IOException or ObjectDisposedException or JsonException)
+            catch (Exception exception) when (!Fatal(exception))
             {
                 return (null, new Problem("unavailable", "The event journal cannot be read now: " + exception.Message, []));
             }
@@ -400,13 +404,17 @@ public sealed partial class EstateService
             DeriveEventsLocked(model, pass);
             return events.Seal(events.Head, principal);
         }
-        catch (Exception exception) when (exception is SqliteException or IOException or ObjectDisposedException or InvalidOperationException or JsonException)
+        catch (Exception exception) when (!Fatal(exception))
         {
+            // A journal that cannot derive never fails the read it would complement: the read answers without a cursor.
             return null;
         }
     }
 
     private static TimeSpan Max(TimeSpan one, TimeSpan other) => one > other ? one : other;
+
+    /// <summary>Failures no catch should hide: the process cannot go on after them.</summary>
+    private static bool Fatal(Exception exception) => exception is OutOfMemoryException or StackOverflowException or AccessViolationException or InsufficientExecutionStackException;
 
     private static readonly Problem EventsUnavailable = new("unavailable", "This runtime keeps no event journal: the daemon keeps it. Start the runtime with 'vericairn runtime start' and read events through it.", []);
 
@@ -450,6 +458,7 @@ public sealed partial class EstateService
     /// </summary>
     private void DeriveEventsLocked(EstateModel model, EventPass pass)
     {
+        EventPassStarting?.Invoke();
         EventJournal events = journal!;
         Volatile.Write(ref audience, EventAudience.From(model));
         string at = RecordParser.FormatTimestamp(eventClock.GetUtcNow());
@@ -471,7 +480,13 @@ public sealed partial class EstateService
             writtenHere.TryRemove(id, out _);
         }
 
-        var derived = new List<PendingEvent>();
+        // A write judged invalid after it was stored is discarded under the same gate: its id never reaches a model, so it is forgotten.
+        foreach (string id in writtenHere.Keys.Where(id => !model.ById.ContainsKey(id)))
+        {
+            writtenHere.TryRemove(id, out _);
+        }
+
+        var derived = new List<(string Item, PendingEvent Event)>();
         var updates = new List<ProjectionUpdate>();
         void Compare(string projection, Dictionary<string, EventItem> items, IReadOnlyDictionary<string, EventItem>? baseline, bool silent, Func<string, bool>? within = null)
         {
@@ -489,7 +504,7 @@ public sealed partial class EstateService
                 if (!silent)
                 {
                     string change = before is null ? "raised" : before.State + ":acknowledged" == item.State ? "acknowledged" : "changed";
-                    derived.Add(new PendingEvent(item.Key(item.State), item.Kind, change, item.Subject, item.Sources, item.To, item.Category, item.Private, item.Related));
+                    derived.Add((projection + "\n" + key, new PendingEvent(item.Key(item.State), item.Kind, change, item.Subject, item.Sources, item.To, item.Category, item.Private, item.Related)));
                 }
             }
 
@@ -500,7 +515,7 @@ public sealed partial class EstateService
                     removed.Add(key);
                     if (!silent)
                     {
-                        derived.Add(new PendingEvent(before.Key("cleared"), before.Kind, "cleared", before.Subject, before.Sources, before.To, before.Category, before.Private, before.Related));
+                        derived.Add((projection + "\n" + key, new PendingEvent(before.Key("cleared"), before.Kind, "cleared", before.Subject, before.Sources, before.To, before.Category, before.Private, before.Related)));
                     }
                 }
             }
@@ -560,16 +575,17 @@ public sealed partial class EstateService
                 && !listening.Keys.Any(s => AttentionProjection(s.Principal) == r.Key))
             .Select(r => r.Key).ToList();
 
-        // Derived changes to one subject in one pass collapse to the last; record events never merge.
+        // Derived changes to one item in one pass collapse to the last; record events never merge. An item is a projection's own
+        // identity, so two items on one subject (attention of two kinds about one record, say) stay two events.
         var collapsed = derived.Select((e, index) => (e, index))
-            .GroupBy(x => (x.e.Kind, x.e.Subject.Type, x.e.Subject.Id, x.e.To))
-            .Select(g => g.Last()).OrderBy(x => x.index).Select(x => x.e);
+            .GroupBy(x => x.e.Item, StringComparer.Ordinal)
+            .Select(g => g.Last()).OrderBy(x => x.index).Select(x => x.e.Event);
         appended.AddRange(collapsed);
         events.Commit(at, appended, observedNow, updates, touched, dropped, initialize: !events.Initialized);
         EventsDerived?.Invoke();
     }
 
-    private static PendingEvent RecordEvent(EstateModel model, RecordEnvelope record, string change, EventRelations relations)
+    private PendingEvent RecordEvent(EstateModel model, RecordEnvelope record, string change, EventRelations relations)
     {
         var sources = new List<EventReference>();
         if (record.Subject is { } subject)
@@ -586,7 +602,7 @@ public sealed partial class EstateService
         return new PendingEvent(item.Key(item.State), "record", change, item.Subject, item.Sources, null, null, false, item.Related);
     }
 
-    private static Dictionary<string, EventItem> AttentionItems(EstateModel model, string principal, AttentionResponse attention, EventRelations relations)
+    private Dictionary<string, EventItem> AttentionItems(EstateModel model, string principal, AttentionResponse attention, EventRelations relations)
     {
         var items = new Dictionary<string, EventItem>(StringComparer.Ordinal);
         foreach (AttentionNotice notice in attention.Items)
@@ -611,7 +627,7 @@ public sealed partial class EstateService
         return items;
     }
 
-    private static Dictionary<string, EventItem> AskItems(EstateModel model, EventRelations relations)
+    private Dictionary<string, EventItem> AskItems(EstateModel model, EventRelations relations)
     {
         var items = new Dictionary<string, EventItem>(StringComparer.Ordinal);
         foreach (RecordEnvelope ask in model.Current("ask"))
@@ -634,7 +650,7 @@ public sealed partial class EstateService
         return items;
     }
 
-    private static Dictionary<string, EventItem> RequestItems(EstateModel model, EventRelations relations)
+    private Dictionary<string, EventItem> RequestItems(EstateModel model, EventRelations relations)
     {
         var items = new Dictionary<string, EventItem>(StringComparer.Ordinal);
         foreach (RecordEnvelope request in model.Current("operator-request"))
@@ -653,10 +669,10 @@ public sealed partial class EstateService
         return items;
     }
 
-    private static Dictionary<string, EventItem> StepItems(EstateModel model, EventRelations relations, string? only)
+    private Dictionary<string, EventItem> StepItems(EstateModel model, EventRelations relations, string? only)
     {
         var items = new Dictionary<string, EventItem>(StringComparer.Ordinal);
-        DateTimeOffset at = DateTimeOffset.UtcNow;
+        DateTimeOffset at = eventClock.GetUtcNow();
         foreach (RecordEnvelope goal in model.Current("goal"))
         {
             string root = model.Chain(goal)[0];
@@ -691,7 +707,7 @@ public sealed partial class EstateService
                 related.AddRange(relations.Of(step.Assignment));
                 // A step's name can carry an item a goal configures, so the step is named only by an opaque digest.
                 string key = root + "/" + step.Name;
-                items[key] = new EventItem("step", new EventReference("step", Opaque("step", key)), Bounded(sources), step.State + (step.Waiting ? ":waiting" : string.Empty),
+                items[key] = new EventItem("step", new EventReference("step", journal!.Name("step", key)), Bounded(sources), step.State + (step.Waiting ? ":waiting" : string.Empty),
                     step.Principal, step.State is "blocked" or "stale" ? "blocked" : null, false, related.Distinct(StringComparer.Ordinal).ToList());
             }
         }
@@ -717,7 +733,7 @@ public sealed partial class EstateService
 
             bool stalled = run.Liveness?.AttentionAt is not null || run.Signals?.Any(s => s.Severity == "critical") == true;
             bool overdue = run.RequestedProgress?.Overdue == true;
-            string state = Opaque("run", JsonSerializer.Serialize(new
+            string state = Digest(JsonSerializer.Serialize(new
             {
                 run.Status,
                 stop = run.Stop is not null,
@@ -742,19 +758,20 @@ public sealed partial class EstateService
     }
 
     /// <summary>
-    /// A reference an envelope may carry: a record by type, id and hash; any other subject by its kind and an opaque digest, since its
-    /// identity can be a path or a command.
+    /// A reference an envelope may carry: a record by type, id and hash; any other subject by its kind and a name keyed on this
+    /// machine, since its identity can be a path or a command that a reader could otherwise confirm by guessing.
     /// </summary>
-    private static EventReference Reference(EstateModel model, string type, string id, string? hash) =>
+    private EventReference Reference(EstateModel model, string type, string id, string? hash) =>
         model.ById.TryGetValue(id, out RecordEnvelope? record)
             ? new EventReference(record.Type, record.Id, hash ?? record.ComputedHash)
-            : new EventReference(SafeType(type), Opaque(type, id));
+            : new EventReference(SafeType(type), journal!.Name(type, id));
 
     private static string SafeType(string type) =>
         type.Length is > 0 and <= 64 && type.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-') ? type : "subject";
 
-    private static string Opaque(string type, string id) =>
-        "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(type + "\n" + id)));
+    /// <summary>A digest of a derived state; it never reaches an envelope except inside a key.</summary>
+    private static string Digest(string state) =>
+        "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(state)));
 
     private static List<EventReference> Bounded(List<EventReference> sources) =>
         sources.Distinct().Take(EventVocabulary.MaxSources).ToList();

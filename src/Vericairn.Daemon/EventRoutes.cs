@@ -28,10 +28,16 @@ internal static class EventRoutes
     internal const int StreamsPerDevice = 4;
 
     /// <summary>
-    /// The most streams and long polls the runtime holds at once. The design's ceiling is 64; the daemon admits 32 connections in all,
-    /// so streams are held to half of them and never starve the API's other requests.
+    /// The most streams and long polls paired and loopback devices hold at once. The design's ceiling is 64; the daemon admits 32
+    /// connections in all, so device streams are held to half of them and never starve the API's other requests.
     /// </summary>
     internal const int StreamsPerRuntime = DaemonHost.ConcurrentConnections / 2;
+
+    /// <summary>The streams the local socket's user always has beyond the devices' pool.</summary>
+    internal const int LocalReserve = 2;
+
+    /// <summary>The most streams all of one principal's devices hold at once, so no one principal fills the pool.</summary>
+    internal const int StreamsPerPrincipal = StreamsPerRuntime / 2;
 
     /// <summary>How long a device-signed stream lasts before the client reconnects with a fresh signature.</summary>
     internal static readonly TimeSpan SignedStreamLimit = TimeSpan.FromMinutes(60);
@@ -75,11 +81,11 @@ internal static class EventRoutes
         // A reconnecting event source sends the newest id it saw, which supersedes the cursor its first request named.
         string? after = context.Request.Headers.TryGetValue("Last-Event-ID", out StringValues last) && !StringValues.IsNullOrEmpty(last) ? last.ToString() : Single(query, "after");
         var filter = new EventFilter(Many(query, "kind"), Many(query, "type"), Many(query, "subject"), Many(query, "to"), Many(query, "category"));
-        using IDisposable? slot = host.EventStreams.TryAcquire(device?.Identity ?? "local-socket");
+        using IDisposable? slot = host.EventStreams.TryAcquire(device?.Identity, device?.Principal ?? principal ?? EventStreamSlots.LocalSocket);
         if (slot is null)
         {
             return Refused(context, device, StatusCodes.Status429TooManyRequests,
-                new Problem("refused", $"A device holds at most {StreamsPerDevice} event streams and long polls at once, and the runtime {StreamsPerRuntime}; close one first.", []));
+                new Problem("refused", $"A device holds at most {StreamsPerDevice} event streams and long polls at once, one principal's devices {StreamsPerPrincipal}, all devices {StreamsPerRuntime}, and the local socket {StreamsPerDevice}; close one first.", []));
         }
 
         (EventSubscription? subscription, Problem? problem) = host.Service.OpenEvents(after, filter, principal, device?.Identity, device?.PublicKey,
@@ -118,6 +124,11 @@ internal static class EventRoutes
         while (true)
         {
             EventBatch batch = subscription.Read();
+            if (batch.Closed)
+            {
+                return Refused(context, device, StatusCodes.Status503ServiceUnavailable, new Problem("unavailable", "The runtime is stopping; read events again once it serves.", []));
+            }
+
             if (batch.Refusal is not null)
             {
                 return Refused(context, device, StatusCodes.Status401Unauthorized, new Problem("denied", batch.Refusal, []));
@@ -158,6 +169,12 @@ internal static class EventRoutes
             while (!end.IsCancellationRequested)
             {
                 EventBatch batch = subscription.Read();
+                if (batch.Closed)
+                {
+                    // The journal closed without the daemon's stop being signalled: end rather than wait on a journal that never wakes.
+                    return;
+                }
+
                 if (batch.Refusal is not null)
                 {
                     host.Log($"closed an event stream of {subscription.Principal}: {batch.Refusal}");
@@ -268,49 +285,82 @@ internal static class EventRoutes
     }
 }
 
-/// <summary>The streams and long polls held now, by device (or the local socket's user) and in all.</summary>
+/// <summary>
+/// The streams and long polls held now. Devices share a pool of <see cref="EventRoutes.StreamsPerRuntime"/>, at most
+/// <see cref="EventRoutes.StreamsPerDevice"/> each and <see cref="EventRoutes.StreamsPerPrincipal"/> for all of one principal's
+/// devices; the local socket's user may take free slots of that pool too and always has <see cref="EventRoutes.LocalReserve"/> more,
+/// so paired devices can never lock out the runtime machine's own user.
+/// </summary>
 internal sealed class EventStreamSlots
 {
+    /// <summary>The holder name of the local socket's operating-system user.</summary>
+    internal const string LocalSocket = "local-socket";
+
     private readonly object gate = new();
     private readonly Dictionary<string, int> held = new(StringComparer.Ordinal);
-    private int total;
+    private readonly Dictionary<string, int> principals = new(StringComparer.Ordinal);
+    private int devices;
+    private int local;
 
-    /// <summary>A slot for a holder, or null when it or the runtime holds its most already.</summary>
-    public IDisposable? TryAcquire(string holder)
+    /// <summary>A slot for a device of a principal, or for the local socket when <paramref name="device"/> is null; null when a limit is reached.</summary>
+    public IDisposable? TryAcquire(string? device, string principal)
     {
         lock (gate)
         {
-            int mine = held.GetValueOrDefault(holder);
-            if (mine >= EventRoutes.StreamsPerDevice || total >= EventRoutes.StreamsPerRuntime)
+            if (device is null)
+            {
+                if (local >= EventRoutes.StreamsPerDevice || devices + local >= EventRoutes.StreamsPerRuntime + EventRoutes.LocalReserve)
+                {
+                    return null;
+                }
+
+                local++;
+                return new Slot(this, null, principal);
+            }
+
+            if (held.GetValueOrDefault(device) >= EventRoutes.StreamsPerDevice || principals.GetValueOrDefault(principal) >= EventRoutes.StreamsPerPrincipal
+                || devices >= EventRoutes.StreamsPerRuntime || devices + local >= EventRoutes.StreamsPerRuntime + EventRoutes.LocalReserve)
             {
                 return null;
             }
 
-            held[holder] = mine + 1;
-            total++;
-            return new Slot(this, holder);
+            held[device] = held.GetValueOrDefault(device) + 1;
+            principals[principal] = principals.GetValueOrDefault(principal) + 1;
+            devices++;
+            return new Slot(this, device, principal);
         }
     }
 
     /// <summary>How many slots are held in all.</summary>
     public int Total
     {
-        get { lock (gate) return total; }
+        get { lock (gate) return devices + local; }
     }
 
-    private void Release(string holder)
+    private void Release(string? device, string principal)
     {
         lock (gate)
         {
-            total--;
-            if (--held[holder] == 0)
+            if (device is null)
             {
-                held.Remove(holder);
+                local--;
+                return;
+            }
+
+            devices--;
+            if (--held[device] == 0)
+            {
+                held.Remove(device);
+            }
+
+            if (--principals[principal] == 0)
+            {
+                principals.Remove(principal);
             }
         }
     }
 
-    private sealed class Slot(EventStreamSlots slots, string holder) : IDisposable
+    private sealed class Slot(EventStreamSlots slots, string? device, string principal) : IDisposable
     {
         private int released;
 
@@ -318,7 +368,7 @@ internal sealed class EventStreamSlots
         {
             if (Interlocked.Exchange(ref released, 1) == 0)
             {
-                slots.Release(holder);
+                slots.Release(device, principal);
             }
         }
     }

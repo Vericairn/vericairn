@@ -100,7 +100,7 @@ path, secret or command:
 | `cursor` | The opaque position after this event, sealed for the reader |
 | `kind`, `change` | `record` with `written` or `found`; a derived kind with `raised`, `changed`, `acknowledged` or `cleared` |
 | `at` | When this runtime observed the change |
-| `subject` | `type`, `id` and, for a record, `hash`; a subject that is not a record, such as a finding or a flow step, is named by an opaque `sha256:` digest |
+| `subject` | `type`, `id` and, for a record, `hash`; a subject that is not a record, such as a finding or a flow step, is named by an opaque `hmac-sha256:` digest under a key this machine keeps, the same across epochs, so a reader cannot confirm a guessed path or command |
 | `sources` | At most 16 records the change rests on, each by type, id and hash |
 | `to` | The principal concerned, when one is |
 | `category` | For attention, one of the six attention kinds: `decision-needed`, `blocked`, `uncertain-effect`, `failed-check`, `incident` or `information` |
@@ -127,21 +127,30 @@ retention: after a reconnection an event can come again.
 Each state read a stream complements returns `eventsCursor`, the journal's position as of that read sealed
 for the reader: `GET /v1/status`, `/v1/progress`, `/v1/attention`, `/v1/asks` and `/v1/goals/{id}`. Read,
 then follow from that cursor, and no change is missed. The status document's own JSON stays portable; the
-cursor sits beside it on the response.
+cursor sits beside it on the response. A device's cursor is sealed for its own principal. On the local
+socket an attention read's cursor is sealed for its `principal`, an asks read's for its `to` principal when
+it names a known one, and the other reads' for the operator, the local socket's default reader. A journal
+that cannot be read or derived never fails a state read: the read answers without `eventsCursor`, and
+`GET /v1/events` answers 503 with the problem `unavailable` until the journal recovers.
 
 A cursor seals the journal's epoch and the position with a key only this runtime holds, binds the reader's
 principal and reveals no count: each sealing differs, even for one position. A cursor that is malformed,
 sealed for another principal, from another epoch, older than what the journal keeps, or a reader too far
 behind, answers `reset` and nothing else. A journal that is lost, unreadable or was not closed cleanly (a
 crash, or a copy restored from a running machine) starts a new epoch, in which every older cursor answers
-`reset`; a clean restart continues the epoch.
+`reset`; a clean restart continues the epoch, and the mark that the journal is open is flushed to disk before
+the runtime serves. A copy of a cleanly closed journal restored later is not detected: it continues its
+epoch, and a client holding a cursor from after the copy can miss events it never sees again. After such a
+restore, delete `events.db` beside the live store, so a new epoch starts and every cursor resets.
 
 The stream authenticates as its profile does. On the local socket the operating-system user reads for the
 principal named by `principal`, by default the operator, as attention does. On loopback and the local
 network the opening request is device-signed and reads only for its device's principal; naming another
-answers 401, and a device-signed stream ends after 60 minutes to reconnect with a fresh signature. A device,
-or the local socket's user, holds at most four streams and long polls at once, and the runtime 16, half of
-the daemon's 32 connections, below the design's ceiling of 64; one more answers 429. At delivery the
+answers 401, and a device-signed stream ends after 60 minutes to reconnect with a fresh signature. A device
+holds at most four streams and long polls at once, all of one principal's devices eight, and all devices 16,
+half of the daemon's 32 connections, below the design's ceiling of 64. The local socket's user holds at most
+four, from the same pool while it has room and from two more slots kept for it alone, so paired devices can
+never lock it out. One more answers 429. At delivery the
 runtime checks that the device is still admitted with the key that opened the stream and still permitted
 its profile, and that its principal is still known; otherwise the stream closes before the next event, so a
 revocation closes a device's streams. Every event then passes the audience check: per-principal state, such

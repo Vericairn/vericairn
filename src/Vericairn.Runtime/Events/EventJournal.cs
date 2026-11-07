@@ -44,6 +44,7 @@ internal sealed record PendingEvent(string Key, string Kind, string Change, Even
 internal sealed class EventJournal : IDisposable
 {
     internal const string FileName = "events.db";
+    internal const string KeyFileName = "events.key";
     internal const int DefaultCapacity = 100_000;
     internal static readonly TimeSpan DefaultRetention = TimeSpan.FromDays(7);
 
@@ -63,6 +64,7 @@ internal sealed class EventJournal : IDisposable
     private readonly byte[] epoch;
     private readonly byte[] encryption;
     private readonly byte[] authentication;
+    private readonly byte[] naming;
     private readonly HashSet<string> observed = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<string, EventItem>> baselines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> used = new(StringComparer.Ordinal);
@@ -74,6 +76,7 @@ internal sealed class EventJournal : IDisposable
 
     private EventJournal(SqliteConnection connection, TimeProvider time, int capacity, TimeSpan retention, byte[] epoch, byte[] secret, string path, bool fresh)
     {
+        naming = NamingKey(path);
         this.connection = connection;
         this.time = time;
         this.capacity = capacity;
@@ -103,6 +106,20 @@ internal sealed class EventJournal : IDisposable
 
     /// <summary>True once the derivation has taken its first, silent observation of the records and global projections.</summary>
     public bool Initialized { get; private set; }
+
+    /// <summary>True once the journal is closed: readers end rather than wait.</summary>
+    public bool Closed
+    {
+        get { lock (sync) return disposed; }
+    }
+
+    /// <summary>
+    /// The opaque name of a subject that is not a record, such as a finding or a flow step, whose own identity can be a path, a command
+    /// or an item a goal configures: a keyed digest under a key this machine keeps across epochs, so a reader can neither confirm a guess
+    /// nor see a name change when a new epoch starts.
+    /// </summary>
+    public string Name(string type, string id) =>
+        "hmac-sha256:" + Convert.ToHexStringLower(HMACSHA256.HashData(naming, Encoding.UTF8.GetBytes(type + "\n" + id)));
 
     /// <summary>
     /// Opens the journal at a path, or starts a new epoch there. The file is created owner-only; the directory holding it is the live
@@ -463,6 +480,15 @@ internal sealed class EventJournal : IDisposable
             return null;
         }
 
+        // Kept owner-only even if an earlier build or a copy left them wider; SQLite gives the -wal and -shm files this mode.
+        foreach (string file in new[] { path, path + "-wal", path + "-shm" })
+        {
+            if (!OperatingSystem.IsWindows() && File.Exists(file))
+            {
+                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
         SqliteConnection connection = Connect(path);
         try
         {
@@ -485,12 +511,15 @@ internal sealed class EventJournal : IDisposable
             }
 
             var journal = new EventJournal(connection, time, capacity, retention, epoch, secret, path, fresh: false) { Initialized = Meta("initialized") == "1" };
-            using (SqliteTransaction transaction = connection.BeginTransaction())
+            // Unclean from now until a clean close: a crash or a copy taken while running starts a new epoch. This one commit is
+            // flushed before anything is served, so a power loss can never leave the old clean mark behind newer positions.
+            Durably(connection, () =>
             {
-                // Unclean from now until a clean close: a crash or a copy taken while running starts a new epoch.
+                using SqliteTransaction transaction = connection.BeginTransaction();
                 journal.SetMeta(transaction, "clean", "0");
                 transaction.Commit();
-            }
+            });
+            Index(connection);
 
             journal.head = head;
             journal.Load();
@@ -506,6 +535,7 @@ internal sealed class EventJournal : IDisposable
     private static EventJournal Create(string path, TimeProvider time, int capacity, TimeSpan retention)
     {
         Delete(path);
+        CreateOwnerOnly(path);
         SqliteConnection connection = Connect(path);
         try
         {
@@ -515,6 +545,7 @@ internal sealed class EventJournal : IDisposable
                     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                     CREATE TABLE events (position INTEGER PRIMARY KEY, stamp INTEGER NOT NULL, key TEXT NOT NULL, entry TEXT NOT NULL);
                     CREATE INDEX events_key ON events (key);
+                    CREATE INDEX events_stamp ON events (stamp);
                     CREATE TABLE observed (id TEXT PRIMARY KEY);
                     CREATE TABLE baselines (projection TEXT NOT NULL, item TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (projection, item));
                     CREATE TABLE projections (projection TEXT PRIMARY KEY, used INTEGER NOT NULL);
@@ -522,11 +553,11 @@ internal sealed class EventJournal : IDisposable
                 create.ExecuteNonQuery();
             }
 
-            OwnerOnly(path);
             byte[] epoch = RandomNumberGenerator.GetBytes(EpochBytes);
             byte[] secret = RandomNumberGenerator.GetBytes(32);
-            using (SqliteTransaction transaction = connection.BeginTransaction())
+            Durably(connection, () =>
             {
+                using SqliteTransaction transaction = connection.BeginTransaction();
                 foreach ((string key, string value) in new[] { ("format", JournalFormat), ("epoch", Base64Url.EncodeToString(epoch)), ("secret", Base64Url.EncodeToString(secret)), ("head", "0"), ("clean", "0"), ("initialized", "0") })
                 {
                     using SqliteCommand insert = connection.CreateCommand();
@@ -538,7 +569,7 @@ internal sealed class EventJournal : IDisposable
                 }
 
                 transaction.Commit();
-            }
+            });
 
             return new EventJournal(connection, time, capacity, retention, epoch, secret, path, fresh: true) { head = 0, floor = 1 };
         }
@@ -700,12 +731,86 @@ internal sealed class EventJournal : IDisposable
         }
     }
 
-    private static void OwnerOnly(string path)
+    /// <summary>
+    /// Creates an empty file readable and writable by its owner alone, before SQLite opens it: SQLite gives the -wal and -shm files it
+    /// creates the database file's own mode, so they are owner-only from the first byte too.
+    /// </summary>
+    private static void CreateOwnerOnly(string path)
     {
+        var create = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
         if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            create.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         }
+
+        using var stream = new FileStream(path, create);
+    }
+
+    /// <summary>Runs one commit with every write flushed to disk before it returns, then goes back to the journal's ordinary pace.</summary>
+    private static void Durably(SqliteConnection connection, Action commit)
+    {
+        using (SqliteCommand full = connection.CreateCommand())
+        {
+            full.CommandText = "PRAGMA synchronous = FULL;";
+            full.ExecuteNonQuery();
+        }
+
+        commit();
+        using SqliteCommand normal = connection.CreateCommand();
+        normal.CommandText = "PRAGMA synchronous = NORMAL;";
+        normal.ExecuteNonQuery();
+    }
+
+    private static void Index(SqliteConnection connection)
+    {
+        using SqliteCommand index = connection.CreateCommand();
+        index.CommandText = "CREATE INDEX IF NOT EXISTS events_stamp ON events (stamp);";
+        index.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// The key subjects that are not records are named under: kept in its own owner-only file beside the journal, created once and
+    /// kept when a new epoch replaces the journal, so a name stays the same on this machine.
+    /// </summary>
+    private static byte[] NamingKey(string journalPath)
+    {
+        string path = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(journalPath)!, KeyFileName);
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            if (File.Exists(path))
+            {
+                byte[] existing = File.ReadAllBytes(path);
+                if (existing.Length == 32)
+                {
+                    return existing;
+                }
+
+                File.Delete(path);
+            }
+
+            byte[] key = RandomNumberGenerator.GetBytes(32);
+            try
+            {
+                var create = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, Options = FileOptions.WriteThrough };
+                if (!OperatingSystem.IsWindows())
+                {
+                    create.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                }
+
+                using (var stream = new FileStream(path, create))
+                {
+                    stream.Write(key);
+                }
+
+                return key;
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                // Another opening wrote it first: read that one.
+            }
+        }
+
+        throw new IOException($"The event journal's naming key at {path} cannot be read or created.");
     }
 
     private static void Delete(string path)

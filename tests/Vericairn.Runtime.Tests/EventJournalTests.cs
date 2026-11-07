@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Vericairn.Protocol;
@@ -164,6 +166,91 @@ public sealed class EventJournalTests : IDisposable
     }
 
     [Fact]
+    public void ItsFilesAreOwnerOnlyAndItsNamesAreKeyedAndOutliveAnEpoch()
+    {
+        const string Location = "records/work-order/2026-11/finding.json:record.code";
+        string name;
+        using (EventJournal journal = EventJournal.Open(Path_))
+        {
+            Append(journal, 1);
+            name = journal.Name("finding", Location);
+            Assert.StartsWith("hmac-sha256:", name, StringComparison.Ordinal);
+            Assert.DoesNotContain(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("finding\n" + Location))), name, StringComparison.Ordinal);
+            Assert.NotEqual(name, journal.Name("finding", Location + "x"));
+            Assert.NotEqual(name, journal.Name("reconciliation", Location));
+            if (!OperatingSystem.IsWindows())
+            {
+                // The -wal and -shm files exist while the journal is open, and SQLite gave them the database's own mode.
+                foreach (string file in new[] { Path_, Path_ + "-wal", Path_ + "-shm", Path.Combine(directory, EventJournal.KeyFileName) })
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+            }
+        }
+
+        // A lost journal starts a new epoch; the names stay the same on this machine.
+        foreach (string file in Directory.GetFiles(directory, EventJournal.FileName + "*")) File.Delete(file);
+        using EventJournal next = EventJournal.Open(Path_);
+        Assert.True(next.Fresh);
+        Assert.Equal(name, next.Name("finding", Location));
+    }
+
+    [Fact]
+    public void TwoAttentionItemsOnOneSubjectThatChangeInOnePassStayTwoEvents()
+    {
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        service.EnableEvents(directory);
+        string op = estate.OperatorId;
+        string cursor = service.AttentionGet(op).EventsCursor!;
+        Assert.True(service.NewRecord(new NewRecordRequest("work-order", op, Json("""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Two notices on one result.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget"]}"""))).Ok);
+        string assignment = Written(service.Assign(new AssignRequest("W-1", estate.BuilderId, op, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["example repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests pass"],"recovery":"Record a result."}"""))));
+        string attempt = Written(service.Attempt(new AttemptRequest(assignment, estate.BuilderId, "example repository, work branch", "Build it.")));
+        string result = Written(service.Result(new ResultRequest(attempt, estate.BuilderId, Json("""{"outcome":"completed","summary":"Built it; one check failed.","outputs":[],"evidence":[],"checks":[{"name":"tests","outcome":"failed","summary":"One test failed."}],"limitations":[],"unresolvedEffects":[],"nextStep":"Fix the test."}"""))));
+
+        // One pass derives both of the operator's notices on the result: the decision it awaits and its failed check.
+        AttentionResponse attention = service.AttentionGet(op);
+        string[] kinds = [.. attention.Items.Where(i => i.SubjectId == result).Select(i => EstateService.Category(i.Kind)).Order(StringComparer.Ordinal)];
+        Assert.Equal(["decision-needed", "failed-check"], kinds);
+        EventEnvelope[] raised = [.. service.Events(after: cursor, filter: new EventFilter(Kinds: ["attention"]), principal: op).Events.Where(e => e.Subject.Id == result)];
+        Assert.Equal(kinds, raised.Select(e => e.Category!).Order(StringComparer.Ordinal));
+        Assert.All(raised, e => Assert.Equal("raised", e.Change));
+        Assert.NotEqual(raised[0].Key, raised[1].Key);
+        Assert.Single(service.Events(after: cursor, filter: new EventFilter(Kinds: ["attention"], Categories: ["failed-check"]), principal: op).Events, e => e.Subject.Id == result);
+    }
+
+    [Fact]
+    public void AFaultingPassNeverFailsAStateReadAndAClosedJournalEndsItsReaders()
+    {
+        using var estate = new TestEstate(3);
+        var service = EstateService.Open(estate.Root);
+        try
+        {
+            service.EnableEvents(directory);
+            // A fault no narrower catch would name, in the fresh epoch's first pass, the one a state read runs.
+            service.EventPassStarting = () => throw new ArithmeticException("Injected fault.");
+            StatusResponse status = service.Status();
+            Assert.Null(status.EventsCursor);
+            Assert.False(string.IsNullOrEmpty(status.Text));
+            Assert.Null(service.Progress().EventsCursor);
+            Assert.Null(service.AttentionGet(estate.OperatorId).EventsCursor);
+            Assert.Null(service.Asks().EventsCursor);
+            Assert.Equal("unavailable", service.Events().Problem?.Code);
+
+            service.EventPassStarting = null;
+            Assert.NotNull(service.Status().EventsCursor);
+            (EventSubscription? subscription, Problem? problem) = service.OpenEvents(null, null, estate.OperatorId);
+            Assert.Null(problem);
+            service.Dispose();
+            EventBatch closed = subscription!.Read();
+            Assert.True(closed.Closed);
+            Assert.True(subscription.WaitAsync(TestContext.Current.CancellationToken).IsCompleted);
+        }
+        finally
+        {
+            service.Dispose();
+        }
+    }
+
+    [Fact]
     public void AttentionKindsMapToTheSixCategories()
     {
         Assert.Equal("decision-needed", EstateService.Category("decision needed"));
@@ -181,6 +268,14 @@ public sealed class EventJournalTests : IDisposable
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(directory, recursive: true); }
         catch (IOException) { }
+    }
+
+    private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    private static string Written(WriteOutcome outcome)
+    {
+        Assert.True(outcome.Ok, outcome.Problem?.Message);
+        return outcome.Written!.Id;
     }
 
     private static void Append(EventJournal journal, int count, IReadOnlyCollection<string>? observed = null)

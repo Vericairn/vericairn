@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Vericairn.Protocol;
 using Vericairn.Records.Tests;
@@ -160,7 +162,11 @@ public sealed class EventStreamTests
             Assert.False(resumed.Reset);
             Assert.Equal("found", Assert.Single(resumed.Events, e => e.Subject.Id == offline).Change);
             if (!OperatingSystem.IsWindows())
-                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(journalPath));
+            {
+                // Owner-only from creation: the database, the -wal and -shm files SQLite made beside it, and the naming key.
+                foreach (string file in new[] { journalPath, journalPath + "-wal", journalPath + "-shm", Path.Combine(Path.GetDirectoryName(journalPath)!, "events.key") })
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+            }
         }
 
         // A lost journal starts a new epoch, in which every older cursor answers reset.
@@ -320,6 +326,107 @@ public sealed class EventStreamTests
         Assert.True(await TestTiming.CompletesAsync(follower.Completion, TestContext.Current.CancellationToken), "The signed stream outlived its 60 minutes.");
     }
 
+    [Theory]
+    [InlineData("rotate")]
+    [InlineData("withdraw-profile")]
+    public async Task AStreamClosesWhenItsDeviceRotatesItsKeyOrLosesItsProfile(string change)
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(recordFormat: 3);
+        WriteOutcome created = harness.Socket.DeviceCreate(new DeviceCreateRequest(harness.Estate.BuilderId, "Stream device", "file", ["local-network"]));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(device, harness.Estate.OperatorId, "A stream test device.")).Ok);
+        DeviceRequestSigner signer = DeviceRequestSigner.Find(device)!;
+        string publicKey = harness.Host.Service.Standing(device)!.PublicKey;
+
+        // A key rotation is judged on loopback; a withdrawn profile on the local network, the profile it takes away.
+        using VericairnClient client = change == "rotate"
+            ? VericairnClient.Loopback(harness.Host.Endpoint, signer)
+            : VericairnClient.LocalNetwork(new RuntimeConnection(Records.Identity.Ulid.NewUlid().Value, harness.Address, harness.Estate.Estate.Id, null,
+                harness.Host.IdentityPublicKey!, device, publicKey, harness.Estate.BuilderId, null, ["local-network"], "2026-11-07T00:00:00Z"), signer);
+        await using var follower = new EventFollower(token => client.StreamEventsAsync(cancellationToken: token));
+        Assert.Null((await follower.NextAsync()).Event);
+
+        WriteOutcome changed = change == "rotate" ? harness.Socket.DeviceRotate(new DeviceRotateRequest(device)) : WithdrawProfile(harness, device);
+        Assert.True(changed.Ok, changed.Problem?.Message);
+        Assert.True(await TestTiming.CompletesAsync(follower.Completion, TestContext.Current.CancellationToken), "The stream outlived its device's " + change + ".");
+        Assert.DoesNotContain(follower.Received, item => item.Event is not null);
+    }
+
+    [Fact]
+    public async Task AFaultingPassNeitherStopsThePumpNorFailsAReadNorTheDaemonsStop()
+    {
+        using var estate = new TestEstate(3);
+        var log = new ConcurrentQueue<string>();
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, options: new DaemonOptions { Log = log.Enqueue }, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(host.Endpoint);
+        await using var follower = new EventFollower(token => client.StreamEventsAsync(filter: new EventFilter(Kinds: ["record"]), cancellationToken: token));
+        Assert.Null((await follower.NextAsync()).Event);
+
+        // One pass throws what no narrower catch would name; the pump logs it and the next pass derives what that one missed.
+        var faulted = TestTiming.Signal();
+        int faults = 0;
+        host.Service.EventPassStarting = () =>
+        {
+            if (Interlocked.Increment(ref faults) == 1)
+            {
+                faulted.TrySetResult();
+                throw new ArithmeticException("Injected fault.");
+            }
+        };
+        RecordWritten first = Write(client, estate.OperatorId);
+        await faulted.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        RecordWritten second = Write(client, estate.OperatorId);
+        Assert.Equal(first.Id, (await follower.NextEventAsync()).Subject.Id);
+        Assert.Equal(second.Id, (await follower.NextEventAsync()).Subject.Id);
+        Assert.Contains(log, line => line.Contains("could not derive", StringComparison.Ordinal) && line.Contains(nameof(ArithmeticException), StringComparison.Ordinal));
+
+        // While every pass throws, a state read still answers, without a cursor, and a new reader is told the journal is unavailable.
+        host.Service.EventPassStarting = () => throw new ArithmeticException("Injected fault.");
+        StatusResponse status = client.Status();
+        Assert.Null(status.EventsCursor);
+        Assert.False(string.IsNullOrEmpty(status.Text));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, Assert.Throws<HttpRequestException>(() => client.Events(wait: 0)).StatusCode);
+        host.Service.EventPassStarting = null;
+        Assert.NotNull(client.Status().EventsCursor);
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public void TheRuntimeCapHoldsDevicesToTheirPoolAndKeepsTheLocalSocketsReserve()
+    {
+        var slots = new EventStreamSlots();
+        var held = new List<IDisposable?>();
+        // Two principals with two devices each fill the devices' pool, each device at its own most.
+        for (int principal = 0; principal < 2; principal++)
+            for (int device = 0; device < 2; device++)
+                for (int stream = 0; stream < EventRoutes.StreamsPerDevice; stream++)
+                    held.Add(slots.TryAcquire($"device-{principal}-{device}", $"principal-{principal}"));
+        Assert.All(held, Assert.NotNull);
+        Assert.Equal(EventRoutes.StreamsPerRuntime, slots.Total);
+        Assert.Null(slots.TryAcquire("device-new", "principal-new"));
+
+        // The local socket's user still has its reserve, and no more while the pool is full.
+        for (int i = 0; i < EventRoutes.LocalReserve; i++) held.Add(Assert.IsAssignableFrom<IDisposable>(slots.TryAcquire(null, "operator")));
+        Assert.Null(slots.TryAcquire(null, "operator"));
+        foreach (IDisposable? slot in held) slot!.Dispose();
+        held.Clear();
+        Assert.Equal(0, slots.Total);
+
+        // One principal's devices hold at most half the pool, whichever device asks.
+        for (int device = 0; device < 3; device++)
+            for (int stream = 0; stream < EventRoutes.StreamsPerDevice; stream++)
+                held.Add(slots.TryAcquire($"device-{device}", "principal"));
+        Assert.Equal(EventRoutes.StreamsPerPrincipal, held.Count(h => h is not null));
+        Assert.Null(slots.TryAcquire("device-9", "principal"));
+
+        // With the pool free the local socket takes up to a device's most, from the pool.
+        for (int i = 0; i < EventRoutes.StreamsPerDevice; i++) held.Add(Assert.IsAssignableFrom<IDisposable>(slots.TryAcquire(null, "operator")));
+        Assert.Null(slots.TryAcquire(null, "operator"));
+        foreach (IDisposable? slot in held) slot?.Dispose();
+        Assert.Equal(0, slots.Total);
+    }
+
     [Fact]
     public async Task ADeviceHoldsAtMostFourStreams()
     {
@@ -361,6 +468,11 @@ public sealed class EventStreamTests
         {
             Assert.False(client.Events(after: cursor, wait: 0).Reset);
         }
+
+        // An asks read for a principal on the local socket seals its cursor for that principal, whose stream then continues from it.
+        string asksForBuilder = client.Asks(estate.BuilderId).EventsCursor!;
+        Assert.False(client.Events(after: asksForBuilder, principal: estate.BuilderId, wait: 0).Reset);
+        Assert.True(client.Events(after: asksForBuilder, wait: 0).Reset);
 
         RecordWritten written = Write(client, estate.OperatorId);
         foreach (string? cursor in cursors)
@@ -405,6 +517,16 @@ public sealed class EventStreamTests
     }
 
     private static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    /// <summary>A device revision that keeps only the embedded profile, written on the runtime's machine.</summary>
+    private static WriteOutcome WithdrawProfile(LocalNetworkHarness harness, string device)
+    {
+        RecordResponse record = harness.Socket.Record(device)!;
+        JsonObject body = JsonNode.Parse(record.Envelope.GetProperty("body").GetRawText())!.AsObject();
+        body["profiles"] = new JsonArray("embedded");
+        using JsonDocument changed = JsonDocument.Parse(body.ToJsonString());
+        return harness.Socket.NewRecord(new NewRecordRequest("device", harness.Estate.BuilderId, changed.RootElement.Clone(), Supersedes: device));
+    }
 
     private static async Task WaitUntil(Func<bool> condition, string because)
     {

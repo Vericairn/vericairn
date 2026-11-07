@@ -8,11 +8,12 @@ using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Events;
 
-/// <summary>What one read of a subscription delivered: the events, a refusal that closes it, or a reset.</summary>
+/// <summary>What one read of a subscription delivered: the events, a refusal that closes it, a reset, or the journal's close.</summary>
 /// <param name="Events">The events the reader may read that its filter admits, oldest first.</param>
 /// <param name="Refusal">Why the reader may no longer read events; the stream closes and nothing is delivered.</param>
 /// <param name="Reset">True when the reader fell behind what the journal keeps and must re-read state before continuing.</param>
-public sealed record EventBatch(IReadOnlyList<EventEnvelope> Events, string? Refusal = null, bool Reset = false);
+/// <param name="Closed">True when the journal closed: the runtime is stopping, and the reader ends and reconnects later.</param>
+public sealed record EventBatch(IReadOnlyList<EventEnvelope> Events, string? Refusal = null, bool Reset = false, bool Closed = false);
 
 /// <summary>
 /// One reader's position in the journal, for a stream or a long poll. Each read passes every entry through the audience check and
@@ -70,6 +71,11 @@ public sealed class EventSubscription
     /// </summary>
     public EventBatch Read(int max = 256)
     {
+        if (journal.Closed)
+        {
+            return new EventBatch([], Closed: true);
+        }
+
         long from = Interlocked.Read(ref position);
         IReadOnlyList<JournalEntry> entries = journal.After(from, max);
         if (entries.Count > 0 ? entries[0].Position != from + 1 : !journal.Holds(from))

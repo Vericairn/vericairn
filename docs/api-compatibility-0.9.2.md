@@ -196,10 +196,13 @@ does not. It sits beside the canonical JSON, which is unchanged, so the status d
 are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
 and `Json` instead. Older clients ignore the property and older servers omit it.
 
-`Vericairn.Runtime` adds `EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
+`EventBatch.Closed` is true when the journal closed under a reader; a long poll then answers 503 with `unavailable`, and a stream
+ends. A state read whose derivation fails answers without `eventsCursor` instead of failing. `Vericairn.Runtime` adds
+`EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
 `EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
 principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
 `Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
-beside the live store, owner-only, and runs the derivation for as long as it serves. A state read through the daemon now
+beside the live store, and the key that names subjects that are not records in `events.key`, kept across epochs, both
+owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
