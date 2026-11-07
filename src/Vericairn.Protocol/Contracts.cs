@@ -435,7 +435,7 @@ public sealed record AsksResponse(string Text, JsonElement Json)
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).
 /// </summary>
 /// <param name="By">The proposing principal; for a revision, who decides for the goal it supersedes.</param>
-/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits. limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.</param>
+/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits. limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.</param>
 /// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
 
