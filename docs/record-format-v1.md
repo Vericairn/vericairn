@@ -26,6 +26,11 @@ Every record is a JSON object with these keys and no others:
 | `hash` | yes | `sha256:` + 64 lower-case hex digits over the canonical envelope without `hash` and `signatures` |
 | `signatures` | optional | `[{algorithm, device, signature}]`: signatures over the content hash by admitted devices; verified on load |
 
+From 0.9.2, a new record's `by` names a principal the estate holds when the record is written, whatever its `at`, and a
+record whose `by` names no record or a record of another type is refused (`record.author`). A record already in the estate
+keeps its reading and is reported as information. An unsigned `by` remains the author's claim; only a signature by a
+device admitted for that principal authenticates it ([record authors](record-format.md#record-authors-092)).
+
 ## Canonical form
 
 Hashing uses the compact RFC 8785 form: object members sorted by UTF-16 code units, strings escaped only as RFC 8785

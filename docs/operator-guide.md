@@ -204,6 +204,8 @@ You type a passphrase of at least twelve characters, or pass it on the first lin
 
 **Requiring signatures.** To make signing mandatory, revise the charter so that `policies.signatures` is `required`: author a new estate record that supersedes the current one (`records new estate --by <operator id> --supersedes <current estate record id> --body charter.json`) with the same name, slug, purpose, operator and record format and the new policy. From then on a record without a signature from an admitted device is refused, and a clone without a key is read-only. A record's date is what its author wrote, so the policy binds the records dated after the charter revision: an unsigned record dated earlier is read under the earlier policy, which from record format 2 no longer reaches admissions (above). Do this only after your own device is admitted. Once signatures are required, a later charter revision counts only when the root operator, the operator the estate's first charter names, signs it from an admitted device. Any other revision is reported as a `signature.charter` error and changes nothing, and a revision that names another operator is refused (`estate.operator`).
 
+**What an author's id establishes.** From 0.9.2, a new record's `--by` must name a principal the estate holds when the record is written, whatever time `--at` gives the record. An id that names no record, or a record of another type such as the charter, is refused (`record.author`) on every write surface. Records already in the estate keep their reading; `estate check` and `records validate` report each unresolved author as information. Under optional signatures an unsigned record's author is still a claim: it names a known principal, and records that carry authority check that principal's roles and scopes, but anyone who can add records to a copy can claim any principal. Only a signature from that principal's admitted device authenticates authorship, and required signatures make it mandatory.
+
 Rules the tool enforces here: only the root operator or a principal granted `administer` may author a principal record; a device record is signed by its own key to prove possession, and each later revision by the device in the name of its identity. An admission is authored by the operator or under `administer` authority, is signed in record format 2, and stays in force across the device's renames and rotations. A format-2 admission has no `scope` field. An agent principal that records operations and releases needs an authority with the `local-engineering` scope (section 4).
 
 ## 4. Authority and decisions
@@ -645,7 +647,9 @@ Install the target release, then restart any daemon serving the estate before ch
 the upgrade. From the estate directory on the daemon's machine, using that installed release, run
 `vericairn runtime stop`, then `vericairn runtime start`. Installing a binary leaves an existing daemon
 running its previous release. Restart running workers with the new release after their active work
-has settled. The upgrade command does not stop the daemon or workers itself.
+has settled. The upgrade command does not restart workers itself; from 0.9.2 it replaces a daemon of
+an older release than the new pin, as [the serving runtime after an upgrade](#the-serving-runtime-after-an-upgrade-092)
+describes.
 
 ```sh
 vericairn estate upgrade --to <published-version> --check
@@ -730,6 +734,43 @@ its independently reviewed conversion; changing the manifest alone does not conv
 See [record format 3](record-format-v3.md), [policy adoption](policy-adoption.md) and
 [the adoption proposals](policy-adoption-proposals.md).
 
+### The serving runtime after an upgrade (0.9.2)
+
+From 0.9.2 (OPS-05), no runtime of an older release keeps serving an estate on its machine after an
+upgrade. Applying the upgrade, or running it again once applied, ends with a runtime step; `--check`
+leaves the runtime alone. The step reads the daemon that serves the estate here, as its endpoint file
+and its health describe it, and compares its release, without build metadata, with the release the
+manifest now pins:
+
+| Found | What the upgrade does |
+| --- | --- |
+| No daemon serves the estate | Nothing. It starts no daemon where none ran. |
+| A daemon of the pinned release | Nothing; `runtime:` names it. |
+| A daemon of an older release | Stops it. When the upgrade's own command line is the pinned release's build, with its version and the source commit its release record or dependency observation names, starts that release's daemon from it and names both on a `runtime:` line. Otherwise it names the one it stopped and warns with the command that starts the pinned release's. |
+| A daemon of a newer release, or one whose release cannot be ordered | Leaves it running and warns with the mismatch. |
+| A daemon that serves another estate or another root | Leaves it running and warns. |
+| A daemon that refuses this user's connection, or that cannot be stopped | Leaves it running and warns with exactly what to run. |
+
+A daemon that refuses the stop request, such as another user's, or that still answers 15 seconds after
+it was asked to stop, is named with its process and release. The warning says to run
+`vericairn --estate <root> runtime stop` as the user that started it, with that release's command line
+or the current one, and to end the process if it still answers. Then start the pinned release's runtime
+with `./bootstrap runtime start` in the estate's directory (`.\bootstrap.ps1 runtime start` on Windows),
+which fetches and verifies exactly the pinned release, or with `vericairn runtime start` from that
+release's command line. The upgrade's observation, migration record and manifest are the same whatever
+the step finds, and a warning from it leaves the exit code at 0.
+
+The step runs after the upgrade's own runtime has answered or closed, so neither the upgrade nor the
+daemon it stops holds the working tree's write lock ([one writer per working tree](#one-writer-per-working-tree-092))
+while the new daemon opens the estate. A daemon installed as a per-user service starts the command line
+it was installed with at the next login; after an upgrade, run `vericairn runtime uninstall`, then
+`vericairn runtime install`, with the pinned release's command line. Workers are not restarted.
+
+`vericairn runtime status` shows the serving daemon's release against the pin on a `release` line and,
+while they differ, a `mismatch:` line with the commands that settle it. Human `vericairn status` ends,
+when a daemon served it, with a `Serving runtime (this machine):` line and any `Mismatch:` line; the
+canonical `status --json` document is unchanged, and a mismatch goes to stderr as a warning.
+
 
 ## 10. Export, restore, recovery and divergence
 
@@ -776,6 +817,8 @@ the unreadable journal's write hold. This is local recovery state, not a new rec
 
 Objects are content-addressed bytes beside the records: `objects put <file>`, `objects list`, `objects verify` reads every object and checks its bytes against its name.
 
+An object holds at most 8 MiB (8,388,608 bytes), and an export carries nothing held outside the estate repository. From 0.9.2, [Large private artifacts](large-artifacts.md) shows how to keep a private artifact above that limit in a private store with exact-byte custody, using existing records, and how to prove a cold recovery by reading its bytes back.
+
 ### A damaged live store (0.9.2)
 
 Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
@@ -820,6 +863,8 @@ vericairn runtime stop
 vericairn runtime install --plan
 vericairn runtime install
 ```
+
+From 0.9.2 (OPS-05) `runtime status` also shows the serving daemon's release against the estate's pin, with a `mismatch:` line and the commands that settle it while they differ; `--json` adds `servingRelease`, `pin`, `pinnedRelease` and `mismatch`. An upgrade replaces a daemon of an older release than its new pin ([section 9](#the-serving-runtime-after-an-upgrade-092)).
 
 `runtime serve` runs the daemon in the foreground until stopped; `start` runs it in the background with streams of its own, its output going to `daemon.log` beside the estate's live store, and waits until it answers; when the daemon stops before it serves, `start` exits with an error that quotes what the daemon wrote to its log and says where the log is; `stop` asks it to stop (closing a client never does). `install --plan` prints the per-user service unit (a launchd agent, a systemd user unit or a logon task) and the commands without installing; `install` registers it so the daemon starts at login; `uninstall` removes it. The daemon serves a local socket (or a named pipe on Windows), whose trust boundary is the operating-system user, and a loopback TLS endpoint pinned to its own certificate, where requests are signed by an admitted device. A configured local-network listener adds mutual TLS for paired devices (section 19); `--no-loopback` disables loopback only, not that listener. Signing and authority are checked by the runtime; `api-v1.md` has the details and `api-reference.md` every operation. Workbench's runtime workspace (section 13) does the same through this command line and shows the plan before it installs or uninstalls.
 
@@ -1469,7 +1514,9 @@ by the person asked and accepts no work.
 ## 24. Release notices and upgrades
 
 After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
-commands and coordination steps in section 9 before using the upgraded CLI against that estate.
+commands and coordination steps in section 9 before using the upgraded CLI against that estate. From
+0.9.2 `estate upgrade` itself replaces a daemon of an older release than the new pin, or says exactly
+what to run when it cannot.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
 enabled by default. It asks GitHub's `Vericairn/vericairn` latest-release endpoint for the newest

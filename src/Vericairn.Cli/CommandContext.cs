@@ -28,11 +28,21 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
 
     public bool UsingDaemon { get; private set; }
 
+    // The daemon this invocation's estate operation used and the health it answered; null when the operation ran embedded.
+    private (string Root, DaemonEndpoint Endpoint, HealthResponse Health)? served;
+
+    /// <summary>The daemon this invocation's estate operation used, against the estate's pin; null when it ran embedded (OPS-05).</summary>
+    internal ServingRuntime? Serving() => served is { } used ? ServingRuntime.Of(used.Root, used.Endpoint, used.Health) : null;
+
+    // The health the last liveness read answered, so a command can name the serving release without asking again.
+    private HealthResponse? lastHealth;
+
     public CancellationToken CancellationToken => boundary?.Token ?? cancellationToken;
 
     public int Invoke(Func<int> action)
     {
         daemonWarnings.Clear();
+        served = null;
         using var invocation = new ClientBoundary(Error, cancellationToken);
         boundary = invocation;
         try { return invocation.Invoke(action); }
@@ -48,11 +58,21 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         return IsAlive(client);
     }
 
+    /// <summary>Whether the daemon at an endpoint answers this API, with the health it answered when it does.</summary>
+    public bool IsAlive(DaemonEndpoint endpoint, out HealthResponse? health)
+    {
+        lastHealth = null;
+        bool alive = IsAlive(endpoint);
+        health = alive ? lastHealth : null;
+        return alive;
+    }
+
     private bool IsAlive(VericairnClient client)
     {
         try
         {
             HealthResponse health = client.HealthAsync(CancellationToken).GetAwaiter().GetResult();
+            lastHealth = health;
             if (client.DaemonVersionWarning is { } warning && daemonWarnings.Add(warning))
                 Error.WriteLine("warning: " + warning);
             return health.Api == ApiVersion.Current;
@@ -114,6 +134,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 return operation(new CancellationBoundApi(BorrowedApi, CancellationToken));
             }
 
+            served = null;
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
             if (endpoint is not null)
             {
@@ -121,6 +142,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 if (IsAlive(client))
                 {
                     UsingDaemon = true;
+                    served = (root, endpoint, lastHealth!);
                     return operation(new CancellationBoundApi(client, CancellationToken));
                 }
             }
