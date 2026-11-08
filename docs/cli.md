@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 13, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
+Revision 14, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
+
+Revision 13, November 7, 2026. Add a run's stops to `goal step`, `goal show`, `goal next`, `status` and `operator list` in the development build.
 
 Revision 12, November 7, 2026. Add the build tooling's documentation-set commands in the development build.
 
@@ -393,6 +395,18 @@ gains `attention`, `held` and each step's `review` and `attention`, and `goal sh
 `attemptsUsed`, `attemptsAllowed`, `reviews`, `attention`, `failed`, `failure` and `rerun`, and the run's `attention`. See
 [hand-offs, reviews and failure routes](operator-guide.md#hand-offs-reviews-and-failure-routes-092). See the
 [operator's guide](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
+
+From PROC-06 (0.9.2), a reserved step that is next is routed as `request`: `goal step` records its operator request, carrying
+the step's exact command as the records give it then, and prints the command; its outcome is `request`, and with `--json` the
+response's `request` names the record. The command is computed only for a reserved step that is next. Asked again while the
+request waits, `goal next` shows the route as `requested` and `goal step` records nothing more; once a request carrying that
+command was closed, the route is `closed`. `goal show`, `goal next` and `status` list the run's stops, each with why it waits,
+on whom and how it reaches them, and for a reserved step that is next its command; with `--json`, the position's `stops`, each
+step's `stop` and `command`, and status's `runs`, whose stops carry no command. At most three stops of the estate's runs reach
+one person at a time: a fourth routes as
+`queued`, and `goal step` dispatches nothing for it. `operator list` delivers a run's request only while it carries the command
+the records give now, and lists each open request a run no longer waits on, `withdrawn` or `settled`, under `withdrawn` in its
+JSON. See [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
 
 ## `vericairn estate cache rebuild` (0.9.2)
 

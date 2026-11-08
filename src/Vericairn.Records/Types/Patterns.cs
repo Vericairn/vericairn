@@ -41,7 +41,7 @@ public static partial class Patterns
     /// <summary>A pack's or the foundation's contribution: a namespace, a slash and a name, such as vericairn.software/git-file.</summary>
     public static Regex Contribution => ContributionRegex();
 
-    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*\z")]
     private static partial Regex SlugRegex();
 
     [GeneratedRegex("^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$")]

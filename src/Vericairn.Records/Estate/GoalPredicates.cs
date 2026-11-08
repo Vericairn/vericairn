@@ -62,7 +62,14 @@ public static class GoalPredicates
     }
 
     /// <summary>Evaluates a record predicate from the current records.</summary>
-    public static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate) => Count(model, predicate).Verdict;
+    public static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate) => Count(model, predicate, null).Verdict;
+
+    /// <summary>
+    /// Evaluates a record predicate counting toward its minimum only the matching records a rule admits, such as a reserved act's done
+    /// predicates, which count only the records of a principal who holds the act (the estate's design/flow.md § 8). Every matching
+    /// record still counts toward its maximum, and the reason names those not admitted, so a refusal never makes a predicate hold.
+    /// </summary>
+    public static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit) => Count(model, predicate, admit).Verdict;
 
     /// <summary>
     /// The current records a record predicate counts, oldest first: those it decides match, without those it cannot decide here. A
@@ -71,10 +78,17 @@ public static class GoalPredicates
     public static IReadOnlyList<RecordEnvelope> Matching(EstateModel model, JsonElement predicate)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return Count(model, predicate).Matches;
+        return Count(model, predicate, null).Matches;
     }
 
-    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate)
+    /// <summary>The current records a record predicate counts that a rule admits, oldest first; every record when no rule is given.</summary>
+    public static IReadOnlyList<RecordEnvelope> Matching(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return Count(model, predicate, admit).Matches;
+    }
+
+    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit)
     {
         ArgumentNullException.ThrowIfNull(model);
         string? type = Text(predicate, "type");
@@ -96,6 +110,13 @@ public static class GoalPredicates
             .Where(r => fields.All(f => EstateModel.BodyString(r, f.Name) == f.Value))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
+
+        // A rule's admission judges the record of an act itself; a derived state rests on other records, the act's or not, so a
+        // predicate that names one never holds under a rule (a reserved step's done predicates name no state: FlowContract).
+        if (admit is not null && state is not null)
+        {
+            return (new Verdict("not-met", $"{DescribePredicate(predicate)}: a state rests on other records than those counted, so it cannot show whose act made it true.", candidates.Select(r => r.Reference).ToList()), []);
+        }
 
         var read = new List<RecordEnvelope>(candidates);
         var matches = new List<RecordEnvelope>();
@@ -126,14 +147,24 @@ public static class GoalPredicates
             }
         }
 
-        long known = matches.Count;
-        long possible = known + undecided.Count;
-        string value = known >= min && (max is null || possible <= max) ? "met" : possible < min || (max is not null && known > max) ? "not-met" : "unknown";
+        // A rule's refusal lowers only what counts toward the minimum: every matching record still counts toward the maximum.
+        List<RecordEnvelope> refused = admit is null ? [] : matches.Where(m => !admit(m)).ToList();
+        List<RecordEnvelope> admitted = refused.Count == 0 ? matches : matches.Where(m => admit!(m)).ToList();
+        long undecidedAdmitted = admit is null ? undecided.Count : undecided.Count(u => admit(u.Record));
+        long known = admitted.Count;
+        long possible = matches.Count + undecided.Count;
+        string value = known >= min && (max is null || possible <= max) ? "met" : known + undecidedAdmitted < min || (max is not null && matches.Count > max) ? "not-met" : "unknown";
         var reason = new StringBuilder();
-        reason.Append(DescribePredicate(predicate)).Append(": ").Append(Count(matches, undecided.Count > 0));
+        reason.Append(DescribePredicate(predicate)).Append(": ").Append(Count(admitted, undecided.Count > 0));
         if (undecided.Count > 0)
         {
             reason.Append(", and ").Append(undecided.Count.ToString(CultureInfo.InvariantCulture)).Append(" more cannot be decided here (").Append(string.Join("; ", undecided.Select(u => u.Why))).Append(')');
+        }
+
+        if (refused.Count > 0)
+        {
+            reason.Append(", and ").Append(refused.Count.ToString(CultureInfo.InvariantCulture)).Append(refused.Count == 1 ? " more was" : " more were")
+                .Append(" recorded by a principal who does not hold the act, which does not count (").Append(string.Join(", ", refused.Select(r => r.Id))).Append(')');
         }
 
         reason.Append("; ").Append(Bound(min, max)).Append('.');
@@ -146,7 +177,7 @@ public static class GoalPredicates
             .GroupBy(r => r.Id, StringComparer.Ordinal).Select(g => g.First())
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .Select(r => r.Reference).ToList();
-        return (new Verdict(value, reason.ToString(), references), matches);
+        return (new Verdict(value, reason.ToString(), references), admitted);
     }
 
     /// <summary>A completion condition in words: what a record predicate counts and its bounds, or an evidence statement and its check.</summary>

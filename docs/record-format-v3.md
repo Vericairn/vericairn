@@ -424,6 +424,27 @@ role's `document` are template content, not record fields; see
 `records describe goal` include these contracts, and the generic record reader
 advances to `vericairn.records/readers/8`.
 
+### Stops (0.9.2)
+
+PROC-06 adds one optional field within format 3, and no record type. An operator
+request without `flowStep` behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `operator-request` | Optional `flowStep: {goal, key, instance?}` names the reserved step of a run the request waits on: the run's goal by its first revision, a step of its flow marked `reserved`, and for a step that runs over a list one of the run's instances. Its subject is the run's work order, its content exactly one item of kind `command`, and it carries no ask over. A revision keeps its `flowStep`. |
+
+Validation refuses a `flowStep` that names a goal that is not a run, or the goal
+by a later revision; a step the flow does not declare or does not mark reserved;
+an instance a step that runs once does not take, or one the run does not name;
+a subject other than the run's work order; content other than one command; and a
+carried ask. Whether such a request is due, carrying exactly the command the
+records give now while its step waits on the operator, is derived when it is
+read, never stored; the request grants nothing, and its close never completes
+the step. A flow's reserved step declares its `action` and `done` predicates,
+template content; see [Templates](templates.md#flows-092). `records describe
+operator-request` includes this contract, within the generic record reader
+`vericairn.records/readers/8`.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

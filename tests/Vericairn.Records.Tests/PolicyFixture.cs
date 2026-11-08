@@ -170,6 +170,14 @@ public sealed class PolicyFixture : IDisposable
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
     }
 
+    /// <summary>A signing device for a principal, admitted by the operator; returns its signer.</summary>
+    public StoreSigner AdmitSigner(string principal)
+    {
+        RecordEnvelope device = Device(principal);
+        Add("admission", new JsonObject { ["principal"] = principal, ["status"] = "admitted", ["note"] = "Test admission." }, subject: device.Reference);
+        return new StoreSigner(store, device.Id);
+    }
+
     private RecordEnvelope Device(string principal)
     {
         string id = Ulid.NewUlid().Value;

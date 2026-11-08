@@ -17,8 +17,11 @@ public static class OperatorActions
     /// <summary>The versioned machine representation.</summary>
     public const string Format = "vericairn.operator-actions/1";
 
-    /// <summary>Derive every waiting item from one record snapshot, without inspecting a device or a provider.</summary>
-    public static JsonObject Derive(EstateModel model)
+    /// <summary>Derive every waiting item from one record snapshot, without inspecting a device or a provider, a run's requests delivered now.</summary>
+    public static JsonObject Derive(EstateModel model) => Derive(model, DateTimeOffset.UtcNow);
+
+    /// <summary>Every waiting item, a run's operator requests delivered as of a time, the reading runtime's clock.</summary>
+    public static JsonObject Derive(EstateModel model, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
         var items = new JsonArray();
@@ -26,7 +29,7 @@ public static class OperatorActions
             .Select(p => model.Chain(p)[0]).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
         Dictionary<string, string> states = EstateStatus.WorkItems(model).ToDictionary(w => w.Id, w => w.Status, StringComparer.Ordinal);
 
-        AddRequests(model, items);
+        AddRequests(model, items, at);
         AddAsks(model, items);
         AddAcceptances(model, items, operators, states);
         AddPublications(model, items, operators);
@@ -80,7 +83,13 @@ public static class OperatorActions
                     text.Append("  Request waiting in order: ").Append(item["id"]!.GetValue<string>()).Append('\n');
                     continue;
                 }
-                text.Append("\nRecommendation: ").Append(item["recommendation"]!.GetValue<string>()).Append('\n')
+                if (item["stepCommand"] is JsonNode stepCommand)
+                {
+                    text.Append("\nA run's reserved step; its command, checked against the records: ").Append(stepCommand.GetValue<string>()).Append('\n')
+                        .Append("  The requester's words, not checked:\n");
+                }
+
+                text.Append(item["stepCommand"] is null ? "\nRecommendation: " : "  Recommendation: ").Append(item["recommendation"]!.GetValue<string>()).Append('\n')
                     .Append("  Action: ").Append(item["title"]!.GetValue<string>()).Append('\n')
                     .Append("  Why: ").Append(item["why"]!.GetValue<string>()).Append('\n')
                     .Append("  Destination: ").Append(item["destination"]!.GetValue<string>()).Append('\n')
@@ -138,14 +147,20 @@ public static class OperatorActions
         }
     }
 
-    private static void AddRequests(EstateModel model, JsonArray items)
+    private static void AddRequests(EstateModel model, JsonArray items, DateTimeOffset at)
     {
-        foreach (RecordEnvelope request in OperatorRequests.Open(model))
+        foreach (RecordEnvelope request in OperatorRequests.WaitingOf(model, null, at).Open)
         {
             string to = EstateModel.BodyString(request, "to") ?? "?";
             JsonObject item = Item("operator-request", request, EstateModel.BodyString(request, "action") ?? "Request", "open",
                 EstateModel.BodyString(request, "why") ?? "Unknown", [], [request]);
             foreach (string field in new[] { "recommendation", "consequence", "destination", "askedBy", "to" }) item[field] = EstateModel.BodyString(request, field) ?? "unknown";
+            // A run's step request is delivered only while its command is the records' own; its prose is the requester's, unchecked.
+            if (FlowStops.StepOf(request) is not null)
+            {
+                item["stepCommand"] = FlowStops.CommandOf(request);
+            }
+
             item["request"] = OperatorRequests.Item(model, request);
             foreach (string action in new[] { "done", "dismiss" })
             {

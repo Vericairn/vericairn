@@ -142,15 +142,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 AddPolicySections(result, sections);
                 return result;
             }, observe);
-            // Status is portable: neither the progress projection nor the run projection may read local worker state.
+            // Status is portable: neither the progress projection nor the run projection may read local worker state, and nothing in its
+            // canonical JSON reads the clock: a run's operator requests are delivered as of the records' own time.
             json["attention"] = MeasureStatus("attention", () => JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
-                includeLocalObservations: false), ProtocolJson.Options), observe);
+                includeLocalObservations: false, requestsAt: FlowStops.RecordedTime(model)), ProtocolJson.Options), observe);
             var adapters = AgentRuns.All(model).Where(r => r.Latest.Body.TryGetProperty("executionObserved", out JsonElement facts)
                 && facts.TryGetProperty("adapter", out _)).Select(r => new { run = r.Id, measurement = r.Latest.Body.GetProperty("executionObserved").GetProperty("adapter") }).ToArray();
             if (adapters.Length > 0) json["efficiencyAdapters"] = JsonSerializer.SerializeToNode(adapters, ProtocolJson.Options);
             string adapterText = adapters.Length == 0 ? string.Empty : "\nRecorded efficiency measurements:\n" + string.Join('\n', adapters.Select(a => "  run " + a.run + " " + AdapterPresentation.Describe(a.measurement))) + "\n";
-            StatusResponse status = MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks) + adapterText + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
+            StatusResponse status = MeasureStatus("status-text-and-response", () => new StatusResponse(EstateStatus.Render(model, checks, FlowClock.GetUtcNow()) + adapterText + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors) { RequestedProgress = CurrentRequestedProgress(model) }, observe);
             // Status shows what the records say, so the records first observed are the pass it needs.
             return journal is null ? status : status with { EventsCursor = EventsCursorLocked(model, null, new EventPass()) };
         }
@@ -208,7 +209,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
-    private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true, string? recipient = null, Func<RunsResponse>? runs = null)
+    private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true, string? recipient = null, Func<RunsResponse>? runs = null, DateTimeOffset? requestsAt = null)
     {
         var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
         RecordResponse Response(RecordEnvelope record)
@@ -227,7 +228,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             progress,
             recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
             () => GoalView.Rows(model).Select(r => new GoalRow(r.Id, r.Hash, r.Title, r.Status, r.Sponsor, r.SponsorName)).ToList(),
-            runs ?? (() => Runs(model, includeLocalObservations))).Derive(recipient);
+            runs ?? (() => Runs(model, includeLocalObservations)),
+            to => new OperatorRequestsResponse(string.Empty, Element(Vericairn.Records.Estate.OperatorRequests.Derive(model, to, requestsAt ?? FlowClock.GetUtcNow())), model.Findings.HasErrors)).Derive(recipient);
     }
 
     /// <inheritdoc />
@@ -1122,8 +1124,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return null;
             }
 
-            using JsonDocument json = JsonDocument.Parse(GoalView.RenderJson(model, goal));
-            return new GoalResponse(GoalView.RenderText(model, goal), json.RootElement.Clone())
+            DateTimeOffset now = FlowClock.GetUtcNow();
+            using JsonDocument json = JsonDocument.Parse(GoalView.RenderJson(model, goal, now));
+            return new GoalResponse(GoalView.RenderText(model, goal, now), json.RootElement.Clone())
             {
                 EventsCursor = EventsCursorLocked(model, null, new EventPass { StepsOfGoal = model.Chain(goal)[0] }),
             };

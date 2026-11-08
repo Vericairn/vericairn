@@ -124,7 +124,11 @@
       "review",
       "asked",
       "answered",
-      "attention"
+      "attention",
+      "request",
+      "requested",
+      "closed",
+      "queued"
     ],
     "flow-step": [
       "done",
@@ -143,6 +147,19 @@
       "in-review",
       "stale",
       "off"
+    ],
+    "flow-stop": [
+      "person",
+      "reserved",
+      "attention",
+      "accept"
+    ],
+    "flow-delivery": [
+      "due",
+      "delivered",
+      "closed",
+      "queued",
+      "outside"
     ]
   }
 }

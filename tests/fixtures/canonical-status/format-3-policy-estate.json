@@ -1,0 +1,178 @@
+{
+  "assignments": [
+    {
+      "attempts": 1,
+      "contributor": "01M57TPYP3J1PPGV71CJKDNBFC",
+      "contributorName": "Test Builder",
+      "id": "01M57TPYRDKPAHE8SC456NQPB7",
+      "key": "TASK-2",
+      "latestResult": "01M57TPYRE2FCVBP9F6DS0EAGX",
+      "outcome": "completed",
+      "state": "awaiting review"
+    },
+    {
+      "attempts": 1,
+      "contributor": "01M57TPYP3J1PPGV71CJKDNBFC",
+      "contributorName": "Test Builder",
+      "id": "01M57TPYS05BAB84RA37B57PTX",
+      "key": "TASK-3",
+      "latestResult": "01M57TPYS1FP5YX5CS5CB8Q038",
+      "outcome": "completed",
+      "state": "awaiting review"
+    },
+    {
+      "attempts": 1,
+      "contributor": "01M57TPYP3J1PPGV71CJKDNBFC",
+      "contributorName": "Test Builder",
+      "id": "01M57TPYSHFM7HZ77R836NSWVT",
+      "key": "TASK-4",
+      "latestResult": "01M57TPYSJDHMRRPD4ZTV628ZV",
+      "outcome": "completed",
+      "state": "awaiting review"
+    },
+    {
+      "attempts": 1,
+      "contributor": "01M57TPYP3J1PPGV71CJKDNBFC",
+      "contributorName": "Test Builder",
+      "id": "01M57TPYT5RT6GGF4PYHWGA9FV",
+      "key": "TASK-5",
+      "latestResult": "01M57TPYT62NW4DXKSKMND4N80",
+      "outcome": "completed",
+      "state": "awaiting review"
+    }
+  ],
+  "documents": [
+    {
+      "clearance": null,
+      "declaration": "01M7BNS4XRAE0FS50P7RX49NJ2",
+      "level": "refuse",
+      "path": "docs/registers/decisions/{month}/{date}-{slug}-{id}.md",
+      "reasons": [
+        {
+          "level": "refuse",
+          "on": "generation",
+          "record": null,
+          "summary": "The versioned generator is unavailable."
+        }
+      ],
+      "repository": null,
+      "state": "unavailable",
+      "unavailable": [
+        "The versioned generator is unavailable."
+      ]
+    }
+  ],
+  "estate": {
+    "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+    "name": "Test Estate",
+    "slug": "test-estate"
+  },
+  "findings": [
+    {
+      "code": "record.subject-stale",
+      "location": "records/policy-exception/2026-10/01M57TPYPX9WQBKRKTV3H8067K.json",
+      "message": "The subject has been superseded by 01M7BNN6YGH33BD7K5K6VT37PG; this record refers to an earlier revision and needs reconsideration.",
+      "severity": "warning"
+    },
+    {
+      "code": "record.subject-stale",
+      "location": "records/reconciliation/2026-10/01M57TPYPMCEBXQX7B1SC5002T.json",
+      "message": "The subject has been superseded by 01M57TPYPKSJAAV071H48M0D17; this record refers to an earlier revision and needs reconsideration.",
+      "severity": "warning"
+    }
+  ],
+  "lastObservedByPerson": null,
+  "operations": [
+    {
+      "action": "change-merge",
+      "id": "01M7BNQAARRN50NQZFZVZVN49M",
+      "identity": "fixture-change-merge",
+      "provider": "example",
+      "status": "observed-success"
+    },
+    {
+      "action": "change-push",
+      "id": "01M7BNQ7D05QPEN6HWPHCE7C03",
+      "identity": "fixture-change-push",
+      "provider": "example",
+      "status": "observed-success"
+    },
+    {
+      "action": "inspect",
+      "id": "01M57TPYPZ8PW162RQ4EB1EKJ1",
+      "identity": "fixture-inspection",
+      "provider": "example",
+      "status": "observed-success"
+    }
+  ],
+  "operatorRequests": {
+    "delivered": [],
+    "format": "vericairn.operator-requests/1",
+    "perDelivery": 3,
+    "queued": [],
+    "to": null,
+    "waiting": 0
+  },
+  "reconcile": [],
+  "records": 84,
+  "releases": [
+    {
+      "commit": "1111111111111111111111111111111111111111",
+      "id": "01M57TPYSK8MJQYZFXAMNVPVZ3",
+      "status": "published",
+      "version": "0.8.0"
+    }
+  ],
+  "vericairn": {
+    "channel": "stable",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "line": "current",
+    "mode": "source",
+    "repository": "Vericairn/vericairn",
+    "version": null
+  },
+  "workOrders": [
+    {
+      "id": "01M57TPYPC5P4Q97ZMQ1A1X4XA",
+      "key": "BACKLOG-1",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Fixture release"
+    },
+    {
+      "id": "01M57TPYPC5P4Q97ZMQ1A1X4X8",
+      "key": "REL-1",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Fixture release"
+    },
+    {
+      "id": "01M57TPYPZ8PW162RQ4EB1EKJ5",
+      "key": "TASK-2",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Maintenance"
+    },
+    {
+      "id": "01M57TPYRFA559G4DXFHET967G",
+      "key": "TASK-3",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Maintenance"
+    },
+    {
+      "id": "01M57TPYS3D0BV4NWW96DTJCG3",
+      "key": "TASK-4",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Maintenance"
+    },
+    {
+      "id": "01M57TPYSK8MJQYZFXAMNVPVZ5",
+      "key": "TASK-5",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "Maintenance"
+    }
+  ]
+}
