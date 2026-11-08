@@ -62,8 +62,9 @@ public sealed class OperationType : IRecordType
         new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
         new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
         new("signals", "object[]", false, "Worker event-stream and settlement observations: code, severity (warning|critical), at, summary, optional fingerprint, count and attention (ask id). Raw invocation inputs never enter a record.", 2),
-        new("execution", "object", false, "Immutable admitted model, effort, provenance, disabled Adapter, environment inventory and context allocation, recorded before dispatch.", 2),
+        new("execution", "object", false, "Immutable admitted model, effort, provenance, disabled Adapter, environment inventory and context allocation, recorded before dispatch. From format 3, contextSelections holds each dispatch-time search of the run's package as a vericairn.search-selection/1 object: at most five, of at most 50 candidates, each omitting candidates every record reader cannot read.", 2),
         new("executionObserved", "object", false, "Harness reports at settlement, with discrepancies and facts still unknown; never inferred from the request.", 2),
+        new("searchesObserved", "object", false, "For a settled agent-run: the searches its agent made through the run's MCP server, as that server logged them (not tamper-evident under a harness that does not sandbox the agent): selections (at most 100 vericairn.search-selection/1 objects, each omitting candidates and naming segments every record reader cannot read only as one Restricted entry), complete (whether every logged search is kept; false when the log is missing or unreadable) and digest (of every observed selection's hash, in order). Recorded at settlement only; a run whose log is empty records none.", 3),
         new("provenance", "object", false, ProducedBy.Description, 3),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
@@ -461,6 +462,7 @@ public sealed class OperationType : IRecordType
         ChangeOperationRules.Read(context);
         PackageRecordRules.Operation(context);
         ExecutionRecord.Read(context, status);
+        ExecutionRecord.ReadObservedSearches(context, status);
         SavedPrompts.ValidateUse(context);
         ProducedBy.Read(context, body);
         body.NoOtherKeys();

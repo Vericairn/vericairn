@@ -1737,6 +1737,77 @@ and pins without that marker remain working-tree-only. Missing or shallow histor
 bytes refuse with recovery guidance. Nothing fetches, checks out, substitutes a newer revision or
 writes the estate. This changes original retrieval, not the context allocation or token accounting.
 
+### Searching for context (0.9.2)
+
+A package follows the work's own records and the documents they name. Search adds a recorded second way in (CONTEXT-02):
+a machine-local keyword index finds candidates, and a package carries those it selects as optional, pinned sources, saying
+how they were found.
+
+```sh
+vericairn search "earlier decision on calibration"
+vericairn context prepare W-1 --search "earlier decision on calibration"
+vericairn search index
+vericairn search replay --record <agent-run operation id>
+```
+
+**What is indexed.** Every record is one passage, with its type, id and key kept whole and every string field of its body;
+superseded revisions are searched only with `history`. Each current pin of an estate document is split at its headings, and
+each table row is its own passage, so each catalog entry is found alone. Whole generated files, earlier revisions and unpinned
+changes are not indexed. A knowledge draft under `docs/knowledge/` adds an entry passage of its front matter, without its
+sources, drafting principal or status, and every passage of it belongs to the audience its front matter names.
+
+**Custody.** The index is `search.db` beside the live store under the Vericairn home, created owner-only before SQLite opens it;
+a file others may read is replaced. It is never committed, exported, shared or served, and deleting it loses nothing: the next
+search rebuilds it. A read-only runtime keeps its index in memory. Every estate on a machine has its own index, and a
+repository-synced estate one per clone.
+
+**Freshness and determinism.** Before answering, the runtime compares each segment's basis (the record-set hash over its
+records' `{id, hash}` and the document-set hash over its indexed `{path, revision, byteHash}`) with the current records and pins,
+and updates incrementally. `--allow-stale` answers within the query's budget from what is indexed, labelled stale; context
+preparation always updates first, or refuses with `search-index-stale`. Ranking is BM25 with fixed parameters and field weights,
+exact id, key or path matches first, scores rounded to fixed precision and ties ordered by source identity, so ranks repeat on
+every platform. The analyzer's Unicode normalization (NFKC), case folding and character classes come from Unicode 16.0.0
+tables built into Vericairn, never from the operating system, so every platform and the shipped build analyze text alike. Each
+candidate is reread and checked against what the index held: a mismatch drops it as an `index-fault`, and
+pinned bytes absent from this copy make it `excluded`, never read from another revision.
+
+**Permission.** Each audience's passages (Internal, Members only, Public, and any other restriction a draft names) form their own
+segment with its own ranking statistics, and a search ranks, counts and excerpts only the segments its reader may read, so a
+restricted passage changes no readable score, rank, count or error, and restricted and nonexistent sources answer alike. Today
+every admitted reader reads the whole estate, so every reader searches every segment; the segments are built for Knowledge,
+read-only participation and network access. A reader that cannot read every segment is told only that completeness cannot be
+confirmed, and `search index` gives such a reader no total index size, source bytes or update counts. A record keeps only
+candidates whose audience every reader of the estate's records may read, Internal or Public, and says, without a count, when it
+omits any, ranking the rest again without gaps; the audiences searched and the index segments it names are only those, with
+one opaque `Restricted` entry, carrying no label or hash, for every other segment, and its index revision covers only what it
+names. One count remains: when `more` is true, the selection's limit minus the candidates kept is the number omitted.
+
+**Selection, not authority.** A package's searches follow its explicit selection and never reorder it. Their candidates are
+optional sources with the dependency `candidate from search s1; optional; grants no authority`, inlined within the allocation
+or withheld with identity, size and retrieval command. A decision binds through its recorded subject and effects; a candidate
+that seems to govern the work from outside its explicit selection is raised as an ask or an amendment, not obeyed. Candidate
+text is untrusted content. Search may return a record the estate does not count, for example an unanchored or forged one; a
+candidate's standing is judged by reading it, never by search. A package's searches never select such a record: it is
+recorded as `excluded`, with its reason, as a pin whose bytes this copy lacks is.
+
+**What a run records.** A run's searches (`worker run --search`, `goal step --search`) are fixed in its intent as
+`execution.contextSelections`, and the searches its agent made through the run's MCP server are recorded at settlement as
+`searchesObserved`, at most 100 in full with a digest of all, from record format 3. That list is what the run's MCP server
+logged, not tamper-evident evidence: under a harness that does not sandbox the agent, the agent runs as the same user and could
+change the log, and the run does not record whether its harness was sandboxed. A missing log or an unreadable line makes the
+list incomplete; a run that searched nothing records no list. A reviewer replays them from the record: `search replay` reruns
+a selection only on exactly its basis (this copy's index, this copy's records up to the selection's time, or the estate commit
+it equalled, read from local Git history) and otherwise says so, at most 20 selections per request. A recorded selection's
+restricted segments are searched again as they are now, by a reader of every segment, and the replay says their basis was not
+confirmed. A full `search index --rebuild` runs from this machine's own command line or for an operator; a paired device can
+bring the index up to date but not rebuild it.
+
+**Measures.** `vericairn search measure <questions>` runs a question set and reports recall at 5 and 10, mean reciprocal rank,
+the index's size against its source bytes and query times, against the budgets of the search design: recall at 10 of at least
+0.8, an index at most half its source bytes, a full build within 30 seconds, an update after a record write within 100
+milliseconds and 95 percent of queries within 250 milliseconds. Each release's `verification` record reports them. A
+question set kept in the estate as a pinned document is skipped as a candidate for its own questions.
+
 ## 21. Hand-over, resume and explicit observation
 
 ```sh

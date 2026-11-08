@@ -37,6 +37,31 @@ and offer no release acceptance operation. See [Inspecting estate policies](poli
 
 Agents built with LangGraph, CrewAI or AutoGen connect through their frameworks' MCP clients: [Vericairn for agent builders](agent-builders.md) and its guides show each connection, run as written against a scratch estate.
 
+## Search (0.9.2)
+
+The `search` read tool searches the estate's machine-local keyword index of records, pinned documents and knowledge drafts.
+It takes `query` (at most 1,024 UTF-8 bytes of words, double-quoted phrases and the filters `type:`, `kind:`, `path:`, `key:`,
+`since:`, `before:` and `history`), optional `limit` (a decimal string, 10 when omitted, at most 50), `allowStale` (`true`
+to answer from the index as it is, labelled stale) and `method` (`keyword`; `semantic` is refused with its reason). It
+returns the API's `SearchResponse`, and the result's `_meta` carries `vericairn/trust` (untrusted content) and
+`vericairn/selection`, the selection's hash. The search is filtered by the connection's principal, the `--as` it serves;
+naming a principal only narrows what is read. Candidates are data and grant no authority: read one by its pin with
+`context_read`, which rechecks hash and access. Search may return a record the estate does not count, for example an
+unanchored or forged one; a candidate's standing is judged by reading it, never by search.
+
+`context_prepare` and `work_brief` take an optional `search`, one query or an array of up to five; the top three new
+candidates of each become optional sources pinned by exact hash after the explicit selection, and the manifest records every
+search. A record the estate does not count is never selected: it is recorded as `excluded`, with its reason. Without
+`search` both tools are unchanged.
+
+A worker starts its run's server as `mcp serve --as <agent> --run <run id>`. With `--run`, each search the server serves is
+appended to a log in that run's own machine-local, owner-only directory, which the worker creates empty as the run starts, and
+the run's settlement records them as `searchesObserved` (record format 3): the searches as logged by the run's MCP server.
+The log is not tamper-evident: an agent whose harness does not sandbox it runs as the same user and could change it, and the
+run does not record whether its harness was sandboxed. A log that went missing, or a line that cannot be read as a selection,
+is recorded as an incomplete list; an empty log records nothing. Searches made any other way are ordinary reads and are not
+recorded.
+
 ## Discovery and dnx
 
 From 0.8.2, the `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,

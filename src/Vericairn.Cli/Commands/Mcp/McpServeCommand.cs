@@ -15,25 +15,35 @@ internal sealed class McpServeCommand : Command
         : base("serve", "Serve the estate's tools over standard input and output until the input ends; a client of the daemon or the embedded runtime, never a second owner. With --connection, serve a remote estate's network MCP over a paired connection instead.")
     {
         Option<string> asOption = context.McpPrincipalOption;
+        var run = new Option<string?>("--run") { Description = "The agent run this server was configured for by its worker: each search it serves is kept in that run's own machine-local directory, and the run's settlement records them. Set by the worker; never needed by hand." };
+
         var connectionOption = new Option<string?>("--connection")
         {
             Description = "From 0.9.2: bridge to the estate a paired connection reaches ('vericairn connections list'), by its id or its estate's name: this machine's device signs every request and, in two steps, every record it writes; the remote runtime judges each call as its API operation for that device. Not with --as.",
         };
         Options.Add(asOption);
+        Options.Add(run);
         Options.Add(connectionOption);
         SetAction(parseResult => parseResult.GetValue(connectionOption) is string connection
             ? Bridge(context, connection, parseResult.GetValue(asOption))
-            : Execute(context, parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(asOption)));
+            : Execute(context, parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(asOption), parseResult.GetValue(run)));
     }
 
     /// <summary>Serves the estate over the Model Context Protocol on standard input and output; diagnostics go to standard error.</summary>
-    private static int Execute(CommandContext context, string root, string? actingAs) => context.WithApi(root, api =>
+    private static int Execute(CommandContext context, string root, string? actingAs, string? run) => context.WithApi(root, api =>
     {
         var utf8 = new System.Text.UTF8Encoding(false);
         Console.InputEncoding = utf8;
         Console.OutputEncoding = utf8;
+        if (run is not null && !Records.Identity.Ulid.IsValid(run)) return context.Fail("--run names a run by its ULID.");
+        string? estate = run is null ? null : api.Health().Estate;
+        var registry = new ToolRegistry(api, actingAs)
+        {
+            SearchObserved = estate is null ? null : selection => Vericairn.Runtime.Search.ObservedSearches.Append(estate, run!, selection),
+        };
+
         // From 0.9.2 (MCP-05) the session subscribes to resources when its runtime keeps an event journal: the daemon does.
-        var server = new McpServer(new ToolRegistry(api, actingAs), CommandContext.VersionText())
+        var server = new McpServer(registry, CommandContext.VersionText())
         {
             Subscriptions = new McpResourceWatch(new McpApiEventSource(api, actingAs)),
         };

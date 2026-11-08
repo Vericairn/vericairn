@@ -305,7 +305,7 @@ internal sealed class GoalOperations(CommandContext context)
             }
 
             GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search });
             if (!step.Ok)
             {
                 return step.Run?.Problem is { Findings.Count: > 0 } rejected ? context.ReportOutcome(WriteOutcome.Fail(rejected), json) : context.Fail(step.Message);

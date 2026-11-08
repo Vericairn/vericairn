@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 16, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
+
 Revision 15, November 7, 2026. Add `estate check --expect` and the bootstrap's `--expect` in the development build.
 
 Revision 14, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
@@ -606,3 +608,73 @@ when there are none. `vericairn estate bootstrap --force` writes the new scripts
 history, merges included, that is absent here and that no history checkpoint witnessed; a witnessed one is already the
 error `history.removed`. The warning depends on the clone, so it is not part of the canonical status. In a shallow
 clone it is reported unavailable, as information.
+
+## Keyword search and search-selected context (0.9.2)
+
+`vericairn search <query>` searches the estate's machine-local keyword index of records, pinned documents and knowledge
+drafts (CONTEXT-02). The query is data: words, double-quoted phrases and the filters `type:` (a record type or a knowledge
+kind), `kind:` (`record`, `document` or `knowledge`), `path:` (a path or path prefix), `key:` (a record key), `since:` and
+`before:` (dates, `yyyy-MM-dd`, inclusive and exclusive) and the bare word `history`, which adds superseded record revisions.
+Anything else, including the full-text engine's own operators and column syntax, is matched as text. A query is at most
+1,024 UTF-8 bytes and 32 words and phrases. Each candidate shows its rank, score, kind, title, matched fields, the
+`context read` command for its `vc1_` pin and an untrusted excerpt of at most 320 bytes of the original. Candidates are
+data and grant no authority. Search may return a record the estate does not count, for example an unanchored or forged one;
+a candidate's standing is judged by reading it, never by search, and `--search` on a package never selects such a record:
+it is recorded as `excluded`, with its reason. The selection, `vericairn.search-selection/1`, records the search; `--json` prints it in the
+response. Searching writes no record.
+
+| Option | Meaning |
+|---|---|
+| `--limit <n>` | Candidates requested: 10 when omitted, at most 50. |
+| `--allow-stale` | Answer from the index as it is, labelled stale, when bringing it up to date would overrun the query's time budget. |
+| `--method <keyword\|semantic>` | `keyword` by default. Semantic search needs a semantic search Adapter, which this release does not include; it is refused with its reason. |
+
+To search for the bare word `index`, `replay` or `measure`, quote it as a phrase: `vericairn search '"index"'`.
+
+```sh
+vericairn search "withheld list context package"
+vericairn search "keyword index type:decision since:2026-11-01" --limit 20
+vericairn context read <vc1_ pin from a candidate> --original
+```
+
+`vericairn search index` brings the index up to date and shows each audience segment the caller may read, with its
+passages and its record-set and document-set hashes, the index's size against the indexed source bytes and the time taken; a
+caller that cannot read every segment is shown no total size, source bytes or update counts. `--rebuild` discards every
+passage first; it runs from this machine's own command line or for an operator, and a paired device's request is refused. The
+index is derived, owner-only and machine-local; it is never committed, exported or served, and deleting it loses nothing.
+Several processes on one machine (a worker and its run's MCP server) share it, and one never deletes it while another has it
+open. The analyzer normalizes (NFKC) and folds case with Unicode 16.0.0 tables built into Vericairn, so results never depend
+on the operating system.
+
+`--search <query>` on `context prepare`, `work brief`, `worker run` and `goal step`, repeatable up to five times, searches
+after the work's explicit selection. The top three new candidates of each query become optional sources pinned by exact
+hash, with the dependency `candidate from search s1; optional; grants no authority`; a candidate already selected is a
+duplicate. The manifest becomes `vericairn.context-manifest/2` and records each search in its basis's `selections`. A
+record stays whole; a document section or table row may be a labelled excerpt from its own offset. A package without
+`--search` is unchanged, byte for byte. On `work brief`, `--search` implies `--agent-context`. A run records its searches in
+its intent from record format 3; an earlier format refuses them.
+
+```sh
+vericairn context prepare W-1 --search "earlier decision on calibration" --search "release notes widget" --max-bytes 200000
+vericairn work brief W-1 --search "calibration"
+vericairn worker run <assignment id> --launcher claude-code --agent <principal> --by <operator> --repository <resource> --search "calibration"
+```
+
+`vericairn search replay <file>` replays every selection a file holds (a selection, a context package or its manifest),
+and `--record <operation id>` replays those an agent-run operation records, optionally only the one `--selection <hash>`
+names. A selection is rerun only on exactly its basis: this copy's index, this copy's records up to the selection's time,
+or its commit read from local Git history. Otherwise it says so and approximates nothing. One request replays at most 20
+selections and names the rest; a selection a record keeps names its restricted segments only as one opaque `Restricted`
+entry, and replaying it says their basis was not confirmed. A selection that cannot be read is answered as unavailable. Exit 0
+means every selection was replayed and matched; 2 otherwise.
+
+`vericairn search measure <questions>` runs a question set and reports recall at 5 and 10, mean reciprocal rank, the
+index's size against its source bytes and query times; `--rebuild` adds the full build time. A question set is JSON
+(`{"format": "vericairn.search-questions/1", "questions": [{"query": "...", "expected": ["..."]}]}`) or Markdown whose first
+table has `Query` (or `Question`) and `Expected` columns. An expected source is a record id or key, a document revision id,
+or a document path (a prefix when it ends in `/`). When the question set lies inside the estate (for example a pinned
+`docs/search-questions.md`), candidates from that file itself are skipped, since each of its rows would match its own query
+and outrank the real sources; the report names the skipped path. It records nothing. See the
+[operator's guide](operator-guide.md#searching-for-context-092).
+
+`vericairn doctor` adds a `search` line confirming that this build's SQLite has the full-text module the index uses.

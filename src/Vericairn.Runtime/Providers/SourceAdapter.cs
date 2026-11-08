@@ -42,6 +42,11 @@ public sealed record DesignFileChange(string Path, string Hash);
 /// <param name="Documents">Complete changed design-file membership and current content hashes.</param>
 public sealed record DesignChangeSet(string BaseCommit, string Head, IReadOnlyList<DesignFileChange> Documents);
 
+/// <summary>One regular file of a repository at an exact commit, with its exact bytes.</summary>
+/// <param name="Path">Repository-relative path with '/' separators.</param>
+/// <param name="Bytes">The blob's bytes.</param>
+public sealed record SourceFile(string Path, byte[] Bytes);
+
 /// <summary>A record file deleted in a repository's history.</summary>
 /// <param name="Path">Repository-relative path under records/.</param>
 /// <param name="Commit">The newest commit, reachable from the checked-out one, that deleted it.</param>
@@ -95,6 +100,12 @@ public interface ISourceAdapter
     /// Null means unavailable or unsupported; without an observation the estate checks every entry.
     /// </summary>
     IReadOnlySet<string>? IgnoredEstateEntries(string root) => null;
+
+    /// <summary>
+    /// The regular files under the given top-level directories at an exact commit of this repository's local history, read without
+    /// checkout, fetch or change. Null when unsupported, when the commit is absent, or when the history is shallow or unreadable.
+    /// </summary>
+    IReadOnlyList<SourceFile>? ReadTreeAtCommit(string root, string commit, IReadOnlyList<string> directories) => null;
 
     /// <summary>
     /// The record files deleted in the checked-out commit's reachable history, merges included, each with the newest commit that deleted
