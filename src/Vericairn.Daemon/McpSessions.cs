@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Vericairn.Mcp;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Daemon;
@@ -24,21 +25,37 @@ internal sealed class McpSession
     private long lastUsed;
     private int streaming;
 
-    internal McpSession(string id, AuthenticatedDevice device, string profile, string protocolVersion, DateTimeOffset now)
+    internal McpSession(string id, AuthenticatedDevice device, string profile, string protocolVersion, DateTimeOffset now, EstateService? service = null)
     {
         Id = id;
         Device = device.Identity;
+        PublicKey = device.PublicKey;
         Principal = device.Principal;
         Profile = profile;
         ProtocolVersion = protocolVersion;
         lastUsed = now.UtcTicks;
+        if (service is not null)
+        {
+            Events = new McpSessionEvents(service, device.Identity, device.PublicKey, profile, device.Principal);
+            // Notifications are spaced in real time, whatever clock judges the session's idleness.
+            Watch = new McpResourceWatch(Events);
+        }
     }
+
+    /// <summary>From 0.9.2 (MCP-05): the session's events, read for its device, principal and profile; null without a runtime.</summary>
+    internal McpSessionEvents? Events { get; }
+
+    /// <summary>From 0.9.2 (MCP-05): the session's resource subscriptions and the notifications its server stream carries.</summary>
+    internal McpResourceWatch? Watch { get; }
 
     /// <summary>The session id the client repeats in Mcp-Session-Id: 256 random bits, base64url.</summary>
     internal string Id { get; }
 
     /// <summary>The identity of the device that opened it.</summary>
     internal string Device { get; }
+
+    /// <summary>The key that device was admitted with when it opened the session.</summary>
+    internal string PublicKey { get; }
 
     /// <summary>That device's principal.</summary>
     internal string Principal { get; }
@@ -63,7 +80,8 @@ internal sealed class McpSession
 
     /// <summary>
     /// The messages waiting for the session's server stream: the notifications MCP-05 sends, for this session's device alone. Bounded;
-    /// when full the oldest gives way, since a notification is a hint and the client reads state afresh.
+    /// when full the oldest gives way, since a notification is a hint and the client reads state afresh. Its stream checks the
+    /// device's standing before it sends any of them.
     /// </summary>
     internal Channel<JsonObject> Outbox { get; } = Channel.CreateBounded<JsonObject>(new BoundedChannelOptions(64)
     {
@@ -78,6 +96,9 @@ internal sealed class McpSession
         && string.Equals(profile, Profile, StringComparison.Ordinal);
 
     internal void Touch(DateTimeOffset now) => Interlocked.Exchange(ref lastUsed, now.UtcTicks);
+
+    /// <summary>Whether its server stream is open now.</summary>
+    internal bool Streaming => Volatile.Read(ref streaming) == 1;
 
     /// <summary>Takes the session's one server stream; false when it already has one open.</summary>
     internal bool TryOpenStream() => Interlocked.CompareExchange(ref streaming, 1, 0) == 0;
@@ -121,7 +142,7 @@ internal sealed class McpSession
 /// device runs at most <see cref="CallsPerDevice"/> requests at once and all devices <see cref="CallsPerRuntime"/>, so MCP never takes
 /// the connections the API and the event streams need. Server streams take the event streams' slots.
 /// </summary>
-internal sealed class McpSessions(TimeProvider time)
+internal sealed class McpSessions(TimeProvider time, EstateService? service = null)
 {
     /// <summary>The most sessions one device holds; a new one ends its least recently used.</summary>
     internal const int PerDevice = 4;
@@ -163,6 +184,15 @@ internal sealed class McpSessions(TimeProvider time)
         }
     }
 
+    /// <summary>The open session an id names, whichever device holds it: for the runtime's own reports and tests, never a request.</summary>
+    internal McpSession? Named(string id)
+    {
+        lock (gate)
+        {
+            return sessions.TryGetValue(id, out McpSession? session) && !session.IsEnded ? session : null;
+        }
+    }
+
     /// <summary>Opens a session for a device, or null when the runtime holds as many as it keeps.</summary>
     internal McpSession? Open(AuthenticatedDevice device, string profile, string protocolVersion)
     {
@@ -181,7 +211,7 @@ internal sealed class McpSessions(TimeProvider time)
                 return null;
             }
 
-            var session = new McpSession(NewId(), device, profile, protocolVersion, now);
+            var session = new McpSession(NewId(), device, profile, protocolVersion, now, service);
             sessions[session.Id] = session;
             return session;
         }

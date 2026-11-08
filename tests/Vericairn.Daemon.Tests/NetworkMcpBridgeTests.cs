@@ -171,6 +171,132 @@ public class NetworkMcpBridgeTests
         Assert.DoesNotContain(hostile.Seen, m => m["params"]?["_meta"]?["vericairn/signature"] is not null);
     }
 
+    [Fact]
+    public async Task TheBridgeHoldsAStreamOnlyWhileSubscribedAndPassesOnOnlyBoundedResourceNotifications()
+    {
+        var runtime = new Streaming();
+        using var http = new HttpClient(runtime) { BaseAddress = new Uri("http://streaming/") };
+        using McpBridge bridge = Bridge(http, _ => throw new InvalidOperationException("Never asked to sign."));
+        await using (var client = new McpLines((input, output, token) => bridge.RunAsync(input, output, token)))
+        {
+            await client.InitializeAsync();
+            Assert.NotNull((await client.RequestAsync("ping"))["result"]);
+            Assert.Equal(0, runtime.Streams);
+
+            // The first subscription the runtime accepts opens the stream. Of what it carries, only resource notifications within
+            // 64 KiB go on: not another method, not a request, not an oversized message.
+            Assert.NotNull((await client.RequestAsync("resources/subscribe", new JsonObject { ["uri"] = "vericairn://e/record/a" }))["result"]);
+            JsonObject updated = await client.NotificationAsync(n => n["method"]?.GetValue<string>() == "notifications/resources/updated");
+            Assert.Equal("vericairn://e/record/a", updated["params"]!["uri"]!.GetValue<string>());
+            await client.NotificationAsync(n => n["method"]?.GetValue<string>() == "notifications/resources/list_changed");
+            Assert.Equal(["notifications/resources/updated", "notifications/resources/list_changed"], client.Notifications.Select(n => n["method"]!.GetValue<string>()));
+            Assert.True(runtime.Streams >= 1);
+
+            // The last unsubscription lets the stream go, and no new one opens.
+            Assert.NotNull((await client.RequestAsync("resources/unsubscribe", new JsonObject { ["uri"] = "vericairn://e/record/a" }))["result"]);
+            await runtime.Released.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            int streams = runtime.Streams;
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+            Assert.Equal(streams, runtime.Streams);
+        }
+    }
+
+    /// <summary>
+    /// A runtime that accepts every subscription and serves one server stream: a notification of another method, an oversized one, a
+    /// request, then the resource notifications, after which the stream stays open until the bridge lets it go.
+    /// </summary>
+    private sealed class Streaming : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int streams;
+
+        public int Streams => Volatile.Read(ref streams);
+
+        public Task Released => released.Task;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.NoContent);
+            if (request.Method == HttpMethod.Get)
+            {
+                Interlocked.Increment(ref streams);
+                string oversized = new('x', McpBridge.MaxStreamBlock + 10);
+                string text = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{\"data\":\"not passed on\"}}\n\n"
+                    + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/resources/updated\",\"params\":{\"uri\":\"" + oversized + "\"}}\n\n"
+                    + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"notifications/resources/updated\",\"params\":{\"uri\":\"a request\"}}\n\n"
+                    + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/resources/updated\",\"params\":{\"uri\":\"vericairn://e/record/a\"}}\n\n"
+                    + "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/resources/list_changed\"}\n\n";
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new HeldOpen(Encoding.UTF8.GetBytes(text), released)) };
+            }
+
+            JsonObject message = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
+            if (message["id"] is null) return new HttpResponseMessage(HttpStatusCode.Accepted);
+            JsonObject result = message["method"]?.GetValue<string>() == "initialize"
+                ? new JsonObject { ["protocolVersion"] = "2025-06-18", ["capabilities"] = new JsonObject { ["resources"] = new JsonObject { ["subscribe"] = true, ["listChanged"] = true } } }
+                : new JsonObject();
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = message["id"]!.DeepClone(), ["result"] = result }.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+            response.Headers.Add("Mcp-Session-Id", "S1");
+            return response;
+        }
+    }
+
+    /// <summary>A body that yields its bytes and then stays open until its reader lets it go.</summary>
+    private sealed class HeldOpen(byte[] content, TaskCompletionSource released) : Stream
+    {
+        private int position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (position < content.Length)
+            {
+                int take = Math.Min(buffer.Length, content.Length - position);
+                content.AsMemory(position, take).CopyTo(buffer);
+                position += take;
+                return take;
+            }
+
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+            finally
+            {
+                released.TrySetResult();
+            }
+
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            released.TrySetResult();
+            base.Dispose(disposing);
+        }
+    }
+
     /// <summary>A runtime that answers every call with a prepared record of its choosing.</summary>
     private sealed class Hostile(Func<JsonObject> prepared) : HttpMessageHandler
     {

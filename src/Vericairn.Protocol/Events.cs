@@ -56,6 +56,37 @@ public sealed record EventFilter(IReadOnlyList<string>? Kinds = null, IReadOnlyL
 public sealed record EventsResponse(IReadOnlyList<EventEnvelope> Events, string Cursor, bool Reset = false, Problem? Problem = null);
 
 /// <summary>
+/// From 0.9.2 (MCP-05): one of several narrower interests a follower reads the journal for, such as an MCP session's subscribed
+/// resource. It only narrows: an event passes it only when the read delivers that event at all.
+/// </summary>
+/// <param name="Filter">What the interest follows, as a filter names it.</param>
+/// <param name="Since">A cursor the reader holds: only events after it pass. A cursor that cannot be honored bounds nothing.</param>
+public sealed record EventSelection(EventFilter Filter, string? Since = null);
+
+/// <summary>
+/// From 0.9.2 (MCP-05): a long poll of the journal that also says, for each event delivered, which of several selections it passes,
+/// so one read serves a follower with many interests. It answers as <c>GET /v1/events</c> does as a long poll, and never streams.
+/// </summary>
+/// <param name="After">The cursor to continue from; the journal's head when omitted.</param>
+/// <param name="Filter">What the read delivers at all.</param>
+/// <param name="Selections">At most 32 narrower interests, each judged on the events delivered.</param>
+/// <param name="Principal">On the local socket, the principal read for, by default the operator; a device reads only for its own.</param>
+/// <param name="Wait">Seconds to wait for an event, 0 to 25, by default 20.</param>
+public sealed record EventSelectRequest(string? After = null, EventFilter? Filter = null, IReadOnlyList<EventSelection>? Selections = null,
+    string? Principal = null, int? Wait = null);
+
+/// <summary>
+/// From 0.9.2 (MCP-05): what a selecting long poll delivered: the events, oldest first, and for each the indices of the selections it
+/// passes; the cursor to continue from; reset when the cursor given could not be honored; or a problem when nothing was read.
+/// </summary>
+/// <param name="Events">The events delivered.</param>
+/// <param name="Selected">For each event, in order, the indices of the selections it passes.</param>
+/// <param name="Cursor">The position to continue from, sealed for the reader.</param>
+/// <param name="Reset">True when the reader must re-read state before continuing.</param>
+/// <param name="Problem">Why nothing was read.</param>
+public sealed record EventSelectResponse(IReadOnlyList<EventEnvelope> Events, IReadOnlyList<IReadOnlyList<int>> Selected, string Cursor, bool Reset = false, Problem? Problem = null);
+
+/// <summary>
 /// One message of a server-sent event stream as the SDK reads it: an event, a reset, or only a newer cursor to resume from.
 /// </summary>
 /// <param name="Cursor">The position after this message.</param>
@@ -84,6 +115,15 @@ public static class EventVocabulary
     /// <summary>The most values one filter dimension holds.</summary>
     public const int MaxFilterValues = 32;
 
+    /// <summary>From 0.9.2: the most selections one selecting read names.</summary>
+    public const int MaxSelections = 32;
+
+    /// <summary>
+    /// From 0.9.2: the problem code of a selecting read on a runtime that keeps no event journal, apart from <c>unavailable</c>, a
+    /// journal briefly unable to be read or a runtime stopping, which a follower retries.
+    /// </summary>
+    public const string NoJournal = "no-journal";
+
     /// <summary>Every kind of event. due and presence are reserved for reminders and presence leases, which later releases raise.</summary>
     public static ImmutableArray<string> Kinds { get; } = ["record", "attention", "ask", "step", "request", "due", "run", "presence"];
 
@@ -111,6 +151,16 @@ public partial interface IEstateApi
     /// <summary>The cancellable read bridge of a long poll.</summary>
     Task<EventsResponse> EventsAsync(string? after = null, EventFilter? filter = null, string? principal = null, int? wait = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Events), () => Events(after, filter, principal, wait), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>
+    /// From 0.9.2 (MCP-05): reads the events after a cursor as <see cref="Events"/> does, and says for each which of the request's
+    /// selections it passes. The daemon waits; an embedded runtime that keeps a journal reads once without waiting.
+    /// </summary>
+    EventSelectResponse EventsSelect(EventSelectRequest request) => throw new NotSupportedException("The event journal is unavailable.");
+
+    /// <summary>The cancellable read bridge of a selecting long poll.</summary>
+    Task<EventSelectResponse> EventsSelectAsync(EventSelectRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(EventsSelect), () => EventsSelect(request), false, this as IClientOperationLifetime, cancellationToken);
 
     /// <summary>The cancellable read bridge of one event by key.</summary>
     Task<EventEnvelope?> EventGetAsync(string key, string? principal = null, CancellationToken cancellationToken = default) =>

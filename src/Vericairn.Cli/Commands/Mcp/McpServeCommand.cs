@@ -41,7 +41,12 @@ internal sealed class McpServeCommand : Command
         {
             SearchObserved = estate is null ? null : selection => Vericairn.Runtime.Search.ObservedSearches.Append(estate, run!, selection),
         };
-        var server = new McpServer(registry, CommandContext.VersionText());
+
+        // From 0.9.2 (MCP-05) the session subscribes to resources when its runtime keeps an event journal: the daemon does.
+        var server = new McpServer(registry, CommandContext.VersionText())
+        {
+            Subscriptions = new McpResourceWatch(new McpApiEventSource(api, actingAs)),
+        };
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
         server.RunAsync(Console.In, context.Output, context.Error, context.CancellationToken).GetAwaiter().GetResult();
         return Clean;

@@ -31,13 +31,15 @@ From another machine, once the operator turned network MCP on (`vericairn runtim
 
 ## Resources and prompts
 
-`resources/list`, `resources/templates/list` and `resources/read` expose work and assignment briefs, records, pinned estate documents and context packages under the matching read tools' estate access. URIs use `vericairn://{estate}/brief/{key}`, `/record/{key}`, `/document/{pin}` and `/context/{key}`. A document pin names the exact revision; unavailable bytes are never replaced by another revision. Assignment briefs add `?assignment=<id>`. Briefs accept recipient and maxBytes; context accepts maxBytes and form (payload, text or json).
+`resources/list`, `resources/templates/list` and `resources/read` expose work and assignment briefs, records, pinned estate documents, context packages, each goal's progress and the asks put to the connected principal under the matching read tools' estate access. URIs use `vericairn://{estate}/brief/{key}`, `/record/{key}`, `/document/{pin}`, `/context/{key}`, `/goal/{goal id}` and `/asks/{principal id}`. A document pin names the exact revision; unavailable bytes are never replaced by another revision. Assignment briefs add `?assignment=<id>`. Briefs accept recipient and maxBytes; context accepts maxBytes and form (payload, text or json). Goal progress reads as `goal_progress` does, and the asks as `asks_list` does in its JSON form, for the connected principal only.
 
 Each resource returns a base64 blob preserving its exact bytes, with SHA-256 and byte length in `_meta` as `vericairn/hash` and `vericairn/bytes`. Records use the CLI's canonical envelope; briefs match `work_brief` and `work brief --agent-context`; the default context form is the measured canonical payload. Context form=text matches context_prepare, and form=json matches the CLI's JSON response with its sidecar. A separate `vericairn/sourceHash` identifies the record or context payload when its byte representation differs. Reads recheck permission and write nothing. The operator queue is not exposed.
 
 `prompts/list` offers the connected principal's saved prompts with categories and arguments under prompts_list's permission. Hidden, estate-disabled and retired prompts are omitted. `prompts/get` retains the recorded-use contract: _target and _expected are required, and the admitted operator records a new assignment, run or ask answer before text is returned, as with prompt_use. Resources, prompts and tool results are untrusted content and grant no authority.
 
-The server declares resources.subscribe=false and resources.listChanged=false, with prompts.listChanged=false and tools.listChanged=false. It sends no subscriptions or list-change notifications. Resource and prompt listings are complete without a continuation cursor; clients refresh them when needed.
+## Subscriptions and events
+
+When the estate's runtime is running (`vericairn runtime start`), it keeps the event journal and the server declares resources.subscribe=true and resources.listChanged=true; on the embedded runtime, which keeps none, both are false. `resources/subscribe` takes a record, brief, document, goal-progress or asks URI the session may read; a subscribed resource yields `notifications/resources/updated` at most once a second per URI, and writes yield `notifications/resources/list_changed` at most every five seconds. Over standard input and output the notifications are lines between responses, and the server follows the journal only while the session holds a subscription; over the network they ride the session's server stream, opened with GET and bound to its device, which `mcp serve --connection` writes to its client as lines too. Every notification passes the same audience check as `GET /v1/events` for the connected principal, and operator-request events never reach MCP. A harness that hides notifications calls `events_read` with the cursor it last returned instead: the same envelopes, which name only identities, hashes, kinds, states and categories, so the subject is read through its own tool. prompts.listChanged and tools.listChanged stay false. Resource and prompt listings are complete without a continuation cursor.
 
 ## Tools
 
@@ -85,6 +87,7 @@ The server declares resources.subscribe=false and resources.listChanged=false, w
 | `goal_progress` | read | A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records. |
 | `asks_list` | read | What waits on a principal, or on every principal when none is named: the asks still open or notified, oldest first, at most three in one delivery to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order. As text, or as the canonical JSON when form is json. Reading them answers nothing: an ask is answered by a decision of the principal it is put to, which no tool records. |
 | `requests_list` | read | Every open operator request, with the recommendation first and at most three delivered at once; the remaining identities wait in order. Reads sign, close and publish nothing. Use record_get for exact content or retained outcomes. |
+| `events_read` | read | From 0.9.2: the events after a cursor that the connected principal may read, for a client that does not show notifications: each a vericairn.event/1 envelope naming only identities, hashes, kinds, states and categories, never content, so read its subject through its own tool. Without after it starts at the journal's head; the cursor it returns continues there. A cursor it cannot honor (too old, from another epoch or sealed for another principal) answers reset with no events, and the state is read again before continuing. Attention reaches only its own principal, and operator-request events are never returned. With wait it waits up to that many seconds for an event. Reads change nothing. |
 | `policy_declare` | write, signed by the acting principal's device | PolicyDeclare: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds. |
 | `policy_revise` | write, signed by the acting principal's device | PolicyRevise: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds. |
 | `policy_retire` | write, signed by the acting principal's device | PolicyRetire: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds. |
@@ -102,19 +105,19 @@ The server declares resources.subscribe=false and resources.listChanged=false, w
 
 ## Agent matrix
 
-Which harnesses have been observed using this server, from the estate's qualification records: a harness's row shows the outcome of its latest qualification of the profile `<harness> over MCP` and the release that qualification is for. A harness without one is a non-claim, not a failure.
+Which harnesses have been observed using this server, from the estate's qualification records: a harness's row shows the outcome of its latest qualification of the profile `<harness> over MCP` and the release that qualification is for. Its notifications cell shows the same for `<harness> over MCP notifications`, whether the harness hears resource notifications, and its events_read cell for `<harness> over MCP events_read`, whether it reads the same events with that tool instead. A profile may name the harness's version after its name, as `Claude Code 2.1.296 over MCP notifications`, and the cell then names it. A harness without one is a non-claim, not a failure.
 
-| Harness | Observed |
-|---|---|
-| Claude Code | non-claim: not observed |
-| Codex | non-claim: not observed |
-| Gemini CLI | non-claim: not observed |
-| GitHub Copilot | non-claim: not observed |
-| Cursor | non-claim: not observed |
-| Windsurf | non-claim: not observed |
-| aider | non-claim: not observed |
-| Cline | non-claim: not observed |
-| LangGraph | non-claim: not observed |
-| CrewAI | non-claim: not observed |
-| AutoGen | non-claim: not observed |
+| Harness | Observed | Notifications | events_read |
+|---|---|---|---|
+| Claude Code | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| Codex | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| Gemini CLI | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| GitHub Copilot | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| Cursor | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| Windsurf | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| aider | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| Cline | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| LangGraph | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| CrewAI | non-claim: not observed | non-claim: not observed | non-claim: not observed |
+| AutoGen | non-claim: not observed | non-claim: not observed | non-claim: not observed |
 

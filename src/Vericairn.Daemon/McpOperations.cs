@@ -25,12 +25,14 @@ namespace Vericairn.Daemon;
 internal sealed class McpOperations
 {
     /// <summary>
-    /// The operations that carry their input in a POST body that a network tool sends: the reads among them, and section 8's contributor
-    /// writes. Every other POST is refused before its route runs; reads by GET pass, except the event stream, which a tool never opens.
+    /// The operations that carry their input in a POST body that a network tool sends: the reads among them, among them from 0.9.2 the
+    /// selecting long poll events_read reads (MCP-05), which never streams, and section 8's contributor writes. Every other POST is
+    /// refused before its route runs; reads by GET pass, except the event routes: a tool never opens a stream or reads an event by key.
     /// </summary>
     internal static readonly IReadOnlySet<string> Posts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "POST /v1/resources/read",
+        "POST /v1/events/select",
         "POST /v1/releases/check",
         "POST /v1/templates/render",
         "POST /v1/work/attempt",
