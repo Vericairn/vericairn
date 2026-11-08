@@ -145,7 +145,7 @@ public static class SoftwareFlows
               "kind": "operation",
               "role": "root-operator",
               "required": true,
-              "action": "Once, in an estate with no adoption checkpoint: run vericairn estate checkpoint --adopt --check, read the records it would anchor and the plan hash it prints, then the root operator signs the adoption with vericairn estate checkpoint --adopt --by <root-operator> --expect-plan <plan hash>, which is refused if what it anchors changed since that check. An estate born with one, adopted when its root operator's first device admitted itself, has this step done.",
+              "action": "Once, in an estate with no adoption checkpoint: the root operator adopts history checkpoints as the item Adopt history checkpoints in vericairn operator list says, which carries the check to read and the signing command with its plan hash. An estate born with one, adopted when its root operator's first device admitted itself, has this step done.",
               "done": [
                 { "type": "history-checkpoint", "fields": { "trigger": "adoption" } }
               ],
@@ -336,7 +336,7 @@ public static class SoftwareFlows
               "kind": "operation",
               "role": "release-manager",
               "required": true,
-              "action": "Build the command line from the release commit and, against an estate clone that no runtime of another build serves, run vericairn release submit --check with it: every objection with its next action, nothing recorded. In an estate that adopted history checkpoints, the runtime writes one with trigger release, signed by the device then writing, before the check (OPS-07). The step counts once the submission's intent is recorded.",
+              "action": "Build the command line from the release commit and, against an estate clone that no runtime of another build serves, run vericairn release submit --check with it: every objection with its next action, with nothing recorded and no history checkpoint written. In an estate that adopted history checkpoints, vericairn release submit itself writes the checkpoint with trigger release, signed by the device then writing, before its own admission check. The step counts once the submission's intent is recorded.",
               "done": [
                 { "type": "operation", "fields": { "action": "dispatch-release-workflow", "target.version": "{subject.version}" } }
               ],

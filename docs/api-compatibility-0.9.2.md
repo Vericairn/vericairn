@@ -624,9 +624,12 @@ is now. `Routing.MayHandOver` and `DecidesForStep` read authority at the record 
 
 The API adds one route, `POST /v1/history/checkpoints` with `HistoryCheckpointRequest` `{by, adopt, check, expectPlan}`,
 returning `HistoryCheckpointResponse` `{trigger, applied, adopted, witnessed, listed, heads, anchored, notCounting,
-byRevokedDevices, deletedInHistory, unavailable, written, planHash, uncommitted}`, or a `Problem` with status 409 when refused.
+byRevokedDevices, deletedInHistory, unavailable, written, planHash, uncommitted, authorityChanges}`, or a `Problem` with status 409 when refused.
 Each `HistoryRecordItem` gives `{id, type, at, path, commit, device, commitAt, note}`. An adoption that anchors anything needs
-`expectPlan`, the `planHash` its check returned, and is refused when the anchored set differs. Adoption and its check are refused
+`expectPlan`, the `planHash` its check returned, and is refused when the anchored set differs. For adoption, `authorityChanges`
+lists the records whose findings differ when roles and grants are read at each record's own time, as an adopted estate reads the
+records its adoption does not witness, each with a `note` saying what differs; adoption keeps for every record it witnesses the
+reading it has then, and `planHash` does not cover the list. Adoption and its check are refused
 while the machine's memory holds a checkpoint the copy no longer holds. `IEstateApi` adds the default members
 `HistoryCheckpoint` and `HistoryCheckpointAsync`; an implementation that does not override them answers `unsupported`, so
 existing implementations compile unchanged. The SDK client and `CancellationBoundApi` implement both. With `check` it signs and
@@ -642,7 +645,7 @@ submission's check, or, with `written` null, why none was. In an estate that has
 trigger `charter` for a charter revision, whose checkpoint, for a revision to required signatures by the root operator or a
 human holding `administer`, anchors the unsigned records that count before it, and trigger `interval` once the unwitnessed tail holds 500 records or its oldest
 record is 24 hours old, when the write is signed by this machine's device for its author and that device is not a person's
-with presence; `estate upgrade --to` sets off `upgrade`, and `release submit` writes `release` before its check. The root
+with presence; `estate upgrade --to` sets off `upgrade`, and `release submit` writes `release` before its own admission check. The root
 operator's first device admitting itself in an estate that holds only what `estate init` wrote, the root operator's devices
 and no checkpoint sets off `adoption`, anchoring the unsigned records init wrote. Only a write the runtime signs for its author sets one off: a
 device-signed request, a record presigned on a phone (`POST /v1/records/signed`) and a write signed with keys the caller names
@@ -664,8 +667,25 @@ pinned in release mode to a version after 0.9.1 that has not adopted; it names t
 and `waitsOn` and carries no record command. `estate check` (`GET /v1/check`) adds `history.rolled-back`, a warning when the
 main line no longer holds the newest checkpoint this machine verified or the memory cannot be read or kept, or information when
 there is no main line, and `history.remembered`, information naming what the machine remembers; neither is in the canonical
-status. A batch journal treats a stored record whose history checkpoint was not stored as complete, unless the record is a
-charter revision or an admission, whose checkpoint anchors or adopts.
+status. A batch journal treats a stored record whose history checkpoint was not stored as complete, except a birth adoption's
+admission while the estate has not adopted and a charter revision while an unsigned record is left unanchored; its
+`batch.incomplete` warning then says how to settle it, and the task ends once that holds. A closing stored without its act is
+complete too: `history.closing-unfollowed` stands until an act follows. An admission that would set off the birth adoption
+writes none while the machine's memory holds a checkpoint the copy no longer holds; the admission is written alone, and its
+`checkpoint` says why.
+
+**Closings with their acts.** In an estate that has adopted, a revocation (`POST /v1/devices/revoke`, with or without the
+recovery key), a key rotation (`POST /v1/devices/rotate`) and an authority revision that narrows a grant (`POST /v1/records`
+superseding an `authority` record: another grantee, a dropped scope, another reserved action, an added condition, an added or
+shorter expiry, or any change to `bounds`) are stored after a closing checkpoint in the same batch, its `closes` naming the
+device, the device revision whose key is replaced or the grant revision, signed by the key that performs the act and dated no
+later than it. The outcome's `checkpoint` has trigger `closing`. The act is refused, and nothing is written, when the closing
+cannot be written or the batch with it is invalid, as when an agent holding `administer` revokes a device, since its closing
+would close nothing (`history.closing-author`). A device-signed request (MCP-03) and a presigned record (`POST
+/v1/records/prepare` and `POST /v1/records/signed`) cannot carry a closing, so such an act is refused, at preparation once the
+estate has adopted. Every store refuses a batch that holds such an act without a closing before it naming what it closes. An
+admission, a rename and a widening grant revision carry none, and an estate that has not adopted writes all of these as
+before.
 
 `Vericairn.Records` adds, each additively: `SignedHistory.IntervalRecords`, `IntervalAge`, `IntervalDue`, `TailRecords`,
 `PlanAdoption`, `Follows` and `ExpectMatch`; `AdoptionPlan` with `AlreadyAnchored` and `AnchoredHash`; `HistoryState.OldestTailAt`; and `History.HistoryLine` (`States`,

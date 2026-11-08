@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
@@ -75,7 +78,15 @@ public class SoftwareUpgradeFlowTests
 
         Assert.Equal(("done", "done"), (Step(history.Estate, goal, "verify").State, Step(history.Estate, goal, "docs").State));
         Assert.Equal(("stopped", "person"), (Step(history.Estate, goal, "adopt").State, Step(history.Estate, goal, "adopt").Stop));
-        Assert.Contains("vericairn estate checkpoint --adopt --check", Step(history.Estate, goal, "adopt").Step.Action, StringComparison.Ordinal);
+        // The step points at the operator's list, whose one item carries the check and the signing command.
+        string action = Step(history.Estate, goal, "adopt").Step.Action!;
+        Assert.Contains("Adopt history checkpoints in vericairn operator list", action, StringComparison.Ordinal);
+        Assert.DoesNotContain("--expect-plan", action, StringComparison.Ordinal);
+        PinRelease(history, Version);
+        JsonObject item = Assert.Single(OperatorActions.Derive(history.Load())["items"]!.AsArray().OfType<JsonObject>(), i => i["kind"]!.GetValue<string>() == "history-adoption");
+        Assert.Equal("vericairn estate checkpoint --adopt --check", item["inspect"]!.GetValue<string>());
+        Assert.Contains("--expect-plan <the plan hash the check prints>", item["waitsOn"]![0]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Equal(1, Regex.Count(OperatorActions.RenderText(OperatorActions.Derive(history.Load())), "Adopt history checkpoints"));
 
         // The root operator signs the adoption checkpoint: the step is done, and stays done after later checkpoints.
         history.Adopt();
@@ -102,6 +113,22 @@ public class SoftwareUpgradeFlowTests
         Assert.Contains(history.Load().Findings, f => f.Code == "history.adoption-author");
         FlowPosition.StepInstance adopt = Step(history.Estate, goal, "adopt");
         Assert.Equal(("stopped", "person", history.Estate.OperatorId), (adopt.State, adopt.Stop, adopt.Principal));
+    }
+
+    // The manifest of an estate pinned to a published release, as an upgrade leaves it.
+    private static void PinRelease(HistoryFixture f, string version)
+    {
+        var manifest = new JsonObject
+        {
+            ["estate"] = f.Estate.Estate.Id, ["format"] = EstateManifest.Format1, ["recordFormat"] = 3,
+            ["vericairn"] = new JsonObject
+            {
+                ["mode"] = "release", ["repository"] = "Vericairn/vericairn", ["version"] = version,
+                ["artifacts"] = new JsonObject { ["linux-x64"] = "sha256:" + new string('1', 64) },
+            },
+        };
+        using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
+        File.WriteAllBytes(Path.Combine(f.Root, EstateLayout.ManifestPath), CanonicalJson.SerializePrettyUtf8(document.RootElement));
     }
 
     /// <summary>An upgrade run in a history fixture's estate, its root operator named in the root-operator role.</summary>

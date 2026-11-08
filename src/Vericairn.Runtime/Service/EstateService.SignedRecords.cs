@@ -44,6 +44,7 @@ public sealed partial class EstateService
             if (RequestDeviceRefusal(model) is Problem denied) return new(false, Problem: denied);
             if (Standing(model, device.Device) is not DeviceStanding standing || !string.Equals(standing.Principal, request.By, StringComparison.Ordinal))
                 return Unprepared("denied", $"Device {device.Device} signs only its own principal's records.");
+            if (ClosingRequired(model, request.Type, request.Body, subject, request.Supersedes) is { } closes) return Unprepared("refused", SignedElsewhereRefusal(closes));
 
             var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, now, Ulid.NewUlid(now).Value,
                 Math.Min(model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat, RecordFormats.Current));

@@ -53,6 +53,13 @@ public sealed record HistoryCheckpointResponse(string Trigger, bool Applied, boo
 
     /// <summary>For adoption, the record files present that no commit holds yet, which adoption witnesses all the same.</summary>
     public IReadOnlyList<string> Uncommitted { get; init; } = [];
+
+    /// <summary>
+    /// For adoption, the records that read otherwise when roles and grants are read at each record's own time, as an adopted estate reads
+    /// every record its adoption does not witness, each with a note saying what differs; adoption keeps, for every record it witnesses,
+    /// the reading it has at adoption.
+    /// </summary>
+    public IReadOnlyList<HistoryRecordItem> AuthorityChanges { get; init; } = [];
 }
 
 /// <summary>A history checkpoint named by id and hash.</summary>
@@ -62,8 +69,9 @@ public sealed record HistoryCheckpointPin(string Id, string Hash);
 
 /// <summary>
 /// The history checkpoint an act's trigger wrote in the same batch (0.9.2): at an upgrade, a release submission, a charter revision, an
-/// estate's birth or once the unwitnessed tail is due; or, when none could be, why. A checkpoint that could not be written never
-/// blocks the act it would have followed without saying so.
+/// estate's birth or once the unwitnessed tail is due, or the closing written before a revocation, a key rotation or a narrowing grant
+/// revision; or, when none could be, why. A checkpoint that could not be written never blocks the act it would have followed without
+/// saying so, and a closing that could not be written refuses its act.
 /// </summary>
 /// <param name="Trigger">adoption, interval, upgrade, release, charter or closing.</param>
 /// <param name="Written">The checkpoint, when written.</param>

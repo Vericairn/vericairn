@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 19, November 8, 2026. Add `estate checkpoint`, the history checkpoints the runtime writes, closings with `devices revoke`, `devices rotate` and narrowing grant revisions, and this machine's memory of the estate's history in `estate check`, in the development build.
+
 Revision 18, November 8, 2026. `mcp serve --connection` holds the session's server stream while its harness holds a resource subscription and writes the resource notifications to standard output, in the development build.
 
 Revision 17, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
@@ -614,7 +616,7 @@ error `history.removed`. The warning depends on the clone, so it is not part of 
 clone it is reported unavailable, as information.
 
 From OPS-07 the check also keeps this machine's memory of the estate's history, beside the clone's live store under the
-Vericairn home and never in the estate: the newest checkpoint it verified and the main-line commit that held it. The main
+Vericairn home and never in the estate, kept by the clone's directory, so a fresh clone into the same directory keeps it: the newest checkpoint it verified and the main-line commit that held it. The main
 line is the local branch the origin's `HEAD` names, else `main`, else `master`, whatever is checked out. When the main line
 no longer holds that checkpoint, as after a rewrite that removed the newest checkpoints with the records after them, the
 check warns `history.rolled-back`; a checkout of another branch warns nothing. The memory advances only to a head that follows
@@ -644,8 +646,10 @@ checkpoint, with trigger `adoption`, witnesses every record present and anchors 
 adoption changes no reading and admits nothing new. Only the root operator or a person holding `administer` signs it; any
 other principal, an agent above all, is refused before anything is signed. `--adopt --check` lists what it would witness and
 anchor: the count, each unsigned record it anchors with its type, date, path, the commit that added it and that commit's date,
-the unsigned records that count for nothing today and stay so, records signed by a device revoked now, record files deleted in
-the repository's history, which no checkpoint can witness, and record files no commit holds yet; a `NOTE` points out a record
+the unsigned records that count for nothing today and stay so, records signed by a device revoked now, records that read
+otherwise when roles and grants are read at each record's own time, each with a `NOTE` saying what differs (adoption keeps for
+every record it witnesses the reading it has then), record files deleted in the repository's history, which no checkpoint can
+witness, and record files no commit holds yet; a `NOTE` points out a record
 dated more than a day before its adding commit, an uncommitted file and an admission the format-2 migration already anchored.
 It says what it cannot list in a shallow clone or outside a git repository, and ends with `plan: sha256:<hash>`, the hash of
 the anchored set. `--adopt --expect-plan <hash>` refuses unless the adoption anchors exactly that set; it is required when the
@@ -654,8 +658,8 @@ the estate holds nothing but what `estate init` wrote, and `devices admit` print
 An estate that has adopted refuses `--adopt`; one that has not refuses a checkpoint without it.
 
 The runtime also writes checkpoints by itself in an estate that has adopted, each in the same batch as its act and signed by
-the device then writing: at `estate upgrade --to` (trigger `upgrade`), at `release submit` before its check (trigger
-`release`), after a charter revision (trigger `charter`), and once the unwitnessed tail holds 500 records or its oldest
+the device then writing: at `estate upgrade --to` (trigger `upgrade`), at `release submit` before its own admission check
+(trigger `release`; `release submit --check` writes none), after a charter revision (trigger `charter`), and once the unwitnessed tail holds 500 records or its oldest
 record is 24 hours old (trigger `interval`), on the next write signed on this machine for its author by a device that needs no
 person's presence. A command that writes one prints it after its own record:
 
@@ -665,7 +669,11 @@ records/history-checkpoint/<YYYY-MM>/<id>.json  <id>  sha256:<hash>  (history ch
 
 With `--json`, the record's output adds a `checkpoint` object with `trigger` and `written`. A checkpoint that cannot be
 written never blocks the act: the record is written alone and standard error says why. A release submission is the
-exception: its gate refuses with `history.checkpoint` and says why. Only one trigger anchors: a charter revision to required
+exception: its gate refuses with `history.checkpoint` and says why. So is an act a closing precedes: `devices revoke`, with or
+without `--recovery`, `devices rotate`, and `records new authority --supersedes` with a revision that names another grantee,
+drops a scope, reserves another action, adds a condition, adds or shortens an expiry or changes `bounds`. Each is stored after
+its closing, a checkpoint with trigger `closing` signed by the key that performs the act and printed after the act, and is
+refused with nothing written when the closing cannot be written or would close nothing, or when the act is signed elsewhere. Only one trigger anchors: a charter revision to required
 signatures by the root operator or a person holding `administer` anchors the unsigned records that count before it. `status`
 shows the history line, for example
 `History: adopted · head 9f86d081884c7d65 · 5,140 witnessed · tail 12 · no problems`; its sixteen hexadecimal digits name the

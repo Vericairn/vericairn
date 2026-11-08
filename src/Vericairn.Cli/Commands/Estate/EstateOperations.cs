@@ -163,6 +163,7 @@ internal sealed class EstateOperations(CommandContext context)
                 Section("anchors", response.Anchored, r => $"{r.Type}  {r.At}  {r.Path}  added in {(r.Commit is null ? "an unknown commit" : r.Commit + (r.CommitAt is null ? string.Empty : " on " + r.CommitAt))}{(r.Note is null ? string.Empty : "  NOTE: " + r.Note)}");
                 Section("unsigned records that count for nothing today and stay so", response.NotCounting, r => $"{r.Type}  {r.At}  {r.Path}{(r.Note is null ? string.Empty : "  NOTE: " + r.Note)}");
                 Section("records signed by a device revoked now", response.ByRevokedDevices, r => $"{r.Type}  {r.At}  {r.Path}  device {r.Device}");
+                Section("records whose roles and grants read otherwise at their own time; adoption keeps for each the reading it has at adoption", response.AuthorityChanges, r => $"{r.Type}  {r.At}  {r.Path}  NOTE: {r.Note}");
                 Section("record files deleted in history, which no checkpoint can witness", response.DeletedInHistory, d => $"{d.Path}  deleted in {d.Commit}");
                 Section("record files no commit holds yet, which adoption witnesses all the same", response.Uncommitted, p => p);
                 if (response.PlanHash is { } plan) context.Output.WriteLine("plan: " + plan);

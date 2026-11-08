@@ -629,7 +629,7 @@ public class HistoryTriggerTests
     /// A format-3 estate whose operator and builder each have a device held by the runtime, admitted by the operator's first authority, so the
     /// runtime signs as either; adopted by the root operator unless asked not to. The machine's memory of history is kept in a home of its own.
     /// </summary>
-    private sealed class Fixture : IDisposable
+    internal sealed class Fixture : IDisposable
     {
         private readonly List<string> keys = [];
 

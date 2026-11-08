@@ -2339,6 +2339,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
         {
+            // An act a closing precedes, in an estate that has adopted, needs a closing the request's device cannot sign with it (OPS-07).
+            if (ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is { } closes) return Refuse(SignedElsewhereRefusal(closes));
             return signers is null
                 ? DeviceSignedWriteLocked(draft, current, device, signing)
                 : Refuse("A device-signed request is signed by its own device only; this write signs on the runtime's machine, and nothing was written.");
@@ -2359,6 +2361,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (record is null)
         {
             return Refuse(refusal!);
+        }
+
+        // In an estate that has adopted, a revocation, key rotation or narrowing grant revision is stored after its closing, in the same
+        // batch, signed on this machine by one who may perform the act; a record signed elsewhere cannot carry one (design/signed-history.md § 8; OPS-07).
+        if (ClosingRequired(current, record.Envelope.Type, record.Envelope.Body, record.Envelope.Subject, record.Envelope.Supersedes) is { } closes)
+        {
+            return signers is not null && signers.Any(s => s is PresignedSigner)
+                ? Refuse(SignedElsewhereRefusal(closes))
+                : UnderWriteLock(() => StoreWithClosingLocked(record, current, signers), WriteOutcome.Fail);
         }
 
         // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
@@ -2674,10 +2685,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // A run's work order holds its steps one by one: the batch is moot once its own step is held again.
             FlowRuns.StepRef? flowStep = stored.Where(r => r.Type == "assignment").Select(r => FlowRuns.StepOf(model.ById[r.Id])).FirstOrDefault(s => s is not null);
             // A record stored without the history checkpoint its trigger wrote with it needs nothing more: the next checkpoint witnesses it.
-            // Not so a charter revision or an admission, whose checkpoint anchors or adopts: without it unsigned records may stop counting
-            // or the estate is left unadopted, so the task stays.
-            bool moot = stored.Count == 0 || missing.Count == 0 ||
-                missing.All(r => r.Type == "history-checkpoint") && stored.All(r => r.Type is not ("estate" or "admission")) || (routing &&
+            // Two such checkpoints carry more, and keep the task only until what they carried holds another way, since the journal keeps
+            // ids alone and the checkpoint cannot be stored again: a birth adoption, until the estate has adopted, and the checkpoint of a
+            // charter revision anchoring the unsigned records that counted before it, until none is left unanchored. A closing stored
+            // without its act closes all the same, and its own warning, history.closing-unfollowed, stands until an act follows.
+            bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
+            bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
+            bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
+            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
+            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)
@@ -2689,6 +2705,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
             string consequence = routing
                 ? $"The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned."
+                : adoptionMissing
+                ? "The estate's adoption at birth was not stored, so it has not adopted history checkpoints: the root operator reads vericairn estate checkpoint --adopt --check and adopts with vericairn estate checkpoint --adopt --expect-plan <plan> --by <root operator>. This task ends once the estate has adopted."
+                : anchorsMissing
+                ? "The checkpoint anchoring the unsigned records that counted before the charter revision was not stored, so they count for nothing (history.unanchored): the root operator or a person holding administer anchors each, after reading it, in a checkpoint's anchored list (records new history-checkpoint). This task ends once no unsigned record is left unanchored."
                 : "Reconcile the missing records from the stored evidence; nothing stored is removed, and the task remains until the batch is complete.";
             findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. {consequence}");
         }
@@ -2735,6 +2755,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
+            if (UnclosedActRefusal(proposed, records) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
