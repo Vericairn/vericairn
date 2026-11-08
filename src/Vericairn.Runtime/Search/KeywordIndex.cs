@@ -10,6 +10,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Runtime.Search;
 
@@ -136,35 +137,38 @@ internal sealed class KeywordIndex : IDisposable
         return options;
     }
 
-    // The database is created as an empty owner-only file before SQLite opens it, so it is never readable by others, even for
-    // a moment; SQLite gives its -wal and -shm files the database's own permissions. An existing file that others may read, or
-    // that is not a regular file, is not trusted: it is removed and recreated.
+    // The database follows the rule all per-user state follows (OwnerOnlyState): created as an empty owner-only file before SQLite
+    // opens it, so it is never readable by others, even for a moment, and SQLite gives its -wal and -shm files the same mode; narrowed
+    // when an earlier build left it wider; refused when another user owns it; and on a filesystem that keeps no Unix modes used as it
+    // is, with one warning, rather than rebuilt at every opening. A link is not trusted, and one others could write to until now is
+    // rebuilt once it is owner-only: the index is derived, so nothing is lost.
     private static void OwnerOnlyFile(string path)
     {
-        string directory = System.IO.Path.GetDirectoryName(path)!;
-        if (!Directory.Exists(directory))
-        {
-            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(directory);
-            else Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
+        OwnerOnlyState.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         var info = new FileInfo(path);
-        if (info.Exists && (info.LinkTarget is not null || (!OperatingSystem.IsWindows() && (info.UnixFileMode & ~(UnixFileMode.UserRead | UnixFileMode.UserWrite)) != 0)))
+        if (info.Exists && info.LinkTarget is not null)
         {
-            if (!TryDelete(path)) throw new IOException("The search index is not owner-only, and another process has it open, so it was not replaced.");
+            if (!TryDelete(path)) throw new IOException("The search index is a link, and another process has it open, so it was not replaced.");
             info.Refresh();
         }
 
-        if (info.Exists) return;
-        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
-        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        bool writable = !OperatingSystem.IsWindows() && info.Exists && (info.UnixFileMode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0;
+        OwnerOnlyState.PrepareDatabase(path);
+        if (writable && !OperatingSystem.IsWindows() && File.GetUnixFileMode(path) == OwnerOnlyState.FileMode)
+        {
+            if (!TryDelete(path)) throw new IOException("The search index could be written by other users, and another process has it open, so it was not replaced.");
+            OwnerOnlyState.PrepareDatabase(path);
+        }
+
+        if (File.Exists(path)) return;
+        // Windows keeps its profile's permissions and SQLite opens the index without creating it, so it is created here.
         try
         {
-            using var created = new FileStream(path, options);
+            using var created = new FileStream(path, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None });
         }
         catch (IOException) when (File.Exists(path))
         {
-            // Another process created it first, through this same owner-only route.
+            // Another process created it first.
         }
     }
 

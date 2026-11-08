@@ -8,6 +8,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Search;
 using Vericairn.Runtime.Store;
 
 namespace Vericairn.Runtime.Tests;
@@ -295,6 +296,110 @@ public class LocalStateModeTests
             OwnerOnlyState.Report = report;
             Delete(scratch);
         }
+    }
+
+    [Fact]
+    public void ASearchIndexThatBelongsToAnotherUserIsRefused()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Needs a Unix directory that another user owns: /tmp is root's, unless the tests run as root.");
+            return;
+        }
+
+        string index = Path.Combine("/tmp", "vericairn-other-owner-" + Ulid.NewUlid().Value + ".db");
+        IOException refused = Assert.Throws<IOException>(() => KeywordIndex.Open(index));
+        Assert.Contains("belongs to another user of this machine", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(index));
+        Assert.False(File.Exists(index + ".lock"));
+    }
+
+    [Fact]
+    public void ASearchIndexLeftWiderIsNarrowedAndKeptAndOneOthersCouldWriteIsRebuilt()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows keeps per-user state under the profile's own permissions.");
+            return;
+        }
+
+        string scratch = Scratch();
+        try
+        {
+            string index = Path.Combine(scratch, "live", KeywordIndex.FileName);
+            using (KeywordIndex.Open(index)) { }
+            Assert.Equal(OwnerFile, File.GetUnixFileMode(index));
+            Assert.Equal(OwnerDirectory, File.GetUnixFileMode(Path.GetDirectoryName(index)!));
+            Probe(index, write: true);
+
+            File.SetUnixFileMode(index, WideFile);
+            using (KeywordIndex.Open(index)) { }
+            Assert.Equal(OwnerFile, File.GetUnixFileMode(index));
+            Assert.True(Probe(index, write: false), "A readable index is narrowed and kept.");
+
+            File.SetUnixFileMode(index, WideFile | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite);
+            using (KeywordIndex.Open(index)) { }
+            Assert.Equal(OwnerFile, File.GetUnixFileMode(index));
+            Assert.False(Probe(index, write: false), "An index others could write is rebuilt, not trusted.");
+        }
+        finally
+        {
+            Delete(scratch);
+        }
+    }
+
+    [Theory]
+    [InlineData("refused")]
+    [InlineData("ignored")]
+    public void ASearchIndexOnAFilesystemThatKeepsNoUnixModesIsKeptAndReportedOnce(string filesystem)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows keeps per-user state under the profile's own permissions.");
+            return;
+        }
+
+        string scratch = Scratch();
+        Action<string>? report = OwnerOnlyState.Report;
+        var told = new List<string>();
+        try
+        {
+            string live = Path.Combine(scratch, "live");
+            string index = Path.Combine(live, KeywordIndex.FileName);
+            using (KeywordIndex.Open(index)) { }
+            Probe(index, write: true);
+
+            // As Linux shows a vfat file (0755, a mode change refused) or macOS an exFAT one (a mode change that does not hold).
+            File.SetUnixFileMode(index, WideFile | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            OwnerOnlyState.Report = told.Add;
+            OwnerOnlyState.ModeSetter = filesystem == "refused" ? (_, _) => throw new UnauthorizedAccessException("Operation not permitted") : (_, _) => { };
+            using (KeywordIndex first = KeywordIndex.Open(index))
+            {
+                // Another process with the index open does not stop an opening, which used to try to replace the file.
+                using KeywordIndex second = KeywordIndex.Open(index);
+            }
+
+            using (KeywordIndex.Open(index)) { }
+            Assert.Equal([live], told);
+            Assert.True(Probe(index, write: false), "The index is kept, not rebuilt at every opening.");
+        }
+        finally
+        {
+            OwnerOnlyState.ModeSetter = null;
+            OwnerOnlyState.Report = report;
+            Delete(scratch);
+        }
+    }
+
+    // A table of the test's own in the index: present only while the index file is the same one.
+    private static bool Probe(string index, bool write)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = index, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = write ? "CREATE TABLE probe (x INTEGER); INSERT INTO probe VALUES (1);" : "SELECT count(*) FROM sqlite_master WHERE name = 'probe';";
+        object? result = command.ExecuteScalar();
+        return write || Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture) == 1;
     }
 
     private static string Scratch()
