@@ -75,6 +75,7 @@ public class FlowContractTests
         { "trap-without-holds-or-check", "body.missing" },
         { "trap-check-not-a-name", "body.pattern" },
         { "reserved-done-names-a-state", "flow.reserved" },
+        { "request-close-after-an-untimed-step", FlowContract.UnclosableCode },
     };
 
     [Theory]
@@ -127,6 +128,11 @@ public class FlowContractTests
             case "trap-without-holds-or-check": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "nothing", ["summary"] = "Checks nothing." }); break;
             case "trap-check-not-a-name": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "odd", ["summary"] = "An odd check.", ["check"] = "Release Client Build" }); break;
             case "reserved-done-names-a-state": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SONG-1" }, ["state"] = "accepted" }); break;
+            case "request-close-after-an-untimed-step":
+                // Publication, done by the operator's close of its request, waits on a step done when no open order is left: never dated.
+                steps.Insert(steps.Count - 1, FlowFixture.Step("settled", "operation", "decider", done: new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "OPEN-1" }, ["max"] = 0 })));
+                Step("publish")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}", ["fields"] = new JsonObject { ["outcome"] = "done" } });
+                break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 

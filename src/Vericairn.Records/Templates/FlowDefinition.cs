@@ -485,6 +485,17 @@ public sealed class FlowDefinition
             }
         }
 
+        // A reserved step done by the operator's close of its request never waits on a step done at no time the records give, in the
+        // merged order an extension's steps take among its base's.
+        HashSet<string> branched = branches.SelectMany(b => b.Steps).ToHashSet(StringComparer.Ordinal);
+        List<FlowContract.ClosingShape> closing = steps.Select(s => new FlowContract.ClosingShape(s.Key, s.After,
+            s.Inputs.Select(i => i.Step).Append(TJson.Text(TJson.Object(s.When, "due"), "from")).OfType<string>().ToList(),
+            !s.Required || branched.Contains(s.Key), FlowContract.Untimed(s.Kind, s.Outputs.Count, s.Done), FlowContract.ClosesByRequest(s.Reserved, s.Done))).ToList();
+        foreach ((string reserved, string waited) in FlowContract.Unclosable(closing))
+        {
+            errors.Add($"{FlowContract.UnclosableCode}: {FlowContract.UnclosableMessage(reserved, waited)}");
+        }
+
         if (errors.Count > 0)
         {
             throw new InvalidOperationException("The flow does not resolve: " + string.Join(" ", errors));

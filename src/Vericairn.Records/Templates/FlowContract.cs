@@ -163,6 +163,7 @@ public static partial class FlowContract
         }
 
         var branches = new HashSet<string>(StringComparer.Ordinal);
+        var branched = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader branch in body.NestedArray("branches", false, allowEmpty: false) ?? [])
         {
             if (branch.Text("name", true, 100, Patterns.Slug, "a branch name") is string name)
@@ -175,7 +176,7 @@ public static partial class FlowContract
                 Predicate(predicate, subject, extension, instance: false);
             }
 
-            branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
+            branched.UnionWith(branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key") ?? []);
             branch.Text("returnTo", false, 100, Patterns.Slug, "a step key");
             branch.NoOtherKeys();
         }
@@ -188,9 +189,121 @@ public static partial class FlowContract
             {
                 step.Body.Error("flow.failure", "failure", $"The step's failure route enters branch '{step.FailureBranch}', which the flow does not declare.");
             }
+
+            // A reserved step done by the operator's close of its request never waits on a step done at no time the records give; an
+            // extension's steps, placed among its base's, are checked when the flow is resolved.
+            var closing = new List<ClosingShape>();
+            for (int i = 0; i < declared.Count; i++)
+            {
+                if (declared[i].Key is not null)
+                {
+                    closing.Add(Closing(declared[i].Body.Element, i == 0 ? null : declared[i - 1].Key, branched));
+                }
+            }
+
+            foreach ((string reserved, string waited) in Unclosable(closing))
+            {
+                declared.First(s => s.Key == reserved).Body.Error(UnclosableCode, "done", UnclosableMessage(reserved, waited));
+            }
         }
 
         body.NoOtherKeys();
+    }
+
+    /// <summary>The refusal of a reserved step that could never close: it waits on a step done at no time the records give.</summary>
+    public const string UnclosableCode = "flow.reserved-unclosable";
+
+    /// <summary>
+    /// A step as the closing check reads it: the steps it waits on by <c>after</c> (or the step before it) and by its due time or inputs,
+    /// whether it may be off, so that a step waiting on it waits on what it waits on, whether it is done at no time the records give, and
+    /// whether it is a reserved step done by the operator's close of its request.
+    /// </summary>
+    internal sealed record ClosingShape(string Key, IReadOnlyList<string> After, IReadOnlyList<string> Also, bool MayBeOff, bool Untimed, bool ClosesByRequest);
+
+    /// <summary>
+    /// The reserved steps that could never close, each with the step that keeps it from closing. A reserved step done by the operator's
+    /// close of its request, <c>{request}</c>, counts a close only after every step it waits on was done, at the time the records give for
+    /// it. A step that is done by its done predicates alone, each saying <c>max: 0</c>, with no result, review or item to date it, has no
+    /// such time, so a reserved step waiting on it, directly or through steps that may be off, could never close. Only that can deadlock:
+    /// a step with a predicate that counts records, an item, or a work or review step's result is always dated.
+    /// </summary>
+    internal static List<(string Step, string Waited)> Unclosable(IReadOnlyList<ClosingShape> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        var byKey = new Dictionary<string, ClosingShape>(StringComparer.Ordinal);
+        foreach (ClosingShape step in steps)
+        {
+            byKey.TryAdd(step.Key, step);
+        }
+
+        var found = new List<(string Step, string Waited)>();
+        foreach (ClosingShape step in steps.Where(s => s.ClosesByRequest))
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var pending = new Stack<string>(step.After.Concat(step.Also).Reverse());
+            while (pending.Count > 0)
+            {
+                string key = pending.Pop();
+                if (!byKey.TryGetValue(key, out ClosingShape? waited) || !seen.Add(key))
+                {
+                    continue;
+                }
+
+                if (waited.Untimed)
+                {
+                    found.Add((step.Key, key));
+                }
+
+                // A step that is off hands its waiting on to the steps it waits on.
+                if (waited.MayBeOff)
+                {
+                    foreach (string earlier in waited.After.Reverse())
+                    {
+                        pending.Push(earlier);
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The refusal's words, naming both steps.</summary>
+    internal static string UnclosableMessage(string reserved, string waited) =>
+        $"Reserved step '{reserved}' is done by the operator's close of its request and waits on '{waited}', whose done predicates all say max 0, " +
+        $"so '{waited}' is done at no time the records give and no close of '{reserved}' could ever count; have '{waited}' count a record it " +
+        $"leaves, or place '{reserved}' after a step that does.";
+
+    /// <summary>True for a step done at no time the records give: one done by its predicates alone, each saying max 0, with no work or review result and no item.</summary>
+    internal static bool Untimed(string? kind, int outputs, IEnumerable<JsonElement> done)
+    {
+        ArgumentNullException.ThrowIfNull(done);
+        List<JsonElement> predicates = done.ToList();
+        return kind is not null && Routed.IndexOf(kind) < 0 && outputs == 0 && predicates.Count > 0 && predicates.All(p => p.ValueKind == JsonValueKind.Object
+            && p.TryGetProperty("max", out JsonElement max) && max.ValueKind == JsonValueKind.Number && max.TryGetInt64(out long value) && value == 0);
+    }
+
+    /// <summary>True for a reserved step whose done predicates name its operator request, {request}.</summary>
+    internal static bool ClosesByRequest(string? reserved, IEnumerable<JsonElement> done) =>
+        reserved is not null && done.Any(p => TJson.Text(p, "subject") == "{request}");
+
+    /// <summary>One declared step of a flow's own content, as the closing check reads it.</summary>
+    private static ClosingShape Closing(JsonElement step, string? previous, HashSet<string> branched)
+    {
+        string key = TJson.Text(step, "key")!;
+        List<string> after = step.TryGetProperty("after", out JsonElement named) && named.ValueKind == JsonValueKind.Array
+            ? TJson.Strings(step, "after").ToList()
+            : previous is null ? [] : [previous];
+        List<string> also = TJson.Array(step, "inputs").Select(i => TJson.Text(i, "step")).OfType<string>().ToList();
+        if (TJson.Text(TJson.Object(TJson.Object(step, "when"), "due"), "from") is string from)
+        {
+            also.Add(from);
+        }
+
+        bool required = step.TryGetProperty("required", out JsonElement marking) && marking.ValueKind == JsonValueKind.True;
+        List<JsonElement> done = TJson.Array(step, "done").ToList();
+        return new ClosingShape(key, after, also, !required || branched.Contains(key), Untimed(TJson.Text(step, "kind"), TJson.Array(step, "outputs").Count(), done),
+            ClosesByRequest(TJson.Text(step, "reserved"), done));
     }
 
     /// <summary>A flow's subject: what a run is about, and the fields a run's plan binds, by name and type.</summary>

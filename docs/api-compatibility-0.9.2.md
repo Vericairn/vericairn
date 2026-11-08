@@ -605,7 +605,7 @@ adoption checkpoint that counts.
 - `Estate.GoalPredicates.FieldString` and `MaximumPathDepth`: a predicate's `fields` may name a nested field by a dotted path.
 - `Estate.FlowRuns.PolicyRequired`, an overload taking a resolved `FlowDefinition`.
 - `Estate.FlowStops.ClosedRequest` and `ClosesByRequest`; `Estate.FlowPosition.StepInstance.AskedSince`.
-- `Estate.ReleaseHistory`: `Previous` and `Joined`; `Templates.FlowContract.BindsPrevious`.
+- `Estate.ReleaseHistory`: `Previous` and `Joined`; `Templates.FlowContract.BindsPrevious` and `UnclosableCode`.
 
 Behavior changes, each within record format 3:
 
@@ -627,6 +627,10 @@ Behavior changes, each within record format 3:
 - For a reserved step whose done predicate names `{request}`, only the addressed operator's own operator-request-close keeps
   `goal step` from asking again; an agent's close citing the operator's words, or an observation, leaves it due.
 - A sprung trap quotes a record's summary only when a principal who takes the run's steps recorded it, as plain text on one line.
+- Flow content, and a flow's resolution with its extensions, refuses `flow.reserved-unclosable`: a reserved step whose done
+  predicate names `{request}` and that waits, directly or through optional or branch steps, on a non-work, non-review step
+  without items whose done predicates all say `max: 0`. Such a step is done at no time the records give, so the reserved step
+  could never close. The shipped flows and the first-party extension declare none.
 
 The command line adds `docs pass --before`, with `--documents`, `--guides`, `--previous` and `--record` (not with `--previous`),
 and `estate verify`, which needs the principal's admitted device on this machine and records it as `environment.device`.

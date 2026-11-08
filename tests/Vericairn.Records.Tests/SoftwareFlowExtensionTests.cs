@@ -103,6 +103,38 @@ public class SoftwareFlowExtensionTests
         }, refusal.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnExtensionsReservedStepNeverWaitsOnAStepDoneAtNoTimeTheRecordsGive(bool throughAnOptionalStep)
+    {
+        using var estate = new TestEstate(3);
+        JsonObject extension = Extension();
+        var steps = (JsonArray)extension["steps"]!;
+
+        // A check done when no living document is due leaves no record of its own, so it is done at no time the records give.
+        steps.Add(JsonNode.Parse("""
+            {"key":"checked","title":"Nothing due","kind":"operation","role":"release-manager","required":true,"following":"site","action":"Clear what the release made due.","done":[{"type":"living-document","state":"due","max":0}],"recovery":"Clear it again."}
+            """));
+        string waited = "checked";
+        if (throughAnOptionalStep)
+        {
+            // An optional step that is off hands its waiting on, so the post still waits on the check.
+            steps.Add(JsonNode.Parse("""
+                {"key":"maybe","title":"Optional extra","kind":"operation","role":"release-manager","optional":true,"default":"off","following":"checked","action":"Do the extra.","done":[{"type":"work-order","fields":{"key":"EXTRA-1"}}],"recovery":"Again."}
+                """));
+            waited = "maybe";
+        }
+
+        steps.Add(JsonNode.Parse($$$"""
+            {"key":"post","title":"Posted","kind":"operation","role":"publisher","required":true,"reserved":"publish","following":"{{{waited}}}","after":["{{{waited}}}"],"action":"Post the release notes of {subject.version}.","done":[{"type":"operator-request-close","subject":"{request}","fields":{"outcome":"done"}}],"recovery":"Post again."}
+            """));
+
+        TemplateDefinition installed = TemplateFixture.Install(estate, extension);
+        var refusal = Assert.Throws<InvalidOperationException>(() => FlowDefinition.Resolve(estate.Load(), new TemplatePin(installed.Id, installed.Version, installed.Hash)));
+        Assert.Contains(FlowContract.UnclosableCode + ": Reserved step 'post' is done by the operator's close of its request and waits on 'checked'", refusal.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AnExtensionMayTurnOffAnOptionalStepButNeverOneAnEstatePolicyRequires()
     {

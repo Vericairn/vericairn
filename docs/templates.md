@@ -495,7 +495,13 @@ every template.
   later than the time the run is read. Anything else leaves `{request}` unbound.
   A revision that changes the pin, subject or options, such as a corrective
   version, asks the step again; one that changes only the budget, objective or
-  other fields does not. A flow whose
+  other fields does not. Because a close counts only after every step the
+  reserved step waits on was done at a time the records give, a flow, an
+  extension included, is refused (`flow.reserved-unclosable`) when such a step
+  waits, directly or through steps that may be off, on an operation done only by
+  predicates that each say `max: 0`, such as no living document due, with no
+  item: that step is done at no time the records give, so no close could count.
+  A flow whose
   subject names a `product` record and a `version` text may bind `{previous}`
   in a field: the two newest published releases of the product before the
   version and any candidate withdrawn since, separated by spaces, as
