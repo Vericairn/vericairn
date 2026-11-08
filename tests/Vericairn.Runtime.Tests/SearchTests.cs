@@ -270,12 +270,54 @@ public class SearchTests
         Assert.Contains(findings, f => f.Code == "search.selection-audience" && f.Location.Contains("audiences", StringComparison.Ordinal));
         Assert.Contains(findings, f => f.Code == "search.selection-audience" && f.Location.Contains("segments", StringComparison.Ordinal));
 
+        // The record's index revision covers only what it names, so it neither confirms a guessed label nor changes when only
+        // restricted content does.
+        string revision = recorded["index"]!["revision"]!.GetValue<string>();
+        Assert.NotEqual(wide.Selection.Value.GetProperty("index").GetProperty("revision").GetString(), revision);
+        JsonObject other = JsonNode.Parse(wide.Selection.Value.GetRawText())!.AsObject();
+        foreach (JsonNode? segment in other["index"]!["segments"]!.AsArray().Where(s => s!["audience"]!.GetValue<string>() == audience))
+        {
+            segment!["audience"] = "restricted: another label";
+            segment["documents"] = "sha256:" + new string('a', 64);
+            segment["records"] = "sha256:" + new string('b', 64);
+        }
+
+        other["reader"]!["audiences"] = new JsonArray(other["reader"]!["audiences"]!.AsArray().Select(a => (JsonNode)(a!.GetValue<string>() == audience ? "restricted: another label" : a.GetValue<string>())).ToArray());
+        other["index"]!["revision"] = "sha256:" + new string('c', 64);
+        other["hash"] = SearchSelections.Hash(JsonSerializer.SerializeToElement(other));
+        Assert.Equal(revision, EstateService.ForRecord(JsonSerializer.SerializeToElement(other))["index"]!["revision"]!.GetValue<string>());
+
         // A reader of the standard audiences alone never sees it, and is told completeness cannot be confirmed.
         service.SearchAudienceRule = (_, principal) => principal == Reader ? SearchAudiences.Standard : null;
         SearchResponse narrow = service.Search(new SearchRequest("narwhal tusks", Principal: Reader));
         Assert.Empty(narrow.Candidates);
         Assert.Equal(SearchEstateContext.Completeness, narrow.Completeness);
         Assert.DoesNotContain(narrow.Selection!.Value.GetProperty("index").GetProperty("segments").EnumerateArray(), s => s.GetProperty("audience").GetString() == audience);
+    }
+
+    [Fact]
+    public void ARecordRanksItsKeptCandidatesWithoutGapsAndItsReplayRanksTheRerunTheSameWay()
+    {
+        using var estate = new SearchEstate();
+        estate.Document("docs/knowledge/article/partners.md", "Partners", "---\nkind: article\nid: partners\ntitle: \"Keyword index keyword index\"\naudience: partners\n---\n\n# Keyword index\n\nThe keyword index, the keyword index and the keyword index.\n");
+        // Unrelated drafts for the same audience, so its segment's own statistics score the matching one above zero.
+        foreach (string animal in new[] { "otters", "herons", "badgers", "voles", "newts", "moles" })
+            estate.Document($"docs/knowledge/article/{animal}.md", animal, $"---\nkind: article\nid: {animal}\ntitle: \"About {animal}\"\naudience: partners\n---\n\n# About {animal}\n\nNotes on {animal}.\n");
+        using EstateService service = estate.Open();
+        SearchResponse live = service.Search(new SearchRequest("keyword index"));
+        List<SearchCandidate> covered = live.Candidates.Where(c => SearchAudiences.CoversRecordReaders(c.Audience)).ToList();
+        // A restricted candidate ranks among the kept ones, so keeping the original ranks would leave a gap that counts it.
+        Assert.Contains(live.Candidates, c => !SearchAudiences.CoversRecordReaders(c.Audience) && c.Rank < covered.Max(k => k.Rank));
+        JsonObject recorded = EstateService.ForRecord(live.Selection!.Value);
+        Assert.Equal(Enumerable.Range(1, covered.Count), recorded["candidates"]!.AsArray().Select(c => c!["rank"]!.GetValue<int>()));
+        Assert.Equal(covered.Select(c => c.Pin), recorded["candidates"]!.AsArray().Select(c => c!["pin"]!.GetValue<string>()));
+        var findings = new FindingList();
+        SearchSelections.Validate(new BodyReader(JsonSerializer.SerializeToElement(recorded), "selection", findings, 3), recordReaders: true);
+        Assert.False(findings.HasErrors, string.Join("; ", findings.Select(f => f.Message)));
+
+        SearchReplayOutcome replayed = Assert.Single(service.SearchReplay(new SearchReplayRequest(JsonSerializer.SerializeToElement(recorded))).Outcomes);
+        Assert.True(replayed.Replayed, replayed.Message);
+        Assert.True(replayed.Matches, string.Join('\n', replayed.Differences));
     }
 
     [Fact]

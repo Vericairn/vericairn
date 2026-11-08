@@ -1602,8 +1602,9 @@ every admitted reader reads the whole estate, so every reader searches every seg
 read-only participation and network access. A reader that cannot read every segment is told only that completeness cannot be
 confirmed, and `search index` gives such a reader no total index size, source bytes or update counts. A record keeps only
 candidates whose audience every reader of the estate's records may read, Internal or Public, and says, without a count, when it
-omits any; the audiences searched and the index segments it names are only those, with one opaque `Restricted` entry, carrying
-no label or hash, for every other segment.
+omits any, ranking the rest again without gaps; the audiences searched and the index segments it names are only those, with
+one opaque `Restricted` entry, carrying no label or hash, for every other segment, and its index revision covers only what it
+names. One count remains: when `more` is true, the selection's limit minus the candidates kept is the number omitted.
 
 **Selection, not authority.** A package's searches follow its explicit selection and never reorder it. Their candidates are
 optional sources with the dependency `candidate from search s1; optional; grants no authority`, inlined within the allocation

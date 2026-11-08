@@ -434,9 +434,10 @@ public sealed partial class EstateService
     }
 
     /// <summary>
-    /// One selection as a record keeps it: the same search, with only candidates every reader of the record may read, and the
-    /// reader's audiences and the index segments those readers cannot all read replaced by one opaque Restricted entry, so no
-    /// restricted audience's label, size or hash is recorded.
+    /// One selection as a record keeps it: the same search, with only candidates every reader of the record may read, ranked again
+    /// without gaps, and the reader's audiences and the index segments those readers cannot all read replaced by one opaque
+    /// Restricted entry, with the index revision recomputed over what the record names, so no restricted audience's label, size,
+    /// count or hash is recorded or can be confirmed from the record.
     /// </summary>
     internal static JsonObject ForRecord(JsonElement selection)
     {
@@ -446,6 +447,8 @@ public sealed partial class EstateService
         var kept = new JsonArray(candidates.Where(c => SearchAudiences.CoversRecordReaders(c!["audience"]!.GetValue<string>())).Select(c => c!.DeepClone()).ToArray());
         if (kept.Count != candidates.Count)
         {
+            // Kept candidates are ranked 1, 2, 3 in their order, so no gap counts the candidates omitted between them.
+            for (int i = 0; i < kept.Count; i++) kept[i]!["rank"] = i + 1;
             copy["candidates"] = kept;
             copy["limited"] = SearchSelections.Limited;
             changed = true;
@@ -460,8 +463,13 @@ public sealed partial class EstateService
 
         if (copy["index"]?["segments"] is JsonArray segments && segments.Any(s => !SearchAudiences.CoversRecordReaders(s!["audience"]!.GetValue<string>())))
         {
-            copy["index"]!["segments"] = new JsonArray(segments.Where(s => SearchAudiences.CoversRecordReaders(s!["audience"]!.GetValue<string>())).Select(s => s!.DeepClone())
+            var named = new JsonArray(segments.Where(s => SearchAudiences.CoversRecordReaders(s!["audience"]!.GetValue<string>())).Select(s => s!.DeepClone())
                 .Append(new JsonObject { ["audience"] = SearchSelections.RestrictedAudience }).ToArray());
+            copy["index"]!["segments"] = named;
+            // The live revision covers every segment's label and bases; the record's covers only the segments it names and the
+            // opaque entry, so it neither confirms a guessed label nor changes when only restricted content does.
+            copy["index"]!["revision"] = ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(
+                new JsonObject { ["method"] = SearchSelections.KeywordMethod, ["segments"] = named.DeepClone() })));
             changed = true;
         }
 
@@ -600,12 +608,14 @@ public sealed partial class EstateService
         var expected = selection.GetProperty("candidates").EnumerateArray()
             .ToDictionary(c => c.GetProperty("rank").GetInt32(), c => Describe(c.GetProperty("kind").GetString()!, c.GetProperty("source"), c.GetProperty("extent"), c.GetProperty("score").GetInt64()));
         var actual = new Dictionary<int, string>();
+        int kept = 0;
         foreach (SearchRunner.Candidate candidate in found.Candidates)
         {
             if (limited && !SearchAudiences.CoversRecordReaders(candidate.Audience)) continue;
             JsonElement source = JsonSerializer.SerializeToElement(candidate.Source);
             JsonElement extent = JsonSerializer.SerializeToElement(new { start = candidate.Start, length = candidate.Length });
-            actual[candidate.Rank] = Describe(candidate.Hit.Kind, source, extent, candidate.Hit.Score);
+            // A record ranks its kept candidates again without gaps; the rerun's are ranked the same way.
+            actual[limited ? ++kept : candidate.Rank] = Describe(candidate.Hit.Kind, source, extent, candidate.Hit.Score);
         }
 
         var differences = new List<string>();

@@ -443,9 +443,12 @@ analyzer string names the Unicode version of the tables it normalizes and folds 
 candidate holds its `rank`, integer `score`, `kind`, `audience`, `source` identity, `pin`, matched `fields`, `extent` and
 `state` (`selected`, `duplicate`, `below-limit`, `excluded` or `index-fault`), with a `reason` for the last two; an index
 fault's source names only what the index held. A record carries only candidates whose audience is Internal or Public, and a
-selection that omits others says so in `limited`, without a count. Its `reader.audiences` and `index.segments` likewise name
-only Internal and Public, with one opaque entry, `Restricted`, standing for every other segment searched: in the segments it
-is `{"audience": "Restricted"}`, with no basis hashes. Validation refuses a hash that does not match, a value canonical JSON
+selection that omits others says so in `limited`, and ranks the candidates it keeps again 1, 2, 3 in their order, so no gap
+counts the omitted ones. One count remains: when `more` is true, `limit` minus the number of candidates kept is the number
+omitted. Its `reader.audiences` and `index.segments` likewise name only Internal and Public, with one opaque entry,
+`Restricted`, standing for every other segment searched: in the segments it is `{"audience": "Restricted"}`, with no basis
+hashes, and its `index.revision` is recomputed over the method and the segments it names, so it confirms no restricted label
+and does not change when only restricted content does. Validation refuses a hash that does not match, a value canonical JSON
 cannot hold (a fraction or a duplicate member, reported as a finding), a candidate, audience or segment of another audience in
 a record, more than one `Restricted` segment, more candidates or selections than these limits, an out-of-order rank and any
 field not listed here.

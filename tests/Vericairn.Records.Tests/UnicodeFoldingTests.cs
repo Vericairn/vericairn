@@ -22,6 +22,25 @@ public class UnicodeFoldingTests
         Assert.Equal("file", UnicodeFolding.Nfkc("ﬁle"));
     }
 
+    // The generated tables and the conformance test they are checked against, as tools/generate-unicode-folding.py writes them
+    // from the hash-checked Unicode 16.0.0 files: an edit to any entry fails here unless these pins change with it.
+    private const string TablesSha256 = "95cd336a130bfa0a5db6ed0ab75a793d684bcd349954bf975d692e3a289c0efa";
+    private const string ConformanceSha256 = "d811971453e7075e1ad56fb1b301eece5aa80757b81f6156e74a1bfb3ae5ceb1";
+
+    [Fact]
+    public void TheGeneratedTablesAndTheConformanceTestAreTheGeneratorsPinnedBytes()
+    {
+        string repository = RecordCompanionTests.FindRepository();
+        byte[] tables = File.ReadAllBytes(Path.Combine(repository, "src", "Vericairn.Records", "Text", "UnicodeFolding.Tables.cs"));
+        // Line ends as the repository stores them, whatever a checkout converted them to.
+        byte[] normalized = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(tables).Replace("\r\n", "\n", StringComparison.Ordinal));
+        Assert.Equal(TablesSha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(normalized)));
+        using var conformance = new GZipStream(File.OpenRead(Path.Combine(repository, "tests", "fixtures", "unicode", $"NormalizationTest-{UnicodeFolding.UnicodeVersion}.txt.gz")), CompressionMode.Decompress);
+        using var buffer = new MemoryStream();
+        conformance.CopyTo(buffer);
+        Assert.Equal(ConformanceSha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(buffer.ToArray())));
+    }
+
     [Fact]
     public void NormalizationPassesTheUnicodeConformanceTestOfThePinnedVersion()
     {

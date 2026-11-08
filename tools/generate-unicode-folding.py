@@ -7,6 +7,8 @@ Reads the Unicode Character Database files of one version, checks each against i
 src/Vericairn.Records/Text/UnicodeFolding.Tables.cs (decompositions, combining classes, primary composites, full case
 folding and general categories) and tests/fixtures/unicode/NormalizationTest-<version>.txt.gz (the conformance test the
 normalizer is checked against). Changing the version changes every search analyzer identity built on these tables.
+UnicodeFoldingTests pins the SHA-256 of both outputs (the tables with LF line ends, the fixture decompressed); a deliberate
+regeneration updates those pins with the values this script prints.
 
 Usage: python3 -I tools/generate-unicode-folding.py <ucd-directory> [--download]
 With --download, the files are fetched from unicode.org into the given (new or empty) directory first.
@@ -225,6 +227,8 @@ def main():
         with gzip.GzipFile(filename=f"NormalizationTest-{VERSION}.txt", mode="wb", fileobj=handle, compresslevel=9, mtime=0) as compressed:
             compressed.write(conformance)
     print(f"Wrote {os.path.relpath(target, root)} and {os.path.relpath(fixture, root)} from Unicode {VERSION}.")
+    print("Tables sha256: " + hashlib.sha256("\n".join(out).encode("utf-8")).hexdigest())
+    print("Conformance sha256: " + hashlib.sha256(conformance).hexdigest())
 
 
 if __name__ == "__main__":
