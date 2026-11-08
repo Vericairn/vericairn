@@ -529,3 +529,37 @@ Func<string, byte[]?>)`, which reads checkpoint inventories through the given ob
 and `EstateStatus.HistoryProblems` and `EstateStatus.HistoryJson`. `Vericairn.Runtime` adds the default interface member
 `ISourceAdapter.DeletedRecordFiles(string)` with the records `RecordDeletion` and `RecordDeletions`, implemented by the git
 adapter; existing implementations compile unchanged and report the warning unavailable by returning null.
+
+## Closings and authority at a record's time (ID-06)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In an estate
+that has adopted history checkpoints, a `history-checkpoint`'s `closes` now acts
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)): from a closing that acts on, a record
+signed by the closed device or with the closed key, or written by the grantee while the closed grant revision was in force,
+counts only when the closing or a checkpoint it follows witnesses it. Such an admission or revocation admits or revokes
+nothing, such a device revision changes no key or name and leaves the device's line, and such a checkpoint witnesses nothing,
+until anchored; an anchoring checkpoint may now list a signed record a closing refuses, and `SignedHistory.AuthoringRefusal`
+refuses only an anchor of a signed record no closing refuses. A recovery device may sign a device closing; any other
+checkpoint it signs is still `signature.recovery-scope`.
+
+New findings: `history.after-closing` and `history.closing-author`, errors that status lists first and that hold release
+submission, and the warnings `history.closing-unfollowed` and `history.dated-after-witness`. `history.checkpoint-invalid` also
+reports a closing that names a record of another type.
+
+In an adopted estate, roles and grants are read at a record's authority time: its own `at`, or the adoption checkpoint's for a
+record the adoption witnesses. `ValidationContext.HasRole` and `HasScope` read this way, so every validator does, and so do the
+operator-acceptance checks of `AcceptanceType`, `ReleaseType`, the operator queue and the progress report, the recovery-use
+review, generated-document retirement and migration reviews, living-document clearance, the security-reports declaration and
+the goal rules that judge a status, revision, acceptance or custody exception. A person's `administer` grant decides anchoring
+and closing as it stood at the checkpoint's time, so a later narrowing no longer takes anchoring away from earlier checkpoints.
+`FlowStops.RecordedTime` takes the greatest `at` among records that count. In an estate that has not adopted, every one of these
+reads as before.
+
+`NewRecord` (`POST /v1/records`, `records new --at`) and `Attempt` (`POST /v1/work/attempt`, `work attempt --at`) refuse, in every
+estate, a stated time more than five minutes past the runtime's clock, before anything else is judged.
+
+`Vericairn.Records` adds, each additively: `EstateModel.PrincipalAt`, `RolesAt`, `HasRoleAt` and `HasScopeAt`, which read a
+principal, its roles and its scopes as they stood at a record's place, and read them as `CurrentPrincipal`, `RolesOf` and
+`HasScope` at the record's time in an estate that has not adopted; and overloads taking the record judged of
+`GoalRules.HoldsSpending`, `ActivationRefusals`, `MayRevise`, `RevisionRefusals`, `MayEnd`, `Accepter.Decides` and
+`Accepter.Allows`, whose existing signatures keep reading authority as it is now.

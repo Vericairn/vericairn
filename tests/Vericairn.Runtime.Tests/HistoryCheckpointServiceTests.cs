@@ -183,6 +183,58 @@ public class HistoryCheckpointServiceTests
         finally { Directory.Delete(outside, recursive: true); }
     }
 
+    [Fact]
+    public void AfterAClosingTheRuntimeRefusesWhatTheClosedDeviceSignsAndAnchorsWhatTheClosingRefused()
+    {
+        using var f = new Fixture();
+        f.Require();
+        Ok(f.Checkpoint(f.Records.Estate.OperatorId, "adoption", f.Unsigned()));
+
+        // The operator closes the builder's device in the test's key store; a record it signed elsewhere and merged after the closing
+        // counts for nothing until the operator anchors it, and a record that counts needs no anchor.
+        Ok(f.Checkpoint(f.Records.Estate.OperatorId, "closing", closes: ("device", f.Records.BuilderDevice.Id)));
+        RecordEnvelope merged = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("HIS-30", "Merged after the closing"))!.AsObject(), builder: true);
+        EstateModel model = f.Api.Session.Load();
+        Assert.False(model.Counts(model.ById[merged.Id]));
+        Assert.Contains(model.Findings, x => x.Code == "history.after-closing" && x.Location.StartsWith(merged.ExpectedPath, StringComparison.Ordinal));
+        WriteOutcome needless = f.Checkpoint(f.Records.Estate.OperatorId, "manual", [model.ById[f.Records.Decision.Id]]);
+        Assert.False(needless.Ok);
+        Assert.Contains("needs no anchor", needless.Problem!.Message, StringComparison.Ordinal);
+        Ok(f.Checkpoint(f.Records.Estate.OperatorId, "manual", [model.ById[merged.Id]]));
+        model = f.Api.Session.Load();
+        Assert.True(model.Counts(model.ById[merged.Id]));
+        Assert.DoesNotContain(model.Findings, x => x.Code == "history.after-closing");
+
+        // Once the builder's runtime device is closed, the runtime refuses to write what that device would sign.
+        RecordEnvelope runtimeDevice = model.OfType("device").Single(d => EstateModel.BodyString(d, "principal") == f.Records.Estate.BuilderId && EstateModel.BodyString(d, "name") == "Runtime's device");
+        Ok(f.Checkpoint(f.Records.Estate.OperatorId, "closing", closes: ("device", runtimeDevice.Id)));
+        WriteOutcome refused = f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.BuilderId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("HIS-31"))!)));
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, x => x.Code == "history.after-closing");
+        Ok(f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.OperatorId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("HIS-32"))!))));
+    }
+
+    [Fact]
+    public void TheRuntimeRefusesAStatedTimeMoreThanFiveMinutesPastItsClock()
+    {
+        using var f = new Fixture();
+        // The runtime's clock an hour after the devices were made, so earlier stated times still follow their admissions.
+        DateTimeOffset clock = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()).AddHours(1);
+        f.Api.AuthoringClock = new HeldClock(clock);
+        WriteOutcome ahead = f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.OperatorId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("HIS-33"))!), At: Stated(clock.AddMinutes(5).AddSeconds(1))));
+        Assert.False(ahead.Ok);
+        Assert.Contains("more than five minutes past this runtime's clock", ahead.Problem!.Message, StringComparison.Ordinal);
+        WriteOutcome start = f.Api.Attempt(new AttemptRequest(Ulid.NewUlid().Value, f.Records.Estate.BuilderId, "the workspace", "Starting.", At: Stated(clock.AddHours(1))));
+        Assert.False(start.Ok);
+        Assert.Contains("more than five minutes past this runtime's clock", start.Problem!.Message, StringComparison.Ordinal);
+
+        // Within five minutes, and any earlier time, a stated time is the author's to give.
+        Ok(f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.OperatorId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("HIS-34"))!), At: Stated(clock.AddMinutes(5)))));
+        Ok(f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.OperatorId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("HIS-35"))!), At: Stated(clock.AddMinutes(-30)))));
+
+        static string Stated(DateTimeOffset at) => RecordParser.FormatTimestamp(at);
+    }
+
     private static RecordWritten Ok(WriteOutcome outcome)
     {
         Assert.True(outcome.Ok, JsonSerializer.Serialize(outcome.Problem, ProtocolJson.Options));
@@ -232,15 +284,15 @@ public class HistoryCheckpointServiceTests
 
         public IReadOnlyList<RecordEnvelope> Unsigned() => [.. Api.Session.Load().Records.Where(r => r.Signatures.Count == 0)];
 
-        public CheckpointDraft Prepare(string trigger, IEnumerable<RecordEnvelope>? anchored = null)
+        public CheckpointDraft Prepare(string trigger, IEnumerable<RecordEnvelope>? anchored = null, (string Kind, string Id)? closes = null)
         {
-            CheckpointDraft draft = SignedHistory.Prepare(Api.Session.Load(), trigger, anchored);
+            CheckpointDraft draft = SignedHistory.Prepare(Api.Session.Load(), trigger, anchored, closes: closes);
             foreach (byte[] bytes in draft.Objects) Api.Session.Objects.Put(bytes);
             return draft;
         }
 
-        public WriteOutcome Checkpoint(string by, string trigger, IEnumerable<RecordEnvelope>? anchored = null) =>
-            Api.NewRecord(new NewRecordRequest("history-checkpoint", by, Prepare(trigger, anchored).Body));
+        public WriteOutcome Checkpoint(string by, string trigger, IEnumerable<RecordEnvelope>? anchored = null, (string Kind, string Id)? closes = null) =>
+            Api.NewRecord(new NewRecordRequest("history-checkpoint", by, Prepare(trigger, anchored, closes).Body));
 
         public void Dispose()
         {

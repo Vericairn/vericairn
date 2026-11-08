@@ -30,7 +30,7 @@ public sealed class HistoryFixture : IDisposable
         Estate.Add("admission", Estate.OperatorId, Admission(Estate.OperatorId, "The first authority."), OperatorDevice.Reference, signer: OperatorSigner);
         BuilderDevice = Device(Estate.BuilderId);
         BuilderSigner = new StoreSigner(store, BuilderDevice.Id);
-        Estate.Add("admission", Estate.OperatorId, Admission(Estate.BuilderId, "The builder's device."), BuilderDevice.Reference, signer: OperatorSigner);
+        BuilderAdmission = Estate.Add("admission", Estate.OperatorId, Admission(Estate.BuilderId, "The builder's device."), BuilderDevice.Reference, signer: OperatorSigner);
     }
 
     public TestEstate Estate { get; }
@@ -42,6 +42,8 @@ public sealed class HistoryFixture : IDisposable
     public RecordEnvelope BuilderDevice { get; }
 
     public StoreSigner BuilderSigner { get; }
+
+    public RecordEnvelope BuilderAdmission { get; }
 
     public string Root => Estate.Root;
 
@@ -65,6 +67,58 @@ public sealed class HistoryFixture : IDisposable
     }
 
     public StoreSigner Signer(RecordEnvelope device) => new(store, device.Id);
+
+    /// <summary>An admitted device for a principal, admitted by the operator's first device; returns the device and its admission.</summary>
+    public (RecordEnvelope Device, RecordEnvelope Admission) Admitted(string principal, string name = "Another signing device")
+    {
+        RecordEnvelope device = Device(principal, name);
+        return (device, Estate.Add("admission", Estate.OperatorId, Admission(principal, name + "."), device.Reference, signer: OperatorSigner));
+    }
+
+    /// <summary>The operator's recovery device, its key kept offline, admitted by the operator's first device.</summary>
+    public RecordEnvelope RecoveryDevice()
+    {
+        string id = Ulid.NewUlid(Estate.Clock.AddSeconds(1)).Value;
+        string publicKey = RecordSigning.EncodePublicKey(store.Create(id));
+        RecordEnvelope device = Estate.Add("device", Estate.OperatorId, $$"""{"principal":"{{Estate.OperatorId}}","name":"Recovery key","platform":"linux","custody":"offline","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["embedded"],"presence":"none","purpose":"recovery"}""",
+            id: id, signer: new StoreSigner(store, id));
+        Estate.Add("admission", Estate.OperatorId, Admission(Estate.OperatorId, "The recovery key."), device.Reference, signer: OperatorSigner);
+        return device;
+    }
+
+    /// <summary>A rotation of a device to a new key, signed by its current key and the new one; returns the revision and the new key's signer.</summary>
+    public (RecordEnvelope Revision, StoreSigner Signer) Rotate(RecordEnvelope device, IRecordSigner current, string? identity = null)
+    {
+        string keyId = Ulid.NewUlid().Value;
+        string publicKey = RecordSigning.EncodePublicKey(store.Create(keyId));
+        JsonObject body = Body(device);
+        body["publicKey"] = publicKey;
+        var next = new StoreSigner(store, keyId, identity ?? device.Id);
+        string principal = body["principal"]!.GetValue<string>();
+        return (Estate.Add("device", principal, body.ToJsonString(), supersedes: device.Id, signers: [current, next]), next);
+    }
+
+    /// <summary>The revocation of a device from now on, superseding its admission, by the operator unless another author is given.</summary>
+    public RecordEnvelope Revoke(RecordEnvelope device, RecordEnvelope admission, IRecordSigner? signer = null, string? by = null)
+    {
+        string principal = Body(device)["principal"]!.GetValue<string>();
+        string revokedAt = RecordParser.FormatTimestamp(Estate.Clock.AddSeconds(1));
+        return Estate.Add("admission", by ?? Estate.OperatorId, Admission(principal, "Revoked.", "revoked", revokedAt), device.Reference, supersedes: admission.Id, signer: signer ?? OperatorSigner);
+    }
+
+    /// <summary>A decision the operator signs, the basis of the grants a test records.</summary>
+    public RecordEnvelope Decision() => Estate.Add("decision", Estate.OperatorId,
+        $$"""{"title":"Basis","statement":"Grant authority.","summary":"A basis.","synthesis":"For tests.","effects":["grant"],"affects":[],"decidedBy":"{{Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":["publication"]}""",
+        signer: OperatorSigner);
+
+    /// <summary>A grant of scopes to a principal, or a revision of one, by the operator.</summary>
+    public RecordEnvelope Grant(string grantee, RecordEnvelope basis, string[] scopes, string? supersedes = null) => Estate.Add("authority", Estate.OperatorId,
+        new JsonObject { ["grantee"] = grantee, ["scope"] = new JsonArray([.. scopes.Select(s => (JsonNode)s)]), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = basis.Id }.ToJsonString(),
+        supersedes: supersedes, signer: OperatorSigner);
+
+    /// <summary>A closing checkpoint, by the root operator unless another author is given.</summary>
+    public RecordEnvelope Close(string kind, string id, string? by = null, IRecordSigner? signer = null) =>
+        Checkpoint(by, signer, "closing", closes: (kind, id));
 
     /// <summary>Moves the charter to required signatures by the root operator's signed revision.</summary>
     public RecordEnvelope Require() => Estate.Add("estate", Estate.OperatorId,

@@ -25,11 +25,13 @@ internal sealed record Closing(RecordEnvelope Record, string Kind, string Target
 
 /// <summary>
 /// Closings (design/signed-history.md § 8). They are judged first, in checkpoint order: every checkpoint after those it follows, ids
-/// breaking ties. A closing acts when it is on a path of checkpoints back to an adoption, verifies against the closings before it in
-/// that order, and is signed by one who may perform the act: the operator, a person holding administer or the operator's recovery
-/// device for a device, the device itself for its own key, and an operator for a grant revision. Concurrent closings each act, since
-/// neither is before the other. Every later judgment reads the closings that act: a record one of them refuses does not count, an
-/// admission or revocation it refuses neither admits nor revokes, and a device revision it refuses changes no key or name.
+/// breaking ties. A closing acts when the checkpoints it follows, present with the hashes it names, reach an adoption by one who may
+/// anchor, when it verifies against the closings before it in that order, and when it is signed by one who may perform the act: the
+/// operator, a person holding administer or the operator's recovery device for a device, the device itself for its own key, and an
+/// operator for a grant revision. A closing acts by itself, so the checkpoints between it and the adoption need not count: closings
+/// only ever refuse. Concurrent closings each act, since neither is before the other. Every later judgment reads the closings that act:
+/// a record one of them refuses does not count, an admission or revocation it refuses neither admits nor revokes, and a device revision
+/// it refuses changes no key or name.
 /// </summary>
 internal sealed partial class EstateTrust
 {
@@ -85,7 +87,7 @@ internal sealed partial class EstateTrust
             .ToLookup(x => x.Previous, x => x.Next, StringComparer.Ordinal);
         var waiting = checkpoints.ToDictionary(c => c.Record.Id, c => predecessors[c.Record.Id].Count, StringComparer.Ordinal);
         var ready = new SortedSet<string>(waiting.Where(w => w.Value == 0).Select(w => w.Key), StringComparer.Ordinal);
-        var onPath = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var reached = new Dictionary<string, bool>(StringComparer.Ordinal);
         var before = new Dictionary<string, IReadOnlyList<Closing>>(StringComparer.Ordinal);
         var acting = new List<Closing>();
         var actingIds = new HashSet<string>(StringComparer.Ordinal);
@@ -96,17 +98,25 @@ internal sealed partial class EstateTrust
             CheckpointBody checkpoint = byId[id];
             IReadOnlyList<Closing> bound = Before(id);
             before[id] = bound;
-            // On the path: it verifies against the closings before it, and it is an adoption by one who may anchor or follows only
-            // checkpoints on the path, through hashes that match.
+            // Reached from an adoption by one who may anchor, through checkpoints present with the hashes each names.
             bool path = checkpoint.Previous.Count == 0
-                ? AuthenticWith(checkpoint.Record, bound) && MayAnchor(checkpoint.Record)
-                : checkpoint.Previous.All(p => byId.TryGetValue(p.Id, out CheckpointBody? previous) && previous.Record.ComputedHash == p.Hash && onPath[p.Id]) &&
-                    AuthenticWith(checkpoint.Record, bound);
-            onPath[id] = path;
-            if (path && checkpoint.Closes is { } closes && Close(checkpoint, closes, predecessors) is { } closing)
+                ? AuthenticWith(checkpoint.Record, NoClosings) && MayAnchor(checkpoint.Record)
+                : checkpoint.Previous.All(p => byId.TryGetValue(p.Id, out CheckpointBody? previous) && previous.Record.ComputedHash == p.Hash && reached[p.Id]);
+            reached[id] = path;
+            if (path && checkpoint.Closes is { } closes)
             {
-                acting.Add(closing);
-                actingIds.Add(id);
+                if (!AuthenticWith(checkpoint.Record, bound))
+                {
+                    // Its signature findings say why it does not verify; one that verifies but for a closing before it is said here.
+                    if (bound.Count > 0 && AuthenticWith(checkpoint.Record, NoClosings))
+                        closingFindings.Add(new Finding(Severity.Error, "history.closing-author", checkpoint.Record.ExpectedPath + "#body.closes",
+                            "This closing is signed by a device, or with a key, that a closing before it closed, so it closes nothing, anchored or not; it still witnesses what it lists if it counts."));
+                }
+                else if (Close(checkpoint, closes, predecessors) is { } closing)
+                {
+                    acting.Add(closing);
+                    actingIds.Add(id);
+                }
             }
 
             foreach (CheckpointBody next in followers[id])
