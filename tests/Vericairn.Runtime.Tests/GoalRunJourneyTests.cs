@@ -167,7 +167,7 @@ public class GoalRunJourneyTests
         Assert.EndsWith("a stop is asked with vericairn worker stop", held.GetProperty("reason").GetString(), StringComparison.Ordinal);
 
         // The run is stopped through the worker: requested, transmitted, acknowledged and contained are each observed.
-        RunStopResponse stop = run.Service.RunStop(running, new RunStopRequest(op, "The goal was stopped."));
+        RunStopResponse stop = run.Service.RunStop(running, new RunStopRequest(op, "The goal was stopped.", 5));
         Assert.True(stop.Ok, stop.Message);
         RunRow settled = run.Settled(running);
         Assert.Equal("known-failure", settled.Status);
