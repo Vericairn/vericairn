@@ -9,7 +9,7 @@ using Vericairn.Runtime.Providers;
 namespace Vericairn.Cli;
 
 /// <summary>
-/// What this distribution ships beside the foundation: the GitHub provider, the git adapter with its isolated workspaces and git-file
+/// What this distribution ships beside the foundation: the GitHub provider (releases, pull requests and the security-advisory reader), the git adapter with its isolated workspaces and git-file
 /// source for living documents of other repositories, and the software pack's coding-agent launchers, registered as available. Being
 /// available selects nothing: a release goes through the provider its product declares or its request names, and a provider with
 /// no implementation here is refused. Registration keeps an implementation already registered (tests register in-memory ones).
@@ -23,6 +23,7 @@ internal static class Composition
         registry.VericairnReleases ??= Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default;
         registry.RegisterIfAbsent(new GitHubReleaseProvider());
         registry.RegisterIfAbsent(new GitHubPullRequestProvider());
+        registry.RegisterIfAbsent(new GitHubSecurityAdvisoryReader());
         registry.RegisterIfAbsent(Vericairn.Providers.NuGet.NuGetRegistryProvider.Default);
         registry.PushAdapter ??= new GitPushAdapter();
         registry.SecretScanner ??= new GitleaksScanner();

@@ -59,7 +59,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
-            AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
+            AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary),
+            SecurityReportObjections);
     }
 
     /// <summary>
@@ -1452,6 +1453,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             rows.Add(Row(provider.Provider, "release", provider.Descriptor));
         }
 
+        foreach (ISecurityAdvisoryReader reader in Providers.SecurityAdvisoryReaders)
+        {
+            rows.Add(Row(reader.Provider, "security-advisories", reader.Descriptor));
+        }
+
         foreach (ISourceAdapter adapter in Providers.SourceAdapters)
         {
             rows.Add(Row(adapter.Kind, "source", adapter.Descriptor));
@@ -2659,6 +2665,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // From 0.9.2, a new result's output locations carry no URL scheme (FIX-97); results already in the estate keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Code == ResultType.OutputSchemeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.outputs")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new repository-resource revision needs the authority its change takes now (OPS-11), however early its time;
+        // revisions already in the estate keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is ResourceType.LocationAuthorCode or ResourceType.SecurityReportsAuthorCode
+            && records.Any(r => f.Location == r.RelativePath)))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

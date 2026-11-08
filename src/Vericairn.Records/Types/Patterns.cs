@@ -23,6 +23,9 @@ public static partial class Patterns
     /// <summary>GitHub owner/name.</summary>
     public static Regex GitHubRepository => GitHubRepositoryRegex();
 
+    /// <summary>A GitHub security advisory identifier, GHSA and three groups of four characters from GitHub's alphabet.</summary>
+    public static Regex GitHubAdvisory => GitHubAdvisoryRegex();
+
     /// <summary>Semantic version.</summary>
     public static Regex SemanticVersion => SemanticVersionRegex();
 
@@ -52,6 +55,9 @@ public static partial class Patterns
 
     [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$")]
     private static partial Regex GitHubRepositoryRegex();
+
+    [GeneratedRegex("^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$")]
+    private static partial Regex GitHubAdvisoryRegex();
 
     [GeneratedRegex(@"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$")]
     private static partial Regex SemanticVersionRegex();

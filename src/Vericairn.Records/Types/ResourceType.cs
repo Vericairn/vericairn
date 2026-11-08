@@ -56,13 +56,47 @@ public sealed class ResourceType : IRecordType
             }
         }
 
-        // A repository's location is where checked changes push and merge; only the operator or an administer grant moves it.
-        if (context.Record.Format >= 3 && context.Record.Supersedes is not null && Estate.EstateModel.BodyString(context.Record, "kind") == "repository"
-            && ProductType.Changed(context, "location") && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
-            context.Error("resource.location-author", "A repository resource's location is changed only by the operator or a principal with the 'administer' scope.");
+        RepositoryChange(context);
 
         body.Enum("visibility", true, "public", "private", "n/a");
         body.Text("notes", false, 4000);
         body.NoOtherKeys();
+    }
+
+    /// <summary>The code of a repository change by an author without the operator role or the 'administer' scope.</summary>
+    public const string LocationAuthorCode = "resource.location-author";
+
+    /// <summary>The code of a change to a repository a security-reports declaration names, by an author other than the operator.</summary>
+    public const string SecurityReportsAuthorCode = "resource.security-reports-author";
+
+    // A repository's location is where checked changes push and merge and where security reports are read. Each revision is judged
+    // against the declarations and grants in force at its own time, so a rule never reaches back to a revision written before it:
+    // while a product's security-reports declaration names the resource, only the operator changes its kind or location, and a
+    // repository's location moves only by the operator or an administer grant, as before 0.9.2. From 0.9.2 the write boundary also
+    // refuses a new revision that turns a resource into or out of a repository without that authority, or that a later declaration
+    // would forbid; a revision already in the estate keeps its reading, and validation reports it as information.
+    private static void RepositoryChange(ValidationContext context)
+    {
+        if (context.Record.Format < 3 || context.Record.Supersedes is null) return;
+        bool repository = Estate.EstateModel.BodyString(context.Record, "kind") == "repository";
+        bool was = context.Find(context.Record.Supersedes) is { } previous && Estate.EstateModel.BodyString(previous, "kind") == "repository";
+        bool located = ProductType.Changed(context, "location");
+        if (!repository && !was || !located && !ProductType.Changed(context, "kind")) return;
+        bool byOperator = context.HasRole(context.Record.By, Roles.Operator);
+        IReadOnlyList<string> lineage = context.Model.Chain(context.Model.Latest(context.Record));
+        if (SecurityReportRules.DeclaresAt(context.Model, lineage, context.Record.AtTime))
+        {
+            if (!byOperator)
+                context.Error(SecurityReportsAuthorCode, "A repository resource that a product's security-reports declaration names changes its kind or location only by the operator.");
+            return;
+        }
+
+        bool administers = byOperator || context.HasScope(context.Record.By, Scopes.Administer);
+        if (repository && located && !administers)
+            context.Error(LocationAuthorCode, "A repository resource's location is changed only by the operator or a principal with the 'administer' scope.");
+        else if (!administers)
+            context.Findings.Info(LocationAuthorCode, context.Location, "From 0.9.2 a new revision that turns a resource into or out of a repository, or moves a former repository, needs the operator or the 'administer' scope; a revision already in the estate keeps its reading.");
+        if (!byOperator && SecurityReportRules.DeclaresAt(context.Model, lineage, DateTimeOffset.MaxValue))
+            context.Findings.Info(SecurityReportsAuthorCode, context.Location, "A product's security-reports declaration now names this resource, so a new revision changing its kind or location needs the operator; this revision, written before the declaration, keeps its reading.");
     }
 }
