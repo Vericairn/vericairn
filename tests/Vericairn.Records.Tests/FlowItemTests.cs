@@ -201,7 +201,7 @@ public class FlowItemTests
         Assert.Equal("configured off by the goal's plan", configured.ItemsOff["draft.notes"]);
         Assert.False(configured.ItemsOff.ContainsKey("draft.sketch"));
 
-        // The acceptance's sign-off is an attestation: a person's record counts, an agent's does not.
+        // The acceptance's sign-off is an attestation of a reserved act: the operator's record counts, an agent's does not count at all.
         Assert.Equal(["sign-off missing"], Items(FlowPosition.Derive(model, optional, run.Estate.Clock).Steps.Single(s => s.Step.Key == "accept")));
         run.Add("work-order", new JsonObject
         {
@@ -209,7 +209,8 @@ public class FlowItemTests
             ["exitQuestion"] = "Recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("marker"),
         }, builder: true);
         FlowPosition.ItemState unsigned = Item(FlowPosition.Derive(run.Estate.Load(), optional, run.Estate.Clock).Steps.Single(s => s.Step.Key == "accept"), "sign-off");
-        Assert.Equal(("unproven", "an attestation is a person's, and Test Builder is not a person"), (unsigned.State, unsigned.Reasons[0]));
+        Assert.Equal("missing", unsigned.State);
+        Assert.EndsWith("recorded by a principal who does not hold the act, does not count", unsigned.Reasons[0], StringComparison.Ordinal);
     }
 
     [Fact]

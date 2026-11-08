@@ -34,6 +34,16 @@ public sealed record OperationRow(string Identity, string? Provider, string? Act
     public string StatusLabel => StateLanguage.Label("operation", Status);
 }
 
+/// <summary>
+/// A run of a flow as canonical status shows it: its goal, flow, position and stops as of the estate's newest record, the time
+/// <paramref name="AsOf"/> names, so that canonical status never depends on when it is read.
+/// </summary>
+public sealed record FlowRunRow(string Goal, string Title, string Status, string Flow, int Done, int Steps, IReadOnlyList<string> Next, IReadOnlyList<StopRow> Stops, string? AsOf = null)
+{
+    /// <summary>The run and its position, in words.</summary>
+    public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}{(AsOf is null ? string.Empty : $"; as of {AsOf}, the newest record")}";
+}
+
 /// <summary>A finding as a surface lists it.</summary>
 public sealed record FindingRow(string Severity, string Code, string Location, string Message);
 
@@ -111,6 +121,20 @@ public sealed class EstateView
     /// <summary>Reconcile tasks.</summary>
     public IReadOnlyList<FindingRow> Reconcile { get; private set; } = [];
 
+    /// <summary>The runs of flows status shows, each with its stops.</summary>
+    public IReadOnlyList<FlowRunRow> Runs { get; private set; } = [];
+
+    /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
+    public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
+
+    /// <summary>
+    /// When the stops were derived, in words: canonical status gives them as of the estate's newest record and leaves a reserved step's
+    /// command to a live read; empty without runs.
+    /// </summary>
+    public string StopsAsOf => Runs.FirstOrDefault(r => r.AsOf is not null)?.AsOf is string at
+        ? $"As of {at}, the estate's newest record. What fell due since, and each reserved step's exact command, show in a live read: the Goals workspace or vericairn goal next."
+        : string.Empty;
+
     /// <summary>Attention items derived from the above, most urgent first.</summary>
     public IReadOnlyList<AttentionItem> Attention { get; private set; } = [];
 
@@ -152,6 +176,14 @@ public sealed class EstateView
         view.Releases = Rows(document, "releases", e => new ReleaseRowView(Str(e, "version"), Str(e, "status"), Str(e, "commit"), Str(e, "id") ?? string.Empty));
         view.Operations = Rows(document, "operations", e => new OperationRow(Str(e, "identity") ?? "?", Str(e, "provider"), Str(e, "action"), Str(e, "status"), Str(e, "id") ?? string.Empty));
         view.Findings = Rows(document, "findings", e => new FindingRow(Str(e, "severity") ?? "info", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
+        view.Runs = Rows(document, "runs", e =>
+        {
+            JsonElement goal = e.TryGetProperty("goal", out JsonElement g) ? g : default;
+            JsonElement pin = e.TryGetProperty("pin", out JsonElement p) ? p : default;
+            List<string> next = e.TryGetProperty("next", out JsonElement n) && n.ValueKind == JsonValueKind.Array ? n.EnumerateArray().Select(x => x.GetString() ?? "?").ToList() : [];
+            return new FlowRunRow(Str(goal, "id") ?? "?", Str(goal, "title") ?? "?", Str(goal, "status") ?? "?", pin.ValueKind == JsonValueKind.Object ? $"flow {Str(pin, "id")} {Str(pin, "version")}" : "no flow",
+                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"));
+        });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Attention = DeriveAttention(view);
         return view;

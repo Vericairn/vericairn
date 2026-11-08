@@ -36,6 +36,39 @@ public sealed record StepRow(string Key, string Title, string Status, string Rol
     public string Heading => $"{Key}  {Title} ({Role}): {State}{(Principal is null ? string.Empty : ", " + Principal)}";
 }
 
+/// <summary>
+/// A stop of a run as every surface shows it (the estate's design/flow.md § 8): the step, why it waits, on whom, how it reaches them, and
+/// for a reserved act that is next its exact command. Read from the runtime's stops, the same in status, the goal view and the routed
+/// steps; nothing here derives a state of its own.
+/// </summary>
+public sealed record StopRow(string Kind, string Name, string Title, string? Principal, string Reason, string Delivery, string? Record, string? Command)
+{
+    /// <summary>Why it waits, in the state language.</summary>
+    public string KindLabel => StateLanguage.Label("flow-stop", Kind);
+
+    /// <summary>How it reaches its person, in the state language.</summary>
+    public string DeliveryLabel => StateLanguage.Label("flow-delivery", Delivery);
+
+    /// <summary>The step, why it waits and on whom.</summary>
+    public string Heading => $"{Name}: {KindLabel}; waits on {Principal ?? "a person the records do not name"}";
+
+    /// <summary>How it reaches its person, why, and a reserved act's exact command.</summary>
+    public string Detail => $"{DeliveryLabel}{(Record is null ? string.Empty : $" [{Record}]")}. {Reason}{(Command is null ? string.Empty : $" Command: {Command}")}";
+
+    /// <summary>The rows of a run's stops, as the runtime renders them; none when it gave none.</summary>
+    public static IReadOnlyList<StopRow> From(JsonElement stops) =>
+        stops.ValueKind != JsonValueKind.Array ? [] : stops.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.Object).Select(s =>
+        {
+            JsonElement record = s.TryGetProperty("record", out JsonElement r) ? r : default;
+            string? principal = Str(s, "principalName") ?? Str(s, "principal");
+            return new StopRow(Str(s, "kind") ?? "?", Str(s, "name") ?? "?", Str(s, "title") ?? "?", principal, Str(s, "reason") ?? string.Empty, Str(s, "delivery") ?? "?",
+                record.ValueKind == JsonValueKind.Object ? $"{Str(record, "type")} {Str(record, "id")}" : null, Str(s, "command"));
+        }).ToList();
+
+    private static string? Str(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+}
+
 /// <summary>One unit of a goal's budget with what its runs were charged.</summary>
 public sealed record SpendRow(string Unit, string Detail);
 
@@ -98,6 +131,9 @@ public sealed class GoalPresentation
     /// <summary>Its evaluations, oldest first.</summary>
     public IReadOnlyList<EvaluationRow> Evaluations { get; private set; } = [];
 
+    /// <summary>For a run, its stops in the order the flow reaches them; none for a goal that is not a run, or a run with none.</summary>
+    public IReadOnlyList<StopRow> Stops { get; private set; } = [];
+
     /// <summary>Builds the workspace's view from the goal view and the routed next steps; a missing part is shown as unavailable, never as empty.</summary>
     public static GoalPresentation From(JsonElement goal, JsonElement next)
     {
@@ -116,6 +152,7 @@ public sealed class GoalPresentation
             JsonElement evaluation = Obj(c, "evaluation");
             return new ConditionRow(Int(c, "index"), Str(c, "description") ?? "?", Str(c, "verdict") ?? "unknown", Str(c, "reason") ?? string.Empty, Str(evaluation, "verdict"), Str(evaluation, "reason"));
         }).ToList();
+        view.Stops = StopRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("stops", out JsonElement stops) ? stops : default);
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();
         if (next.ValueKind != JsonValueKind.Object || Str(next, "format") != "vericairn.next/1")

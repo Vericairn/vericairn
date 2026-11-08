@@ -71,6 +71,7 @@ public sealed partial class RemoteViewModel : Observable
     private IReadOnlyList<AttentionItem> attention = [];
     private IReadOnlyList<WorkOrderRow> work = [];
     private IReadOnlyList<AssignmentItem> assignments = [];
+    private IReadOnlyList<StopRow> stops = [];
     private IReadOnlyList<ProductItem> products = [];
     private NodeView? node;
 
@@ -215,6 +216,20 @@ public sealed partial class RemoteViewModel : Observable
 
     /// <summary>The estate's products.</summary>
     public IReadOnlyList<ProductItem> Products { get => products; private set => Set(ref products, value); }
+
+    /// <summary>
+    /// The stops of the estate's runs from the last observation (the estate's design/flow.md § 8): each step that waits on a person, why,
+    /// on whom, how it reaches them, and for the operator's next reserved step its exact command. Remote shows them; it carries none of
+    /// them out, and a reserved act stays the operator's own.
+    /// </summary>
+    public IReadOnlyList<StopRow> Stops { get => stops; private set { if (Set(ref stops, value)) Raise(nameof(HasStops)); } }
+
+    /// <summary>True while a run in the last observation has a stop to show.</summary>
+    public bool HasStops => Stops.Count > 0;
+
+    /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
+    public string StopsAsOf { get => stopsAsOf; private set => Set(ref stopsAsOf, value); }
+    private string stopsAsOf = string.Empty;
 
     /// <summary>The runtime this phone reaches.</summary>
     public NodeView? Node { get => node; private set => Set(ref node, value); }
@@ -362,6 +377,8 @@ public sealed partial class RemoteViewModel : Observable
         SelectedWork = Work.FirstOrDefault(w => w.Id == orderId);
         SelectedAssignment = Assignments.FirstOrDefault(a => a.Id == assignmentId);
         Products = observation?.Products ?? [];
+        Stops = view?.Stops ?? [];
+        StopsAsOf = view?.StopsAsOf ?? string.Empty;
         Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";
         ObservationAge = observation is null ? "age unknown" : RemoteFreshness.Age(observation.AsOf, clock);
         Communication = observation is null ? "Communication settings have not been observed." :
