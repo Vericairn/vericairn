@@ -52,6 +52,19 @@ public sealed partial class EstateService
     /// <summary>Test seam: what a failed index operation does, closing the index and deleting it only when no other process has it open.</summary>
     internal void ResetSearchStoreForTests() { lock (gate) ResetSearchStore(); }
 
+    /// <summary>Test seam: the selections search-selected context records for these searches over the full, judged estate.</summary>
+    internal JsonArray? SearchSelectionsForTests(IReadOnlyList<string> searches)
+    {
+        lock (gate)
+        {
+            IReadOnlyList<RecordFile> files = session.Files();
+            return SearchSources(session.LoadFiles(files), files, [], searches, null).Selections;
+        }
+    }
+
+    // Why search-selected context passes over a record the estate does not count.
+    private const string NotCountedReason = "The estate does not count this record (for example an unanchored or forged one), so it is not selected.";
+
     /// <inheritdoc />
     public SearchResponse Search(SearchRequest request)
     {
@@ -330,7 +343,9 @@ public sealed partial class EstateService
     /// <summary>
     /// Search as a selection method, after the explicit selection: up to five queries over the package's own snapshot; candidates
     /// already selected are duplicates, the top three others of each query become optional sources pinned by exact hash, each
-    /// reread and checked against its pin, and every search is recorded. Nothing is made mandatory or reordered.
+    /// reread and checked against its pin, and every search is recorded. Nothing is made mandatory or reordered. The model is the
+    /// full, judged estate every caller loads for its package, so a record the estate does not count is excluded with its reason,
+    /// never selected.
     /// </summary>
     private (List<ContextAssembly.Source>? Sources, JsonArray? Selections, Problem? Problem) SearchSources(EstateModel model, IReadOnlyList<RecordFile> files,
         IReadOnlyList<ContextAssembly.Source> explicitSources, IReadOnlyList<string> searches, string? principal)
@@ -380,6 +395,8 @@ public sealed partial class EstateService
             foreach (SearchRunner.Candidate candidate in found.Candidates)
             {
                 if (candidate.State is "index-fault" or "excluded") classified.Add(candidate);
+                else if (candidate.Hit.Kind == "record" && model.ById.TryGetValue(candidate.Hit.Record!, out RecordEnvelope? held) && !model.Counts(held))
+                    classified.Add(candidate with { State = "excluded", Reason = NotCountedReason });
                 else if (keys.Contains(candidate.SourceKey!)) classified.Add(candidate with { State = "duplicate" });
                 else if (selected >= SearchSelectLimit) classified.Add(candidate with { State = "below-limit" });
                 else

@@ -1755,7 +1755,9 @@ names. One count remains: when `more` is true, the selection's limit minus the c
 optional sources with the dependency `candidate from search s1; optional; grants no authority`, inlined within the allocation
 or withheld with identity, size and retrieval command. A decision binds through its recorded subject and effects; a candidate
 that seems to govern the work from outside its explicit selection is raised as an ask or an amendment, not obeyed. Candidate
-text is untrusted content.
+text is untrusted content. Search may return a record the estate does not count, for example an unanchored or forged one; a
+candidate's standing is judged by reading it, never by search. A package's searches never select such a record: it is
+recorded as `excluded`, with its reason, as a pin whose bytes this copy lacks is.
 
 **What a run records.** A run's searches (`worker run --search`, `goal step --search`) are fixed in its intent as
 `execution.contextSelections`, and the searches its agent made through the run's MCP server are recorded at settlement as

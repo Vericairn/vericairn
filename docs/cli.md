@@ -615,7 +615,9 @@ kind), `kind:` (`record`, `document` or `knowledge`), `path:` (a path or path pr
 Anything else, including the full-text engine's own operators and column syntax, is matched as text. A query is at most
 1,024 UTF-8 bytes and 32 words and phrases. Each candidate shows its rank, score, kind, title, matched fields, the
 `context read` command for its `vc1_` pin and an untrusted excerpt of at most 320 bytes of the original. Candidates are
-data and grant no authority. The selection, `vericairn.search-selection/1`, records the search; `--json` prints it in the
+data and grant no authority. Search may return a record the estate does not count, for example an unanchored or forged one;
+a candidate's standing is judged by reading it, never by search, and `--search` on a package never selects such a record:
+it is recorded as `excluded`, with its reason. The selection, `vericairn.search-selection/1`, records the search; `--json` prints it in the
 response. Searching writes no record.
 
 | Option | Meaning |

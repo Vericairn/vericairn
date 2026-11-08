@@ -46,11 +46,13 @@ to answer from the index as it is, labelled stale) and `method` (`keyword`; `sem
 returns the API's `SearchResponse`, and the result's `_meta` carries `vericairn/trust` (untrusted content) and
 `vericairn/selection`, the selection's hash. The search is filtered by the connection's principal, the `--as` it serves;
 naming a principal only narrows what is read. Candidates are data and grant no authority: read one by its pin with
-`context_read`, which rechecks hash and access.
+`context_read`, which rechecks hash and access. Search may return a record the estate does not count, for example an
+unanchored or forged one; a candidate's standing is judged by reading it, never by search.
 
 `context_prepare` and `work_brief` take an optional `search`, one query or an array of up to five; the top three new
 candidates of each become optional sources pinned by exact hash after the explicit selection, and the manifest records every
-search. Without `search` both tools are unchanged.
+search. A record the estate does not count is never selected: it is recorded as `excluded`, with its reason. Without
+`search` both tools are unchanged.
 
 A worker starts its run's server as `mcp serve --as <agent> --run <run id>`. With `--run`, each search the server serves is
 appended to a log in that run's own machine-local, owner-only directory, which the worker creates empty as the run starts, and

@@ -27,7 +27,7 @@ public sealed record SearchExcerpt(long Start, long Length, string Text, string 
 /// <param name="Rank">Its position: exact identity matches first, then by score, then by source identity.</param>
 /// <param name="Score">BM25 times 10,000, rounded half away from zero, from its own segment's statistics.</param>
 /// <param name="Kind">record, document or knowledge.</param>
-/// <param name="State">selected (returned or selected into a package), duplicate, below-limit, excluded (its pinned bytes are unavailable here) or index-fault.</param>
+/// <param name="State">selected (returned or selected into a package), duplicate, below-limit, excluded (its pinned bytes are unavailable here or, in a package, the estate does not count its record) or index-fault.</param>
 /// <param name="Title">A display title derived from the source.</param>
 /// <param name="Source">The source's identity, as context packages pin it.</param>
 /// <param name="Pin">The self-contained pin that context read retrieves, rechecking hash and access.</param>
