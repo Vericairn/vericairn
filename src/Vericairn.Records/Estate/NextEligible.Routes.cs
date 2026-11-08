@@ -56,6 +56,31 @@ public static partial class NextEligible
     /// <param name="Request">For a run's reserved act, the operator request that carries it, or that carried its command and was closed.</param>
     public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception = null, RecordEnvelope? Request = null)
     {
+        /// <summary>A route without an operator request, as 0.9.1 constructed one.</summary>
+        public Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception)
+            : this(Role, Reserved, Source, Candidates, State, Principal, Launcher, Assignment, Ask, Run, Budget, Custody, Reason, Exception, null)
+        {
+        }
+
+        /// <summary>Deconstructs the route as 0.9.1 did, without its operator request.</summary>
+        public void Deconstruct(out string Role, out string? Reserved, out Routing.Source Source, out IReadOnlyList<Routing.Candidate> Candidates, out string State, out string? Principal, out string? Launcher, out RecordEnvelope? Assignment, out RecordEnvelope? Ask, out AgentRuns.Run? Run, out IReadOnlyList<string> Budget, out IReadOnlyList<string> Custody, out string Reason, out RecordEnvelope? Exception)
+        {
+            Role = this.Role;
+            Reserved = this.Reserved;
+            Source = this.Source;
+            Candidates = this.Candidates;
+            State = this.State;
+            Principal = this.Principal;
+            Launcher = this.Launcher;
+            Assignment = this.Assignment;
+            Ask = this.Ask;
+            Run = this.Run;
+            Budget = this.Budget;
+            Custody = this.Custody;
+            Reason = this.Reason;
+            Exception = this.Exception;
+        }
+
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Dispatching.IndexOf(State) >= 0;
 
