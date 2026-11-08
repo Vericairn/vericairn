@@ -80,8 +80,15 @@ public static class EstateLoader
         return Load(root, files, null, manifestBytes);
     }
 
+    /// <summary>
+    /// The records of a file set as identities only: each parsed record with its id, hash and body, supersession and the manifest,
+    /// with parse findings alone. No record type, reference, authority, signature or admission is judged, no clock is read, and no
+    /// file is read but the record files given and the manifest. A caller that needs any judgment loads the estate with <see cref="Load(string, IReadOnlyList{RecordFile})"/>.
+    /// </summary>
+    internal static EstateModel LoadIdentities(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache) => Load(root, files, cache, judge: false);
+
     // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
-    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null)
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null, bool judge = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -137,6 +144,13 @@ public static class EstateLoader
             ObjectReader = objects ?? FileObjects(root),
             FilePaths = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal),
         };
+        if (!judge)
+        {
+            // Identities only: no trust, counting, type, signature or manifest judgment; just the manifest as it reads.
+            model.Manifest = manifestBytes is null ? EstateManifest.Load(root, new FindingList()) : EstateManifest.Parse(manifestBytes, new FindingList());
+            return model;
+        }
+
 
         // The manifest is read before anything is judged, because which unsigned admissions count depends on the estate's record format;
         // its findings keep their place after the signatures'. Signatures, anchors and history checkpoints are judged from every record

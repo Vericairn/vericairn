@@ -71,6 +71,10 @@ public class PolicyGoldenFixtureTests
         using FlowFixture flows = FlowFixture.RecordedFixture();
         EstateModel flowModel = flows.Estate.Load();
         Assert.False(flowModel.Findings.HasErrors, string.Join('\n', flowModel.Findings));
+        // A settled agent run keeps the searches its agent made through the run's MCP server.
+        using PolicyFixture searches = SearchSelectionRecordTests.RecordedFixture();
+        EstateModel searchModel = searches.Estate.Load();
+        Assert.False(searchModel.Findings.HasErrors, string.Join('\n', searchModel.Findings));
         using var progress = new ProgressFixture();
         foreach (string scope in new[] { "estate", "roster", "goal", "brief" }) progress.Set(scope, ProgressRequestTests.FullRequest);
         RecordEnvelope completion = progress.Estate.Add("work-progress", progress.Estate.BuilderId,
@@ -93,9 +97,9 @@ public class PolicyGoldenFixtureTests
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)).Concat(revisionModel.OfType(type.Name)).Concat(flowModel.OfType(type.Name)).Concat(historyModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)).Concat(promptModel.OfType(type.Name)).Concat(templateModel.OfType(type.Name)).Concat(reviewModel.OfType(type.Name)).Concat(requestModel.OfType(type.Name)).Concat(firstPartyModel.OfType(type.Name)).Concat(lineModel.OfType(type.Name)).Concat(progressModel.OfType(type.Name)).Concat(revisionModel.OfType(type.Name)).Concat(flowModel.OfType(type.Name)).Concat(historyModel.OfType(type.Name)).Concat(searchModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))).Concat(revisionModel.Records.Select(r => (r, revisionHistory.Root))).Concat(flowModel.Records.Select(r => (r, flows.Estate.Root))).Concat(historyModel.Records.Select(r => (r, historyRoot))))
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))).Concat(promptModel.Records.Select(r => (r, prompts.Estate.Root))).Concat(templateModel.Records.Select(r => (r, templates.Root))).Concat(reviewModel.Records.Select(r => (r, reviews.Estate.Root))).Concat(requestModel.Records.Select(r => (r, requests.Estate.Root))).Concat(firstPartyModel.Records.Select(r => (r, firstParty.Root))).Concat(lineModel.Records.Select(r => (r, lines.Estate.Root))).Concat(progressModel.Records.Select(r => (r, progress.Estate.Root))).Concat(revisionModel.Records.Select(r => (r, revisionHistory.Root))).Concat(flowModel.Records.Select(r => (r, flows.Estate.Root))).Concat(historyModel.Records.Select(r => (r, historyRoot))).Concat(searchModel.Records.Select(r => (r, searches.Estate.Root))))
         {
             byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));

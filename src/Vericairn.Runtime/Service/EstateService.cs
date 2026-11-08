@@ -54,8 +54,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (draft, model) => AuthorLocked(draft, model),
             StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
-            (model, files, order, goal, maxBytes, recipient, assignment, promptUse) =>
-                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal),
+            (model, files, order, goal, maxBytes, recipient, assignment, promptUse, searches, agent) =>
+                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
@@ -403,7 +403,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
         ReadBrief(workOrder, false, maxBytes, recipient, assignment, view);
 
-    private BriefResponse? ReadBrief(string workOrder, bool fullSelectedScope, long? maxBytes, string? recipient, string? assignment, CommunicationValues? view)
+    private BriefResponse? ReadBrief(string workOrder, bool fullSelectedScope, long? maxBytes, string? recipient, string? assignment, CommunicationValues? view,
+        IReadOnlyList<string>? searches = null, string? principal = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -429,7 +430,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 profile = profile with { Unavailable = "The selected assignment does not belong to this work brief; its communication override is not applied." };
             }
 
-            return BriefLocked(model, files, order, fullSelectedScope: fullSelectedScope, maxBytes: maxBytes, profile: profile);
+            return BriefLocked(model, files, order, fullSelectedScope: fullSelectedScope, maxBytes: maxBytes, profile: profile, searches: searches, principal: principal);
         }
     }
 
