@@ -232,8 +232,10 @@ and a later narrowing withdraws nothing already written. A record the adoption c
 witnesses keeps the reading it had then, read at the adoption's time. Anchoring, acknowledging
 a removal, rooting an adoption and signing a device's or a grant's closing read more
 strictly, as before: the role or grant must still stand, so a later narrowing withdraws those
-powers for every checkpoint. A role has no closing, so close and revoke a person's devices
-when removing their operator role or `administer` grant. Status and policy
+powers for every checkpoint. They read authority only from the root operator or an operator
+who still stands, and a grant or principal revision dated before the record it supersedes
+counts for nothing; ordinary records keep the reading as it stood. A role has no closing, so
+close and revoke a person's devices when removing their operator role or `administer` grant. Status and policy
 evaluation take their recorded time from the records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
