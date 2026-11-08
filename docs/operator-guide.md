@@ -1682,9 +1682,9 @@ The traps carry the lessons of 0.8.1 to 0.8.4. A guide still naming the release 
 sentence named 0.8.2, stops `docs-before-freeze` with its location. A set frozen before that pass, as 0.8.4's first one was,
 cannot be made: `docs-set` waits on it and takes the check as its input, so a newer check makes the set stale. Notes rendered
 before the carrier's work closed, as 0.8.3's were, and an ask about the carrier, such as one approving a security section, that
-no decision has answered hold the set. The flow reads the approval as that answered ask; whether a release needs a security
-section, and what the decision says, the records do not tell, so the release manager asks whenever a fix is under a disclosure
-hold. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
+still waits, open or notified, hold the set. A withdrawn ask no longer holds it. The flow cannot prove an approval: whether a
+release needs a security section, what the deciding decision says and why an ask was withdrawn, the records do not tell, so the
+release manager asks whenever a fix is under a disclosure hold. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
 withdrawn candidate's draft left at the provider stops `gate`, as do the objections `release submit --check` names, such as a
 client of another build than the serving runtime (0.8.4's stale daemon) or a clone without a default head (0.8.3). An uncertain
 submission stops `submit` until a reconciliation reads the release record. The publication command is computed only once the
@@ -1733,8 +1733,9 @@ observation after `observe`, the announcement's drafts with their independent re
 announcement on GitHub Discussions and on the operator's X account as reserved `publish` steps after `publish`, each done only
 once the operator closes its request with the observed link, and the profile repository's documents after `docs-after`. A close
 counts only for the step's current ask: a request a principal who takes the run's steps put to the operator, with the command the
-records give the step now, closed after the step was asked and after the goal's current revision, so a corrective version's
-listing and announcement are asked again. Its
+records give the step now, closed after the step was asked and after the goal revision that last changed the run's flow pin,
+subject or options, so a corrective version's listing and announcement are asked again, while a revision that only grants more
+budget asks nothing again. Its
 destinations are that estate's own, so it is never part of the software pack.
 
 ## 19. Pairing, local-network connections and revocation

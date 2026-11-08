@@ -76,7 +76,7 @@ public sealed class ReleaseFlowFixture : IDisposable
     public RecordEnvelope ByReviewer(string type, JsonObject body, RecordReference? subject = null) =>
         Estate.Add(type, Reviewer, body.ToJsonString(), subject);
 
-    public JsonObject GoalBody(string version, JsonObject? options = null)
+    public JsonObject GoalBody(string version, JsonObject? options = null, int attempts = 3)
     {
         var plan = new JsonObject
         {
@@ -95,7 +95,7 @@ public sealed class ReleaseFlowFixture : IDisposable
             ["title"] = "Release " + version, ["objective"] = "Release the product from its placed work to its closed carrier.",
             ["completion"] = new JsonArray(new JsonObject { ["record"] = new JsonObject { ["type"] = "acceptance", ["subject"] = Carrier.Id } }),
             ["constraints"] = new JsonArray("nothing outside the release"), ["kind"] = "finite", ["sponsor"] = Estate.OperatorId,
-            ["budget"] = new JsonObject { ["wallMinutes"] = 600, ["attemptsPerStep"] = 3 },
+            ["budget"] = new JsonObject { ["wallMinutes"] = 600, ["attemptsPerStep"] = attempts },
             ["plan"] = new JsonObject { ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(Carrier.Id), ["flow"] = plan },
             ["inputs"] = new JsonArray(),
         };
@@ -105,6 +105,15 @@ public sealed class ReleaseFlowFixture : IDisposable
     public RecordEnvelope Revise(string version)
     {
         Goal = Add("goal", GoalBody(version), supersedes: Goal.Id);
+        return Goal;
+    }
+
+    /// <summary>The sponsor revises the run's budget alone, granting more attempts: its flow pin, subject and options are unchanged.</summary>
+    public RecordEnvelope ReviseBudget(int attempts)
+    {
+        JsonObject body = JsonNode.Parse(Goal.Body.GetRawText())!.AsObject();
+        body["budget"] = new JsonObject { ["wallMinutes"] = 600, ["attemptsPerStep"] = attempts };
+        Goal = Add("goal", body, supersedes: Goal.Id);
         return Goal;
     }
 

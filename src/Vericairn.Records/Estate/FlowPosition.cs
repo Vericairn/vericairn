@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
@@ -317,6 +318,7 @@ public static partial class FlowPosition
         private readonly FlowDefinition flow;
         private readonly FlowRuns.Configuration configuration;
         private readonly DateTimeOffset at;
+        private DateTimeOffset? shapedAt;
         private readonly Dictionary<FlowRuns.StepRef, StepInstance> derived = [];
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> held;
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> reviewing;
@@ -491,7 +493,7 @@ public static partial class FlowPosition
             IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             DateTimeOffset? asked = step.Reserved is null ? null : AskedSince(step, item);
             if (asked is DateTimeOffset askedAt && FlowStops.ClosesByRequest(step) && CommandOf(step, bindings, EarlyInputs(step, item)).Command is string now
-                && FlowStops.ClosedRequest(model, goal, new FlowRuns.StepRef(step.Key, item), now, askedAt, done: true, closesOnly: true) is RecordEnvelope closed)
+                && FlowStops.ClosedRequest(model, goal, new FlowRuns.StepRef(step.Key, item), now, askedAt, at, done: true, closesOnly: true) is RecordEnvelope closed)
             {
                 // {request}: the request the operator closed as done for this ask, with the step's current command, after it was asked.
                 bindings = new Dictionary<string, string>(bindings, StringComparer.Ordinal) { ["request"] = model.Chain(closed)[0] };
@@ -1592,12 +1594,13 @@ public static partial class FlowPosition
         private StepInstance? Producer(FlowInput input, string? item) => input.Step is null ? null : InstanceOf(input.Step, item);
 
         /// <summary>
-        /// When a reserved step was asked: its current goal revision's time, or the latest time a step it waits on was done, whichever is
-        /// later; the latest time there is when one of them is not done or off, so that no close answers an ask not yet made.
+        /// When a reserved step was asked: the time the run took its current shape (<see cref="ShapedAt"/>), or the latest time a step it
+        /// waits on was done, whichever is later; the latest time there is when one of them is not done or off, or is done at no time the
+        /// records give, so that no close answers an ask not yet made.
         /// </summary>
         private DateTimeOffset AskedSince(FlowStep step, string? item)
         {
-            DateTimeOffset since = goal.AtTime;
+            DateTimeOffset since = shapedAt ??= ShapedAt();
             foreach (StepInstance wait in Dependencies(step, item))
             {
                 if (wait.State == "off")
@@ -1605,18 +1608,45 @@ public static partial class FlowPosition
                     continue;
                 }
 
-                if (wait.State != "done")
+                if (wait.State != "done" || wait.DoneAt is not DateTimeOffset done)
                 {
                     return DateTimeOffset.MaxValue;
                 }
 
-                if (wait.DoneAt is DateTimeOffset done && done > since)
+                if (done > since)
                 {
                     since = done;
                 }
             }
 
             return since;
+        }
+
+        /// <summary>
+        /// The time of the oldest goal revision since which the run's flow pin, subject and options are unchanged: a revision that only
+        /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
+        /// </summary>
+        private DateTimeOffset ShapedAt()
+        {
+            string shape = Shape(goal);
+            RecordEnvelope since = goal;
+            IReadOnlyList<string> chain = model.Chain(goal);
+            for (int i = chain.Count - 2; i >= 0 && model.ById.TryGetValue(chain[i], out RecordEnvelope? earlier) && earlier.Type == goal.Type && Shape(earlier) == shape; i--)
+            {
+                since = earlier;
+            }
+
+            return since.AtTime;
+        }
+
+        private static readonly string[] ShapeMembers = ["pin", "subject", "options"];
+
+        /// <summary>A goal revision's flow pin, subject and options, each as canonical JSON.</summary>
+        private static string Shape(RecordEnvelope revision)
+        {
+            JsonElement plan = FlowRuns.Plan(revision);
+            return string.Join('\n', ShapeMembers.Select(name =>
+                TJson.Object(plan, name) is { ValueKind: JsonValueKind.Object } value ? CanonicalJson.Serialize(value) : "-"));
         }
 
         /// <summary>A step's inputs as they are handed on now, by the records that carry them and their exact hashes, for its command before the step is derived.</summary>

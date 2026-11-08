@@ -160,8 +160,9 @@ nuget.org availability or account-holder qualification claim.
   outside a history section, a release label or a marker such as `From`, `in` or `or earlier` is reported, and a claim worded
   as history, such as "From 0.9.1 the current release is…", is not; mark a history section with `<!-- vericairn:history -->`
   under its heading. It reads only the declared documents the guides directory holds, through no link. The flow's
-  `security-section` trap reads an approval as an answered ask about the carrier: it cannot tell whether a release needs a
-  section or what the deciding decision says.
+  `security-section` trap holds the set only while an ask about the carrier still waits, open or notified; it proves no
+  approval. It cannot tell whether a release needs a section, what the deciding decision says, or whether an ask was withdrawn
+  instead of answered, and a set frozen with none asked, or after one was withdrawn, passes it.
 - A corrective version after a withdrawal is a revision of the run's goal naming the new version; the run then derives afresh
   from `docs-before-freeze`. The release flow's `gate` step relies on the runtime writing a history checkpoint with trigger
   `release` before the submission check in an estate that adopted checkpoints (`OPS-07`), which this build does not write yet.

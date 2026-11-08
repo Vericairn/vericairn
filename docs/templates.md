@@ -490,9 +490,12 @@ every template.
   principal who takes the run's steps and is put to a person who holds the act;
   the close is that operator's own authentic `operator-request-close` with
   outcome `done`, pinning a revision of the request with the same step and
-  command, made no earlier than the current goal revision and every step the
-  step waits on done. Anything else leaves `{request}` unbound, and a revision
-  of the goal, such as a corrective version, asks the step again. A flow whose
+  command, made no earlier than the goal revision that gave the run its current
+  flow pin, subject and options and every step the step waits on done, and no
+  later than the time the run is read. Anything else leaves `{request}` unbound.
+  A revision that changes the pin, subject or options, such as a corrective
+  version, asks the step again; one that changes only the budget, objective or
+  other fields does not. A flow whose
   subject names a `product` record and a `version` text may bind `{previous}`
   in a field: the two newest published releases of the product before the
   version and any candidate withdrawn since, separated by spaces, as

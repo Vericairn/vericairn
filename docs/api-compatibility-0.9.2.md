@@ -555,8 +555,9 @@ Behavior changes, each within record format 3:
   before. A trap may declare `check` instead of, or beside, `holds`.
 - A reserved step's closed request (route `closed`) is one its addressed operator closed for the step's current ask: with the
   command the records give now, recorded by a principal who takes the run's steps, pinning a revision that names the same step
-  and command, and closed no earlier than the goal's current revision and every step it waits on done. An earlier close no
-  longer keeps `goal step` from asking again.
+  and command, and closed no earlier than the goal revision that last changed the run's flow pin, subject or options and every
+  step it waits on done, the latter at a time the records give, and no later than the time the position is derived at. An
+  earlier close no longer keeps `goal step` from asking again; a close after a revision of the budget alone still does.
 - A sprung trap's reason ends with the summary of the record that sprang it, when it has one.
 - An input whose record is now the published revision of the candidate a step used, as `ReleaseType.IsPublicationOf` defines
   it, is no change after use: a step that used the candidate stays done.

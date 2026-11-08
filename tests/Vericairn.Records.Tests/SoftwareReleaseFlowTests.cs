@@ -400,12 +400,17 @@ public class SoftwareReleaseFlowTests
     }
 
     [Fact]
-    public void AWithdrawnAskAboutTheCarrierIsNoApprovalOfTheSecuritySection()
+    public void AnAskAboutTheCarrierHoldsTheSetWhileItWaitsAndAWithdrawnOneHoldsItNoLonger()
     {
         using var run = AtGuides();
         run.GuidesChecked();
-        run.Add("ask", JsonNode.Parse($$"""{"to":"{{run.Estate.OperatorId}}","question":"Approve the security section as drafted?","recommendation":"Approve it.","consequence":"The set waits.","state":"withdrawn"}""")!.AsObject(), subject: run.Carrier.Reference);
+        const string Ask = """{"to":"{0}","question":"Approve the security section as drafted?","recommendation":"Approve it.","consequence":"The set waits.","state":"{1}"}""";
+        RecordEnvelope ask = run.Add("ask", JsonNode.Parse(Ask.Replace("{0}", run.Estate.OperatorId, StringComparison.Ordinal).Replace("{1}", "open", StringComparison.Ordinal))!.AsObject(), subject: run.Carrier.Reference);
         Assert.Contains(run.Step("docs-set").Reasons, r => r.StartsWith("trap security-section:", StringComparison.Ordinal));
+
+        // A withdrawn ask can never be answered or revised; it proves no approval, and it no longer holds the set.
+        run.Add("ask", JsonNode.Parse(Ask.Replace("{0}", run.Estate.OperatorId, StringComparison.Ordinal).Replace("{1}", "withdrawn", StringComparison.Ordinal))!.AsObject(), subject: run.Carrier.Reference, supersedes: ask.Id);
+        Assert.DoesNotContain(run.Step("docs-set").Reasons, r => r.StartsWith("trap security-section:", StringComparison.Ordinal));
     }
 
     private static ReleaseFlowFixture AtGuides()

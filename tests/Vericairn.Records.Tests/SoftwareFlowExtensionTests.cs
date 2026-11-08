@@ -204,6 +204,39 @@ public class SoftwareFlowExtensionTests
     }
 
     [Fact]
+    public void ARevisionOfTheBudgetAloneAsksNoPublicationAgainWhileAVersionChangeDoes()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true);
+        ToPublication(run);
+        run.Done(run.Request("mcp-registry"));
+        run.Done(run.Request("announce-x"));
+
+        // More attempts change neither the flow's pin, its subject nor its options: the operator's closes still answer the same asks,
+        // so nothing already posted is asked for again.
+        run.ReviseBudget(attempts: 5);
+        Assert.Equal(("done", "done"), (run.State("mcp-registry"), run.State("announce-x")));
+        Assert.Equal("stopped", run.State("announce-discussions"));
+
+        // A new version is a new ask for each.
+        run.Revise("1.2.1");
+        Assert.NotEqual("done", run.State("mcp-registry"));
+        Assert.NotEqual("done", run.State("announce-x"));
+    }
+
+    [Fact]
+    public void ACloseDatedAfterTheReadCountsOnlyOnceItsTimeIsReached()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true);
+        ToPublication(run);
+        RecordEnvelope close = run.Done(run.Request("announce-x"));
+        Assert.Equal("done", run.State("announce-x"));
+
+        // Read before the close's own time, as a clock behind the closer's would read it, the step is still asked.
+        FlowPosition.StepInstance early = Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, close.AtTime.AddSeconds(-1)).Steps, s => s.Name == "announce-x");
+        Assert.NotEqual("done", early.State);
+    }
+
+    [Fact]
     public void AClosedRequestCountsOnlyForTheStepsCommandFromAStepTakerAfterTheStepWasAsked()
     {
         using var run = new ReleaseFlowFixture(firstParty: true);

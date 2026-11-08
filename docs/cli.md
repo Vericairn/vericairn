@@ -637,8 +637,8 @@ earlier releases come from the estate's release records, or from `--previous`, w
 `environment.previous` the earlier releases it read, separated by spaces, superseding the latest one of the same check and
 version. It refuses a clone with uncommitted changes, since the verification names the commit it read, and refuses `--previous`:
 the release flow counts a check only of the earlier releases the records give. Every file is read inside the guides directory:
-a declared name, or any directory on its way, that is a link is refused. The command reads files and changes none; `--before`
-goes with neither `--assign-to`, `--key`, `--document` nor `--output`.
+`/` and `\` both divide a declared name, and a declared name, or any directory on its way, that is a link is refused. The
+command reads files and changes none; `--before` goes with neither `--assign-to`, `--key`, `--document` nor `--output`.
 
 ## `vericairn estate verify` (0.9.2)
 

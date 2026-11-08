@@ -556,7 +556,7 @@ The release flow's steps are `placed-work`, `docs-before-freeze`, `docs-set`, `r
 | Trap | Step | Read from |
 | --- | --- | --- |
 | A guide naming an earlier release as current, or preparation wording | `docs-before-freeze` | `docs pass --before --record`'s verifications |
-| A set frozen before the guides' pass; notes rendered before the carrier's work closed; an ask about the carrier, such as a security section's approval, no decision answered | `docs-set` | The guides' verifications; the carrier's work orders; asks about the carrier |
+| A set frozen before the guides' pass; notes rendered before the carrier's work closed; an ask about the carrier, such as a security section's approval, still waiting | `docs-set` | The guides' verifications; the carrier's work orders; asks about the carrier |
 | A declared document changed after its clearing review | `reviews-at-commit` | The product's living documents |
 | A client of another build than the serving runtime, a clone without a default head, a held document | `gate` | `release submit --check`'s objections, which its action runs |
 | A withdrawn candidate's draft left at the provider | `gate` | The repository's draft-deletion intents |

@@ -101,8 +101,10 @@ public sealed class DocsBeforeFreezeTests
         Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", ["../outside.md"], ["0.9.1"]));
     }
 
-    [Fact]
-    public void AGuideUnderALinkedDirectoryIsRefusedRatherThanFollowedOut()
+    [Theory]
+    [InlineData("sub/secret.md")]
+    [InlineData("sub\\secret.md")]
+    public void AGuideUnderALinkedDirectoryIsRefusedRatherThanFollowedOut(string declared)
     {
         using var guides = new TestEstate();
         guides.WriteFile("outside/secret.md", "Install Vericairn 0.9.1.\n");
@@ -116,7 +118,8 @@ public sealed class DocsBeforeFreezeTests
             return;
         }
 
-        var refusal = Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", ["sub/secret.md"], ["0.9.1"]));
+        // Either separator divides the name, so a backslash, Windows' own separator, never carries a name past the link check.
+        var refusal = Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", [declared], ["0.9.1"]));
         Assert.Contains("docs/sub is a link", refusal.Message, StringComparison.Ordinal);
     }
 

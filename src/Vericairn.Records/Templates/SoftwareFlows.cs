@@ -285,11 +285,10 @@ public static class SoftwareFlows
                 },
                 {
                   "name": "security-section",
-                  "summary": "A security section for fixes under a disclosure hold is approved by the operator through an ask about the carrier, answered by the operator's decision before the set is frozen: every ask about the carrier is answered, none open, notified or withdrawn without a decision. Whether a release needs a section, and what the decision says, the records do not tell; the release manager asks whenever a fix is under a hold.",
+                  "summary": "A security section for fixes under a disclosure hold is approved by the operator through an ask about the carrier, answered by the operator's decision before the set is frozen: no ask about the carrier still waits, open or notified. Whether a release needs a section, what the deciding decision says and why an ask was withdrawn, the records do not tell; the release manager asks whenever a fix is under a hold.",
                   "holds": [
                     { "type": "ask", "subject": "{subject.carrier}", "state": "open", "max": 0 },
-                    { "type": "ask", "subject": "{subject.carrier}", "state": "notified", "max": 0 },
-                    { "type": "ask", "subject": "{subject.carrier}", "state": "withdrawn", "max": 0 }
+                    { "type": "ask", "subject": "{subject.carrier}", "state": "notified", "max": 0 }
                   ]
                 }
               ],

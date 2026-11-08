@@ -76,13 +76,15 @@ internal static partial class GuidesBeforeFreeze
         List<(string Version, Regex Pattern)> tokens = prior.Distinct(StringComparer.Ordinal).Select(v => (v, Token(v))).ToList();
         foreach (string name in documents.Distinct(StringComparer.Ordinal))
         {
-            if (name.Length == 0 || Path.IsPathRooted(name) || name.Split('/', '\\').Any(part => part is "" or "." or ".."))
+            // Both separators divide a name on every platform, so the path read and the components checked for links are the same.
+            string[] parts = name.Split('/', '\\');
+            if (name.Length == 0 || Path.IsPathRooted(name) || parts.Any(part => part is "" or "." or ".."))
             {
                 throw new InvalidOperationException($"The declaration names '{name}', which is not a relative path inside the guides directory.");
             }
 
-            string path = Path.Combine(guides, name.Replace('/', Path.DirectorySeparatorChar));
-            if (LinkedOnTheWay(guides, name) is string linked)
+            string path = Path.Combine([guides, .. parts]);
+            if (LinkedOnTheWay(guides, parts) is string linked)
             {
                 throw new InvalidOperationException($"{label}/{linked} is a link; the pass reads only plain files inside the guides directory and follows no link out of it.");
             }
@@ -118,11 +120,10 @@ internal static partial class GuidesBeforeFreeze
     /// The first component of a declared name, from the guides directory down to the file itself, that is a link, such as a directory
     /// linked to one outside the guides; null when none is, and the resolved file lies inside the guides directory.
     /// </summary>
-    private static string? LinkedOnTheWay(string guides, string name)
+    private static string? LinkedOnTheWay(string guides, string[] parts)
     {
         string root = Path.GetFullPath(guides);
         string current = root;
-        string[] parts = name.Split('/');
         for (int i = 0; i < parts.Length; i++)
         {
             current = Path.Combine(current, parts[i]);
@@ -133,7 +134,7 @@ internal static partial class GuidesBeforeFreeze
         }
 
         string full = Path.GetFullPath(current);
-        return full.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : name;
+        return full.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : string.Join('/', parts);
     }
 
     /// <summary>The locations one guide's text holds, for the given prior versions.</summary>

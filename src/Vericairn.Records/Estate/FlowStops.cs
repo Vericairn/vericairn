@@ -153,7 +153,7 @@ public static class FlowStops
     /// earlier close or a close of another command, leaves the step's request due again.
     /// </summary>
     private static RecordEnvelope? Closed(EstateModel model, FlowPosition.Position position, FlowPosition.StepInstance instance) =>
-        ClosedRequest(model, position.Goal, instance.Ref, instance.Command, instance.AskedSince ?? position.Goal.AtTime, done: false, closesOnly: ClosesByRequest(instance.Step));
+        ClosedRequest(model, position.Goal, instance.Ref, instance.Command, instance.AskedSince ?? position.Goal.AtTime, position.At, done: false, closesOnly: ClosesByRequest(instance.Step));
 
     /// <summary>True for a reserved step whose done predicate is the operator's own close of its request, such as a draft's deletion or an announcement.</summary>
     public static bool ClosesByRequest(FlowStep step)
@@ -167,12 +167,14 @@ public static class FlowStops
     /// carries the command the records give the step now, was recorded by a principal who takes the run's steps and is put to a person who
     /// holds the act, as <see cref="Classify"/> requires of a request it delivers. Its close is that operator's own authentic record; it
     /// pins a revision of the request that names the same run, step and command, so a later revision never redirects it; and it was made
-    /// no earlier than the step was asked: the current goal revision and every step it waits on done (<paramref name="since"/>). With
+    /// no earlier than the step was asked: the goal revision that gave the run its current pin, subject and options, and every step it
+    /// waits on done (<paramref name="since"/>), and no later than the time the position is derived at (<paramref name="until"/>), so a
+    /// close dated ahead by a skewed clock counts only once its time is reached. With
     /// <paramref name="done"/>, only a close that says the act is done counts; with <paramref name="closesOnly"/>, only an
     /// operator-request-close, never an observation. The binding {request} of a reserved step's done predicates and its closed stop both
     /// read it, so they agree.
     /// </summary>
-    public static RecordEnvelope? ClosedRequest(EstateModel model, RecordEnvelope goal, FlowRuns.StepRef step, string? command, DateTimeOffset since, bool done, bool closesOnly)
+    public static RecordEnvelope? ClosedRequest(EstateModel model, RecordEnvelope goal, FlowRuns.StepRef step, string? command, DateTimeOffset since, DateTimeOffset until, bool done, bool closesOnly)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
@@ -195,7 +197,7 @@ public static class FlowStops
                 return false;
             }
 
-            if (close.By != EstateModel.BodyString(revision, "to") || !SignatureChecks.IsAuthentic(model, close) || close.AtTime < since)
+            if (close.By != EstateModel.BodyString(revision, "to") || !SignatureChecks.IsAuthentic(model, close) || close.AtTime < since || close.AtTime > until)
             {
                 return false;
             }
