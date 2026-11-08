@@ -124,11 +124,17 @@ public class FlowStepRoutingTests
         Assert.Equal(("ask", "listen", "person", op), (listen.Outcome, listen.Step, listen.Route, listen.Principal));
         Review(run, remastered);
 
-        // Acceptance and publication are reserved acts: goal step dispatches neither, and says why.
+        // Acceptance and publication are reserved acts: goal step dispatches neither. Acceptance, next, waits on the operator as an
+        // operator request carrying its exact command; asked again, goal step records nothing more while that request waits.
         GoalStepResponse reserved = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource, Command(run, "reserved")));
-        Assert.Equal("none", reserved.Outcome);
-        Assert.Contains("accept is stopped: a reserved act, accept-release", reserved.Message, StringComparison.Ordinal);
+        Assert.True(reserved.Ok, reserved.Message);
+        Assert.Equal(("request", "accept", "request", op), (reserved.Outcome, reserved.Step, reserved.Route, reserved.Principal));
         Assert.Null(reserved.Assignment);
+        Assert.Null(reserved.Run);
+        Assert.NotNull(reserved.Request);
+        GoalStepResponse waiting = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource, Command(run, "reserved-again")));
+        Assert.Equal("none", waiting.Outcome);
+        Assert.Contains($"accept is stopped, requested: a reserved act, accept-release: operator request {reserved.Request!.Id} waits on", waiting.Message, StringComparison.Ordinal);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -204,6 +210,8 @@ public class FlowStepRoutingTests
         string op = run.Estate.OperatorId;
         JsonObject song = FlowFixture.Song();
         song["steps"]![0]!["reserved"] = "security-review";
+        song["steps"]![0]!["action"] = "example-provider review --goal {goal}";
+        song["steps"]![0]!["done"] = new JsonArray(FlowFixture.Marker("REVIEWED"));
         string goal = Run(run, song);
         EstateModel model = run.Estate.Load();
         RecordEnvelope order = model.ById[model.ById[goal].Body.GetProperty("plan").GetProperty("workOrders")[0].GetString()!];

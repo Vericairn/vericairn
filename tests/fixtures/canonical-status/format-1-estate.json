@@ -1,0 +1,54 @@
+{
+  "assignments": [],
+  "documents": [],
+  "estate": {
+    "id": "01M4YGZRZGY8KQGY09BEBHJPR3",
+    "name": "Format 1 Fixture",
+    "slug": "format-1-fixture"
+  },
+  "findings": [],
+  "history": {
+    "adopted": false,
+    "heads": [],
+    "problems": [],
+    "tail": 10,
+    "witnessed": 0
+  },
+  "lastObservedByPerson": null,
+  "operations": [],
+  "operatorRequests": {
+    "delivered": [],
+    "format": "vericairn.operator-requests/1",
+    "perDelivery": 3,
+    "queued": [],
+    "to": null,
+    "waiting": 0
+  },
+  "reconcile": [],
+  "records": 10,
+  "releases": [
+    {
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "id": "01M4YH0R7GVXC7R60Q55CNWBY3",
+      "status": "published",
+      "version": "0.9.0"
+    }
+  ],
+  "vericairn": {
+    "channel": "stable",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "line": "current",
+    "mode": "source",
+    "repository": "Vericairn/vericairn",
+    "version": null
+  },
+  "workOrders": [
+    {
+      "id": "01M4YH08KGCJQBPTB7N64JH1DA",
+      "key": "FIX-1",
+      "kind": "ordinary",
+      "status": "planned",
+      "title": "A format-1 work order"
+    }
+  ]
+}

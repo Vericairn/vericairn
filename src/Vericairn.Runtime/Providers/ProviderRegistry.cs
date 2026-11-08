@@ -22,6 +22,38 @@ public sealed class ProviderRegistry
     private readonly Dictionary<string, IReleaseProvider> releases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IPullRequestProvider> pullRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IPackageRegistryProvider> packages = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ISecurityAdvisoryReader> advisories = new(StringComparer.Ordinal);
+
+    /// <summary>Registers a security advisory reader and returns its predecessor.</summary>
+    public ISecurityAdvisoryReader? Register(ISecurityAdvisoryReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        lock (gate)
+        {
+            ISecurityAdvisoryReader? previous = advisories.GetValueOrDefault(reader.Provider);
+            advisories[reader.Provider] = reader;
+            return previous;
+        }
+    }
+
+    /// <summary>Registers a security advisory reader unless its id is already served.</summary>
+    public bool RegisterIfAbsent(ISecurityAdvisoryReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        lock (gate) return advisories.TryAdd(reader.Provider, reader);
+    }
+
+    /// <summary>The reader registered for exactly this provider id, or null; no other reader is ever selected.</summary>
+    public ISecurityAdvisoryReader? SecurityAdvisories(string provider)
+    {
+        lock (gate) return advisories.GetValueOrDefault(provider);
+    }
+
+    /// <summary>The registered security advisory readers, ordered by id.</summary>
+    public IReadOnlyList<ISecurityAdvisoryReader> SecurityAdvisoryReaders
+    {
+        get { lock (gate) return advisories.Values.OrderBy(r => r.Provider, StringComparer.Ordinal).ToArray(); }
+    }
 
     /// <summary>Registers an anonymous package registry provider and returns its predecessor.</summary>
     public IPackageRegistryProvider? Register(IPackageRegistryProvider provider)

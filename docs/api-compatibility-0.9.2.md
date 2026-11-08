@@ -310,6 +310,136 @@ documentation sets heading. The frozen-set test in the command line's suite no l
 requires every set the release index links, every set directory except the build's own version until it is frozen, and
 each set before 0.6.0 to stay indexed, so freezing a set no longer edits the test.
 
+## Stops and their surfaces (PROC-06)
+
+No route or interface member is added. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds `stops`, and each step
+instance adds `stop` (why a stopped step waits: `person`, `reserved`, `attention` or `accept`) and `command` (for the reserved
+step that is next, its exact command; otherwise null). Each stop has `kind`, `name`, `title`, `step` (`key`, `instance`,
+`review`), `principal`, `principalName`, `reason`, `delivery` (`due`, `delivered`, `closed`, `queued` or `outside`), `record`,
+`act` and `command`. `GET /v1/goals/{id}/next` keeps `vericairn.next/1`; its `flow` adds the same `stops`, the route vocabulary
+adds `request`, `requested`, `closed` and `queued`, and each route adds `request`, the operator request it names.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; its outcome may be `request`, and it adds the init-only `Request`,
+serialized as `request` only when this call wrote an operator request. The OpenAPI schema `GoalStepResponse` adds `request`.
+`GET /v1/status` adds `runs` to its canonical JSON when the estate has a run of a flow that is active, paused, budget-limited or
+blocked: each with its `goal`, `pin`, `asOf`, `available`, `unavailable`, `done`, `steps`, `complete`, `next` and `stops`. Its
+text adds a `Runs:` section when there is one. The operator request queue, in `GET /v1/operator/requests`, status's
+`operatorRequests` and required attention, delivers a request that names a run's step (`flowStep`) only while it is due. It adds
+`withdrawn` only when a run no longer waits on an open request: each such request with `id`, `revision`, `hash`, `state`
+(`settled` or `withdrawn`) and `reason`. Its text adds the step's command to a delivered step's request, and a line for each open
+request that is not delivered. An estate without runs therefore keeps its earlier canonical status bytes, and the `statusHash` a
+person's observation pins. Canonical status reads no clock: a run, its stops, and the delivery of its requests in
+`operatorRequests` and in status's attention are derived as of the newest record (`asOf`), so the document is byte-identical
+whenever and wherever it is read. Human status, `GET /v1/goals/{id}`, `/next`, `GET /v1/operator/requests`, `GET /v1/attention`
+and progress's attention read a run now, so a due time, backoff or watch limit shows there at once, and in canonical status once a
+later record is written. A hand-over package derives a run's position as of the newest record too. Canonical status and a
+hand-over package trust each record's claimed time, so their stops and steps carry `command` null; only the live reads show a
+reserved step's command. A step request's text in the queue, in `operator list` and in attention shows its checked command first
+and labels its recommendation and other prose as the requester's, not checked; a client that cannot read the queue, from an older
+runtime, shows no step request as open. `operator list` (`GET /v1/operator/actions`) reads the runtime's clock, and its
+operator-request items add `stepCommand` for a run's step request. `request` events follow the queue's delivery: a run's request is `open` while it is delivered, `withdrawn` or `settled` otherwise, with category
+`information` once it is not delivered. Older clients ignore the
+added members and values; older servers omit them, which is not evidence that a run has no stops. The SDK's and the MCP
+server's goal, next, status and request reads carry the same JSON; no tool is added and no description changes.
+
+The state language's `step-route` vocabulary adds `request`, `requested`, `closed` and `queued`, and it adds the `flow-stop`
+and `flow-delivery` vocabularies. `Vericairn.Presentation` adds `StopRow` and `FlowRunRow`, `GoalPresentation.Stops`, and
+`EstateView.Runs`, `Stops` and `StopsAsOf`, and `FlowRunRow.AsOf`. Workbench's `ShellViewModel` adds `Stops`, `HasStops` and
+`StopsAsOf`, its `GoalsWorkspace` `Stops` and `HasStops`, and Remote's `RemoteViewModel` `Stops`, `HasStops` and `StopsAsOf`. `Vericairn.Protocol`'s attention derivation reads the request queue when the API offers it, and
+derives it from the records otherwise.
+
+`Vericairn.Records` adds public types and members:
+
+- `Estate.FlowStops`: `Kinds`, `Deliveries`, `RequestStates` and `PerDelivery`; the records `RunStop`, `FlowStepReference` and
+  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `RecordedTime`, `Of`, `Deliver`,
+  `Runs`, `RenderJson` and `AppendText` (each with an optional `commands`), `RunsJson` and `RunsText`.
+- `Estate.FlowPosition.HoldsReservedAct` and `IsReservedAct`; `StepInstance.Stop` and `Command`; `Position.Stops`, `At` and
+  `Reaching`; and an optional `commands` on `RenderText` and `RenderJson`. `FlowPosition` is now `partial`.
+- `Estate.EstateStatus.Render` and `Estate.GoalView.RenderText` and `RenderJson` overloads at a time, the goal view's with an
+  optional `commands`; `Estate.OperatorActions.Derive` at a time.
+- `Estate.GoalPredicates.EvaluatePredicate` and `Matching` overloads taking the records a rule admits.
+- `Estate.OperatorRequests.Held`, `Waiting`, `WaitingOf`, and `Derive` and `RenderText` overloads at a time; `Open` now
+  leaves out a run's request that is not due.
+- `NextEligible.Route.Request`, an optional trailing parameter; `NextEligible.RouteStates` adds `request`, `requested`,
+  `closed` and `queued`, and `FlowDispatching` adds `request`.
+- `Templates.FlowContract.Placeholders`.
+
+Behavior changes to the runs that PROC-05 and PROC-10 add, each within record format 3. A flow's reserved step must declare its
+`action`, the exact command the operator runs, and its `done` predicates (`flow.reserved`), and the command's placeholders must
+be bindings of the run (`flow.binding`), and its done predicates name no `state` (`flow.reserved`); a flow content that lacks
+them no longer validates. A reserved step's done predicates and record items count a record only when its signatures are
+authentic and its author was a person with the operator role when it was made (`FlowPosition.IsReservedAct`), and a result only
+on the same terms: a reserved step that an agent's record, an unsigned record or a record made before its author became an
+operator satisfied under PROC-05 is no longer done, and an agent's attestation item of a reserved step is `missing` rather than
+`unproven`. A predicate evaluated with a rule that admits records never holds by a `state`. `Patterns.Slug` and the predicate
+binding pattern now end at the value's last character, refusing a value with a final newline. A reserved step whose input changed after it was done shows `stopped`, waiting on the
+operator again, rather than `stale`. A reserved step whose command cannot be bound from the records shows `blocked`. `goal step`
+records a reserved step's operator request instead of answering `none`, and queues a fourth stop to one person across every run.
+A request counts as closed only when its addressed operator's own authentic close closes it, and is delivered only when its
+author takes the run's steps and it is put to a person who holds the act. Record format
+remains 3; its addition, an operator request's `flowStep`, is in
+[record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
+explanation of `operator-request` now includes `flowStep`.
+
+## Security reports before a release (OPS-11)
+
+Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
+implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
+`POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
+`disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
+of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether the advisory holds every release now:
+a report (in `triage` or `draft` state, or an unknown state) untriaged at its current revision, or a closed or withdrawn
+advisory no operator triage names at any revision; a published advisory never holds. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
+acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
+`ClientOperation.Deadline` gives `SecurityReportsPoll` and `ReleaseCheck` three minutes, since a check may now read GitHub;
+`ReleaseCheck` had the 30-second default.
+
+`ReleaseSubmitRequest` adds the init-only `SecurityReportsUnread` (JSON `securityReportsUnread`, default false): when true,
+declared security reports are not read and a declaration alone answers with the single `release.security-reports`
+objection. It only ever narrows what a caller learns. The MCP server's `release_submit_check` now checks the submission of
+the principal its connection acts as, falling back to the `by` argument only on a connection that acts as none, and sets
+`SecurityReportsUnread` unless that principal is the operator, so no other connection starts a read or sees which reports
+hold. `release submit`, `POST /v1/releases/check` and `release_submit_check` are otherwise unchanged in shape. While a current product
+declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an advisory that holds, named) and
+`release.security-reports-unavailable` (a repository that could not be read completely, or a declared resource that is no
+longer a repository on GitHub), or, for any principal other than
+the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
+intent. Without a declaration, nothing is read and no objection is added.
+
+`AttentionGet` adds, for the operator only, notices of kind `incident` (an advisory that holds) or `information` (any other new or
+changed advisory, for seven days) with subject type `security-report` (subject id
+`<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
+`security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
+and `GET /v1/status` are unchanged. Through WATCH-05's event journal they become attention events for the operator alone,
+categories `incident`, `information` and `failed-check`, whose subjects are opaque keyed names rather than these ids; a
+stored read asks the journal to derive at once. `GET /v1/providers` adds rows of kind `security-advisories`.
+
+`Vericairn.Runtime` adds the contract `vericairn.provider.security-advisories/1`: `Providers.ISecurityAdvisoryReader`,
+`SecurityAdvisory` (with `States`, `Severities`, `SettledStates` and `Validate`), `SecurityAdvisoryListing` and the in-memory
+`MemorySecurityAdvisoryReader`; `ProviderRegistry.Register(ISecurityAdvisoryReader)`, `RegisterIfAbsent`,
+`SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
+`SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.
+`Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
+the command line. It runs `gh api -i rate_limit` to confirm the token's `X-OAuth-Scopes` (`repo` or `repository_advisories:read`)
+and the allowance, then reads the listing page by page with `gh api -i`, following each `Link` header's `after` cursor, each
+page and the whole listing bounded. It follows a next page only on `api.github.com`'s own advisory listing, with exactly one
+`after` cursor of base64 characters, which it decodes, checks and encodes again; anything else fails closed. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+`TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
+`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` judges each
+revision against the declarations and grants in force at its time: while a security-reports declaration names a resource,
+only the operator changes its kind or location (`resource.security-reports-author`), and a repository's location moves only
+by the operator or an `administer` grant, as before (`resource.location-author`). Validation reports, as information under
+the same codes, a revision already in the estate that turns a resource into or out of a repository without that authority,
+or that a later declaration would forbid; the write boundary refuses such a revision when it is new, as it does for
+FIX-97's and FIX-98's rules. `ResourceType` adds the constants `LocationAuthorCode` and `SecurityReportsAuthorCode`, and
+`SecurityReportRules` adds `DeclaresAt`. Record format remains 3; the record
+additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
+`vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
+fixtures include it. The command line adds `security-reports poll` and `security-reports triage`
+([CLI](cli.md#vericairn-security-reports-092)).
+
 ## History checkpoints (ID-05)
 
 No route, interface member of `IEstateApi` or protocol type is added or removed. Record format remains 3; it gains the record

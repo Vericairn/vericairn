@@ -17,6 +17,13 @@ synthetic fixture with fresh in-memory test keys, rebinds exact references and a
 validates the complete result and writes a new inventory. This refresh changes fixture signatures and public
 keys; it retains no private keys and touches neither the format-1 fixture nor frozen release documentation.
 
+`canonical-status/` holds the canonical status JSON (`EstateStatus.RenderJson` without repository checks) of each estate
+above, as main rendered it before PROC-06 (0.9.2). An estate without runs keeps these exact bytes, and so the
+`statusHash` a person's observation pins; a test renders each estate with the current build and compares, the
+policy estate's `documents` member apart, since its living document names a generator only tests install. A later
+change to canonical status for estates without runs updates these files deliberately: ID-05 (0.9.2) added the `history`
+member to each, and no other member changed.
+
 `history-checkpoint-estate/` is a synthetic format-3 estate for history checkpoints (ID-05): an adoption checkpoint
 by the root operator that anchors the estate's unsigned records, an agent's interval checkpoint, a closing checkpoint
 that acknowledges a removed record, and a last checkpoint after the revocation that closing names. Its inventory

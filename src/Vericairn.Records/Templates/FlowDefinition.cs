@@ -559,6 +559,15 @@ public sealed class FlowDefinition
                 }
             }
         }
+
+        // A reserved step's command binds its base's subject as its predicates do.
+        foreach (string binding in (step.Reserved is null ? [] : FlowContract.Placeholders(step.Action)).Where(b => b.StartsWith("subject.", StringComparison.Ordinal)))
+        {
+            if (!fields.TryGetValue(binding["subject.".Length..], out string? type) || type == "list")
+            {
+                yield return $"{where}: step '{step.Key}' binds {{{binding}}} in its command, which is not a record or text field of the flow's subject.";
+            }
+        }
     }
 
     /// <summary>The bindings a predicate's values name, without their braces.</summary>

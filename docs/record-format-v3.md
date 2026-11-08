@@ -424,6 +424,48 @@ role's `document` are template content, not record fields; see
 `records describe goal` include these contracts, and the generic record reader
 advances to `vericairn.records/readers/8`.
 
+### Stops (0.9.2)
+
+PROC-06 adds one optional field within format 3, and no record type. An operator
+request without `flowStep` behaves as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `operator-request` | Optional `flowStep: {goal, key, instance?}` names the reserved step of a run the request waits on: the run's goal by its first revision, a step of its flow marked `reserved`, and for a step that runs over a list one of the run's instances. Its subject is the run's work order, its content exactly one item of kind `command`, and it carries no ask over. A revision keeps its `flowStep`. |
+
+Validation refuses a `flowStep` that names a goal that is not a run, or the goal
+by a later revision; a step the flow does not declare or does not mark reserved;
+an instance a step that runs once does not take, or one the run does not name;
+a subject other than the run's work order; content other than one command; and a
+carried ask. Whether such a request is due, carrying exactly the command the
+records give now while its step waits on the operator, is derived when it is
+read, never stored; the request grants nothing, and its close never completes
+the step. A flow's reserved step declares its `action` and `done` predicates,
+template content; see [Templates](templates.md#flows-092). `records describe
+operator-request` includes this contract, within the generic record reader
+`vericairn.records/readers/8`.
+
+## Security reports (0.9.2)
+
+OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a
+repository resource's kind. A product without
+`securityReports` behaves as before, and no migration rewrites a record. What the reader observes about each advisory
+(identifier, state, severity and content hash) is machine-local state in the live store, not a record.
+
+| Record | Additive contract |
+| --- | --- |
+| `product` | Optional `securityReports: {provider, repositories}`. `provider` is a provider id (a lower-case slug; the shipped reader is `github-security-advisories`), and `repositories` lists one to eight distinct `resource` ids, each a `repository` with a `github` location. Declaring, changing or removing it is the operator's alone: any other author's revision that changes it is refused (`product.security-reports-author`). While any current product declares it, release submission reads those repositories and refuses while one cannot be read completely, while a declared resource is no longer a repository on GitHub, or while an advisory holds: a report (in `triage` or `draft` state, or an unknown state) with no triage of its current revision, or a closed or withdrawn advisory no triage names at any revision. A published advisory holds nothing. |
+| `resource` | Each revision is judged against the declarations and grants in force at its own time. While a product's `securityReports` names the resource, a revision changing its `kind` or `location` is refused unless the operator records it (`resource.security-reports-author`). A repository's location still moves only by the operator or an `administer` grant (`resource.location-author`). From 0.9.2 the write boundary also refuses a new revision that turns a resource into or out of a repository, or moves a former repository, without that authority, and a new revision a declaration made since would forbid; revisions already in the estate keep their reading, and validation reports them as information under the same codes. Other fields stay open to their usual authors. |
+| `observation` | Kind `security-triage`, by the operator only (`security-triage.author`). Its subject pins the exact `repository` resource on GitHub whose advisory it names (`security-triage.subject`), and its `facts` carry exactly `advisory` (a GHSA identifier), `repository` (owner/name, matching the subject's location), `contentHash` (the reader's hash of the provider's response for that advisory), `disposition` (`security`, `duplicate` or `no-action`) and `reason` (at most 500 characters, required for `no-action`). Any other fact is refused (`security-triage.facts`), and `no-action` without a reason is refused (`security-triage.reason`), so an advisory's summary, description, reporter and credits cannot enter it. |
+
+A triage names one revision: it clears a report's hold and its attention notice only while the report's observed content hash
+is the one it names, so a later change of its severity or text needs another triage. For a closed or withdrawn advisory, a triage
+of any of its revisions ends the hold, and publishing a report ends it without a triage. The kind is named `security-triage`
+so that it stays apart from the conversation triage that conversation intake plans. A triage the estate check refuses, or
+one by any principal other than the operator, clears nothing. A reader that lacks the kind refuses the record, and a
+product's `securityReports` in an earlier format is refused as a later format's field. `records describe product` and
+`records describe observation` include these contracts, and `vericairn.records/readers/8` explains the product's new field.
+
 ## History checkpoints (0.9.2)
 
 ID-05 adds the `history-checkpoint` type within format 3, as 0.8.4 added

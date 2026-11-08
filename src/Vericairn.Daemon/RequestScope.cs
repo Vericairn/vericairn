@@ -130,13 +130,14 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
             DocumentPassAssignResponse pass => pass.Written.Count == 0 ? null : pass.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
+            SecurityReportsResponse reports => reports.Triage,
             WorkMovePlanResponse move => move.Written.Count == 0 ? null : move.Written[^1],
             ReleaseReviewBriefResponse review => review.Assignment,
             ReleaseResponse release when operation == "POST /v1/releases/withdraw" => release.Operation ?? release.Release,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false };
         if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
@@ -286,6 +287,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/packages/observe"] = typeof(PackagesObserveRequest),
         ["POST /v1/packages/unlist"] = typeof(PackagesUnlistRequest),
         ["POST /v1/packages/deprecate"] = typeof(PackagesDeprecateRequest),
+        ["POST /v1/security-reports/poll"] = typeof(SecurityReportsPollRequest),
+        ["POST /v1/security-reports/triage"] = typeof(SecurityReportTriageRequest),
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
@@ -389,6 +392,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PackagesObserveRequest)] = (_, r, d) => Acting(((PackagesObserveRequest)r).By, d),
         [typeof(PackagesUnlistRequest)] = (_, r, d) => Acting(((PackagesUnlistRequest)r).By, d),
         [typeof(PackagesDeprecateRequest)] = (_, r, d) => Acting(((PackagesDeprecateRequest)r).By, d),
+        [typeof(SecurityReportsPollRequest)] = (_, r, d) => Acting(((SecurityReportsPollRequest)r).By, d),
+        [typeof(SecurityReportTriageRequest)] = (_, r, d) => Acting(((SecurityReportTriageRequest)r).By, d),
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),

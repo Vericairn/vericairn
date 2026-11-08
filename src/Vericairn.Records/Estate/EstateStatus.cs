@@ -52,8 +52,11 @@ public static class EstateStatus
         return acceptance ?? chain.SelectMany(id => model.About(id, "work-status")).OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
-    /// <summary>Human-readable status.</summary>
-    public static string Render(EstateModel model, FindingList checks)
+    /// <summary>Human-readable status, a run's position and its requests read now.</summary>
+    public static string Render(EstateModel model, FindingList checks) => Render(model, checks, DateTimeOffset.UtcNow);
+
+    /// <summary>Human-readable status, a run's position and the delivery of its operator requests derived at a time, as a live read does.</summary>
+    public static string Render(EstateModel model, FindingList checks, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(checks);
@@ -147,7 +150,11 @@ public static class EstateStatus
             }
         }
 
-        if (OperatorRequests.Open(model).Count > 0) text.Append(OperatorRequests.RenderText(model));
+        OperatorRequests.Waiting queue = OperatorRequests.WaitingOf(model, null, at);
+        if (queue.Open.Count > 0 || queue.Withdrawn.Count > 0) text.Append(OperatorRequests.RenderText(model, null, at));
+
+        // A run's position and its stops (design/flow.md § 8), as a live read shows them.
+        text.Append(FlowStops.RunsText(model, FlowStops.Runs(model, at)));
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -257,16 +264,22 @@ public static class EstateStatus
             .OrderBy(r => EstateModel.BodyString(r, "asOf"), StringComparer.Ordinal).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
-    /// <summary>Machine-readable status in canonical pretty JSON (byte-identical across machines for the same estate).</summary>
+    /// <summary>
+    /// Machine-readable status in canonical pretty JSON, byte-identical across machines, platforms and reading times for the same estate:
+    /// nothing in it reads the clock. A run's position, its stops and the delivery of its operator requests are derived at the records' own
+    /// time (<see cref="FlowStops.RecordedTime"/>), and an estate without runs has no runs member.
+    /// </summary>
     public static string RenderJson(EstateModel model, FindingList checks)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(checks);
         RecordEnvelope? estate = model.CurrentEstate;
         RecordEnvelope? observed = LastObservationByPerson(model);
+        DateTimeOffset recorded = FlowStops.RecordedTime(model);
+        IReadOnlyList<FlowPosition.Position> runs = FlowStops.Runs(model, recorded);
         var status = new JsonObject
         {
-            ["operatorRequests"] = OperatorRequests.Derive(model),
+            ["operatorRequests"] = OperatorRequests.Derive(model, null, recorded),
             ["lastObservedByPerson"] = observed is null ? null : new JsonObject
             {
                 ["at"] = EstateModel.BodyString(observed, "asOf"),
@@ -313,6 +326,11 @@ public static class EstateStatus
             ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => ReconcileCodes.IndexOf(f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
         };
+        if (runs.Count > 0)
+        {
+            status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
         using JsonDocument document = JsonDocument.Parse(status.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);
     }

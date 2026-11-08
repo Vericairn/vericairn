@@ -85,6 +85,8 @@ internal sealed partial class ReleaseCoordinationService
             "release.commit" => "Supply the exact lower-case forty-digit release commit and check again.",
             "release.identity" => "Observe and reconcile the original release identity before retrying; use a new version for an already built release.",
             "release.author" or "release.principal" => "Choose an existing principal with current release authority and check again.",
+            "release.security-reports" => "Ask the operator to read the security reports with vericairn security-reports poll and triage each one it names, then check again.",
+            "release.security-reports-unavailable" => "Let the declared reader complete: log gh in as an administrator of the repository, or wait for the network or the rate allowance, then run vericairn security-reports poll and check again. Releasing without the reader takes the operator's new product revision without the securityReports declaration.",
             "release.setup" or "release.setting" => "Supply the declared release provider and all required destination settings, then check again.",
             _ => "Resolve the reported finding at its named subject, then run the submission check again.",
         };
