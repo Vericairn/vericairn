@@ -662,7 +662,7 @@ public class GoalStepTests
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"{{key}}","kind":"ordinary","title":"Order {{key}}","intent":"Work.","scope":["work"],"exitQuestion":"Done?","inputs":[{"type":"goal","id":"{{run.Goal}}"}],"deliverables":["work"]{{extra}}}"""))));
 
     /// <summary>The builder's attempt and result on an assignment, as its MCP tools would record them: its result then awaits review.</summary>
-    private static void Done(RunEstate run, string assignment)
+    internal static void Done(RunEstate run, string assignment)
     {
         string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(assignment, run.Estate.BuilderId, "widget, a work branch", "Do the work."))).Id;
         RunEstate.Ok(run.Service.Result(new ResultRequest(attempt, run.Estate.BuilderId, RunEstate.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}"""))));

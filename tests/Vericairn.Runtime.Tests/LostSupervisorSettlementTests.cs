@@ -152,16 +152,17 @@ public sealed class LostSupervisorSettlementTests
         }
     }
 
-    private sealed record Lost(string Run, RunDirectory Directory, RunObservedState State, DateTimeOffset LaunchedAt, int Supervisor, string Workspace, WorkerOptions Options);
+    internal sealed record Lost(string Run, RunDirectory Directory, RunObservedState State, DateTimeOffset LaunchedAt, int Supervisor, string Workspace, WorkerOptions Options);
 
     // A run whose worker observed its exit is turned back into the snapshot its worker last wrote before it was killed: no exit,
     // no settlement, a supervisor process that is gone. Its harness really exited. The worker's clock then reads an hour after
-    // the launch, beyond the stall limit, while the processes are the machine's own.
-    private static Lost Abandon(RunEstate run, string name)
+    // the launch, beyond the stall limit, while the processes are the machine's own. A caller may start the run its own way, such
+    // as a goal's step, with a cap of ten wall minutes.
+    internal static Lost Abandon(RunEstate run, string name, Func<string, RunResponse>? start = null)
     {
         run.Service.BeforeValidatingRecords = RefuseSettlement;
         string report = run.Report(name);
-        RunResponse started = run.Start("generic", "generic", report, wallMinutes: 10);
+        RunResponse started = start?.Invoke(report) ?? run.Start("generic", "generic", report, wallMinutes: 10);
         Assert.True(started.Ok, started.Message);
         Assert.Equal("dispatched", started.Status);
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
@@ -181,7 +182,7 @@ public sealed class LostSupervisorSettlementTests
         return lost;
     }
 
-    private static void Write(Lost lost, int supervisor, int harness, TimeSpan heartbeat, long? tokens)
+    internal static void Write(Lost lost, int supervisor, int harness, TimeSpan heartbeat, long? tokens)
     {
         RunObservedState state = lost.State;
         state.ExitCode = null;

@@ -21,7 +21,7 @@ namespace Vericairn.Cli.Tests;
 /// the sponsor's presence and no exception is recorded.
 /// </summary>
 [Collection("cli")]
-public class GoalJourneyTests
+public partial class GoalJourneyTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
     private const string Hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
