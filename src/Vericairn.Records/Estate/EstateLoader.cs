@@ -39,7 +39,39 @@ public static class EstateLoader
     }
 
     /// <summary>Loads an estate whose records are supplied by the caller (from files, a live store or an export).</summary>
-    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files) => Load(root, files, null);
+    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files) => Load(root, files, (RecordParseCache?)null);
+
+    /// <summary>
+    /// Loads an estate whose records and objects are supplied by the caller: <paramref name="objects"/> reads an object by its content
+    /// hash, or returns null when it is not held, as a store that keeps objects outside the repository does.
+    /// </summary>
+    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files, Func<string, byte[]?> objects) => Load(root, files, null, null, objects);
+
+    /// <summary>
+    /// The objects of a repository's objects/ directory, read by content hash and verified against it; null when absent, unreadable or
+    /// not those bytes.
+    /// </summary>
+    public static Func<string, byte[]?> FileObjects(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        string directory = Path.Combine(Path.GetFullPath(root), EstateLayout.ObjectsDirectory);
+        return hash =>
+        {
+            if (!Hashing.ContentHash.IsValid(hash)) return null;
+            string path = Path.Combine(directory, hash[Hashing.ContentHash.Prefix.Length..]);
+            try
+            {
+                var info = new FileInfo(path);
+                if (!info.Exists || info.LinkTarget is not null || info.Length > EstateLayout.MaxObjectBytes) return null;
+                byte[] bytes = File.ReadAllBytes(path);
+                return Hashing.ContentHash.Sha256(bytes) == hash ? bytes : null;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        };
+    }
 
     /// <summary>Validates prepared records and manifest bytes before initialization writes any files.</summary>
     public static EstateModel LoadPrepared(string root, IReadOnlyList<RecordFile> files, byte[] manifestBytes)
@@ -56,7 +88,7 @@ public static class EstateLoader
     internal static EstateModel LoadIdentities(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache) => Load(root, files, cache, judge: false);
 
     // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
-    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, bool judge = true)
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null, bool judge = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -105,6 +137,113 @@ public static class EstateLoader
             records.Add(record);
         }
 
+        var supersession = new FindingList();
+        Dictionary<string, string> supersededBy = Successors(records, byId, supersession);
+        var model = new EstateModel(root, records, byId, supersededBy, findings)
+        {
+            ObjectReader = objects ?? FileObjects(root),
+            FilePaths = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal),
+        };
+        if (!judge)
+        {
+            // Identities only: no trust, counting, type, signature or manifest judgment; just the manifest as it reads.
+            model.Manifest = manifestBytes is null ? EstateManifest.Load(root, new FindingList()) : EstateManifest.Parse(manifestBytes, new FindingList());
+            return model;
+        }
+
+
+        // The manifest is read before anything is judged, because which unsigned admissions count depends on the estate's record format;
+        // its findings keep their place after the signatures'. Signatures, anchors and history checkpoints are judged from every record
+        // read, and then the model's lookups keep only the records that count, before any rule reads them (design/signed-history.md § 6).
+        var manifestFindings = new FindingList();
+        EstateManifest? manifest = manifestBytes is null ? EstateManifest.Load(root, manifestFindings) : EstateManifest.Parse(manifestBytes, manifestFindings);
+        EstateTrust trust = EstateTrust.Build(model, manifest, model.ObjectReader, model.FilePaths);
+        IReadOnlySet<string> excluded = trust.NotCounting();
+        if (excluded.Count == 0)
+        {
+            foreach (Finding finding in supersession) findings.Add(finding);
+            model.ApplyCounting(trust, excluded, supersededBy);
+        }
+        else
+        {
+            // Divergence is judged among the records that count: a successor that does not count revises nothing, so it neither
+            // unseats a record nor makes a reconcile task.
+            var countingSupersession = new FindingList();
+            Dictionary<string, string> countingSupersededBy = Successors(records.Where(r => !excluded.Contains(r.Id)).ToList(), byId, countingSupersession);
+            foreach (Finding finding in supersession.Where(f => f.Code != "reconcile.successors").Concat(countingSupersession.Where(f => f.Code == "reconcile.successors"))) findings.Add(finding);
+            model.ApplyCounting(trust, excluded, countingSupersededBy);
+        }
+        foreach (RecordEnvelope record in records)
+        {
+            IRecordType? type = RecordTypeRegistry.Find(record.Type);
+            if (type is null)
+            {
+                string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
+                findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
+                continue;
+            }
+
+            if (record.Format < type.SinceFormat)
+            {
+                findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
+                continue;
+            }
+
+            ValidateSubject(model, record, type, findings);
+            type.Validate(new ValidationContext(model, record, findings));
+            // Existing records keep their reading. The write boundary promotes this finding only for proposed records.
+            if (RecordAuthorship.Unresolved(model, record) is Finding author) findings.Add(author);
+        }
+
+        model.Manifest = manifest;
+        SignatureChecks.Run(model, findings);
+        foreach (Finding finding in trust.History.Findings)
+        {
+            findings.Add(finding);
+        }
+
+        foreach (Finding finding in manifestFindings)
+        {
+            findings.Add(finding);
+        }
+
+        // A record is never ahead of its estate: an estate at format 1 holds only format-1 records, and moves to a later format by
+        // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.
+        if (model.Manifest is not null)
+        {
+            Updates.VericairnReleaseObservation.ValidatePin(model);
+            // An upgrade stopped between its migration record and the manifest is reported, not refused: rerunning it finishes the move.
+            RecordEnvelope? pending = UpgradeProgress.Pending(model.Manifest, records);
+            if (pending is not null)
+            {
+                findings.Warning("upgrade.incomplete", pending.ExpectedPath, $"Migration {pending.Id} moves the estate from {model.Manifest.Describe()} to {EstateModel.BodyString(pending, "toPin")}, and the manifest has not moved yet; `vericairn estate upgrade` to that release finishes it.");
+            }
+
+            foreach (RecordEnvelope record in records.Where(r => r.Format > model.Manifest.RecordFormat))
+            {
+                if (ReferenceEquals(record, pending) && UpgradeProgress.MovesToItsOwnFormat(model.Manifest, record)) continue;
+                findings.Error("record.format-ahead", record.ExpectedPath, $"This record states record format {record.Format}, and the estate is at format {model.Manifest.RecordFormat}; `vericairn estate upgrade` to a release that writes format {record.Format} moves the estate first.");
+            }
+        }
+        if (model.Manifest is not null && model.CurrentEstate is not null && model.Manifest.Estate != model.Chain(model.CurrentEstate)[0])
+        {
+            findings.Error("manifest.estate", EstateLayout.ManifestPath, $"The manifest names estate {model.Manifest.Estate} but this estate's charter began as {model.Chain(model.CurrentEstate)[0]}.");
+        }
+
+        if (records.Count > 0 && model.CurrentEstate is null)
+        {
+            findings.Error("estate.missing", EstateLayout.RecordsDirectory, "No current estate record exists; every estate starts with its charter.");
+        }
+
+        return model;
+    }
+
+    /// <summary>
+    /// Which record each superseded record is superseded by, from the records given: divergent successors are a reconcile task unless a
+    /// reconciliation settles them, and an authored document's revisions form one line ordered by time and id.
+    /// </summary>
+    private static Dictionary<string, string> Successors(IReadOnlyList<RecordEnvelope> records, Dictionary<string, RecordEnvelope> byId, FindingList findings)
+    {
         var supersededBy = new Dictionary<string, string>(StringComparer.Ordinal);
         var successors = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
         foreach (RecordEnvelope record in records.Where(r => r.Supersedes is not null))
@@ -187,74 +326,7 @@ public static class EstateLoader
             for (int i = 0; i + 1 < ordered.Length; i++) supersededBy[ordered[i].Id] = ordered[i + 1].Id;
         }
 
-        var model = new EstateModel(root, records, byId, supersededBy, findings);
-        if (!judge)
-        {
-            model.Manifest = manifestBytes is null ? EstateManifest.Load(root, new FindingList()) : EstateManifest.Parse(manifestBytes, new FindingList());
-            return model;
-        }
-
-        foreach (RecordEnvelope record in records)
-        {
-            IRecordType? type = RecordTypeRegistry.Find(record.Type);
-            if (type is null)
-            {
-                string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
-                findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
-                continue;
-            }
-
-            if (record.Format < type.SinceFormat)
-            {
-                findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
-                continue;
-            }
-
-            ValidateSubject(model, record, type, findings);
-            type.Validate(new ValidationContext(model, record, findings));
-            // Existing records keep their reading. The write boundary promotes this finding only for proposed records.
-            if (RecordAuthorship.Unresolved(model, record) is Finding author) findings.Add(author);
-        }
-
-        // The manifest is read before the signatures are checked, because which unsigned admissions count depends on the estate's
-        // record format; its findings keep their place after the signatures'.
-        var manifestFindings = new FindingList();
-        model.Manifest = manifestBytes is null ? EstateManifest.Load(root, manifestFindings) : EstateManifest.Parse(manifestBytes, manifestFindings);
-        SignatureChecks.Run(model, findings);
-        foreach (Finding finding in manifestFindings)
-        {
-            findings.Add(finding);
-        }
-
-        // A record is never ahead of its estate: an estate at format 1 holds only format-1 records, and moves to a later format by
-        // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.
-        if (model.Manifest is not null)
-        {
-            Updates.VericairnReleaseObservation.ValidatePin(model);
-            // An upgrade stopped between its migration record and the manifest is reported, not refused: rerunning it finishes the move.
-            RecordEnvelope? pending = UpgradeProgress.Pending(model.Manifest, records);
-            if (pending is not null)
-            {
-                findings.Warning("upgrade.incomplete", pending.ExpectedPath, $"Migration {pending.Id} moves the estate from {model.Manifest.Describe()} to {EstateModel.BodyString(pending, "toPin")}, and the manifest has not moved yet; `vericairn estate upgrade` to that release finishes it.");
-            }
-
-            foreach (RecordEnvelope record in records.Where(r => r.Format > model.Manifest.RecordFormat))
-            {
-                if (ReferenceEquals(record, pending) && UpgradeProgress.MovesToItsOwnFormat(model.Manifest, record)) continue;
-                findings.Error("record.format-ahead", record.ExpectedPath, $"This record states record format {record.Format}, and the estate is at format {model.Manifest.RecordFormat}; `vericairn estate upgrade` to a release that writes format {record.Format} moves the estate first.");
-            }
-        }
-        if (model.Manifest is not null && model.CurrentEstate is not null && model.Manifest.Estate != model.Chain(model.CurrentEstate)[0])
-        {
-            findings.Error("manifest.estate", EstateLayout.ManifestPath, $"The manifest names estate {model.Manifest.Estate} but this estate's charter began as {model.Chain(model.CurrentEstate)[0]}.");
-        }
-
-        if (records.Count > 0 && model.CurrentEstate is null)
-        {
-            findings.Error("estate.missing", EstateLayout.RecordsDirectory, "No current estate record exists; every estate starts with its charter.");
-        }
-
-        return model;
+        return supersededBy;
     }
 
     private static void ValidateSubject(EstateModel model, RecordEnvelope record, IRecordType type, FindingList findings)
@@ -293,6 +365,11 @@ public static class EstateLoader
         if (record.Subject.Hash is not null && record.Subject.Hash != target.ComputedHash)
         {
             findings.Error("record.subject-hash", record.ExpectedPath, $"Subject {record.Subject.Id} does not have the pinned content hash; the referenced record is not the one this record relied on.");
+        }
+
+        if (!model.Counts(target))
+        {
+            findings.Error("record.subject-not-counting", record.ExpectedPath, $"Subject {record.Subject.Id} does not count: it is kept as evidence and grants nothing, so this record cannot rest on it.");
         }
 
         RecordEnvelope latest = model.Latest(target);

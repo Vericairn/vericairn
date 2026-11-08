@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T12:05:15Z",
+  "body": {
+    "deliverables": [
+      "a test"
+    ],
+    "exitQuestion": "Does it hold?",
+    "inputs": [],
+    "intent": "Exercise checkpoints.",
+    "key": "GOLD-2",
+    "kind": "ordinary",
+    "scope": [
+      "checkpoints"
+    ],
+    "title": "Recorded by the builder"
+  },
+  "by": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+  "format": "vericairn.record/3",
+  "hash": "sha256:711f7e8a663147aa60df827ace3fb5b286a344fffa9e41fab4255fc17027ced9",
+  "id": "01M6VJK9C8KM0VCFYH7BZNNFRB",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9B34RDJ5JCTTCDW2KER",
+      "signature": "uCzl1XpZQrJXtP30EoBWvlP8WQhTfCC5bz78qPL5a9DrT0vPIIOgAuERBBs5Tpqo-lBwOEi7a2ftL-7CmBLAuw"
+    }
+  ],
+  "type": "work-order"
+}

@@ -9,9 +9,14 @@ namespace Vericairn.Records.Estate;
 /// <summary>All records of an estate, indexed, with the findings produced while loading them.</summary>
 public sealed class EstateModel
 {
-    private readonly ILookup<string, RecordEnvelope> recordsByType;
-    private readonly Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>> recordsBySubject;
-    private readonly Lazy<ILookup<string, (int Position, RecordEnvelope Record)>> decisionsByAnswer;
+    private ILookup<string, RecordEnvelope> recordsByType;
+    private Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>> recordsBySubject;
+    private Lazy<ILookup<string, (int Position, RecordEnvelope Record)>> decisionsByAnswer;
+    private readonly object trustGate = new();
+    private EstateTrust? applied;
+    private EstateTrust? judged;
+    private bool judging;
+    private IReadOnlySet<string> notCounting = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -20,27 +25,96 @@ public sealed class EstateModel
         Records = records;
         // Projections ask for a few types repeatedly. Index once while loading so a Home report does not walk unrelated
         // history for every empty section. Lookup preserves each type's original path order and all historical revisions.
-        recordsByType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
-        recordsBySubject = new(() => recordsByType.SelectMany(group => group).ToLookup(r => (r.Type, r.Subject?.Id)));
-        decisionsByAnswer = new(() => OfType("decision").Select((record, position) => (Position: position, Record: record))
-            .SelectMany(item => AnswerIds(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
-            .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal));
+        (recordsByType, recordsBySubject, decisionsByAnswer) = Index(records);
         ById = byId;
         SupersededBy = supersededBy;
         Findings = findings;
+        CountingRecords = records;
+    }
+
+    private static (ILookup<string, RecordEnvelope>, Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>>, Lazy<ILookup<string, (int Position, RecordEnvelope Record)>>) Index(IReadOnlyList<RecordEnvelope> records)
+    {
+        ILookup<string, RecordEnvelope> byType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
+        return (byType,
+            new(() => byType.SelectMany(group => group).ToLookup(r => (r.Type, r.Subject?.Id))),
+            new(() => byType["decision"].Select((record, position) => (Position: position, Record: record))
+                .SelectMany(item => AnswerIds(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
+                .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal)));
     }
 
     /// <summary>Repository root.</summary>
     public string Root { get; }
 
-    /// <summary>All parsed records in path order.</summary>
+    /// <summary>All parsed records in path order, those that do not count among them: they are kept as evidence and reported.</summary>
     public IReadOnlyList<RecordEnvelope> Records { get; }
 
-    /// <summary>Records by id.</summary>
+    /// <summary>
+    /// The records that count, in path order (design/signed-history.md § 6). Type and subject lookups, currency and supersession read
+    /// only these, so no rule that admits, authorizes, accepts, clears or holds reads a record that does not count.
+    /// </summary>
+    public IReadOnlyList<RecordEnvelope> CountingRecords { get; private set; }
+
+    /// <summary>Records by id, those that do not count among them.</summary>
     public IReadOnlyDictionary<string, RecordEnvelope> ById { get; }
 
-    /// <summary>Superseded record id to the id of its successor.</summary>
-    public IReadOnlyDictionary<string, string> SupersededBy { get; }
+    /// <summary>Superseded record id to the id of its counting successor; a record that does not count supersedes nothing.</summary>
+    public IReadOnlyDictionary<string, string> SupersededBy { get; private set; }
+
+    /// <summary>Reads an object of the estate by content hash, or null when it is not held: what checkpoint inventories are read through.</summary>
+    internal Func<string, byte[]?>? ObjectReader { get; set; }
+
+    /// <summary>The repository paths the loader read, for telling an unreadable witnessed file from an absent one.</summary>
+    internal IReadOnlySet<string>? FilePaths { get; set; }
+
+    /// <summary>
+    /// Whether a record counts: a record that does not, such as an unanchored unsigned record under required signatures in an estate
+    /// that has adopted history checkpoints, a record whose signature does not verify, or a witnessed record present with another hash,
+    /// is reported and kept, and grants nothing.
+    /// </summary>
+    public bool Counts(RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return applied is null ? Trust.Counts(record) : !notCounting.Contains(record.Id) && applied.Counts(record);
+    }
+
+    /// <summary>The judgment of this model's signatures, anchors and history, made once.</summary>
+    internal EstateTrust Trust
+    {
+        get
+        {
+            if (applied is not null) return applied;
+            lock (trustGate)
+            {
+                if (judged is not null) return judged;
+                if (judging) throw new InvalidOperationException("The estate's trust is read while it is being judged.");
+                judging = true;
+                try
+                {
+                    judged = EstateTrust.Build(this, Manifest, ObjectReader, FilePaths);
+                }
+                finally
+                {
+                    judging = false;
+                }
+
+                return judged;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps a judgment made from every record and, when some records do not count, rebuilds the type and subject lookups and the
+    /// supersession map from those that do. The loader calls it before any rule reads the model.
+    /// </summary>
+    internal void ApplyCounting(EstateTrust trust, IReadOnlySet<string> excluded, IReadOnlyDictionary<string, string> countingSupersededBy)
+    {
+        applied = trust;
+        if (excluded.Count == 0) return;
+        notCounting = excluded;
+        CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
+        (recordsByType, recordsBySubject, decisionsByAnswer) = Index(CountingRecords);
+        SupersededBy = countingSupersededBy;
+    }
 
     /// <summary>Findings from loading and validating records.</summary>
     public FindingList Findings { get; }
@@ -52,16 +126,18 @@ public sealed class EstateModel
         set
         {
             manifest = value;
-            // The record format the manifest states decides which charter revisions count.
-            currentEstate = null;
+            // The record format the manifest states decides which admissions, and so which records, count.
+            lock (trustGate)
+            {
+                if (!ReferenceEquals(judged?.Manifest, value)) judged = null;
+            }
         }
     }
 
     private EstateManifest? manifest;
-    private Lazy<RecordEnvelope?>? currentEstate;
 
-    /// <summary>True when no later record supersedes this one.</summary>
-    public bool IsCurrent(RecordEnvelope record) => record is not null && !SupersededBy.ContainsKey(record.Id);
+    /// <summary>True when the record counts and no later counting record supersedes it.</summary>
+    public bool IsCurrent(RecordEnvelope record) => record is not null && !notCounting.Contains(record.Id) && !SupersededBy.ContainsKey(record.Id);
 
     /// <summary>All records of a type.</summary>
     public IEnumerable<RecordEnvelope> OfType(string type) => recordsByType[type];
@@ -70,7 +146,10 @@ public sealed class EstateModel
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
 
     /// <summary>The estate's first charter, the one every later revision supersedes (the lowest id wins when several do; validators flag that).</summary>
-    public RecordEnvelope? FirstEstate => OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+    public RecordEnvelope? FirstEstate => applied is not null ? applied.FirstEstate : RawFirstEstate();
+
+    /// <summary>The first charter among every record read, before any is judged: the root of trust.</summary>
+    internal RecordEnvelope? RawFirstEstate() => OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
 
     /// <summary>The root operator: the principal the first charter names. A later revision cannot change it.</summary>
     public string? RootOperator => FirstEstate is { } first ? BodyString(first, "operator") : null;
@@ -81,20 +160,7 @@ public sealed class EstateModel
     /// or foreign revision changes nothing (<see cref="SignatureChecks.CharterRevisionCounts"/>). An estate without a first charter
     /// falls back to the lowest current one, which validators flag.
     /// </summary>
-    public RecordEnvelope? CurrentEstate => (currentEstate ??= new(CountingEstate, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
-
-    private RecordEnvelope? CountingEstate()
-    {
-        if (FirstEstate is not { } current) return Current("estate").OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
-        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
-        while (SupersededBy.TryGetValue(current.Id, out string? next) && ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" &&
-            seen.Add(successor.Id) && SignatureChecks.CharterRevisionCounts(this, current, successor))
-        {
-            current = successor;
-        }
-
-        return current;
-    }
+    public RecordEnvelope? CurrentEstate => Trust.Charter;
 
     /// <summary>Follows the supersedes chain from a record to its latest successor.</summary>
     public RecordEnvelope Latest(RecordEnvelope record)
@@ -126,7 +192,7 @@ public sealed class EstateModel
         return ids;
     }
 
-    /// <summary>The latest principal record describing a principal (principals are referenced by their first record's id).</summary>
+    /// <summary>The latest counting principal record describing a principal (principals are referenced by their first record's id); null when none counts.</summary>
     public RecordEnvelope? CurrentPrincipal(string? id)
     {
         if (id is null || !ById.TryGetValue(id, out RecordEnvelope? record) || record.Type != "principal")
@@ -134,7 +200,9 @@ public sealed class EstateModel
             return null;
         }
 
-        return Latest(record);
+        // The newest revision of the line that counts; a line none of whose revisions counts describes no principal.
+        RecordEnvelope latest = Latest(record);
+        return notCounting.Contains(latest.Id) ? null : latest;
     }
 
     /// <summary>Roles the principal currently holds.</summary>

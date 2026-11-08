@@ -1,12 +1,20 @@
 #!/bin/sh
 # Vericairn estate bootstrap.
 # Obtains the Vericairn pinned in estate/manifest.json and runs it against this estate.
-# Usage: ./bootstrap [vericairn arguments]   (default: estate check)
+# Usage: ./bootstrap [--expect <checkpoint>] [vericairn arguments]   (default: estate check)
+# --expect first checks that this copy holds a history checkpoint known elsewhere, by id or hash, and stops unless it does.
 # Source mode: VERICAIRN_SOURCE must be a clean clone at the pin. For development only,
 # VERICAIRN_SOURCE_OVERRIDE=1 allows a different or dirty local source and identifies it explicitly.
 # Release mode: the distributable is fetched from the pinned release and verified against the hash in the manifest,
 # never against the tag alone; set VERICAIRN_RELEASE_BASE to fetch from another location (a directory or URL).
 set -eu
+
+expect=
+if [ "${1:-}" = "--expect" ]; then
+  [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "bootstrap: --expect needs a history checkpoint: its id or hash" >&2; exit 2; }
+  expect=$2
+  shift 2
+fi
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 manifest="$root/estate/manifest.json"
@@ -110,6 +118,10 @@ case "$mode" in
 esac
 
 [ -x "$exe.exe" ] && exe="$exe.exe"   # Git Bash on Windows
+if [ -n "$expect" ]; then
+  [ "$#" -gt 0 ] || exec "$exe" --estate "$root" estate check --expect "$expect"
+  "$exe" --estate "$root" estate check --expect "$expect" || exit $?
+fi
 if [ "$#" -eq 0 ]; then
   exec "$exe" --estate "$root" estate check
 fi

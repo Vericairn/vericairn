@@ -123,7 +123,29 @@ public sealed class EstateSession : IDisposable
     // Submission checks read the canonical source without refreshing or touching the live cache.
     internal IReadOnlyList<RecordFile> ReadFiles() => Profile == "repository-synced" ? EstateLoader.EnumerateRecordFiles(Root) : Live.Files();
 
-    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles());
+    internal EstateModel Read() => EstateLoader.Load(Root, ReadFiles(), ObjectReader);
+
+    /// <summary>
+    /// The estate's objects by content hash, for reading history checkpoint inventories: null when an object is absent, unreadable or not
+    /// the bytes its hash names.
+    /// </summary>
+    internal Func<string, byte[]?> ObjectReader => Profile == "repository-synced" ? EstateLoader.FileObjects(Root) : hash =>
+    {
+        // The repository's objects are read as the loader reads them, refusing links and anything over the object limit; a local-only
+        // store's objects are held in its database, under the same limit.
+        try
+        {
+            byte[]? bytes = Objects.Read(hash);
+            return bytes is null || bytes.LongLength > EstateLayout.MaxObjectBytes ? null : bytes;
+        }
+        catch (Exception exception) when (exception is ObjectCorruptedException or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return null;
+        }
+    };
+
+    /// <summary>Loads and validates a given set of this estate's record files, with its objects.</summary>
+    internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, ObjectReader);
 
     /// <summary>
     /// The estate's records as identities only, with the exact record files they were parsed from, from one snapshot: ids, hashes,
@@ -164,7 +186,7 @@ public sealed class EstateSession : IDisposable
             parseCache.Retain(files.ByPath);
             loadedFiles = files;
         }
-        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache);
+        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         return model;
     }

@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T12:05:16Z",
+  "body": {
+    "inventory": [
+      "sha256:272fa5d6d0bf931a5115fbf7b899be1ed975891f9e428a45b33c73a916db2b34"
+    ],
+    "previous": [
+      {
+        "hash": "sha256:fd036e6545889dca2d1dcdc210a9135627939df0b22b0620d90a61f7ada75237",
+        "id": "01M6VJK9B7AE4N0SY7KMWDF88T"
+      }
+    ],
+    "recordSetHash": "sha256:9abc167329afe394a65c925b2ce10947c6d88d6739d00cde0e3a256f5869e264",
+    "records": 15,
+    "trigger": "interval"
+  },
+  "by": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+  "format": "vericairn.record/3",
+  "hash": "sha256:716b1b9b3ba745473670292913c12d25765bd1e482d384fbcad08044f1601dfc",
+  "id": "01M6VJK9C8KM0VCFYH7BZNNFRD",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9B34RDJ5JCTTCDW2KER",
+      "signature": "-3m6hXh-jyLHDP9nuLuPbt3VseNU95L4t6AlyR6xZLGAiILtIj1Vj9yQ77IKo71WRy1JIF5waXAPuC4QoZSW-g"
+    }
+  ],
+  "type": "history-checkpoint"
+}

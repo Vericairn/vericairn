@@ -7,6 +7,13 @@
     "slug": "format-1-fixture"
   },
   "findings": [],
+  "history": {
+    "adopted": false,
+    "heads": [],
+    "problems": [],
+    "tail": 10,
+    "witnessed": 0
+  },
   "lastObservedByPerson": null,
   "operations": [],
   "operatorRequests": {

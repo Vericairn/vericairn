@@ -66,7 +66,7 @@ public sealed partial class EstateService
                 if (proposal.Bytes.LongLength <= EstateLayout.MaxFileBytes && signedBytes > EstateLayout.MaxFileBytes)
                     objections.Add(new("error", "layout.size", "release-intent", $"The signed intent would be {signedBytes:N0} bytes, exceeding the {EstateLayout.MaxFileBytes:N0}-byte record limit."));
             }
-            EstateModel proposed = EstateLoader.Load(session.Root, session.ReadFiles().Append(new RecordFile(proposal.RelativePath, proposal.Bytes)).ToArray());
+            EstateModel proposed = session.LoadFiles(session.ReadFiles().Append(new RecordFile(proposal.RelativePath, proposal.Bytes)).ToArray());
             // Only this unsigned in-memory proposal's missing signature is accounted for by the availability check above.
             // Signature findings on every existing record remain objections. No unsigned proposal can reach WriteLocked.
             objections.AddRange(Invalid(proposed, [proposal]).Where(f => !(f.Code == "signature.required" && f.Location == proposal.RelativePath))

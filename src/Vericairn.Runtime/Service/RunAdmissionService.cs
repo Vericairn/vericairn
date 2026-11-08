@@ -102,7 +102,7 @@ internal sealed class RunAdmissionService(
         lock (gate)
         {
             List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
-            EstateModel model = EstateLoader.Load(session.Root, files);
+            EstateModel model = session.LoadFiles(files);
             (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, files, request, launcher, configuration);
             if (planned is null)
             {
@@ -493,7 +493,7 @@ internal sealed class RunAdmissionService(
         {
             if (WorkspaceRootProblem(configuredRoot) is string rootProblem) throw new ProviderRefusedException(rootProblem);
             IReadOnlyList<RecordFile> files = session.Files();
-            (RunPlan? planned, string? refusal, _) = Plan(EstateLoader.Load(session.Root, files), files, request, launcher, configuration);
+            (RunPlan? planned, string? refusal, _) = Plan(session.LoadFiles(files), files, request, launcher, configuration);
             if (planned is null) throw new ProviderRefusedException(refusal!);
             if (!kept) preparation.Save(workspace, inventory);
         }

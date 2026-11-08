@@ -65,6 +65,18 @@ public static class EstateStatus
         text.Append("Estate: ").Append(estate is null ? "(no charter)" : $"{EstateModel.BodyString(estate, "name")} ({EstateModel.BodyString(estate, "slug")})")
             .Append(" · record format ").Append((model.Manifest?.RecordFormat ?? RecordFormats.Current).ToString(CultureInfo.InvariantCulture)).Append(" · ").Append(model.Records.Count.ToString(CultureInfo.InvariantCulture)).Append(" records\n");
         text.Append("Vericairn: ").Append(model.Manifest?.Describe() ?? "(no manifest)").Append('\n');
+        // A removed, altered or missing witnessed record leads the status while it stands (design/signed-history.md § 7).
+        List<Finding> history = HistoryProblems(model);
+        if (history.Count > 0)
+        {
+            text.Append("History: ").Append(history.Count.ToString(CultureInfo.InvariantCulture)).Append(history.Count == 1 ? " problem" : " problems")
+                .Append(" with what history checkpoints witness; release submission waits until each is settled\n");
+            foreach (Finding finding in history)
+            {
+                text.Append("  ").Append(finding).Append('\n');
+            }
+        }
+
         RecordEnvelope? observation = LastObservationByPerson(model);
         text.Append("Last observed by a person: ");
         if (observation is null)
@@ -177,6 +189,37 @@ public static class EstateStatus
         return text.ToString();
     }
 
+    /// <summary>
+    /// The history errors that stand: removed, altered or missing witnessed records and checkpoints, invalid checkpoints, unanchored
+    /// records and, once the estate has adopted checkpoints, unsigned records the signature policy refuses.
+    /// </summary>
+    public static List<Finding> HistoryProblems(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        // Once the estate has adopted checkpoints, an unsigned record refused by the signature policy is a history problem too.
+        bool adopted = History.SignedHistory.Adopted(model);
+        return [.. model.Findings.Where(f => f.Severity == Severity.Error && (History.SignedHistory.ProblemCodes.Contains(f.Code) || adopted && f.Code == "signature.required"))
+            .OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// The history the records establish, identical on every machine for the same records (design/signed-history.md § 9): whether the
+    /// estate has adopted checkpoints, the heads, how many records they witness, the unwitnessed tail and the standing problems.
+    /// </summary>
+    public static JsonObject HistoryJson(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        History.HistoryState state = History.SignedHistory.Of(model);
+        return new JsonObject
+        {
+            ["adopted"] = state.Adopted,
+            ["heads"] = new JsonArray([.. state.Heads.Select(h => (JsonNode)new JsonObject { ["id"] = h.Id, ["hash"] = h.Hash })]),
+            ["witnessed"] = state.Witnessed,
+            ["tail"] = state.Tail,
+            ["problems"] = new JsonArray([.. HistoryProblems(model).Select(f => (JsonNode)new JsonObject { ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message })]),
+        };
+    }
+
     /// <summary>One current external operation.</summary>
     /// <param name="Identity">Original identity.</param>
     /// <param name="Provider">Provider id.</param>
@@ -250,6 +293,7 @@ public static class EstateStatus
             },
             ["estate"] = estate is null ? null : new JsonObject { ["id"] = estate.Id, ["name"] = EstateModel.BodyString(estate, "name"), ["slug"] = EstateModel.BodyString(estate, "slug") },
             ["records"] = model.Records.Count,
+            ["history"] = HistoryJson(model),
             ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version, ["line"] = model.Manifest.Line, ["channel"] = model.Manifest.Channel },
             ["workOrders"] = new JsonArray(WorkItems(model).Select(i => (JsonNode)new JsonObject { ["key"] = i.Key, ["kind"] = i.Kind, ["title"] = i.Title, ["status"] = i.Status, ["id"] = i.Id }).ToArray()),
             ["releases"] = new JsonArray(model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)

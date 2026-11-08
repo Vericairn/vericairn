@@ -1,0 +1,10 @@
+{
+  "estate": "01M6VJK9AXWT4A4435HK5BR4SP",
+  "format": "vericairn.estate-manifest/1",
+  "recordFormat": 3,
+  "vericairn": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "mode": "source",
+    "repository": "Vericairn/vericairn"
+  }
+}
