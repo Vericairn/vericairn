@@ -19,6 +19,12 @@ public static class SignatureChecks
         EstateTrust trust = model.Trust;
         foreach (RecordEnvelope record in model.Records)
         {
+            // A record relying on a grant revision that a closing closed counts only when that closing witnesses it (design/signed-history.md § 8).
+            if (trust.GrantRefuser(record) is { } closing)
+            {
+                findings.Add(EstateTrust.AfterGrantClosing(record, closing));
+            }
+
             if (record.Signatures.Count == 0)
             {
                 if (record.Type == "admission")
@@ -103,7 +109,7 @@ public static class SignatureChecks
         }
 
         bool reviewed = model.About(record.Id, "review").Any(review =>
-            model.IsCurrent(review) && model.HasRole(review.By, Roles.Operator) && review.Subject?.Hash == record.ComputedHash &&
+            model.IsCurrent(review) && model.HasRoleAt(review.By, Roles.Operator, review) && review.Subject?.Hash == record.ComputedHash &&
             !review.Signatures.Any(s => trust.Recovers(s.Device)) && trust.Authentic(review));
         if (!reviewed)
         {

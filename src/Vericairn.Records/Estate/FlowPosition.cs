@@ -873,7 +873,7 @@ public static partial class FlowPosition
         private IEnumerable<RecordEnvelope> FailuresOf(FlowStep step, string? item)
         {
             List<RecordEnvelope> assignments = held.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item)) ?? [];
-            Func<string, bool> judges = Judges(step, item);
+            Func<RecordEnvelope, bool> judges = Judges(step, item);
             IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
             foreach (AttemptState attempt in AttemptsOf(assignments).Where(a => a.Result is not null))
             {
@@ -885,7 +885,7 @@ public static partial class FlowPosition
                 {
                     IReadOnlyList<string> chain = model.Chain(attempt.Result!);
                     foreach (RecordEnvelope failed in model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "fail"
-                        && !authors.Contains(r.By) && judges(r.By)))
+                        && !authors.Contains(r.By) && judges(r)))
                     {
                         yield return failed;
                     }
@@ -900,7 +900,7 @@ public static partial class FlowPosition
         private IEnumerable<RecordEnvelope> Verdicts(FlowStep step, string? item, List<RecordEnvelope> assignments, RecordEnvelope result)
         {
             IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
-            Func<string, bool> judges = Judges(step, item);
+            Func<RecordEnvelope, bool> judges = Judges(step, item);
             var subjects = new List<IReadOnlyList<string>> { model.Chain(model.Latest(result)) };
             IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p))).ToList();
@@ -914,7 +914,7 @@ public static partial class FlowPosition
 
             foreach (IReadOnlyList<string> chain in subjects)
             {
-                RecordEnvelope? latest = model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && !authors.Contains(r.By) && r.By != result.By && judges(r.By))
+                RecordEnvelope? latest = model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && !authors.Contains(r.By) && r.By != result.By && judges(r))
                     .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
                 if (latest is not null)
                 {
@@ -929,7 +929,7 @@ public static partial class FlowPosition
         /// names; a principal of a review step's role that reviews it, or the contributor of such a step's assignment; and the contributor
         /// of one of its own review assignments. Never a principal outside them, whatever it records.
         /// </summary>
-        private Func<string, bool> Judges(FlowStep step, string? item)
+        private Func<RecordEnvelope, bool> Judges(FlowStep step, string? item)
         {
             var named = new HashSet<string>(StringComparer.Ordinal);
             // A role the flow marks a person's judges only by its persons.
@@ -949,8 +949,9 @@ public static partial class FlowPosition
             Add(Roles.Reviewer, Routing.Principals(model, goal, Roles.Reviewer).Principals);
             named.UnionWith((reviewing.GetValueOrDefault(new FlowRuns.StepRef(step.Key, item)) ?? []).Select(a => EstateModel.BodyString(a, "contributor")).OfType<string>());
             bool reviewerHeld = PersonHeld(Roles.Reviewer);
-            return principal => named.Contains(principal) || model.HasRole(principal, Roles.Operator)
-                || (model.HasRole(principal, Roles.Reviewer) && (!reviewerHeld || GoalRules.IsPerson(model, principal)));
+            // Roles are read at each review's place, so a later promotion makes no earlier review a judgment.
+            return review => named.Contains(review.By) || model.HasRoleAt(review.By, Roles.Operator, review)
+                || (model.HasRoleAt(review.By, Roles.Reviewer, review) && (!reviewerHeld || GoalRules.IsPerson(model, review.By)));
         }
 
         /// <summary>
@@ -959,7 +960,7 @@ public static partial class FlowPosition
         /// the contributor of a review assignment of the step instance that names this item and one of its versions; and for a self
         /// review, its producers. Its independence is judged apart.
         /// </summary>
-        private Func<string, bool> Admits(FlowReview required, List<RecordEnvelope> reviews, string? item, List<(RecordEnvelope Subject, string Hash)> versions, IReadOnlySet<string> producers)
+        private Func<RecordEnvelope, bool> Admits(FlowReview required, List<RecordEnvelope> reviews, string? item, List<(RecordEnvelope Subject, string Hash)> versions, IReadOnlySet<string> producers)
         {
             HashSet<string> named = Routing.Principals(model, goal, required.Role ?? Roles.Reviewer).Principals.ToHashSet(StringComparer.Ordinal);
             named.UnionWith(reviews.Where(a => FlowRuns.ReviewOf(a) is FlowRuns.ReviewRef carried && (item is null ? carried.Items.Count == 0 : carried.Items.Contains(item, StringComparer.Ordinal))
@@ -972,8 +973,8 @@ public static partial class FlowPosition
 
             // A review in a role the flow marks a person's is a person's, whoever the roster or an assignment names.
             bool person = PersonHeld(required.Role ?? Roles.Reviewer);
-            return principal => (!person || GoalRules.IsPerson(model, principal))
-                && (named.Contains(principal) || (required.Role is null && (model.HasRole(principal, Roles.Reviewer) || model.HasRole(principal, Roles.Operator))));
+            return review => (!person || GoalRules.IsPerson(model, review.By))
+                && (named.Contains(review.By) || (required.Role is null && (model.HasRoleAt(review.By, Roles.Reviewer, review) || model.HasRoleAt(review.By, Roles.Operator, review))));
         }
 
         /// <summary>A record's operation outcome in words, for a failed run: what was observed when it settled.</summary>
@@ -1419,9 +1420,9 @@ public static partial class FlowPosition
         /// </summary>
         private RecordEnvelope? Reviewed(List<(RecordEnvelope Subject, string Hash)> versions, IReadOnlySet<string> producers, string producer, FlowReview required, List<RecordEnvelope> reviews, string? item, out RecordEnvelope? sentBack, out RecordEnvelope? latest)
         {
-            Func<string, bool> admits = Admits(required, reviews, item, versions, new HashSet<string>(producers, StringComparer.Ordinal) { producer });
+            Func<RecordEnvelope, bool> admits = Admits(required, reviews, item, versions, new HashSet<string>(producers, StringComparer.Ordinal) { producer });
             List<RecordEnvelope> qualifying = model.Current("review")
-                .Where(r => r.Subject is not null && versions.Any(v => v.Subject.Id == r.Subject.Id && v.Hash == r.Subject.Hash) && Qualifies(r.By, producers, producer, required) && admits(r.By))
+                .Where(r => r.Subject is not null && versions.Any(v => v.Subject.Id == r.Subject.Id && v.Hash == r.Subject.Hash) && Qualifies(r.By, producers, producer, required) && admits(r))
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
             latest = qualifying.LastOrDefault();
             sentBack = latest is not null && EstateModel.BodyString(latest, "outcome") is "findings" or "fail" ? latest : null;
@@ -1739,11 +1740,11 @@ public static partial class FlowPosition
         /// The latest current review of a result by a principal other than its authors, at any revision of it, among the admitted reviewers
         /// when they are given; null when there is none.
         /// </summary>
-        private RecordEnvelope? LatestReview(RecordEnvelope result, IReadOnlySet<string> authors, Func<string, bool>? admitted = null)
+        private RecordEnvelope? LatestReview(RecordEnvelope result, IReadOnlySet<string> authors, Func<RecordEnvelope, bool>? admitted = null)
         {
             IReadOnlyList<string> chain = model.Chain(model.Latest(result));
             return model.Current("review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && !authors.Contains(r.By) && r.By != result.By
-                    && (admitted is null || admitted(r.By)))
+                    && (admitted is null || admitted(r)))
                 .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         }
 
@@ -1764,7 +1765,8 @@ public static partial class FlowPosition
         /// </summary>
         private RecordEnvelope? Passing(RecordEnvelope result, IReadOnlySet<string> authors, bool person, IReadOnlySet<string> admitted)
         {
-            RecordEnvelope? latest = LatestReview(result, authors, admitted.Contains);
+            Func<string, bool> admits = admitted.Contains;
+            RecordEnvelope? latest = LatestReview(result, authors, r => admits(r.By));
             return latest is not null && EstateModel.BodyString(latest, "outcome") == "pass" && latest.Subject?.Id == result.Id && latest.Subject.Hash == result.ComputedHash
                 && (!person || GoalRules.IsPerson(model, latest.By)) ? latest : null;
         }

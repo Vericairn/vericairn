@@ -420,7 +420,7 @@ public static class LivingDocuments
         (EstateModel.BodyString(declaration, "clearedBy") ?? "any") switch
         {
             "independent" => "its clearedBy is independent, so a document review by a principal other than the one that wrote or revised its content clears it",
-            "operator" when !model.HasRole(revision.By, Roles.Operator) => "its clearedBy is operator, so a document review or revision by an operator-role principal clears it",
+            "operator" when !model.HasRoleAt(revision.By, Roles.Operator, revision) => "its clearedBy is operator, so a document review or revision by an operator-role principal clears it",
             _ => null,
         };
 

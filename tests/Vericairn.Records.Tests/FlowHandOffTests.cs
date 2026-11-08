@@ -528,6 +528,42 @@ public class FlowHandOffTests
     private static JsonObject Item(string name, string review) => new() { ["name"] = name, ["kind"] = "file", ["required"] = true, ["review"] = review };
 
     /// <summary>The operator's assignment of a step's review before hand-off to a reviewer, naming the items and the exact subject.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ALaterPromotionMakesNoEarlierReviewAssignmentAnOperators(bool adopted)
+    {
+        JsonObject flow = FlowFixture.Song();
+        Step(flow, "draft")["outputs"] = new JsonArray(Item("lyrics", "independent"));
+        using var run = new FlowFixture(flow, new JsonObject { ["step.review-lyrics"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", FlowFixture.Hash('a'), null));
+        RecordEnvelope person = run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Promoted later", ["roles"] = new JsonArray("contributor") });
+        if (adopted)
+        {
+            // The root operator adopts history checkpoints, anchoring what is recorded unsigned.
+            EstateModel model = run.Estate.Load();
+            History.CheckpointDraft draft = History.SignedHistory.Prepare(model, "adoption", model.Records.Where(r => r.Signatures.Count == 0));
+            foreach (byte[] bytes in draft.Objects)
+            {
+                string path = Path.Combine(run.Estate.Root, EstateLayout.ObjectsDirectory, Hashing.ContentHash.Sha256(bytes)["sha256:".Length..]);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllBytes(path, bytes);
+            }
+
+            run.Estate.Add("history-checkpoint", run.Estate.OperatorId, draft.Body.GetRawText(), signer: run.Policies.OperatorSigner);
+            Assert.True(History.SignedHistory.Adopted(run.Estate.Load()));
+        }
+
+        // A review assigned to a person who is not an operator, and the person promoted to operator afterwards.
+        RecordEnvelope assigned = ReviewAssignment(run, person.Id, lyrics, "lyrics");
+        run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Promoted later", ["roles"] = new JsonArray("operator") }, supersedes: person.Id);
+        List<Finding> errors = Errors(run, assigned);
+        if (adopted)
+            Assert.Contains(errors, f => f.Code == "assignment.review" && f.Message.Contains("a person other than an operator records no review", StringComparison.Ordinal));
+        else
+            Assert.DoesNotContain(errors, f => f.Code == "assignment.review");
+    }
+
     private static RecordEnvelope ReviewAssignment(FlowFixture run, string reviewer, RecordEnvelope subject, params string[] items) => StepReviewAssignment(run, reviewer, subject, "draft", items);
 
     private static RecordEnvelope StepReviewAssignment(FlowFixture run, string reviewer, RecordEnvelope subject, string step, params string[] items)

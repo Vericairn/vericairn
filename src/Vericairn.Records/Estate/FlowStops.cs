@@ -142,7 +142,7 @@ public static class FlowStops
     /// person who holds the act. Its command is checked apart, against the records.
     /// </summary>
     private static string? Unproven(EstateModel model, RecordEnvelope goal, RecordEnvelope request) =>
-        !Routing.MayTakeStep(model, goal, request.By, request.AtTime) ? $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps"
+        !Routing.MayTakeStep(model, goal, request.By, request.AtTime, request) ? $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps"
         : !FlowPosition.HoldsReservedAct(model, EstateModel.BodyString(request, "to")) ? "it is put to no person who holds the act"
         : null;
 
@@ -373,7 +373,9 @@ public static class FlowStops
     public static DateTimeOffset RecordedTime(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.Records.Count == 0 ? DateTimeOffset.UnixEpoch : model.Records.Max(r => r.AtTime);
+        // In an estate that has adopted history checkpoints, only records that count give the recorded time (design/signed-history.md § 8).
+        IReadOnlyList<RecordEnvelope> records = History.SignedHistory.Adopted(model) ? model.CountingRecords : model.Records;
+        return records.Count == 0 ? DateTimeOffset.UnixEpoch : records.Max(r => r.AtTime);
     }
 
     /// <summary>The runs status shows: every current goal that is a run and is active, paused, budget-limited or blocked, oldest first, with its position.</summary>

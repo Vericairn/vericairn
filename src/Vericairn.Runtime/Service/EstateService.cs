@@ -360,6 +360,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The authoring time must look like 2026-10-13T14:00:00Z.");
         }
 
+        if (FutureTimeRefusal(at) is string future)
+        {
+            return Refuse(future);
+        }
+
         if (request.Id is not null && !Ulid.IsValid(request.Id))
         {
             return Refuse("An explicit id must be a ULID.");
@@ -504,6 +509,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (request.At is not null && at is null)
         {
             return Refuse("The start time must look like 2026-10-13T14:00:00Z.");
+        }
+
+        if (FutureTimeRefusal(at) is string future)
+        {
+            return Refuse(future);
         }
 
         lock (gate)
@@ -2887,6 +2897,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         reference = new RecordReference(parts[0], parts[1], hash);
         return true;
+    }
+
+    /// <summary>
+    /// The clock a stated authoring time is held to, the runtime's own clock unless a test gives another: the runtime never authors a
+    /// record dated more than five minutes past it.
+    /// </summary>
+    internal TimeProvider? AuthoringClock { get; set; }
+
+    /// <summary>
+    /// Why a stated authoring time is refused, or null: a record is never dated more than five minutes past this runtime's clock, since a
+    /// date is its author's statement of when it was written (design/signed-history.md § 8).
+    /// </summary>
+    private string? FutureTimeRefusal(DateTimeOffset? at)
+    {
+        DateTimeOffset now = (AuthoringClock ?? WorkerOptions.Clock).GetUtcNow();
+        return at is { } stated && stated > now + global::Vericairn.Records.History.SignedHistory.ClockTolerance
+            ? $"Not written: the authoring time {RecordParser.FormatTimestamp(stated)} is more than five minutes past this runtime's clock, {RecordParser.FormatTimestamp(now)}. A record states when it was written, never a later time."
+            : null;
     }
 
     private static DateTimeOffset? ParseAt(string? at) =>

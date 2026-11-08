@@ -258,7 +258,7 @@ public static class OperatorActions
     {
         foreach (RecordEnvelope release in Ordered(model.Current("release")).Where(r => EstateModel.BodyString(r, "status") == "candidate" && Accepted(model, r)))
         {
-            List<RecordEnvelope> references = [release, .. model.OfType("acceptance").Where(a => a.Subject == release.Reference && model.HasRole(a.By, Roles.Operator))];
+            List<RecordEnvelope> references = [release, .. model.OfType("acceptance").Where(a => a.Subject == release.Reference && model.HasRoleAt(a.By, Roles.Operator, a))];
             JsonObject item = Item("reserved-action", release, "Publication of release " + EstateModel.BodyString(release, "version"), "publication not recorded",
                 "The operator accepted this candidate, but no publication is recorded. External publication is not inferred from acceptance.",
                 ["The operator's publication and evidence of its observed time and location; reconcile an uncertain effect before any retry."], references);
@@ -386,7 +386,7 @@ public static class OperatorActions
     }
 
     private static bool Accepted(EstateModel model, RecordEnvelope subject) => model.OfType("acceptance")
-        .Any(a => a.Subject?.Id == subject.Id && a.Subject.Hash == subject.ComputedHash && model.HasRole(a.By, Roles.Operator));
+        .Any(a => a.Subject?.Id == subject.Id && a.Subject.Hash == subject.ComputedHash && model.HasRoleAt(a.By, Roles.Operator, a));
     private static JsonObject Reference(RecordEnvelope record) => new() { ["type"] = record.Type, ["id"] = record.Id, ["hash"] = record.ComputedHash };
     private static JsonArray Strings(IEnumerable<string> values) => new(values.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray());
     private static IEnumerable<RecordEnvelope> Ordered(IEnumerable<RecordEnvelope> records) => records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal);

@@ -481,8 +481,8 @@ writes one. The design is the estate's signed history design, decision
 | `inventory` | Hashes of the objects listing the records this checkpoint first witnesses, each once. |
 | `records`, `recordSetHash` | The count and record set hash of everything it witnesses: its inventory and those of the checkpoints it follows, less the removals they acknowledge. The set hash is an estate observation's: SHA-256 of the canonical JSON array of `{hash, id}` sorted by id. |
 | `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
-| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`. This build validates its shape only; what a closing closes is ID-06's. |
-| `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures because this checkpoint lists them. |
+| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). |
+| `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures, and signed records a closing refused, because this checkpoint lists them. |
 | `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
 
 A checkpoint has no subject and supersedes nothing, and none of its lists names the
@@ -531,7 +531,7 @@ reports a malformed inventory, a checkpoint that lists itself, and a head whose
 **Anchoring.** Only the root operator, or a human principal holding `administer`
 through a signed grant from the root operator or an operator whose role rests on
 signatures, whose own principal record rests on signatures and was written by such
-an operator, and whose grant no such operator has since revised away, anchors or acknowledges, never an agent, and only with devices whose
+an operator, whose grant stood at the checkpoint's time, and whose grant no such operator has since revised away and no closing that does not witness the checkpoint has closed ([below](#closings-and-authority-at-a-records-time-092)), anchors or acknowledges, never an agent, and only with devices whose
 own admissions rest on signed admissions; another author's lists are
 `history.anchor-author` and count for nothing, while its checkpoint still witnesses.
 An estate's first checkpoint, its adoption, counts only when one who may anchor signs
@@ -556,13 +556,106 @@ No field changes; a reader judges every checkpoint the same way, whatever its tr
 
 **Records that do not count.** A record that does not count is reported and kept:
 an unsigned record the rule above refuses, an unsigned policy record, checkpoint or
-device revision, and an altered witnessed record. From 0.9.2 the model's type and
+device revision, an altered witnessed record and a record a closing refuses (below). From 0.9.2 the model's type and
 subject lookups, currency and supersession leave such a record out, in every estate,
 so no rule that admits, authorizes, accepts, clears or holds reads it, and a record
 that does not count supersedes nothing. A record whose subject or body reference
 does not count reports `record.subject-not-counting` or
 `record.reference-not-counting`. A device revision changes its key or name only when its device
 signed it.
+
+## Closings and authority at a record's time (0.9.2)
+
+ID-06 gives `closes` its meaning and reads authority as it stood at a record's time, in an
+estate that has adopted history checkpoints. No field, type or format number is added. An
+estate that has not adopted reads exactly as before, except that the runtime refuses a
+stated time more than five minutes past its clock in every estate (below).
+
+**Closings.** A closing is a checkpoint with `trigger` `closing` and `closes`, written just
+before the act it closes:
+
+| `closes.kind` | `closes.id` names | The act it precedes | Who signs it |
+| --- | --- | --- | --- |
+| `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
+| `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
+| `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision dropping a scope or shortening an expiry | An operator, who may revise the grant |
+
+Closings are judged in checkpoint order: every checkpoint after those it follows, ids
+breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
+names, reach an adoption checkpoint by one who may anchor; when its signatures verify
+against the closings before it in that order; and when its author may perform the act. For a
+device or a grant that power reads as before signed history: the signer's operator role or
+`administer` grant stood at the closing's time and still stands, no trusted revision having
+since narrowed, revoked or removed it and no closing before this one having closed that
+grant's line, and a recovery device signs only for an operator. The checkpoints between it and the adoption need not count,
+since a closing acts by itself. One whose author may not perform the act is
+`history.closing-author`, as is one that verifies only without the closings before it,
+because one of them closed its signer's device or key or refused that device's admission; it
+closes nothing, anchored or not, and still witnesses what it lists if it counts. Closings are
+judged with the format-2 migration's anchors alone, so one signed by a device admitted only
+through an anchoring checkpoint closes nothing either, and is `history.closing-author` when it
+counts. One naming a record of another type is `history.checkpoint-invalid`. Two concurrent closings, neither
+following the other, each act, each judged against the closings before it. The recovery
+device signs a device closing and no other checkpoint (`signature.recovery-scope`).
+
+What a closing witnesses is what it and every checkpoint it follows list, with the bytes
+present. From a closing that acts on, these records count only when it witnesses them,
+whatever date they state:
+
+- for a device: every record signed by a device of its line, except a revocation of that
+  device whose `revokedAt` is at or after the closing's time, the act it precedes;
+- for a key: every record with a signature that verifies with the closed key, except the
+  lowest-id revision of the device that replaces that key with another, the rotation it
+  precedes;
+- for a grant: every record by the grantee of a closed revision, other than admissions,
+  devices, grants and checkpoints, dated while one of the closed revisions was in force: at or
+  after it, before the first revision replacing it that counts, and before it expires. Since
+  the closed revisions run from the line's first to the one named, the window starts at the
+  line's first revision. The rule fails closed: it refuses every such record of the grantee,
+  not only those that needed the grant.
+
+Any other such record is `history.after-closing`, an error that leads status and holds
+release submission. It is kept and counts for nothing until an anchoring checkpoint of the
+root operator or a person holding `administer` lists its exact id and hash, which, from
+0.9.2, it may do for a signed record a closing refuses as well as for an unsigned one. Such
+an admission or revocation admits or revokes nothing until anchored. A device revision a
+closing refuses changes no key or name, and an anchor does not restore it, so an anchoring
+checkpoint naming one is refused; the device's line skips it. A checkpoint a closing refuses witnesses nothing until anchored, nor do those
+following it. Deleting the revocation, rotation or narrowing after a closing reopens
+nothing. A closing that acts while no revocation of its device that counts, no rotation
+replacing its key or no revision of its grant follows it is the warning
+`history.closing-unfollowed`; it closes all the same.
+
+**Authority as it stood.** In an adopted estate, the roles and grants a record's rules read
+are read at its authority time: its own `at`, or, for a record the adoption checkpoint
+witnesses with its present bytes, the adoption's `at`, so that such a record keeps the
+reading it had then. A principal's role comes from the latest revision of its line that
+counts dated at or before that time, and none before its first record. A scope comes from
+each authority line's latest revision that counts dated at or before that time, unexpired at
+the record's own `at`, and not closed by a closing that does not witness the record, unless
+the record is anchored. A later grant authorizes nothing earlier, and a later narrowing withdraws nothing
+already written. Validators read roles and scopes this way, as do the acceptance, review,
+clearance, declaration, hand-over and step rules that judge one record's author, and the
+rules for who cleared a flow step's review, each at that review's place. Policy authority
+already read its grants at the action's time. The strongest acts read more strictly, as
+before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
+device's or a grant's closing need the signer's operator role or `administer` grant to stand
+at the checkpoint's time and still stand, so a later narrowing, revocation or closing
+withdraws those powers for every checkpoint. A role has no closing: a former operator's
+records dated into the time the role stood read as it stood, so close and revoke a person's
+devices when removing their role.
+
+**What a claimed time decides.** Path month, order, release-notes windows, progress, ages
+and duty sequence still follow `at` for records that count, ids breaking ties. The
+required-signature boundary is decided by anchoring. The key and admission a signature
+verifies against is the signer's claim of time, bounded by closings. Canonical status and
+policy evaluation take their recorded time from the records that count.
+
+**Dates checkpoints question.** A signed record dated more than five minutes after the
+earliest-dated counting checkpoint that witnesses it, the checkpoint listing it or one that
+follows, is the warning `history.dated-after-witness`, naming that checkpoint; a record
+the adoption checkpoint witnesses is not questioned. The runtime refuses `records new --at`
+and `work attempt --at` more than five minutes past its own clock.
 
 ## Search selections in agent runs (0.9.2)
 

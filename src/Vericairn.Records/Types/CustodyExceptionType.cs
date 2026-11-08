@@ -61,7 +61,7 @@ public sealed class CustodyExceptionType : IRecordType
             return;
         }
 
-        if (!GoalRules.AccepterOf(context.Model, goal).Decides(context.Model, context.Record.By))
+        if (!GoalRules.AccepterOf(context.Model, goal).Decides(context.Model, context.Record.By, context.Record))
         {
             context.Error("custody-exception.sponsor", "A custody exception is recorded by the goal's sponsor when the sponsor is a person, and by an operator when an agent sponsors it; an agent never excepts its own runs from the custody precondition.");
         }
