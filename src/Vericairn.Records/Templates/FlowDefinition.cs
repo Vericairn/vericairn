@@ -555,6 +555,11 @@ public sealed class FlowDefinition
 
         foreach (JsonElement predicate in step.Requires.Concat(step.Done).Concat(step.Traps.SelectMany(t => t.Holds)))
         {
+            if (Bindings(predicate).Contains("previous", StringComparer.Ordinal) && !FlowContract.BindsPrevious(fields))
+            {
+                yield return $"{where}: step '{step.Key}' binds {{previous}}, and the flow's subject names no product and version.";
+            }
+
             foreach (string binding in Bindings(predicate).Where(b => b.StartsWith("subject.", StringComparison.Ordinal)))
             {
                 if (!fields.TryGetValue(binding["subject.".Length..], out string? type) || type == "list")

@@ -209,10 +209,10 @@ public static class SoftwareFlows
               "kind": "operation",
               "role": "release-manager",
               "required": true,
-              "action": "Revise the version-tracking guides for the new version, keeping what earlier releases changed in history sections and labels, commit them, and check and record them from the product's clean clone: vericairn docs pass <version> --before --documents docs/releases/documents.json --record --by <you> --product <product>.",
+              "action": "Revise the version-tracking guides for the new version, keeping what earlier releases changed in history sections and labels, commit them, and check and record them from the product's clean clone: vericairn docs pass <version> --before --documents docs/releases/documents.json --record --by <you> --product <product>. A recorded check names the earlier releases it read, which the estate's records give; one of other versions does not count.",
               "done": [
-                { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/prior-version-tokens", "environment.release": "{subject.version}", "outcome": "passed" } },
-                { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/preparation-wording", "environment.release": "{subject.version}", "outcome": "passed" } }
+                { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/prior-version-tokens", "environment.release": "{subject.version}", "environment.previous": "{previous}", "outcome": "passed" } },
+                { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/preparation-wording", "environment.release": "{subject.version}", "environment.previous": "{previous}", "outcome": "passed" } }
               ],
               "outputs": [
                 { "name": "check", "kind": "verification", "required": true }
@@ -254,8 +254,8 @@ public static class SoftwareFlows
                   "name": "guides-revised",
                   "summary": "The set freezes only guides revised for this version: the documentation pass before freezing passed. 0.8.4's first set froze its guides before that pass and had to be prepared again.",
                   "holds": [
-                    { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/prior-version-tokens", "environment.release": "{subject.version}", "outcome": "passed" } },
-                    { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/preparation-wording", "environment.release": "{subject.version}", "outcome": "passed" } }
+                    { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/prior-version-tokens", "environment.release": "{subject.version}", "environment.previous": "{previous}", "outcome": "passed" } },
+                    { "type": "verification", "subject": "{subject.product}", "fields": { "method": "vericairn.software/preparation-wording", "environment.release": "{subject.version}", "environment.previous": "{previous}", "outcome": "passed" } }
                   ]
                 },
                 {
@@ -270,10 +270,11 @@ public static class SoftwareFlows
                 },
                 {
                   "name": "security-section",
-                  "summary": "A security section for fixes under a disclosure hold is approved by the operator through an ask about the carrier, answered before the set is frozen; no question about the carrier is left open.",
+                  "summary": "A security section for fixes under a disclosure hold is approved by the operator through an ask about the carrier, answered by the operator's decision before the set is frozen: every ask about the carrier is answered, none open, notified or withdrawn without a decision. Whether a release needs a section, and what the decision says, the records do not tell; the release manager asks whenever a fix is under a hold.",
                   "holds": [
                     { "type": "ask", "subject": "{subject.carrier}", "state": "open", "max": 0 },
-                    { "type": "ask", "subject": "{subject.carrier}", "state": "notified", "max": 0 }
+                    { "type": "ask", "subject": "{subject.carrier}", "state": "notified", "max": 0 },
+                    { "type": "ask", "subject": "{subject.carrier}", "state": "withdrawn", "max": 0 }
                   ]
                 }
               ],

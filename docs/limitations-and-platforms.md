@@ -157,8 +157,11 @@ nuget.org availability or account-holder qualification claim.
   upgrade's runtime step replaces an older daemon. `goal show` lists them as traps with their `check`. The upgrade flow's
   `runtime` step reads what `estate verify` recorded on the machine that ran it; another machine is verified there.
 - `docs pass --before` finds tokens and phrases; it never judges whether a sentence is true. A version standing as history
-  outside a history section, a label or a marker such as `From`, `in` or `or earlier` is reported; mark such a section with
-  `<!-- vericairn:history -->` or label it. It reads only the declared documents the guides directory holds.
+  outside a history section, a release label or a marker such as `From`, `in` or `or earlier` is reported, and a claim worded
+  as history, such as "From 0.9.1 the current release is…", is not; mark a history section with `<!-- vericairn:history -->`
+  under its heading. It reads only the declared documents the guides directory holds, through no link. The flow's
+  `security-section` trap reads an approval as an answered ask about the carrier: it cannot tell whether a release needs a
+  section or what the deciding decision says.
 - A corrective version after a withdrawal is a revision of the run's goal naming the new version; the run then derives afresh
   from `docs-before-freeze`. The release flow's `gate` step relies on the runtime writing a history checkpoint with trigger
   `release` before the submission check in an estate that adopted checkpoints (`OPS-07`), which this build does not write yet.

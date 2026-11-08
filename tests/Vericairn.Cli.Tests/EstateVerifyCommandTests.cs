@@ -31,6 +31,18 @@ public sealed class EstateVerifyCommandTests
             string release = UpgradeRuntimeJourneyTests.ClientRelease;
             (_, string builder) = UpgradeRuntimeJourneyTests.Publish(root, scratch, release, UpgradeRuntimeJourneyTests.ClientCommit);
             CliHarness.Ok(UpgradeRuntimeJourneyTests.Upgrade(root, release, builder));
+            using (Vericairn.Runtime.Service.EstateService api = Vericairn.Runtime.Service.EstateService.Open(root))
+            {
+                string op = Records.Estate.EstateModel.BodyString(api.Session.Load().CurrentEstate!, "operator")!;
+                foreach (string principal in new[] { op, builder })
+                {
+                    Vericairn.Protocol.WriteOutcome created = api.DeviceCreate(new(principal, "Verifying device", "file"));
+                    Assert.True(created.Ok, created.Problem?.Message);
+                    Vericairn.Protocol.WriteOutcome admitted = api.DeviceAdmit(new(created.Written!.Id, op, "Signs on this machine."));
+                    Assert.True(admitted.Ok, admitted.Problem?.Message);
+                }
+            }
+
             string commit = Commit(root);
 
             // No daemon: this command line's own runtime, the pinned release's build, serves the estate here.
@@ -42,6 +54,10 @@ public sealed class EstateVerifyCommandTests
             RecordEnvelope runtime = Verification(model, EstateVerifyCommand.ServingRuntimeMethod);
             Assert.Equal(("passed", release, model.CurrentEstate!.Id), (EstateModel.BodyString(runtime, "outcome"), GoalPredicates.FieldString(runtime, "environment.release"), runtime.Subject!.Id));
             Assert.Equal("passed", EstateModel.BodyString(Verification(model, EstateVerifyCommand.EstateCheckMethod), "outcome"));
+
+            // The machine is named by the signing device it holds, so a pass here supersedes only this machine's own verification.
+            string device = GoalPredicates.FieldString(runtime, "environment.device")!;
+            Assert.Equal(EstateModel.BodyString(model.ById[device], "principal"), builder);
 
             // A daemon of an older release serves the estate: the runtime check fails, naming it and the way to replace it, and the
             // estate is not checked with it.

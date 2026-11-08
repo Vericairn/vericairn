@@ -6,6 +6,7 @@ using System.Text.Json;
 using Json = System.Text.Json.Nodes;
 using Vericairn.Packs.Software;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Providers;
 using static Vericairn.Cli.CommandContext;
@@ -166,8 +167,7 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
         string summary = found.Count == 0
             ? $"Passed at {commit[..12]}: {what} in {scan.Read.Count + scan.History.Count} guides of the {version} set."
             : $"Failed at {commit[..12]}: {found.Count.ToString(CultureInfo.InvariantCulture)} locations break {what}: " + string.Join("; ", found.Take(20).Select(f => f.ToString()));
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = version };
-        if (prior.Count > 0) environment["previous"] = string.Join(" ", prior);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = version, ["previous"] = ReleaseHistory.Joined(prior) };
         Json.JsonObject body = Checks.VerificationBody(method, commit, $"vericairn docs pass {version} --before", Checks.LocalEnvironment(environment), "self", found.Count == 0 ? "passed" : "failed",
             summary.Length > 8000 ? summary[..7997] + "..." : summary, found.Count == 0 ? 0 : 1, null, null, null,
             found.Take(50).Select(f => new Checks.Evidence(f.ToString().Length > 2000 ? f.ToString()[..2000] : f.ToString(), null, $"{f.Path}:{f.Line.ToString(CultureInfo.InvariantCulture)}")).ToList(),
@@ -211,23 +211,11 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
         return ids;
     }
 
-    /// <summary>
-    /// The earlier versions the guides must not name as current: the two newest published releases of the product before this version,
-    /// and any candidate withdrawn after the older of them, such as 0.8.1 when 0.8.2 follows 0.8.0.
-    /// </summary>
-    internal static IReadOnlyList<string> Prior(IEstateApi api, IReadOnlyList<string> product, string version)
-    {
-        List<(string Version, string Status)> releases = api.Records("release")
+    /// <summary>The earlier versions the guides must not name as current, as the release flow computes them (<see cref="ReleaseHistory.Previous(IEnumerable{ValueTuple{string, string}}, string)"/>).</summary>
+    internal static IReadOnlyList<string> Prior(IEstateApi api, IReadOnlyList<string> product, string version) =>
+        ReleaseHistory.Previous(api.Records("release")
             .Where(r => r.Current && SubjectOf(r.Envelope) is string s && product.Contains(s, StringComparer.Ordinal))
-            .Select(r => (Field(r.Envelope, "version") ?? string.Empty, Field(r.Envelope, "status") ?? string.Empty))
-            .Where(r => ReleaseFollowing.IsNewer(version, r.Item1)).ToList();
-        List<string> published = releases.Where(r => r.Status == "published").Select(r => r.Version).ToList();
-        published.Sort((a, b) => ReleaseFollowing.IsNewer(a, b) ? -1 : ReleaseFollowing.IsNewer(b, a) ? 1 : 0);
-        List<string> taken = published.Take(2).ToList();
-        string? oldest = taken.Count == 2 ? taken[1] : null;
-        IEnumerable<string> withdrawn = releases.Where(r => r.Status == "withdrawn" && (oldest is null || ReleaseFollowing.IsNewer(r.Version, oldest))).Select(r => r.Version);
-        return taken.Concat(withdrawn).Distinct(StringComparer.Ordinal).ToList();
-    }
+            .Select(r => (Field(r.Envelope, "version") ?? string.Empty, Field(r.Envelope, "status") ?? string.Empty)), version);
 
     private static string? Environment(JsonElement envelope) =>
         envelope.TryGetProperty("body", out JsonElement body) && body.TryGetProperty("environment", out JsonElement environment) && environment.TryGetProperty("release", out JsonElement release)

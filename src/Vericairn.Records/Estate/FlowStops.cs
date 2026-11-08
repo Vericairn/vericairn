@@ -147,14 +147,67 @@ public static class FlowStops
         : null;
 
     /// <summary>
-    /// The request for a reserved step that was closed and is not made again while its command holds: one that would have been due,
-    /// carrying the command the records give now, recorded by a principal who takes the run's steps and put to a person who holds the act,
-    /// whose close is that addressed operator's own authentic record. Any other close, an agent's citing the operator's words among them,
-    /// leaves the step's request due again.
+    /// The request for a reserved step that was closed and is not made again while its command holds: one the operator closed for the
+    /// step's current ask (<see cref="ClosedRequest"/>). For a step whose done predicate is the operator's close of its request, only an
+    /// operator-request-close counts, as that predicate does. Any other close, an agent's citing the operator's words among them, an
+    /// earlier close or a close of another command, leaves the step's request due again.
     /// </summary>
     private static RecordEnvelope? Closed(EstateModel model, FlowPosition.Position position, FlowPosition.StepInstance instance) =>
-        Requests(model, position.Goal, instance.Ref).LastOrDefault(r => CommandOf(r) == instance.Command && Unproven(model, position.Goal, r) is null
-            && OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && SignatureChecks.IsAuthentic(model, c)));
+        ClosedRequest(model, position.Goal, instance.Ref, instance.Command, instance.AskedSince ?? position.Goal.AtTime, done: false, closesOnly: ClosesByRequest(instance.Step));
+
+    /// <summary>True for a reserved step whose done predicate is the operator's own close of its request, such as a draft's deletion or an announcement.</summary>
+    public static bool ClosesByRequest(FlowStep step)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        return step.Reserved is not null && step.Done.Any(p => TJson.Text(p, "subject") == "{request}");
+    }
+
+    /// <summary>
+    /// The newest request for a reserved step instance that its addressed operator closed for the step's current ask, or null. The request
+    /// carries the command the records give the step now, was recorded by a principal who takes the run's steps and is put to a person who
+    /// holds the act, as <see cref="Classify"/> requires of a request it delivers. Its close is that operator's own authentic record; it
+    /// pins a revision of the request that names the same run, step and command, so a later revision never redirects it; and it was made
+    /// no earlier than the step was asked: the current goal revision and every step it waits on done (<paramref name="since"/>). With
+    /// <paramref name="done"/>, only a close that says the act is done counts; with <paramref name="closesOnly"/>, only an
+    /// operator-request-close, never an observation. The binding {request} of a reserved step's done predicates and its closed stop both
+    /// read it, so they agree.
+    /// </summary>
+    public static RecordEnvelope? ClosedRequest(EstateModel model, RecordEnvelope goal, FlowRuns.StepRef step, string? command, DateTimeOffset since, bool done, bool closesOnly)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(step);
+        if (command is null)
+        {
+            return null;
+        }
+
+        string root = model.Chain(goal)[0];
+        return Requests(model, goal, step).LastOrDefault(r => CommandOf(r) == command && Unproven(model, goal, r) is null
+            && OperatorRequests.Closures(model, r).Any(c => Counts(c)));
+
+        bool Counts(RecordEnvelope close)
+        {
+            if (close.Subject is not { } pin || !model.ById.TryGetValue(pin.Id, out RecordEnvelope? revision) || revision.Type != "operator-request"
+                || StepOf(revision) is not FlowStepReference named || named.Goal != root || named.Key != step.Key || named.Instance != step.Instance
+                || CommandOf(revision) != command || Unproven(model, goal, revision) is not null)
+            {
+                return false;
+            }
+
+            if (close.By != EstateModel.BodyString(revision, "to") || !SignatureChecks.IsAuthentic(model, close) || close.AtTime < since)
+            {
+                return false;
+            }
+
+            if (closesOnly && close.Type != "operator-request-close")
+            {
+                return false;
+            }
+
+            return !done || close.Type == "observation" || EstateModel.BodyString(close, "outcome") == "done";
+        }
+    }
 
     /// <summary>
     /// Who a reserved step's operator request is put to: the first person with the operator role its role names, through the goal's

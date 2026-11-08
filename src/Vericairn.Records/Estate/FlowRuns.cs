@@ -572,13 +572,19 @@ public static class FlowRuns
             }
         }
 
+        // {previous}: for a flow about a product's version, the earlier releases its guides must not name as current.
+        if (FlowContract.BindsPrevious(flow.SubjectFields) && bindings.GetValueOrDefault("subject.product") is string product && bindings.GetValueOrDefault("subject.version") is string version)
+        {
+            bindings["previous"] = ReleaseHistory.Joined(ReleaseHistory.Previous(model, product, version));
+        }
+
         return bindings;
     }
 
     /// <summary>
-    /// The values one step instance binds: the run's, the id of the record that carries each of its inputs now ({input.&lt;name&gt;.id}),
-    /// and for a reserved step its operator request ({request}): the first revision of the newest current request whose flowStep names
-    /// the run and this step instance. A binding the records do not give is left out, so a predicate naming it holds for no record.
+    /// The values one step instance binds: the run's, and the id of the record that carries each of its inputs now ({input.&lt;name&gt;.id}).
+    /// A binding the records do not give is left out, so a predicate naming it holds for no record. A reserved step's {request} is bound
+    /// as its position derives it, from the request its operator closed for its current ask (<see cref="FlowStops.ClosedRequest"/>).
     /// </summary>
     internal static IReadOnlyDictionary<string, string> Bindings(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, string? item, Func<FlowInput, RecordEnvelope?> carrier)
     {
@@ -593,29 +599,7 @@ public static class FlowRuns
             }
         }
 
-        if (step.Reserved is not null && Request(model, goal, step.Key, item) is RecordEnvelope request)
-        {
-            bindings["request"] = model.Chain(request)[0];
-        }
-
         return bindings;
-    }
-
-    /// <summary>
-    /// The operator request that carries a run's step instance, by its flowStep (the run's first revision, the key and the instance): the
-    /// newest one its addressed operator closed as done, so that a later request recorded by anyone never undoes the operator's recorded
-    /// act, else the newest current one.
-    /// </summary>
-    internal static RecordEnvelope? Request(EstateModel model, RecordEnvelope goal, string key, string? item)
-    {
-        ArgumentNullException.ThrowIfNull(model);
-        string first = model.Chain(goal)[0];
-        List<RecordEnvelope> requests = model.Current("operator-request")
-            .Where(r => TJson.Object(r.Body, "flowStep") is { ValueKind: JsonValueKind.Object } step && TJson.Text(step, "goal") == first && TJson.Text(step, "key") == key && TJson.Text(step, "instance") == item)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
-        return requests.LastOrDefault(r => OperatorRequests.Closures(model, r).Any(c => c.By == EstateModel.BodyString(r, "to") && SignatureChecks.IsAuthentic(model, c)
-                && (c.Type == "observation" || EstateModel.BodyString(c, "outcome") == "done")))
-            ?? requests.LastOrDefault();
     }
 
     /// <summary>The instances a run's subject list field names, in order.</summary>

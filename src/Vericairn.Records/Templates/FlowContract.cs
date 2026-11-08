@@ -853,6 +853,11 @@ public static partial class FlowContract
             return request && record;
         }
 
+        if (name == "previous")
+        {
+            return !record && (extension || BindsPrevious(subject));
+        }
+
         if (name.StartsWith("input.", StringComparison.Ordinal))
         {
             return inputs is not null && inputs.Contains(name["input.".Length..^".id".Length]);
@@ -930,8 +935,18 @@ public static partial class FlowContract
         }
     }
 
-    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal}, {work}, {input.&lt;name&gt;.id} or {request}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}\z")]
+    /// <summary>
+    /// True for a flow whose subject names a product (a record field) and a version (a text field), whose predicates may bind {previous}:
+    /// the earlier releases of the product before the version that its version-tracking guides must not name as current.
+    /// </summary>
+    public static bool BindsPrevious(IReadOnlyDictionary<string, string> subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        return subject.GetValueOrDefault("product") == "record" && subject.GetValueOrDefault("version") == "text";
+    }
+
+    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal}, {work}, {input.&lt;name&gt;.id}, {request} or {previous}.</summary>
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|previous|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}\z")]
     internal static partial Regex Binding();
 
     /// <summary>A check or objection a step's action runs: lower-case words joined by dots, hyphens or a slash, such as release.client-build.</summary>

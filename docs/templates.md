@@ -484,17 +484,29 @@ every template.
   `each` step, `{goal}` and `{work}`. From 0.9.2 (PROC-07) a step's own
   predicates may also bind `{input.<name>.id}`, the id of the record that carries
   one of its inputs now, and a reserved step's `done` predicate may name
-  `{request}` as its `subject`: the step's operator request, the first revision
-  of the newest one whose `flowStep` names the run and the step. A predicate's
-  `fields` may name a nested field by a dotted path, such as `placement.carrier`,
-  `target.version` or `facts.version`.
+  `{request}` as its `subject`: the operator request its addressed operator
+  closed for the step's current ask. That request names the run and the step,
+  carries the command the records give the step now, was recorded by a
+  principal who takes the run's steps and is put to a person who holds the act;
+  the close is that operator's own authentic `operator-request-close` with
+  outcome `done`, pinning a revision of the request with the same step and
+  command, made no earlier than the current goal revision and every step the
+  step waits on done. Anything else leaves `{request}` unbound, and a revision
+  of the goal, such as a corrective version, asks the step again. A flow whose
+  subject names a `product` record and a `version` text may bind `{previous}`
+  in a field: the two newest published releases of the product before the
+  version and any candidate withdrawn since, separated by spaces, as
+  `docs pass --before` records them. A predicate's `fields` may name a nested
+  field by a dotted path, such as `placement.carrier`, `target.version` or
+  `facts.version`.
 - A trap (`name`, `summary`) declares `holds`, record predicates the position
   reads, or from 0.9.2 `check`, the named check or objection the step's action
   runs on its machine before it acts and refuses on, such as
   `release.client-build`, or both. A check alone is never read from the records:
   the position lists it under the step's traps, and the action enforces it. A
   sprung trap's reason quotes the summary of the record that sprang it, such as
-  the locations a failed check found.
+  the locations a failed check found, as plain text on one line, and only when
+  a principal who takes the run's steps recorded it.
 - `inputs` name a subject field or an earlier step's item. `outputs` lists the
   items the step must produce or collect before it closes, each with its
   completion requirements:
@@ -611,7 +623,9 @@ The release flow's subject is `carrier` (a work order, by its original
 identity), `product`, `version` and `repository` (`owner/name`); the upgrade
 flow's is `version`. The release flow's `upgrade-estate` step runs the upgrade
 flow by its exact pin and is optional, off by default, for an estate that runs
-the product it releases. Its `review` option (`none`, `self` or `independent`,
+the product it releases. The upgrade flow's adoption of history checkpoints, a
+step of the root operator's, arrives with `OPS-07`'s `estate checkpoint --adopt`
+as upgrade `1.1.0`. Its `review` option (`none`, `self` or `independent`,
 `none` by default) sets the review of the set's and the merge's items, which the
 candidate's release review covers.
 

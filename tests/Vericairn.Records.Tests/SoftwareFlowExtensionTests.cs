@@ -187,6 +187,83 @@ public class SoftwareFlowExtensionTests
         run.AssertValid();
     }
 
+    [Fact]
+    public void TheListingAndTheAnnouncementAreAskedAgainForACorrectiveVersion()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true);
+        ToPublication(run);
+        run.Done(run.Request("mcp-registry"));
+        run.Done(run.Request("announce-x"));
+        Assert.Equal(("done", "done"), (run.State("mcp-registry"), run.State("announce-x")));
+
+        // A revision of the run, such as a corrective version, is a new ask: the closes made before it answer nothing now.
+        run.Revise("1.2.1");
+        Assert.NotEqual("done", run.State("mcp-registry"));
+        Assert.NotEqual("done", run.State("announce-x"));
+        Assert.Equal("blocked", run.State("publish"));
+    }
+
+    [Fact]
+    public void AClosedRequestCountsOnlyForTheStepsCommandFromAStepTakerAfterTheStepWasAsked()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true);
+
+        // A request with the listing's exact command, closed by the operator before publication, answers no later ask.
+        RecordEnvelope early = run.Request("mcp-registry", command: $"gh run list -R {ReleaseFlowFixture.Repository} --workflow mcp-registry.yml --event release --limit 1");
+        run.Done(early);
+        ToPublication(run);
+        Assert.Equal("stopped", run.State("mcp-registry"));
+        Assert.Equal("due", Stop(run, "mcp-registry").Delivery);
+
+        // A request from a principal who does not take the run's steps, closed by the operator, completes nothing.
+        RecordEnvelope stranger = run.Request("announce-discussions", command: "echo the announcement is posted", by: run.Reviewer);
+        run.Done(stranger);
+        Assert.Equal("stopped", run.State("announce-discussions"));
+
+        // Nor does a request of another command, even the operator's own.
+        run.Done(run.Request("announce-x", command: "Post something else on the operator's X account"));
+        Assert.Equal("stopped", run.State("announce-x"));
+        Assert.Equal("due", Stop(run, "announce-x").Delivery);
+
+        // An observation that closes the request is no operator-request-close: the step stays asked, as its done predicate reads.
+        RecordEnvelope observed = run.Request("announce-x");
+        run.Add("observation", new JsonObject
+        {
+            ["kind"] = "operator-request", ["asOf"] = Vericairn.Records.Model.RecordParser.FormatTimestamp(run.Estate.Clock), ["summary"] = "The summary is posted.",
+            ["facts"] = new JsonObject { ["outcome"] = "done", ["destination"] = EstateModel.BodyString(observed, "destination"), ["location"] = "https://example.invalid/post", ["evidenceHash"] = ReleaseFlowFixture.Hash('7') },
+            ["limitations"] = new JsonArray(),
+        }, subject: observed.Reference);
+        Assert.Equal("stopped", run.State("announce-x"));
+        Assert.Equal("due", Stop(run, "announce-x").Delivery);
+
+        // The operator's own close of a request a step-taker put, with the step's command, after the step was asked, completes it.
+        run.Done(run.Request("announce-x"));
+        Assert.Equal("done", run.State("announce-x"));
+        run.Done(run.Request("mcp-registry"));
+        Assert.Equal("done", run.State("mcp-registry"));
+        run.AssertValid();
+    }
+
+    /// <summary>A first-party run taken to its publication, the announcement's drafts reviewed.</summary>
+    private static RecordEnvelope ToPublication(ReleaseFlowFixture run)
+    {
+        run.Accept(run.First);
+        run.Accept(run.Second);
+        run.GuidesChecked();
+        run.WorkStep("docs-set", ("manifest", ReleaseFlowFixture.Hash('1'), "application/json"), ("notes", ReleaseFlowFixture.Hash('2'), "text/markdown"));
+        run.WorkStep("release-commit", ("frozen-index", ReleaseFlowFixture.Hash('3'), "application/json"));
+        run.Settle(run.Intent(), "dispatched");
+        RecordEnvelope candidate = run.Candidate();
+        run.ReleaseReview(candidate);
+        run.Accept(candidate);
+        RecordEnvelope drafts = run.WorkStep("draft-announcement", ("discussion", ReleaseFlowFixture.Hash('d'), "text/markdown"), ("x-post", ReleaseFlowFixture.Hash('e'), "text/plain"));
+        run.ByReviewer("review", new JsonObject { ["independence"] = "independent-agent", ["outcome"] = "pass", ["summary"] = "Read both drafts.", ["findings"] = new JsonArray() }, drafts.Reference);
+        run.Published(candidate);
+        return candidate;
+    }
+
+    private static FlowStops.RunStop Stop(ReleaseFlowFixture run, string key) => Assert.Single(run.Position().Stops, s => s.Step?.Key == key);
+
     private static JsonObject RequiresUpgrade(ReleaseFlowFixture run)
     {
         JsonObject body = run.Records.PolicyBody("release-steps", duty: false);

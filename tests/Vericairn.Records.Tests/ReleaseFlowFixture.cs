@@ -127,11 +127,12 @@ public sealed class ReleaseFlowFixture : IDisposable
     }, subject: subject.Reference);
 
     /// <summary>docs pass --before --record: one verification of the product per check, for a version, superseding the earlier one.</summary>
-    public RecordEnvelope Check(string method, string outcome, string version = Version, RecordEnvelope? supersedes = null, string summary = "Checked the version-tracking guides.") =>
+    public RecordEnvelope Check(string method, string outcome, string version = Version, RecordEnvelope? supersedes = null, string summary = "Checked the version-tracking guides.", string? previous = null) =>
         Add("verification", new JsonObject
         {
             ["method"] = method, ["commit"] = Commit, ["command"] = $"vericairn docs pass {version} --before --documents docs/releases/documents.json",
-            ["environment"] = new JsonObject { ["platform"] = "osx-arm64", ["release"] = version }, ["role"] = "self", ["outcome"] = outcome, ["summary"] = summary,
+            ["environment"] = new JsonObject { ["platform"] = "osx-arm64", ["release"] = version, ["previous"] = previous ?? ReleaseHistory.Joined(ReleaseHistory.Previous(Estate.Load(), Product.Id, version)) },
+            ["role"] = "self", ["outcome"] = outcome, ["summary"] = summary,
             ["evidence"] = new JsonArray(), ["limitations"] = new JsonArray(),
         }, builder: true, subject: Product.Reference, supersedes: supersedes?.Id);
 
@@ -226,18 +227,20 @@ public sealed class ReleaseFlowFixture : IDisposable
     }
 
     /// <summary>goal step's operator request for a reserved step, carrying the command its position gives now.</summary>
-    public RecordEnvelope Request(string step, bool builder = false)
+    public RecordEnvelope Request(string step, bool builder = false, string? command = null, string? by = null)
     {
         FlowPosition.StepInstance instance = Step(step);
-        string command = instance.Command ?? (builder ? "a later request" : throw new InvalidOperationException($"Step {step} has no command now: {string.Join("; ", instance.Reasons)}"));
-        return Add("operator-request", new JsonObject
+        command ??= instance.Command ?? (builder || by is not null ? "a later request" : throw new InvalidOperationException($"Step {step} has no command now: {string.Join("; ", instance.Reasons)}"));
+        string author = by ?? (builder ? Estate.BuilderId : Estate.OperatorId);
+        var body = new JsonObject
         {
-            ["to"] = Estate.OperatorId, ["askedBy"] = builder ? Estate.BuilderId : Estate.OperatorId, ["action"] = "Carry the reserved act of step " + step + ".", ["why"] = "The step is next.",
+            ["to"] = Estate.OperatorId, ["askedBy"] = author, ["action"] = "Carry the reserved act of step " + step + ".", ["why"] = "The step is next.",
             ["recommendation"] = "Run the command yourself.", ["consequence"] = "The step waits.", ["kind"] = instance.Step.Reserved == "publish" ? "publication" : "action",
             ["destination"] = "the reserved act of step " + step,
             ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
             ["flowStep"] = new JsonObject { ["goal"] = Estate.Load().Chain(Goal)[0], ["key"] = step },
-        }, builder: builder, subject: Carrier.Reference);
+        };
+        return by is null ? Add("operator-request", body, builder: builder, subject: Carrier.Reference) : Estate.Add("operator-request", by, body.ToJsonString(), Carrier.Reference);
     }
 
     /// <summary>The operator's own close of a request as done, with the observed link of a publication.</summary>

@@ -548,10 +548,13 @@ a plain file, `docs/` beside `docs/releases/documents.json` by default (`--guide
 
 - a token of an earlier release standing as the current one: a version of one of the two newest published releases of the
   product before `<version>`, or of a candidate withdrawn since, outside a history section and a label. A history section's
-  heading speaks of history or changes, or carries a release label such as `(0.8.3)`; a section or a whole document marked with
-  `<!-- vericairn:history -->` counts too. A token in a parenthesized label, just after `From`, `since`, `in`, `until`, `before`,
-  `after`, `fixed in` and the like, before `or earlier`, in a link to a versioned page or set, and on a `Revision` line stands as
-  history. A document whose name carries a version, such as `api-compatibility-0.9.1.md`, is read for preparation wording only;
+  heading speaks of history, changes or earlier releases; a section with `<!-- vericairn:history -->` under its heading counts too,
+  while a marker before the first heading marks nothing. A heading labelled with a release, such as `(0.8.3)`, describes current
+  behaviour and is read like any other. A token stands as history in a label that holds only the release and work-order keys,
+  such as `(0.9.1)`, `(FIX-90, 0.9.1)` or `(from 0.9.1)`, unless the label follows a word such as `release`, `version` or
+  `current`; just after `From`, `since`, `in`, `until`, `before`, `after`, `fixed in` and the like; before `or earlier`; in a link
+  to a versioned page or set; and on a `Revision` line. A document whose name carries a version, such as
+  `api-compatibility-0.9.1.md`, is read for preparation wording only;
 - preparation wording, such as notes that are a placeholder, `under preparation`, `not yet rendered`, `pre-build`,
   `the builder must`, `TODO` or `TBD`.
 
@@ -562,12 +565,14 @@ vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --pr
 ```
 
 Each location is printed with its line. Exit 0 means both checks passed, 1 that one found a location, and 2 a refusal. The
-earlier releases come from the estate's release records, or from `--previous`, which needs no estate when nothing is recorded.
+earlier releases come from the estate's release records, or from `--previous`, which needs no estate and records nothing.
 `--record --by <principal>` records each check's outcome as a `verification` of the product at the guides' commit, with method
-`vericairn.software/prior-version-tokens` or `vericairn.software/preparation-wording` and `environment.release` the version,
-superseding the latest one of the same check and version; it refuses a clone with uncommitted changes, since the verification
-names the commit it read. The command reads files and changes none; `--before` goes with neither `--assign-to`, `--key`,
-`--document` nor `--output`.
+`vericairn.software/prior-version-tokens` or `vericairn.software/preparation-wording`, `environment.release` the version and
+`environment.previous` the earlier releases it read, separated by spaces, superseding the latest one of the same check and
+version. It refuses a clone with uncommitted changes, since the verification names the commit it read, and refuses `--previous`:
+the release flow counts a check only of the earlier releases the records give. Every file is read inside the guides directory:
+a declared name, or any directory on its way, that is a link is refused. The command reads files and changes none; `--before`
+goes with neither `--assign-to`, `--key`, `--document` nor `--output`.
 
 ## `vericairn estate verify` (0.9.2)
 
@@ -576,7 +581,9 @@ flow's `runtime` and `verify` steps (PROC-07). It reads which runtime serves the
 command line's own, and compares its release with the one the manifest pins; with the pinned release serving it, it runs the
 estate check and derives the status. It records each outcome as a `verification` of the estate's charter at the estate
 repository's commit, method `vericairn.software/serving-runtime` or `vericairn.software/estate-check`, with `environment.release`
-the pinned release and `environment.served` the serving one, superseding the latest one of the same check and release.
+the pinned release, `environment.served` the serving one and `environment.device` the signing device this machine holds for the
+principal, superseding only this machine's latest one of the same check and release, so a pass on one machine never hides
+another machine's failed check. The principal needs an admitted device whose key this machine holds.
 
 ```sh
 vericairn estate verify --by <principal>

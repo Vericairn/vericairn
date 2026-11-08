@@ -39,6 +39,10 @@ public sealed class DocsBeforeFreezeTests
     [InlineData("Version 0.9.10 and 10.9.1 are other versions.", false)]
     [InlineData("Designs move during the 0.9.0 cycle.", false)]
     [InlineData("Revision 11, November 7, 2026. Add a command in 0.9.1.", false)]
+    [InlineData("This guide describes the current release (0.9.1).", true)]
+    [InlineData("Unpack the archive (`vericairn-0.9.1-osx-arm64.tar.gz`) first.", true)]
+    [InlineData("Download it (the current release, 0.9.1) from the page.", true)]
+    [InlineData("A runtime replaces an older one (from 0.9.1).", false)]
     public void APriorVersionTokenIsFoundOnlyWhereItStandsAsTheCurrentRelease(string line, bool found)
     {
         List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/guide.md", line + "\n", Earlier).ToList();
@@ -73,9 +77,14 @@ public sealed class DocsBeforeFreezeTests
             "```",
             "TODO: name the release.");
         List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/guide.md", text, Earlier).ToList();
-        Assert.Equal([10, 17], findings.Where(f => f.Check == GuidesBeforeFreeze.PriorVersionMethod).Select(f => f.Line).ToArray());
+        // A heading labelled with a release, as "(0.8.3)", describes current behaviour and is read like any other section.
+        Assert.Equal([4, 6, 10, 17], findings.Where(f => f.Check == GuidesBeforeFreeze.PriorVersionMethod).Select(f => f.Line).ToArray());
         Assert.Equal([(15, "are a placeholder"), (19, "TODO")], findings.Where(f => f.Check == GuidesBeforeFreeze.PreparationMethod).Select(f => (f.Line, f.Found)).ToArray());
-        Assert.Equal("docs/guide.md:10: prior-version token 0.9.1 outside a history section: The 0.9.1 command line is current.", findings[0].ToString());
+        Assert.Equal("docs/guide.md:10: prior-version token 0.9.1 outside a history section: The 0.9.1 command line is current.", findings.Single(f => f.Line == 10).ToString());
+
+        // A marker before the first heading marks nothing: no guide exempts itself whole.
+        List<GuidesBeforeFreeze.Finding> marked = GuidesBeforeFreeze.ScanText("docs/guide.md", GuidesBeforeFreeze.HistoryMarker + "\n# Guide\nInstall 0.9.1.\n", Earlier).ToList();
+        Assert.Equal(3, Assert.Single(marked).Line);
     }
 
     [Fact]
@@ -90,6 +99,25 @@ public sealed class DocsBeforeFreezeTests
         Assert.Equal(["cli-reference.md"], scan.Skipped);
         Assert.Equal([("docs/install.md", GuidesBeforeFreeze.PriorVersionMethod), ("docs/api-compatibility-0.9.1.md", GuidesBeforeFreeze.PreparationMethod)], scan.Findings.Select(f => (f.Path, f.Check)).ToArray());
         Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", ["../outside.md"], ["0.9.1"]));
+    }
+
+    [Fact]
+    public void AGuideUnderALinkedDirectoryIsRefusedRatherThanFollowedOut()
+    {
+        using var guides = new TestEstate();
+        guides.WriteFile("outside/secret.md", "Install Vericairn 0.9.1.\n");
+        Directory.CreateDirectory(Path.Combine(guides.Root, "docs"));
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(guides.Root, "docs", "sub"), Path.Combine(guides.Root, "outside"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        var refusal = Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", ["sub/secret.md"], ["0.9.1"]));
+        Assert.Contains("docs/sub is a link", refusal.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -108,7 +136,7 @@ public sealed class DocsBeforeFreezeTests
         }
 
         var refusal = Assert.Throws<InvalidOperationException>(() => GuidesBeforeFreeze.Run(Path.Combine(guides.Root, "docs"), "docs", ["install.md"], ["0.9.1"]));
-        Assert.Contains("is a link or a directory", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("docs/install.md is a link", refusal.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -153,6 +181,7 @@ public sealed class DocsBeforeFreezeTests
         EstateModel model = f.Estate.Load();
         RecordEnvelope prior = Assert.Single(model.Current("verification"), v => EstateModel.BodyString(v, "method") == GuidesBeforeFreeze.PriorVersionMethod);
         Assert.Equal(("failed", failedCommit, "0.3.0", f.Product.Id), (EstateModel.BodyString(prior, "outcome"), EstateModel.BodyString(prior, "commit"), GoalPredicates.FieldString(prior, "environment.release"), prior.Subject!.Id));
+        Assert.Equal("0.2.0 0.1.0", GoalPredicates.FieldString(prior, "environment.previous"));
         Assert.Contains("docs/install.md:1: prior-version token 0.2.0", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
         Assert.Equal("passed", EstateModel.BodyString(Assert.Single(model.Current("verification"), v => EstateModel.BodyString(v, "method") == GuidesBeforeFreeze.PreparationMethod), "outcome"));
 
@@ -183,6 +212,9 @@ public sealed class DocsBeforeFreezeTests
         Assert.NotEqual(0, CliHarness.Run("docs", "pass", "1.1.0", "--documents", declaration).Code);
         Assert.NotEqual(0, CliHarness.Run("docs", "pass", "1.1.0", "--before", "--documents", declaration, "--record").Code);
         Assert.NotEqual(0, CliHarness.Run("docs", "pass", "1.1.0", "--before", "--documents", declaration, "--assign-to", "x").Code);
+        CliHarness.Outcome given = CliHarness.Run("docs", "pass", "1.1.0", "--before", "--documents", declaration, "--previous", "1.0.0", "--record", "--by", "x");
+        Assert.NotEqual(0, given.Code);
+        Assert.Contains("--previous goes only with a check that records nothing", given.Err, StringComparison.Ordinal);
         CliHarness.Outcome help = CliHarness.Run("docs", "pass", "--help");
         Assert.Contains("--before", help.Out, StringComparison.Ordinal);
         Assert.Contains("--previous", help.Out, StringComparison.Ordinal);

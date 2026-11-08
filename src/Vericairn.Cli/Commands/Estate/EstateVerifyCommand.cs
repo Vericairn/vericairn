@@ -14,8 +14,8 @@ namespace Vericairn.Cli;
 /// <summary>
 /// estate verify (the estate's design/release-procedure.md § 7, the upgrade flow's runtime and verify steps): on this machine, which
 /// runtime serves the estate against the release its manifest pins, and the estate check and status with that runtime, each recorded
-/// as a verification of the estate's charter for the pinned release, superseding the earlier one. It stops and starts nothing; the
-/// upgrade's runtime step does that.
+/// as a verification of the estate's charter for the pinned release, naming this machine by the signing device it holds and superseding
+/// only this machine's earlier one. It stops and starts nothing; the upgrade's runtime step does that.
 /// </summary>
 internal sealed class EstateVerifyCommand : Command
 {
@@ -99,6 +99,14 @@ internal sealed class EstateVerification(CommandContext context)
                 return context.Fail("The estate has no current charter to verify.");
             }
 
+            // The machine is named by the signing device it holds: one machine's verification supersedes only its own, so a pass here
+            // never hides another machine's failed check.
+            string? device = api.Devices().Where(d => d.Principal == by && d.HeldHere && d.Admission == "admitted").Select(d => d.Id).Order(StringComparer.Ordinal).FirstOrDefault();
+            if (device is null)
+            {
+                return context.Fail($"{by} has no admitted device whose key this machine holds, so nothing can be recorded for this machine.");
+            }
+
             var limitations = new List<string> { "What serves the estate on this machine only, as its runtime reported its own release; another machine is verified there." };
             if (!observed.Clean)
             {
@@ -108,7 +116,7 @@ internal sealed class EstateVerification(CommandContext context)
             var written = new List<RecordWritten>();
             foreach ((string method, bool passed, string summary) in new[] { (EstateVerifyCommand.ServingRuntimeMethod, runtimePassed, runtime), (EstateVerifyCommand.EstateCheckMethod, checkPassed, estate) })
             {
-                WriteOutcome outcome = Record(api, charter, by, method, passed, summary, pinned, served, observed.Commit, limitations);
+                WriteOutcome outcome = Record(api, charter, by, device, method, passed, summary, pinned, served, observed.Commit, limitations);
                 if (!outcome.Ok)
                 {
                     if (written.Count > 0) context.Error.WriteLine("Recorded before the refusal: " + string.Join(", ", written.Select(w => w.Id)) + ".");
@@ -141,9 +149,9 @@ internal sealed class EstateVerification(CommandContext context)
         });
     }
 
-    private static WriteOutcome Record(IEstateApi api, RecordResponse charter, string by, string method, bool passed, string summary, string pinned, string served, string commit, IReadOnlyList<string> limitations)
+    private static WriteOutcome Record(IEstateApi api, RecordResponse charter, string by, string device, string method, bool passed, string summary, string pinned, string served, string commit, IReadOnlyList<string> limitations)
     {
-        Json.JsonObject body = Checks.VerificationBody(method, commit, "vericairn estate verify", Checks.LocalEnvironment(new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = pinned, ["served"] = served }),
+        Json.JsonObject body = Checks.VerificationBody(method, commit, "vericairn estate verify", Checks.LocalEnvironment(new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = pinned, ["served"] = served, ["device"] = device }),
             "self", passed ? "passed" : "failed", summary.Length > 8000 ? summary[..7997] + "..." : summary, passed ? 0 : 1, null, null, null, [], limitations);
         if (api.Health().RecordFormat >= 2)
         {
@@ -152,7 +160,7 @@ internal sealed class EstateVerification(CommandContext context)
         }
 
         string? supersedes = api.Records("verification")
-            .Where(v => v.Current && Body(v.Envelope, "method") == method && Release(v.Envelope) == pinned)
+            .Where(v => v.Current && Body(v.Envelope, "method") == method && Environment(v.Envelope, "release") == pinned && Environment(v.Envelope, "device") == device)
             .OrderBy(v => v.Envelope.TryGetProperty("at", out JsonElement at) ? at.GetString() : null, StringComparer.Ordinal).ThenBy(v => v.Id, StringComparer.Ordinal).LastOrDefault()?.Id;
         return api.NewRecord(new NewRecordRequest("verification", by, CommandJson.Element(body), $"estate:{charter.Id}:{charter.Hash}", supersedes));
     }
@@ -160,9 +168,9 @@ internal sealed class EstateVerification(CommandContext context)
     private static string? Body(JsonElement envelope, string name) =>
         envelope.TryGetProperty("body", out JsonElement body) && body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    private static string? Release(JsonElement envelope) =>
-        envelope.TryGetProperty("body", out JsonElement body) && body.TryGetProperty("environment", out JsonElement environment) && environment.TryGetProperty("release", out JsonElement release)
-            && release.ValueKind == JsonValueKind.String ? release.GetString() : null;
+    private static string? Environment(JsonElement envelope, string name) =>
+        envelope.TryGetProperty("body", out JsonElement body) && body.TryGetProperty("environment", out JsonElement environment) && environment.TryGetProperty(name, out JsonElement value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static bool SamePath(string left, string right)
     {

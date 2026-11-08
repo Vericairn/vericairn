@@ -23,7 +23,7 @@ internal sealed class DocsPassCommand : Command
         var declaration = new Option<string?>("--documents") { Description = "With --before: the product's declaration of the documents every set holds, such as docs/releases/documents.json." };
         var guides = new Option<string?>("--guides") { Description = "With --before: the directory holding the maintained guides; the declaration's directory's parent by default." };
         var previous = new Option<string[]>("--previous") { Description = "With --before: an earlier version the guides must not name as current; repeatable. Without it, the estate's two newest published releases of the product before this version, and any candidate withdrawn since.", AllowMultipleArgumentsPerToken = true };
-        var record = new Option<bool>("--record") { Description = "With --before: record each check's outcome as a verification of the product at the guides' commit, signed by --by's device. The guides' clone must be clean." };
+        var record = new Option<bool>("--record") { Description = "With --before: record each check's outcome as a verification of the product at the guides' commit, signed by --by's device, for the earlier releases the estate records. The guides' clone must be clean; not with --previous." };
         var key = new Option<string?>("--key") { Description = "New work-order key for this review assignment." };
         var documents = new Option<string[]>("--document") { Description = "Due declaration id or unambiguous path; repeat to select a group. Omitted selects every due document.", AllowMultipleArgumentsPerToken = true };
         var output = new Option<string?>("--output") { Description = "Directory for proposed .patch files, one per selected front document. Existing files are never overwritten." };
@@ -50,6 +50,8 @@ internal sealed class DocsPassCommand : Command
                     return context.Fail("--before needs --documents: the product's declaration of the documents every set holds.");
                 if (parse.GetValue(record) != (author is not null))
                     return context.Fail("Use --record and --by together with --before: --by names the principal whose device signs the checks.");
+                if (parse.GetValue(record) && (parse.GetValue(previous) ?? []).Length > 0)
+                    return context.Fail("--record checks the earlier releases the estate records, so that the release flow counts the check; --previous goes only with a check that records nothing.");
                 return new DocsBeforeFreeze(context).Run(parse.GetValue(context.EstateOption)!, parse.GetValue(version)!, declared, parse.GetValue(guides), parse.GetValue(previous) ?? [],
                     parse.GetValue(product), author, parse.GetValue(context.JsonOption));
             }

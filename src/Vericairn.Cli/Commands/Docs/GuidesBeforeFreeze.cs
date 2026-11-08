@@ -22,8 +22,8 @@ internal static partial class GuidesBeforeFreeze
     internal const string PreparationMethod = "vericairn.software/preparation-wording";
 
     /// <summary>
-    /// The marker that makes the section it stands in, or before any heading the whole document, a history section: a reviewed choice
-    /// in the guide itself, for history whose heading does not say so.
+    /// The marker that makes the section it stands in a history section: a reviewed choice in the guide itself, for history whose heading
+    /// does not say so. Before any heading it marks nothing.
     /// </summary>
     internal const string HistoryMarker = "<!-- vericairn:history -->";
 
@@ -82,10 +82,15 @@ internal static partial class GuidesBeforeFreeze
             }
 
             string path = Path.Combine(guides, name.Replace('/', Path.DirectorySeparatorChar));
-            var file = new FileInfo(path);
-            if (file.LinkTarget is not null || Directory.Exists(path))
+            if (LinkedOnTheWay(guides, name) is string linked)
             {
-                throw new InvalidOperationException($"{label}/{name} is a link or a directory; the pass reads only plain files.");
+                throw new InvalidOperationException($"{label}/{linked} is a link; the pass reads only plain files inside the guides directory and follows no link out of it.");
+            }
+
+            var file = new FileInfo(path);
+            if (Directory.Exists(path))
+            {
+                throw new InvalidOperationException($"{label}/{name} is a directory; the pass reads only plain files.");
             }
 
             if (!file.Exists)
@@ -109,6 +114,28 @@ internal static partial class GuidesBeforeFreeze
         return new Scan(read, history, skipped, findings);
     }
 
+    /// <summary>
+    /// The first component of a declared name, from the guides directory down to the file itself, that is a link, such as a directory
+    /// linked to one outside the guides; null when none is, and the resolved file lies inside the guides directory.
+    /// </summary>
+    private static string? LinkedOnTheWay(string guides, string name)
+    {
+        string root = Path.GetFullPath(guides);
+        string current = root;
+        string[] parts = name.Split('/');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            current = Path.Combine(current, parts[i]);
+            if (new FileInfo(current).LinkTarget is not null || new DirectoryInfo(current).LinkTarget is not null)
+            {
+                return string.Join('/', parts.Take(i + 1));
+            }
+        }
+
+        string full = Path.GetFullPath(current);
+        return full.StartsWith(Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : name;
+    }
+
     /// <summary>The locations one guide's text holds, for the given prior versions.</summary>
     internal static IEnumerable<Finding> ScanText(string path, string text, IReadOnlyList<(string Version, Regex Pattern)> tokens)
     {
@@ -122,17 +149,10 @@ internal static partial class GuidesBeforeFreeze
             {
                 fenced = !fenced;
             }
-            else if (!fenced && line.Trim() == HistoryMarker)
+            else if (!fenced && line.Trim() == HistoryMarker && sections.Count > 0)
             {
-                // A marked section, or before any heading the whole document, is history.
-                if (sections.Count == 0)
-                {
-                    sections.Add((0, true));
-                }
-                else
-                {
-                    sections[^1] = (sections[^1].Level, true);
-                }
+                // A marked section is history; a marker before any heading marks nothing, so no guide exempts itself whole.
+                sections[^1] = (sections[^1].Level, true);
             }
             else if (!fenced && Heading().Match(line) is { Success: true } heading)
             {
@@ -169,15 +189,15 @@ internal static partial class GuidesBeforeFreeze
         new(@"(?<![0-9])(?<![0-9]\.)v?" + Regex.Escape(version) + @"(?![0-9]|\.[0-9])", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
 
     /// <summary>
-    /// A history section's heading: one about history or changes, or one labelled with the release that added what it describes, such
-    /// as "Withdrawal and moving planned work (0.8.3)".
+    /// A history section's heading: one about history or changes. A heading labelled with the release that added what it describes, such
+    /// as "Withdrawal and moving planned work (0.8.3)", describes current behaviour and is read like any other.
     /// </summary>
     internal static bool IsHistoryHeading(string title)
     {
         string lower = title.ToLowerInvariant();
         return lower.Contains("history", StringComparison.Ordinal) || lower.Contains("changes", StringComparison.Ordinal) || lower.Contains("changelog", StringComparison.Ordinal)
             || lower.Contains("earlier release", StringComparison.Ordinal) || lower.Contains("previous release", StringComparison.Ordinal)
-            || lower.Contains("release notes", StringComparison.Ordinal) || LabelledHeading().IsMatch(title);
+            || lower.Contains("release notes", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -186,11 +206,15 @@ internal static partial class GuidesBeforeFreeze
     /// </summary>
     private static bool Historical(string line, Match token)
     {
+        // A release label in parentheses: "(0.9.1)", "(FIX-90, 0.9.1)" or "(from 0.9.1)", and nothing else inside them, so that
+        // "(the current release, 0.9.1)" is read as a claim.
         int open = line.LastIndexOf('(', token.Index);
         int closeBefore = open < 0 ? -1 : line.IndexOf(')', open, token.Index - open);
         int close = line.IndexOf(')', token.Index + token.Length);
         int openAfter = close < 0 ? -1 : line.IndexOf('(', token.Index + token.Length, close - token.Index - token.Length);
-        if (open >= 0 && closeBefore < 0 && close >= 0 && openAfter < 0)
+        if (open >= 0 && closeBefore < 0 && close >= 0 && openAfter < 0
+            && Label().IsMatch(line[(open + 1)..token.Index] + "VERSION" + line[(token.Index + token.Length)..close])
+            && !ClaimBefore().IsMatch(line[..open]))
         {
             return true;
         }
@@ -242,8 +266,12 @@ internal static partial class GuidesBeforeFreeze
     [GeneratedRegex(@"^(?<level>#{1,6})\s+(?<title>.+?)\s*#*\s*$")]
     private static partial Regex Heading();
 
-    [GeneratedRegex(@"\((?:[^()]*[\s,])?v?\d+\.\d+\.\d+(?:[\s,][^()]*)?\)\s*$")]
-    private static partial Regex LabelledHeading();
+    [GeneratedRegex(@"^\s*(?:[A-Z][A-Z0-9]*-\d+,\s*)*(?:(?:from|since|in|until|fixed in|added in)\s+)?VERSION(?:,\s*[A-Z][A-Z0-9]*-\d+)*\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Label();
+
+    // A label after a word that names the current release, such as "the current release (0.9.1)" or "Vericairn (0.9.1)", is a claim.
+    [GeneratedRegex(@"\b(?:release|version|vericairn|current|latest|now|is|the)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ClaimBefore();
 
     [GeneratedRegex(@"^(?<head>.*?)(?:v?\d+\.\d+\.\d+(?:'s)?\s*(?:,|\bor\b|\band\b)\s*)+$")]
     private static partial Regex ListTail();

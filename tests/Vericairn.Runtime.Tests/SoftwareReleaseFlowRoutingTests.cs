@@ -153,7 +153,7 @@ public class SoftwareReleaseFlowRoutingTests
         foreach (string method in new[] { "vericairn.software/prior-version-tokens", "vericairn.software/preparation-wording" })
         {
             RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("verification", builder, RunEstate.Json($$"""
-                {"method":"{{method}}","commit":"{{new string('a', 40)}}","command":"vericairn docs pass {{Version}} --before","environment":{"release":"{{Version}}"},"role":"self","outcome":"passed","summary":"Checked the guides.","evidence":[],"limitations":[]}
+                {"method":"{{method}}","commit":"{{new string('a', 40)}}","command":"vericairn docs pass {{Version}} --before","environment":{"release":"{{Version}}","previous":""},"role":"self","outcome":"passed","summary":"Checked the guides.","evidence":[],"limitations":[]}
                 """), $"product:{product.Id}:{product.Hash}")));
         }
 

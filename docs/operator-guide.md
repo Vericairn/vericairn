@@ -1643,13 +1643,16 @@ vericairn goal propose --by <sponsor> --title "Release 1.2.0" --objective "Relea
 The traps carry the lessons of 0.8.1 to 0.8.4. A guide still naming the release before last, as 0.8.4's notes-window
 sentence named 0.8.2, stops `docs-before-freeze` with its location. A set frozen before that pass, as 0.8.4's first one was,
 cannot be made: `docs-set` waits on it and takes the check as its input, so a newer check makes the set stale. Notes rendered
-before the carrier's work closed, as 0.8.3's were, and a security section the operator has not approved through an ask about
-the carrier hold the set. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
+before the carrier's work closed, as 0.8.3's were, and an ask about the carrier, such as one approving a security section, that
+no decision has answered hold the set. The flow reads the approval as that answered ask; whether a release needs a security
+section, and what the decision says, the records do not tell, so the release manager asks whenever a fix is under a disclosure
+hold. A document changed after its clearing review, as in 0.8.2 and 0.8.3, stops `reviews-at-commit`. A
 withdrawn candidate's draft left at the provider stops `gate`, as do the objections `release submit --check` names, such as a
 client of another build than the serving runtime (0.8.4's stale daemon) or a clone without a default head (0.8.3). An uncertain
 submission stops `submit` until a reconciliation reads the release record. The publication command is computed only once the
 operator's acceptance names the candidate, never early, as it was for 0.8.3; a candidate of another channel than stable never
-shows this command. The publication is the candidate's own revision, so the steps that used the candidate stay done.
+shows this command. The publication is the candidate's own revision, so the steps that used the candidate stay done. A check of
+the guides counts only when it names the earlier releases the records give, so one made with `--previous` never completes the step.
 
 Accepting and publishing stay the operator's. `accept` shows
 `vericairn records new acceptance --by <operator-id> --subject release:<candidate id>:<hash> --body accept-release.json`, and
@@ -1675,7 +1678,10 @@ The upgrade flow's subject is the version the estate upgrades to:
 | `docs` | No living document due | |
 
 An upgrade with a runtime of an older release still serving the estate stops at `runtime` until it is replaced: the upgrade's own
-runtime step (OPS-05) replaces it where it can, and `estate verify --by <you>` records what serves the estate on this machine.
+runtime step (OPS-05) replaces it where it can, and `estate verify --by <you>` records what serves the estate on this machine,
+naming the machine by the signing device it holds, so a failed check on any machine holds the step until that machine verifies
+again. The root operator's adoption of history checkpoints joins the flow with `OPS-07`'s `estate checkpoint --adopt`, as
+upgrade `1.1.0`.
 
 An estate extends either flow with steps of its own, in a flow under its `docs/templates` that names the shipped version in
 `extends` and places each step `following` a named step ([templates](templates.md#the-software-packs-flows-092)). An extension
@@ -1683,7 +1689,10 @@ never turns off a required step, a reserved marking or a step an estate policy r
 Vericairn's own estate keeps its first-party extension there, `vericairn.first-party/release`: it adds the NuGet packages'
 observation after `observe`, the announcement's drafts with their independent review, the MCP Registry listing and the
 announcement on GitHub Discussions and on the operator's X account as reserved `publish` steps after `publish`, each done only
-once the operator closes its request with the observed link, and the profile repository's documents after `docs-after`. Its
+once the operator closes its request with the observed link, and the profile repository's documents after `docs-after`. A close
+counts only for the step's current ask: a request a principal who takes the run's steps put to the operator, with the command the
+records give the step now, closed after the step was asked and after the goal's current revision, so a corrective version's
+listing and announcement are asked again. Its
 destinations are that estate's own, so it is never part of the software pack.
 
 ## 19. Pairing, local-network connections and revocation
