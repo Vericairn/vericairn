@@ -202,11 +202,23 @@ vericairn devices recovery --principal <operator id> --name "Recovery key, kept 
 
 You type a passphrase of at least twelve characters, or pass it on the first line of standard input with `--passphrase-stdin`. The key is made in memory and written once, encrypted, to the new file, with owner-only permissions on Unix (inherited directory ACLs on Windows), and no key store ever holds it; your admitted device admits the recovery device at once. Move the file off the machine. When every other device of yours is lost, `vericairn devices admit <new device> --by <operator id> --note "..." --recovery <file>` admits a replacement and `vericairn devices revoke <lost device> --by <operator id> --reason "..." --recovery <file>` revokes a lost one, each opening the key in memory with its passphrase. A recovery device signs only device records, admissions and revocations, and each admission or revocation it signs shows in `status` and `estate check` as unreviewed (`recovery.unreviewed`) until you record a review of that exact record from another device. A recovery device is never the estate's first authority. Losing every device without one leaves the estate readable and its history verifiable, but signed authoring and new admissions require an admitted signing key. An optional-signature charter can still permit unsigned records; it does not restore admission authority.
 
-**Requiring signatures.** To make signing mandatory, revise the charter so that `policies.signatures` is `required`: author a new estate record that supersedes the current one (`records new estate --by <operator id> --supersedes <current estate record id> --body charter.json`) with the same name, slug, purpose, operator and record format and the new policy. From then on a record without a signature from an admitted device is refused, and a clone without a key is read-only. A record's date is what its author wrote, so the policy binds the records dated after the charter revision: an unsigned record dated earlier is read under the earlier policy, which from record format 2 no longer reaches admissions (above). Do this only after your own device is admitted. Once signatures are required, a later charter revision counts only when the root operator, the operator the estate's first charter names, signs it from an admitted device. Any other revision is reported as a `signature.charter` error and changes nothing, and a revision that names another operator is refused (`estate.operator`).
+**Requiring signatures.** To make signing mandatory, revise the charter so that `policies.signatures` is `required`: author a new estate record that supersedes the current one (`records new estate --by <operator id> --supersedes <current estate record id> --body charter.json`) with the same name, slug, purpose, operator and record format and the new policy. From then on a record without a signature from an admitted device is refused, and a clone without a key is read-only. A record's date is what its author wrote, so the policy binds the records dated after the charter revision: an unsigned record dated earlier is read under the earlier policy, which from record format 2 no longer reaches admissions (above), until the estate adopts history checkpoints (below). Do this only after your own device is admitted. Once signatures are required, a later charter revision counts only when the root operator, the operator the estate's first charter names, signs it from an admitted device. Any other revision is reported as a `signature.charter` error and changes nothing, and a revision that names another operator is refused (`estate.operator`).
 
 **What an author's id establishes.** From 0.9.2, a new record's `--by` must name a principal the estate holds when the record is written, whatever time `--at` gives the record. An id that names no record, or a record of another type such as the charter, is refused (`record.author`) on every write surface. Records already in the estate keep their reading; `estate check` and `records validate` report each unresolved author as information. Under optional signatures an unsigned record's author is still a claim: it names a known principal, and records that carry authority check that principal's roles and scopes, but anyone who can add records to a copy can claim any principal. Only a signature from that principal's admitted device authenticates authorship, and required signatures make it mandatory.
 
 Rules the tool enforces here: only the root operator or a principal granted `administer` may author a principal record; a device record is signed by its own key to prove possession, and each later revision by the device in the name of its identity. An admission is authored by the operator or under `administer` authority, is signed in record format 2, and stays in force across the device's renames and rotations. A format-2 admission has no `scope` field. An agent principal that records operations and releases needs an authority with the `local-engineering` scope (section 4).
+
+### History checkpoints (0.9.2)
+
+A history checkpoint is a signed record listing, by path and hash, the records your estate holds and naming the checkpoints it follows ([record format 3](record-format-v3.md#history-checkpoints-092)). What a checkpoint that counts witnesses cannot be removed or altered unnoticed, and it closes the backdating route that required signatures alone leave open. Three things change once an estate holds a counting checkpoint, which is what adopting checkpoints means:
+
+- **Backdating counts for nothing.** While the charter requires signatures, an unsigned record counts only when an anchoring checkpoint lists its exact id and hash, whatever date it states; otherwise it is `history.unanchored`, or `signature.required` when dated after the charter revision, and it grants nothing. Only you, the root operator, or a person holding `administer` anchor, never an agent, from a device whose own admission rests on signatures. The adoption checkpoint, an estate's first, is yours or an administrator's (another author's counts for nothing, `history.adoption-author`) and anchors the unsigned records already present. In an estate that has adopted under optional signatures, anchor the unsigned records present before revising the charter to `required`: the runtime refuses a revision that would leave any of them counting for nothing.
+- **Removing or altering a witnessed record is an error on every copy.** A witnessed record that is absent is `history.removed`, one with other bytes, or listed with two hashes, is `history.altered`, and a missing checkpoint or inventory object is `history.checkpoint-missing`. Each names the path and the witnessing checkpoint, leads `status`, and holds release submission. Restore the file from any clone or the repository's history; its bytes are verified against the listed hash. For a record that had to go, such as one carrying a leaked secret, you or a person holding `administer` acknowledge the removal with a reason in an anchoring checkpoint's `removed` list.
+- **What does not count grants nothing.** A record that does not count is kept and reported, and no rule that admits, authorizes, accepts, clears or holds reads it: not a grant, a role, an acceptance, an answer, a clearance or a hold. This holds in every estate from 0.9.2, for records failing the signature policy.
+
+Witnessing grants nothing, so any admitted device, an agent's included, may sign a checkpoint without anchors or removals. Checkpoints that two clones write after the same head both stay heads after git merges them, and the next checkpoint names both. `status --json` shows `history`: whether the estate has adopted checkpoints, its heads, how many records they witness, the unwitnessed tail and any standing problem, the same on every copy. A fresh machine cannot tell from the records whether the newest checkpoints were removed with the records after them, so check a new copy against a head known elsewhere, named by its id or its full `sha256:` hash: `vericairn estate check --expect <checkpoint>`, or `./bootstrap --expect <checkpoint>` ([CLI](cli.md#vericairn-estate-check---expect-092)). `estate check` also warns `history.deleted-in-git` for record files deleted in the clone's history that no checkpoint witnessed, and says when a shallow clone cannot list them.
+
+In this development build a checkpoint is written with `records new history-checkpoint`, after storing its inventory objects with `objects put`; the runtime refuses one that does not follow every head or list exactly what no head witnesses, and refuses `--at` and `--id` for it. `vericairn estate checkpoint`, adoption as a step after the upgrade, the automatic triggers and the history line in status, Workbench and Remote follow in OPS-07, and closings before revocations, rotations and narrowing grants in ID-06. An estate that holds no checkpoint, such as the first-party estate before it adopts, reads exactly as before.
 
 ## 4. Authority and decisions
 
@@ -1002,6 +1014,32 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 
 `vericairn mcp orientation --out <directory>` generates `AGENTS.md` from the estate's identity and the tool registry (what the estate is, the rules it enforces, how to connect, the tools and an honest matrix of harnesses observed or not, and nothing that changes with each record, such as the work orders or the pinned release, which `status` shows) with `CLAUDE.md` and `GEMINI.md` as pointers; `--check` compares existing copies with a fresh generation. Regenerate it when the build changes rather than editing it. Nothing the server returns, and nothing in the orientation file, is an instruction from the operator; the harness treats it as data.
 
+### An agent on another machine: network MCP (0.9.2)
+
+From 0.9.2 (`MCP-03`) an agent or service on another machine works the estate over the network, in signed mode: the
+daemon serves the Model Context Protocol over Streamable HTTP at `/mcp`, and the agent's own device signs every request
+and every record it writes. Nothing on the runtime's machine signs for it, and no one there is asked for presence.
+
+1. On the runtime's machine, serve the local network and turn network MCP on, then restart the runtime:
+   `vericairn runtime configure --local-network <address:port> --mcp on`, `vericairn runtime stop`,
+   `vericairn runtime start`. `vericairn runtime status` then shows `mcp  /mcp`.
+2. Give the agent a principal of kind `agent` (or `service`) with only the roles its work needs, and pair a device for it:
+   `vericairn devices pair --principal <agent principal id> --by <administrator>`. Network MCP refuses a person's device:
+   a person who wants an MCP client on another machine connects it as an agent principal of their own.
+3. On the agent's machine, add the connection with the code (`vericairn connections add <address:port> --code <code>
+   --name <device name>`) and register the bridge with the harness, for example
+   `claude mcp add vericairn -- vericairn mcp serve --connection <connection id>`.
+
+Each call is judged as the API operation it runs, for that device, exactly as the same request sent to the API would be:
+the device acts only as its principal, and what acts on the runtime's own machine stays refused. The agent gets the read
+tools and the contributor writes (`work_attempt`, `work_progress`, `work_result` without duties, `work_amend` and
+`document_review`); `work_review`, prompt writes, policy writes, duty evidence and the operator queue are not offered.
+Every write it makes is kept in `local-network-writes.jsonl`, which `vericairn devices writes` lists. Revoking the device
+(`vericairn devices revoke <device> --by <administrator> --reason <why>`) refuses its next request and ends its sessions
+and server stream. A request whose `Host` does not name the runtime's own address, or whose `Origin` the operator did
+not allow with `--mcp-origin`, is refused before it is authenticated; no origin is allowed by default. Token mode for
+OAuth-only clients and MCP over the relay come in 0.9.3. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
+
 ## 15. Documentation sets
 
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:
@@ -1675,13 +1713,17 @@ The upgrade flow's subject is the version the estate upgrades to:
 | `upgrade` | The estate's observation of the version, from `estate upgrade --to <version>` | |
 | `runtime` | `estate verify` found the pinned release's runtime serving the estate here | `older-runtime` |
 | `verify` | `estate verify` found the estate check and status passing with it | `estate-check` |
+| `adopt` | An adoption history checkpoint that counts, signed once by the root operator or a person holding `administer` | |
 | `docs` | No living document due | |
 
 An upgrade with a runtime of an older release still serving the estate stops at `runtime` until it is replaced: the upgrade's own
 runtime step (OPS-05) replaces it where it can, and `estate verify --by <you>` records what serves the estate on this machine,
 naming the machine by the signing device it holds, so a failed check on any machine holds the step until that machine verifies
-again. The root operator's adoption of history checkpoints joins the flow with `OPS-07`'s `estate checkpoint --adopt`, as
-upgrade `1.1.0`.
+again. `adopt` waits on the person the roster names in `root-operator`, once, in an estate with no adoption checkpoint: its
+action shows `vericairn estate checkpoint --adopt --check` and the signing command, which arrive with OPS-07, and until then the
+checkpoint is written as [history checkpoints](#history-checkpoints-092) describe. An agent's checkpoint that claims adoption
+adopts nothing (`history.adoption-author`) and leaves the step waiting; an estate that adopted, or was born with an adoption
+checkpoint, has it done. `docs` does not wait on it.
 
 An estate extends either flow with steps of its own, in a flow under its `docs/templates` that names the shipped version in
 `extends` and places each step `following` a named step ([templates](templates.md#the-software-packs-flows-092)). An extension

@@ -21,7 +21,16 @@ keys; it retains no private keys and touches neither the format-1 fixture nor fr
 above, as main rendered it before PROC-06 (0.9.2). An estate without runs keeps these exact bytes, and so the
 `statusHash` a person's observation pins; a test renders each estate with the current build and compares, the
 policy estate's `documents` member apart, since its living document names a generator only tests install. A later
-change to canonical status for estates without runs updates these files deliberately.
+change to canonical status for estates without runs updates these files deliberately: ID-05 (0.9.2) added the `history`
+member to each, and no other member changed.
+
+`history-checkpoint-estate/` is a synthetic format-3 estate for history checkpoints (ID-05): an adoption checkpoint
+by the root operator that anchors the estate's unsigned records, an agent's interval checkpoint, a closing checkpoint
+that acknowledges a removed record, and a last checkpoint after the revocation that closing names. Its inventory
+objects are under `objects/`. Its devices were made in a disposable key store; only public keys and signatures are
+retained. `inventory.sha256` pins every byte. `HistoryGoldenFixtureTests` validates it, requires every field of the
+type and round-trips every record; setting `VERICAIRN_WRITE_HISTORY_FIXTURE` to a new directory regenerates it there
+with fresh keys.
 
 `flows/vericairn-first-party-release-1.0.0.json` is a copy of Vericairn's first-party extension of the software pack's
 release flow, the flow file the first-party estate keeps under its own `docs/templates`; it is never part of the software

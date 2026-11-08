@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 15, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
+Revision 16, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
+
+Revision 15, November 7, 2026. Add `estate check --expect` and the bootstrap's `--expect` in the development build.
 
 Revision 14, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
 
@@ -482,6 +484,43 @@ vericairn events watch --subject <goal id> --after <cursor>
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
 
+## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
+
+`vericairn runtime configure --mcp on` turns on network MCP (`MCP-03`): from the runtime's next start the daemon serves
+the Model Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners, to agents' and
+services' devices whose every request and record is signed by that device. `--mcp off` stops it; it is off by default
+and never served on the local socket. `--mcp-origin <origin>` names an origin (`scheme://host[:port]`) a request may
+carry, repeated for more; it replaces the list, `--mcp-origin none` empties it, and a request naming any other origin is
+refused before it is authenticated. A request without an `Origin`, as native clients send, needs none. The settings are
+kept in `runtime.json` beside the live store with `--local-network`, and `vericairn runtime status` shows `mcp  /mcp`
+while a daemon serves it.
+
+| Option | Meaning |
+|---|---|
+| `--mcp on\|off` | Serve network MCP at `/mcp` from the runtime's next start, or stop. Off unless set. |
+| `--mcp-origin <origin>` | An origin a request to `/mcp` may name; repeatable; replaces the list; `none` empties it. None by default. |
+
+On the agent's machine, `vericairn mcp serve --connection <connection>` bridges a stdio harness to that estate over a
+connection `vericairn connections add` paired, named by its id or its estate's name. It serves standard input and output
+as `mcp serve` does and forwards each message to the runtime's `/mcp`, signing every request with the connection's
+device. Only a write is prepared: its record is checked to be the one the call asks for (the tool's record type, this
+device's principal as author, no supersession, a time within a plan's ten minutes of this machine's clock, the assignment
+or attempt the call names, every field the call supplies unchanged), signed with the same key and then written; nothing
+another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
+document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
+([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
+device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
+principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
+key is no longer held here.
+
+```sh
+vericairn runtime configure --local-network 192.168.1.20:7443 --mcp on
+vericairn mcp serve --connection <connection id>
+```
+
+See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and the
+[operator's guide](operator-guide.md#an-agent-on-another-machine-network-mcp-092).
+
 ## Preparing a documentation set with the build tooling (0.9.2)
 
 `vericairn-docs`, the build tooling in `tools/Vericairn.DocsTool` and not part of the shipped command line, adds five
@@ -539,6 +578,33 @@ line, since it is an observation, not a refusal.
 Both return `SecurityReportsResponse`, and the API binds `by` to the authenticated acting device. `GET /v1/providers` and
 `release providers` list the `github-security-advisories` reader, kind `security-advisories`, with its limits. There is no
 token option and no write to GitHub.
+
+## `vericairn estate check --expect` (0.9.2)
+
+`vericairn estate check --expect <checkpoint>` refuses a copy of the estate that lacks a history checkpoint known
+elsewhere, such as the head another clone shows. A fresh machine cannot tell from the records alone whether the newest
+checkpoints were removed together with the records written after them, so it checks against a head it was told
+([signed history](operator-guide.md#history-checkpoints-092)). The checkpoint is named by its record id or its full content
+hash, `sha256:` and 64 hexadecimal digits; at least sixteen hexadecimal digits of the hash are accepted, and anything shorter
+is refused. The check adds `history.expected`, information, when the copy
+holds it, signed and counting; otherwise `history.expected-missing`, an error, says whether it is absent, here but not
+counting, or named ambiguously, and the command exits 1. Without `--expect` the check is unchanged.
+
+```sh
+vericairn estate check --expect <checkpoint id>
+vericairn estate check --expect sha256:<64 hex digits of its hash>
+./bootstrap --expect <checkpoint id>
+./bootstrap.ps1 --expect <checkpoint id> status
+```
+
+The estate's `bootstrap` and `bootstrap.ps1` accept `--expect <checkpoint>` before any other argument: they run
+`estate check --expect <checkpoint>` first and stop unless it passes, then run the arguments given, or nothing more
+when there are none. `vericairn estate bootstrap --force` writes the new scripts into an existing estate.
+
+`estate check` also warns `history.deleted-in-git` for each record file deleted in the checked-out commit's reachable
+history, merges included, that is absent here and that no history checkpoint witnessed; a witnessed one is already the
+error `history.removed`. The warning depends on the clone, so it is not part of the canonical status. In a shallow
+clone it is reported unavailable, as information.
 
 ## `vericairn docs pass --before` (0.9.2)
 

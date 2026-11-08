@@ -64,7 +64,8 @@ public class SoftwareReleaseFlowTests
         Assert.All(flow.Step("gate")!.Traps.Where(t => t.Check is not null), t => Assert.Empty(t.Holds));
 
         FlowDefinition upgrading = FlowDefinition.Resolve(model, new TemplatePin(upgrade.Id, upgrade.Version, upgrade.Hash));
-        Assert.Equal(["check", "upgrade", "runtime", "verify", "docs"], upgrading.Steps.Select(s => s.Key).Take(5).ToArray());
+        Assert.Equal(["check", "upgrade", "runtime", "verify", "adopt", "docs"], upgrading.Steps.Select(s => s.Key).ToArray());
+        Assert.Equal("person", upgrading.Role(upgrading.Step("adopt")!.Role)!.Holder);
         Assert.Equal(["older-runtime"], upgrading.Step("runtime")!.Traps.Select(t => t.Name).ToArray());
         Assert.DoesNotContain(upgrading.Steps, s => s.Reserved is not null);
     }

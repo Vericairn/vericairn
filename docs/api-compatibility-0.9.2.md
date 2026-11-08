@@ -296,6 +296,46 @@ owner-only from creation, and runs the derivation for as long as it serves. A st
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
 
+## Network MCP over Streamable HTTP (MCP-03)
+
+No route, OpenAPI operation, request or response type of API version 1 is added or changed. The daemon serves the Model
+Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners when the operator turned it on,
+outside the API's route table; each tool call runs the API's own route in the daemon's process for the requesting device,
+with that route's request scope. A message to `/mcp` holds at most 1 MiB, refused before authentication, and a network
+write is kept in `local-network-writes.jsonl` on loopback as on the local network. `DaemonEndpoint` gains the optional
+`Mcp`, serialized as `mcp` (the path served) only while it is on; older clients ignore it and older daemons omit it.
+
+`Vericairn.Daemon` now depends on `Vericairn.Mcp`. `DaemonOptions` adds `Mcp` and `McpAllowedOrigins`, which override the
+runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `AllowedOrigins` and the static
+`TryNormalizeOrigin`; `runtime.json` gains `mcp` and `allowedOrigins`, written on every save, and an older build ignores
+them. A file whose `allowedOrigins` names something other than an origin is refused as unreadable settings.
+
+`Vericairn.Runtime` adds `DeviceSigning` and `DeviceSigningMode` (`Read`, `Prepare`, `Sign`), the overload
+`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.ReadStandings(devices, principals)`, which
+returns a `DeviceStandingsRead`: each device's standing and each principal's kind from one reading of the records. Under a
+`DeviceSigning`, no key on the runtime's machine signs and no record is written unsigned: an operation writes nothing,
+prepares the one record it authors for the requesting device, or writes that record only with the device's signature over
+the plan's exact record, re-authored from the same request with the plan's id and time; every other store is refused.
+An attempt's `startedAt` and a completed progress phase's `completedAt` state the plan's time in both steps. Prepared
+records share one store with `POST /v1/records/prepare`, and from 0.9.2 one device holds at most 32 of them at once,
+answered `unavailable` beyond that; the store's limit of 256 is unchanged. `PrepareRecord` otherwise behaves as before.
+
+`Vericairn.Mcp` adds, each additive: `McpServer.ProtocolVersions` and `McpServer.Instructions` (init-only),
+`McpServer.NetworkDescription` and `McpServer.RespondAsync(id, method, parameters, cancellationToken)`;
+`ToolRegistry.ForNetwork(api, network)`, `ToolRegistry.Network`, `ToolRegistry.NetworkWrites`,
+`ToolRegistry.OfferedOverNetwork(tool)`, `ToolRegistry.Describe(tool)`, the `CallAsync(name, arguments, meta,
+cancellationToken)` overload and the constants `PrepareMeta`, `PlanMeta` and `SignatureMeta`; `ToolCallResult.Meta`;
+and the types `IMcpNetworkSession` and `McpSigning`. `tools/call` now refuses a `_meta` that is not an object and returns
+a result's `_meta` when it has one; over standard input and output `_meta` is not read, and every stdio answer is unchanged.
+
+The command line adds `runtime configure --mcp on|off` and `--mcp-origin`, whose `--json` output adds `mcp`,
+`allowedOrigins` and `mcpServed`, and keeps the other settings when one changes; `runtime status` adds the `mcp` line and,
+in `--json`, `mcp`; and `mcp serve --connection`, whose bridge signs only a write's prepared record and only after binding
+the call's arguments, author, subject, type, time and supersession; fields the runtime computes, such as a document
+review's subject and checks or a result's `progressClaim`, are signed on trust in that runtime. The SDK's additions for
+the bridge are internal. Record format remains 3;
+no record type changes. `AGENTS.md` gains one paragraph on reaching the estate from another machine.
+
 ## Preparing a documentation set (DOCS-11)
 
 No route, interface member, protocol type, shipped command or record type is added or changed. `vericairn-docs`, the build
@@ -440,11 +480,62 @@ additions are in [record format 3](record-format-v3.md#security-reports-092). Th
 fixtures include it. The command line adds `security-reports poll` and `security-reports triage`
 ([CLI](cli.md#vericairn-security-reports-092)).
 
+## History checkpoints (ID-05)
+
+No route, interface member of `IEstateApi` or protocol type is added or removed. Record format remains 3; it gains the record
+type `history-checkpoint` ([record format 3](record-format-v3.md#history-checkpoints-092)), which `records describe`,
+`records new` and the readable companions cover. An earlier format-3 reader reports it as `record.unknown-type`. The generic
+record reader's implementation identity is unchanged: no existing rendition changes.
+
+The canonical status JSON (`status --json`, `GET /v1/status`, the `estate_status` tool) adds a `history` member:
+`{adopted, heads: [{id, hash}], witnessed, tail, problems: [{code, location, message}]}`. Its bytes, and so a new estate
+observation's `statusHash`, change for every estate; observations already recorded keep their facts. The text status lists
+standing history problems first. `estate check` (`GET /v1/check`) adds the check-time warning `history.deleted-in-git`, or
+information when the clone is shallow; the canonical status does not include it. The command line adds `estate check
+--expect <checkpoint>`, evaluated by the client against `Records("history-checkpoint")` and `Record(id)`, and the estate
+bootstrap scripts accept `--expect <checkpoint>` before their other arguments.
+
+`NewRecord` (`POST /v1/records`, `records new`) refuses `at` and `id` for a history checkpoint, and every write surface,
+a device-prepared record included, refuses a checkpoint that does not follow exactly the copy's heads, list exactly the
+records no head witnesses in objects held here, and state their count and set hash, or that anchors a record not present
+unsigned with that hash or acknowledges the removal of a record that is not witnessed and absent. New findings, each an
+error unless stated: `history.removed`, `history.altered`, `history.checkpoint-missing`, `history.checkpoint-invalid`,
+`history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`,
+`history.listing-mismatch` (a warning, only for a record that the root operator or a person holding administer signed, or
+that is anchored with its present bytes; any other record a checkpoint lists with other bytes is `history.altered`, an agent's
+own signed record included), `record.subject-not-counting` and
+`record.reference-not-counting`; `history.deleted-in-git` is a warning and `history.expected` information.
+`signature.required` now also reports an unsigned history checkpoint or device revision. Status lists the history errors,
+`history.unanchored`, and, once the estate has adopted checkpoints, `signature.required`, first. `estate check --expect`
+accepts a record id, a full content hash or at least sixteen hexadecimal digits of it. A device's recovery purpose is
+read from its latest revision that counts.
+
+What counts changes in every estate, without a format step. `EstateModel.OfType`, `Current`, `About`, `IsCurrent`,
+`SupersededBy`, `RolesOf`, `HasRole` and `HasScope` read only records that count. `Latest` follows only counting
+successors and returns the record it starts from when none follows it, which may itself not count; `CurrentPrincipal`
+returns the newest counting revision of a principal's line, or null when none of its revisions counts, so a principal
+record that does not count grants no role. `Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
+policy refuses (after adoption, any unanchored unsigned record under required signatures), an unsigned policy record,
+checkpoint or device revision, or a witnessed record present with another hash. `SignatureChecks.Anchored` includes anchoring checkpoints'
+anchors; a device revision changes the device's key or name only when its device signed it. A policy basis
+holds only records that count, and its recorded time is the greatest `at` among them. An estate without checkpoints and
+without signature errors, such as the first-party estate, reads as before.
+
+`Vericairn.Records` adds, each additively: the namespace `Vericairn.Records.History` with `HistoryInventory`,
+`InventoryEntry`, `InventoryObject`, `RecordSets`, `HistoryState`, `CheckpointDraft` and `SignedHistory` (`Of`,
+`Adopted`, `Prepare`, `AuthoringRefusal`, `Expect`); `Types.HistoryCheckpointType`;
+`EstateModel.CountingRecords` and `EstateModel.Counts`; `EstateLoader.Load(string, IReadOnlyList<RecordFile>,
+Func<string, byte[]?>)`, which reads checkpoint inventories through the given object reader, and `EstateLoader.FileObjects`;
+and `EstateStatus.HistoryProblems` and `EstateStatus.HistoryJson`. `Vericairn.Runtime` adds the default interface member
+`ISourceAdapter.DeletedRecordFiles(string)` with the records `RecordDeletion` and `RecordDeletions`, implemented by the git
+adapter; existing implementations compile unchanged and report the warning unavailable by returning null.
+
 ## The software pack's release and upgrade flows (PROC-07)
 
 `IEstateApi`, the daemon's routes, the OpenAPI document and the SDK are unchanged. The template catalogue adds two built-in flow
 versions, `vericairn.software/release` 1.0.0 and `vericairn.software/upgrade` 1.0.0, which `GET /v1/templates`, `templates list`
-and `templates show` now include.
+and `templates show` now include. The upgrade flow's `adopt` step reads ID-05's `history-checkpoint` records: it is done by an
+adoption checkpoint that counts.
 
 `Vericairn.Records` adds public types and members:
 

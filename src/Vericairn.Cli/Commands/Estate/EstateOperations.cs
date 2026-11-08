@@ -111,8 +111,34 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
-    public int Check(string root, bool json) =>
-        IsEstate(root) ? context.WithApi(root, api => context.ReportFindings(api.Check(), json)) : context.WithFiles(root, model => context.ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
+    public int Check(string root, bool json, string? expect = null) =>
+        IsEstate(root)
+            ? context.WithApi(root, api => context.ReportFindings(Expecting(api.Check(), expect, () => ExpectedCandidates(api, expect)), json))
+            : context.WithFiles(root, model => context.ReportFindings(Expecting(ToFindings(Combined(model), $"{model.Records.Count} records"), expect,
+                () => model.Records.Where(r => r.Type == "history-checkpoint").Select(r => (r.Id, r.ComputedHash, r.ExpectedPath, model.Counts(r))).ToList()), json));
+
+    /// <summary>
+    /// The check with an expected checkpoint (design/signed-history.md § 9): an error refuses a copy that lacks it, so a fresh machine
+    /// checks against a head known elsewhere rather than trusting whatever history the copy happens to hold.
+    /// </summary>
+    private static FindingsResponse Expecting(FindingsResponse findings, string? expect, Func<IReadOnlyList<(string Id, string Hash, string Path, bool Counts)>> candidates)
+    {
+        if (expect is null) return findings;
+        Finding? missing = global::Vericairn.Records.History.SignedHistory.Expect(candidates(), expect);
+        FindingDto finding = missing is null
+            ? new("info", "history.expected", EstateLayout.RecordsDirectory, $"This copy holds the expected history checkpoint {expect.Trim()}, signed and counting.")
+            : new("error", missing.Code, missing.Location, missing.Message);
+        return findings with { Errors = findings.Errors + (missing is null ? 0 : 1), Findings = [.. findings.Findings, finding] };
+    }
+
+    private static List<(string Id, string Hash, string Path, bool Counts)> ExpectedCandidates(IEstateApi api, string? expect)
+    {
+        List<(string Id, string Hash, string Path, bool Counts)> counting = [.. api.Records("history-checkpoint").Select(r => (r.Id, r.Hash, r.Path, true))];
+        // A checkpoint named by id that is here but does not count is reported as such, not as absent.
+        if (expect?.Trim() is { Length: 26 } id && counting.All(c => c.Id != id) && api.Record(id) is { Type: "history-checkpoint" } present)
+            counting.Add((present.Id, present.Hash, present.Path, false));
+        return counting;
+    }
 
     public int Bootstrap(string root, bool force, bool json)
     {

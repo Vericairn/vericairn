@@ -413,7 +413,18 @@ On a desktop, only Secure Enclave custody enforces interactive presence, for a p
 
 In the first-party estate, decision `01M51CDST3GS2CDFXD22Z3NKJP` carried the limitation of procedural, rather than enforced, separation of the Reviewer principal's key from the builder's into 0.6.1, returning it to CRED-01 and ID-03. This documentation work establishes no new credential isolation. Separate principals and review records alone do not establish operating-system credential isolation.
 
-Upgrading moves no key. Format-1 estates cannot name Secure Enclave custody or presence until their move to format 2. Admissions and revocations at format 2 or 3 require signatures or an anchored unsigned admission from the signed migration. The migration lists all unsigned admissions, including superseded ones and revocations, without rewriting any record. A signature policy still uses the date stated by the record, and record removal is visible in repository history or `recover compare`, not necessarily in `estate check`. A potentially leaked key is revoked, not merely renamed or rotated. Recovery keys need separate offline custody; exports carry no private keys.
+Upgrading moves no key. Format-1 estates cannot name Secure Enclave custody or presence until their move to format 2. Admissions and revocations at format 2 or 3 require signatures or an anchored unsigned admission from the signed migration. The migration lists all unsigned admissions, including superseded ones and revocations, without rewriting any record. In an estate that has not adopted history checkpoints, a signature policy still uses the date stated by the record, and record removal is visible in repository history or `recover compare`, not necessarily in `estate check`. A potentially leaked key is revoked, not merely renamed or rotated. Recovery keys need separate offline custody; exports carry no private keys.
+
+**History checkpoints (0.9.2).** In an estate that holds a counting `history-checkpoint`, removing or altering a witnessed record is an error on every copy, and under required signatures an unsigned record counts only when the root operator or a person holding `administer` anchors it, whatever its date ([operator's guide](operator-guide.md#history-checkpoints-092)). What remains:
+
+- A fresh machine facing a rewritten history with no reference from elsewhere cannot detect that the newest checkpoints were removed together with the records after them; `estate check --expect <checkpoint>` checks a copy against a head known elsewhere. This build does not yet remember the newest checkpoint a machine verified, so `history.rolled-back` is not reported.
+- Records written after the newest checkpoint, the unwitnessed tail, have no protection beyond `history.deleted-in-git`, a check-time warning that a shallow clone reports unavailable and that sees only what the clone's git history holds.
+- A signed record is still judged at the time its author states. Closings, which bound what a revoked device, a replaced key or a narrowed grant can still account for, and authority read as it stood at a record's time, are ID-06's and not in this build; an administrator whose `administer` grant is later narrowed or revoked stops counting as an anchorer for every checkpoint, earlier ones included.
+- An estate that has not adopted keeps the fixed boundary of the current required charter revision. In this build checkpoints are written through `records new history-checkpoint`; `estate checkpoint`, adoption as an operator step and the automatic triggers are OPS-07's.
+- Checkpoints forked by an admitted principal are outside this model; each fork is signed and attributable.
+- A checkpoint counts only on an intact path of counting checkpoints back to the adoption checkpoint. A copy from which a checkpoint on that path was removed reports `history.checkpoint-missing`, an error that holds writes and release submission, and witnesses only what the intact part of the graph lists until the checkpoint is restored; a copy without its adoption checkpoint reads, meanwhile, under the earlier boundary. `estate check --expect` against a head known elsewhere shows such a copy.
+- Any admitted device, an agent's included, may sign a checkpoint. Its listing of a record that is not here is `history.removed`, an error until the record is restored or the root operator or a person holding administer acknowledges the listed version's removal. Its listing of other bytes for a record that the root operator or a person holding administer signed, or that is anchored with its present bytes, is only the warning `history.listing-mismatch`, and the record keeps counting. For any other record, one an agent signed included, such a listing is `history.altered` and the record counts for nothing: a signer that rewrites its own witnessed record under the same id, even with its own key, is caught, and a later checkpoint does not witness the new bytes.
+- From 0.9.2, in every estate, a record that does not count is left out of every rule that admits, authorizes, accepts, clears or holds, and an unsigned device revision changes no key or name.
 
 FIX-13 orders generated identifiers within one process, including concurrent calls and repeated or
 backward clock readings. Independent processes, machines and explicitly supplied ids have no such order.
@@ -761,6 +772,22 @@ reader consumed that state, are not raised; the records behind them still raise 
 streams share 16 slots, at most four per device and eight per principal, with two more kept for the local
 socket. A reset tells a client only that its cursor could not be honored; how often one comes depends on the
 journal's whole volume, including events that client may not read. The embedded runtime keeps no journal.
+
+## Network MCP limits (0.9.2)
+
+Network MCP (`MCP-03`) serves signed mode only: every request and every record is signed by an admitted
+agent's or service's device, so a client must be Vericairn-aware, through `vericairn mcp serve
+--connection` or its own signing code. Token mode for OAuth-only clients, the public endpoint and its MCP
+gateway, and MCP over the relay are planned for 0.9.3 (`MCP-04`, `REMOTE-10`, the relay); until then `/mcp`
+is reached on loopback and on the local network only, and a device on the local network pairs there first.
+A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
+connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
+the daemon's memory and end when it restarts; the bridge opens a new one once, and other clients initialize
+again after a `404`. A session has one server stream, and in 0.9.2 nothing is sent on it but keep-alive
+comments: resource notifications are `MCP-05`'s, and the bridge does not yet forward the stream to its
+client. Requests are answered with one JSON body, never a stream; long outputs are returned whole. A
+device holds four sessions and runs four requests at once, all devices eight, and server streams share
+the event streams' slots. Every `<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
 
 ## Context and hand-over limits
 

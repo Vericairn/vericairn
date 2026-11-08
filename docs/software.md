@@ -564,6 +564,9 @@ The release flow's steps are `placed-work`, `docs-before-freeze`, `docs-set`, `r
 | A publication command before the acceptance names the candidate, or for another channel | `publish` | The operator's acceptance; the candidate's channel |
 | A runtime of an older release serving the estate after an upgrade | the upgrade's `runtime` | `estate verify`'s verifications |
 
+The upgrade flow's steps are `check`, `upgrade`, `runtime`, `verify`, `adopt`, the root operator's one adoption of history
+checkpoints, which waits on that person and which no agent's checkpoint completes, and `docs`.
+
 Two commands record what the flows read. `vericairn docs pass <version> --before --documents docs/releases/documents.json --record --by <principal>`
 checks the version-tracking guides and records each check's outcome as a verification of the product at the guides' commit;
 `vericairn estate verify --by <principal>` records which runtime serves the estate here and whether the estate check passes with

@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:05Z",
+  "body": {
+    "note": "The first authority.",
+    "principal": "01M6VJK9ARK66V397R6Q8F9HQM",
+    "status": "admitted"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:68f08f59e9570c7139ee1f99b91ee8dd4abd39302d83931bb6100c715f94a8dc",
+  "id": "01M6VJK9B34RDJ5JCTTCDW2KEP",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "yodyp9FZJjs5TWiiuMNd32OguT_f9xfy0z_u1C7KnCIrgYhcCYA-ut_tmKxX2y65-gFueiK02a8vbicQFUpcQw"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:9a17ee4ae649f513f99d493339eed93357301149b6ca795885c25900093c0400",
+    "id": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+    "type": "device"
+  },
+  "type": "admission"
+}

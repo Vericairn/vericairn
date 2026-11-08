@@ -19,6 +19,8 @@ public class SoftwareUpgradeFlowTests
 {
     private const string Version = "0.9.2";
 
+    private static readonly string[] Checks = ["vericairn.software/serving-runtime", "vericairn.software/estate-check"];
+
     [Fact]
     public void AnUpgradeStopsAtRuntimeUntilTheOlderRuntimeIsReplacedThenVerifiesAndClearsItsDocuments()
     {
@@ -48,9 +50,85 @@ public class SoftwareUpgradeFlowTests
         Assert.Equal(("done", "next"), (State(records, goal, "runtime"), State(records, goal, "verify")));
         Verify(records, "vericairn.software/estate-check", "passed", "The estate check found no error, and status derives.");
         Assert.Equal(("done", "done"), (State(records, goal, "verify"), State(records, goal, "docs")));
-        Assert.True(FlowPosition.Derive(records.Estate.Load(), goal, records.Estate.Clock).Complete);
+
+        // Adoption is the root operator's, once: with no adoption checkpoint, the run waits on the person its role names.
+        FlowPosition.StepInstance adopt = Step(records, goal, "adopt");
+        Assert.Equal(("stopped", "person", records.Estate.OperatorId), (adopt.State, adopt.Stop, adopt.Principal));
+        Assert.False(FlowPosition.Derive(records.Estate.Load(), goal, records.Estate.Clock).Complete);
         records.AssertValid();
     }
+
+    [Fact]
+    public void AdoptionIsTheRootOperatorsOnceAndAnEstateThatAdoptedHasTheStepDone()
+    {
+        using var history = new HistoryFixture();
+        RecordEnvelope goal = UpgradeRun(history);
+        Assert.Equal("blocked", Step(history.Estate, goal, "adopt").State);
+
+        // Upgraded and verified with the pinned release: adoption is next, the root operator's.
+        RecordEnvelope charter = history.Load().CurrentEstate!;
+        history.Estate.Add("observation", history.Estate.OperatorId, ObservationBody(history.Estate.Clock, Version).ToJsonString(), charter.Reference, signer: history.OperatorSigner);
+        foreach (string method in Checks)
+        {
+            history.Estate.Add("verification", history.Estate.OperatorId, VerificationBody(method, "passed", "Verified with the pinned release.").ToJsonString(), charter.Reference, signer: history.OperatorSigner);
+        }
+
+        Assert.Equal(("done", "done"), (Step(history.Estate, goal, "verify").State, Step(history.Estate, goal, "docs").State));
+        Assert.Equal(("stopped", "person"), (Step(history.Estate, goal, "adopt").State, Step(history.Estate, goal, "adopt").Stop));
+        Assert.Contains("vericairn estate checkpoint --adopt --check", Step(history.Estate, goal, "adopt").Step.Action, StringComparison.Ordinal);
+
+        // The root operator signs the adoption checkpoint: the step is done, and stays done after later checkpoints.
+        history.Adopt();
+        Assert.Equal("done", Step(history.Estate, goal, "adopt").State);
+        history.Checkpoint();
+        Assert.Equal("done", Step(history.Estate, goal, "adopt").State);
+        Assert.Empty(HistoryFixture.Codes(history.Load()));
+    }
+
+    [Fact]
+    public void AnAgentsAdoptionCheckpointLeavesTheAdoptionStepToTheRootOperator()
+    {
+        using var history = new HistoryFixture();
+        RecordEnvelope goal = UpgradeRun(history);
+        RecordEnvelope charter = history.Load().CurrentEstate!;
+        history.Estate.Add("observation", history.Estate.OperatorId, ObservationBody(history.Estate.Clock, Version).ToJsonString(), charter.Reference, signer: history.OperatorSigner);
+        foreach (string method in Checks)
+        {
+            history.Estate.Add("verification", history.Estate.OperatorId, VerificationBody(method, "passed", "Verified with the pinned release.").ToJsonString(), charter.Reference, signer: history.OperatorSigner);
+        }
+
+        // The builder signs a checkpoint that claims adoption: it adopts nothing, so the step still waits on the root operator.
+        history.Checkpoint(by: history.Estate.BuilderId, signer: history.BuilderSigner, trigger: "adoption");
+        Assert.Contains(history.Load().Findings, f => f.Code == "history.adoption-author");
+        FlowPosition.StepInstance adopt = Step(history.Estate, goal, "adopt");
+        Assert.Equal(("stopped", "person", history.Estate.OperatorId), (adopt.State, adopt.Stop, adopt.Principal));
+    }
+
+    /// <summary>An upgrade run in a history fixture's estate, its root operator named in the root-operator role.</summary>
+    private static RecordEnvelope UpgradeRun(HistoryFixture history)
+    {
+        TestEstate estate = history.Estate;
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HistoryFixture.Order("UPG-1", "Upgrade the estate"), signer: history.OperatorSigner);
+        estate.Add("roster", estate.OperatorId, $$"""{"roles":[{"role":"upgrader","principals":["{{estate.BuilderId}}"]},{"role":"root-operator","principals":["{{estate.OperatorId}}"]}]}""", signer: history.OperatorSigner);
+        var body = new JsonObject
+        {
+            ["title"] = "Upgrade to " + Version, ["objective"] = "Upgrade the estate.",
+            ["completion"] = new JsonArray(new JsonObject { ["record"] = new JsonObject { ["type"] = "observation", ["fields"] = new JsonObject { ["kind"] = "vericairn-release", ["facts.version"] = Version } } }),
+            ["constraints"] = new JsonArray(), ["kind"] = "finite", ["sponsor"] = estate.OperatorId, ["budget"] = new JsonObject { ["wallMinutes"] = 120, ["attemptsPerStep"] = 2 },
+            ["plan"] = new JsonObject
+            {
+                ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new JsonArray(order.Id),
+                ["flow"] = new JsonObject { ["pin"] = FlowFixture.Pin(SoftwareFlows.UpgradeFlow), ["subject"] = new JsonObject { ["version"] = Version } },
+            },
+            ["inputs"] = new JsonArray(),
+        };
+        RecordEnvelope goal = estate.Add("goal", estate.OperatorId, body.ToJsonString(), signer: history.OperatorSigner);
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Activated for the test."}""", goal.Reference, signer: history.OperatorSigner);
+        return goal;
+    }
+
+    private static FlowPosition.StepInstance Step(TestEstate estate, RecordEnvelope goal, string key) =>
+        Assert.Single(FlowPosition.Derive(estate.Load(), goal, estate.Clock).Steps, s => s.Name == key);
 
     [Fact]
     public void AFailedEstateCheckStopsVerify()
@@ -75,7 +153,7 @@ public class SoftwareUpgradeFlowTests
             ["key"] = "UPG-1", ["kind"] = "ordinary", ["title"] = "Upgrade the estate", ["intent"] = "Upgrade the estate to the release.", ["scope"] = new JsonArray("estate"),
             ["exitQuestion"] = "Is the estate upgraded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("the upgraded estate"),
         });
-        records.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("upgrader", records.Estate.BuilderId)) });
+        records.Add("roster", new JsonObject { ["roles"] = new JsonArray(FlowFixture.Role("upgrader", records.Estate.BuilderId), FlowFixture.Role("root-operator", records.Estate.OperatorId)) });
         RecordEnvelope goal = records.Add("goal", new JsonObject
         {
             ["title"] = "Upgrade to " + Version, ["objective"] = "Upgrade the estate.",
@@ -93,13 +171,16 @@ public class SoftwareUpgradeFlowTests
     }
 
     /// <summary>The observation estate upgrade --to writes of the release it pins.</summary>
-    internal static RecordEnvelope Observe(PolicyFixture records, string version)
+    internal static RecordEnvelope Observe(PolicyFixture records, string version) =>
+        records.Add("observation", ObservationBody(records.Estate.Clock, version), builder: true, subject: records.Estate.Load().CurrentEstate!.Reference);
+
+    internal static JsonObject ObservationBody(DateTimeOffset at, string version)
     {
         string commit = new('c', 40);
         string tag = "v" + version;
-        return records.Add("observation", new JsonObject
+        return new JsonObject
         {
-            ["kind"] = "vericairn-release", ["asOf"] = RecordParser.FormatTimestamp(records.Estate.Clock), ["summary"] = "The published release the estate pins.",
+            ["kind"] = "vericairn-release", ["asOf"] = RecordParser.FormatTimestamp(at), ["summary"] = "The published release the estate pins.",
             ["facts"] = new JsonObject
             {
                 ["repository"] = VerifiedRelease.Repository, ["version"] = version, ["tag"] = tag, ["commit"] = commit, ["url"] = VerifiedRelease.PageUrl(tag),
@@ -109,17 +190,19 @@ public class SoftwareUpgradeFlowTests
                 ["artifactHashes"] = new JsonArray(FlowFixture.Hash('8')), ["reads"] = new JsonArray("1", "2", "3"), ["writes"] = 3,
             },
             ["limitations"] = new JsonArray(),
-        }, builder: true, subject: records.Estate.Load().CurrentEstate!.Reference);
+        };
     }
 
     /// <summary>estate verify's verification of one check, for the pinned release, superseding the earlier one.</summary>
     internal static RecordEnvelope Verify(PolicyFixture records, string method, string outcome, string summary, RecordEnvelope? supersedes = null) =>
-        records.Add("verification", new JsonObject
-        {
-            ["method"] = method, ["commit"] = new string('e', 40), ["command"] = "vericairn estate verify",
-            ["environment"] = new JsonObject { ["platform"] = "osx-arm64", ["release"] = Version }, ["role"] = "self", ["outcome"] = outcome, ["summary"] = summary,
-            ["evidence"] = new JsonArray(), ["limitations"] = new JsonArray("What serves the estate on this machine only."),
-        }, builder: true, subject: records.Estate.Load().CurrentEstate!.Reference, supersedes: supersedes?.Id);
+        records.Add("verification", VerificationBody(method, outcome, summary), builder: true, subject: records.Estate.Load().CurrentEstate!.Reference, supersedes: supersedes?.Id);
+
+    internal static JsonObject VerificationBody(string method, string outcome, string summary) => new()
+    {
+        ["method"] = method, ["commit"] = new string('e', 40), ["command"] = "vericairn estate verify",
+        ["environment"] = new JsonObject { ["platform"] = "osx-arm64", ["release"] = Version }, ["role"] = "self", ["outcome"] = outcome, ["summary"] = summary,
+        ["evidence"] = new JsonArray(), ["limitations"] = new JsonArray("What serves the estate on this machine only."),
+    };
 
     private static FlowPosition.StepInstance Step(PolicyFixture records, RecordEnvelope goal, string key) =>
         Assert.Single(FlowPosition.Derive(records.Estate.Load(), goal, records.Estate.Clock).Steps, s => s.Name == key);

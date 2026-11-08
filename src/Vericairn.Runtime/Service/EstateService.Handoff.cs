@@ -38,7 +38,6 @@ public sealed partial class EstateService
             }
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            JsonElement identities = JsonSerializer.SerializeToElement(model.Records.OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => new { r.Id, Hash = r.ComputedHash }), ProtocolJson.Options);
             using JsonDocument status = JsonDocument.Parse(EstateStatus.RenderJson(model, ChecksWithBatches(model)));
             var body = new JsonObject
             {
@@ -48,7 +47,7 @@ public sealed partial class EstateService
                 ["facts"] = new JsonObject
                 {
                     ["records"] = model.Records.Count,
-                    ["recordSetHash"] = ContentHash.Sha256(CanonicalJson.SerializeUtf8(identities)),
+                    ["recordSetHash"] = global::Vericairn.Records.History.RecordSets.Hash(model.Records.Select(r => (r.Id, r.ComputedHash))),
                     ["pinHash"] = ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(model.Manifest, ProtocolJson.Options))),
                     ["statusHash"] = ContentHash.Sha256(CanonicalJson.SerializeUtf8(status.RootElement)),
                 },
@@ -64,7 +63,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = EstateLoader.Load(session.Root, files);
+            EstateModel model = session.LoadFiles(files);
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new ResumeResponse(ContextDenied + "\n", null, true, new Problem("denied", ContextDenied, []));
@@ -86,7 +85,7 @@ public sealed partial class EstateService
         {
             // Load and retain precisely one file set: a concurrent sync cannot mix two revisions of the copy.
             IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = EstateLoader.Load(session.Root, files);
+            EstateModel model = session.LoadFiles(files);
             if (RequestDeviceRefusal(model) is not null)
             {
                 return HandoffAssembly.Refuse("denied", ContextDenied, []);

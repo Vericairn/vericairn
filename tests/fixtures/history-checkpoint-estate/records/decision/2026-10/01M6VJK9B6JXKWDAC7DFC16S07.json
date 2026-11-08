@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-13T12:00:10Z",
+  "body": {
+    "affects": [],
+    "decidedAt": "2026-10-13T12:00:09Z",
+    "decidedBy": "01M6VJK9ARK66V397R6Q8F9HQM",
+    "effects": [
+      "adopt"
+    ],
+    "notAuthorized": [
+      "publication"
+    ],
+    "stake": "medium",
+    "statement": "Adopt checkpoints for this fixture.",
+    "summary": "A synthetic decision.",
+    "synthesis": "The fixture exercises every checkpoint field.",
+    "title": "Adopt history checkpoints"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:f4d67a04868394204fa951c8dfc6cf9430b26c2aa53d78b246f9fcf081204bb1",
+  "id": "01M6VJK9B6JXKWDAC7DFC16S07",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "zHq01BGIBhG0OfI5_HgIo7Avi7CrlgYvMoyrFCk5vQndt3n6O_ZNmUi2Tg4E1vuJuJzsN3yhXZqsYkkubK1RuQ"
+    }
+  ],
+  "type": "decision"
+}

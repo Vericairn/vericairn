@@ -256,9 +256,39 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease(), Version, PolicyClock.GetUtcNow());
+            foreach (Finding finding in DeletedInGit(model))
+            {
+                all.Add(finding);
+            }
 
             return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
+    }
+
+    /// <summary>
+    /// The check-time warning for the unwitnessed tail (design/signed-history.md § 7): each record file deleted in the checked-out commit's
+    /// reachable history, absent here, that no counting checkpoint witnessed, since a witnessed one is already an error and an acknowledged
+    /// removal needs no warning. It depends on the clone, so it stays out of the canonical status; a shallow clone reports it unavailable.
+    /// </summary>
+    private FindingList DeletedInGit(EstateModel model)
+    {
+        var findings = new FindingList();
+        if (model.Manifest?.Profile != "repository-synced" || Providers.Source("git")?.DeletedRecordFiles(model.Root) is not { } deletions) return findings;
+        if (deletions.Shallow)
+        {
+            findings.Info("history.deleted-in-git", EstateLayout.RecordsDirectory, "Unavailable: this clone is shallow, so the record files deleted in its history cannot be listed. A full clone lists them.");
+            return findings;
+        }
+
+        global::Vericairn.Records.History.HistoryState history = global::Vericairn.Records.History.SignedHistory.Of(model);
+        foreach (RecordDeletion deletion in deletions.Deleted)
+        {
+            string id = Path.GetFileNameWithoutExtension(deletion.Path);
+            if (model.FilePaths?.Contains(deletion.Path) == true || model.ById.ContainsKey(id) || history.IsWitnessed(id) || history.IsAcknowledgedRemoval(id)) continue;
+            findings.Warning("history.deleted-in-git", deletion.Path, $"Deleted in commit {deletion.Commit}, which the checked-out commit reaches, and absent here. No history checkpoint witnessed it, so nothing else shows that it was removed: restore it from that commit's parent if it belongs here.");
+        }
+
+        return findings;
     }
 
     /// <inheritdoc />
@@ -329,6 +359,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
+        if (request.Type == "history-checkpoint" && (request.At is not null || request.Id is not null))
+        {
+            return Refuse("A history checkpoint is written at the runtime's time with a fresh identity; it states no earlier time.");
+        }
+
         if (request.Type is "result" or "review")
         {
             lock (gate)
@@ -369,7 +404,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = EstateLoader.Load(session.Root, files);
+            EstateModel model = session.LoadFiles(files);
             if (RequestDeviceRefusal(model) is not null)
             {
                 return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
@@ -472,6 +507,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return NotFound($"No assignment has id {request.Assignment}.");
             }
 
+            // Under device signing both steps state the plan's time, so the record signed is the one written (MCP-03).
+            at ??= DeviceSigningTime();
             var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(at ?? DateTimeOffset.UtcNow), ["workspace"] = request.Workspace, ["note"] = request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             return WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model);
@@ -2244,6 +2281,25 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
+        if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
+        {
+            return signers is null
+                ? DeviceSignedWriteLocked(draft, current, device, signing)
+                : Refuse("A device-signed request is signed by its own device only; this write signs on the runtime's machine, and nothing was written.");
+        }
+
+        return WriteAuthoredLocked(draft, current, signers);
+    }
+
+    /// <summary>Authors with the signers given, or this machine's for the author, then judges and stores. Caller holds the gate.</summary>
+    private WriteOutcome WriteAuthoredLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    {
+        if (RequestDeviceRefusal(current) is Problem denied)
+        {
+            return WriteOutcome.Fail(denied);
+        }
+
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
         if (record is null)
         {
@@ -2330,6 +2386,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
+        // only, which the store refuses; the one signer allowed is the requesting device's verified signature over its plan.
+        if (requestDevice.Value is { Closed: false, Signing: { } signing } requesting)
+        {
+            if (signers is null)
+            {
+                signers = [];
+            }
+            else if (signers.Any(s => s is not PresignedSigner presigned || presigned.DeviceId != requesting.Device || presigned.Hash != signing.Authorized))
+            {
+                return (null, "A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
+            }
+        }
+
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
@@ -2339,6 +2409,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         if (BlockedTermRefusal(draft, current) is string blockedRefusal) return (null, blockedRefusal);
+        // A history checkpoint follows every head of this copy and lists exactly what no head witnesses (design/signed-history.md § 5).
+        if (draft.Type == "history-checkpoint" && global::Vericairn.Records.History.SignedHistory.AuthoringRefusal(current, draft.Body) is string historyRefusal)
+            return (null, "Not written: " + historyRefusal);
 
         if (signers is null)
         {
@@ -2578,6 +2651,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private Problem? JudgeProposedLocked(IReadOnlyList<AuthoredRecord> records)
     {
+        // Every store judges its records here first: under device signing only the requesting device's signed record passes.
+        if (DeviceSignedStoreRefusal(records) is Problem unsigned)
+        {
+            return unsigned;
+        }
+
         BatchJournal.ReadResult batches = BatchJournal.All(session);
         FindingList unreadable = UnreadableBatches(batches);
         if (unreadable.Count > 0)
@@ -2616,7 +2695,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         List<RecordFile> files = session.Files().Concat(records.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
-        return EstateLoader.Load(session.Root, files);
+        return session.LoadFiles(files);
     }
 
     /// <summary>
@@ -2783,10 +2862,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>Authors a record with no signature, for a device to sign or as a candidate the store refuses. Caller holds the gate.</summary>
+    private (AuthoredRecord? Record, string? Refusal) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
+
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
     private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner
     {
         public string DeviceId => deviceId;
+
+        /// <summary>The content hash the signature is over.</summary>
+        public string Hash => hash;
 
         public RecordSignature Sign(ReadOnlySpan<byte> digest) =>
             digest.SequenceEqual(RecordSigning.Digest(hash))

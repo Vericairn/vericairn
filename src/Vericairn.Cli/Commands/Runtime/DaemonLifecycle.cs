@@ -71,6 +71,11 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 context.Output.WriteLine($"  local network  {RuntimeEndpointText.Address(network)}, mutual TLS with paired devices; runtime identity {network.Identity}");
             }
 
+            if (host.Endpoint.Mcp is string mcp)
+            {
+                context.Output.WriteLine($"  mcp  {mcp} on {(host.Endpoint.LocalNetwork is null ? "loopback" : "loopback and the local network")}, for agents' and services' devices");
+            }
+
             context.Output.WriteLine($"  process {host.Endpoint.ProcessId}; stop with Ctrl+C or 'vericairn runtime stop'");
             host.WaitForShutdownAsync(stop.Token).GetAwaiter().GetResult();
             host.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -247,9 +252,12 @@ internal sealed class DaemonLifecycle(CommandContext context)
         ServingRuntime? serving = alive && health is not null ? ServingRuntime.Of(root, endpoint!, health) : null;
         EstateManifest? pin = serving is null ? ServingRuntime.Pin(root) : serving.Manifest;
         string? configured = null;
+        bool mcpConfigured = false;
         try
         {
-            configured = RuntimeSettings.Load(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!).LocalNetwork;
+            RuntimeSettings settings = RuntimeSettings.Load(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!);
+            configured = settings.LocalNetwork;
+            mcpConfigured = settings.Mcp;
         }
         catch (InvalidOperationException exception)
         {
@@ -263,6 +271,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 mode = alive ? "daemon" : "embedded",
                 daemon = alive ? endpoint : null,
                 localNetwork = configured,
+                mcp = mcpConfigured,
                 servingRelease = serving?.Release,
                 pin = pin?.Describe(),
                 pinnedRelease = pin is { Mode: "release" } ? pin.Version : null,
@@ -283,6 +292,11 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 context.Output.WriteLine($"  local network  {RuntimeEndpointText.Address(network)}, mutual TLS with paired devices; runtime identity {network.Identity}");
             }
 
+            if (endpoint.Mcp is string mcp)
+            {
+                context.Output.WriteLine($"  mcp  {mcp} on {(endpoint.LocalNetwork is null ? "loopback" : "loopback and the local network")}, Streamable HTTP for agents' and services' devices, every request signed");
+            }
+
             if (serving is not null)
             {
                 context.Output.WriteLine($"  release  {serving.ReleaseLine()}");
@@ -298,6 +312,11 @@ internal sealed class DaemonLifecycle(CommandContext context)
             if (configured is not null)
             {
                 context.Output.WriteLine($"  the local-network profile is configured at {configured} and served from the runtime's next start");
+            }
+
+            if (mcpConfigured)
+            {
+                context.Output.WriteLine("  network MCP at /mcp is on, served from the runtime's next start");
             }
         }
 

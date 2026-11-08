@@ -69,6 +69,7 @@
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
+          "Vericairn.Mcp": "[0.7.3-dev, )",
           "Vericairn.Protocol": "[0.7.3-dev, )",
           "Vericairn.Runtime": "[0.7.3-dev, )",
           "Vericairn.Sdk": "[0.7.3-dev, )"

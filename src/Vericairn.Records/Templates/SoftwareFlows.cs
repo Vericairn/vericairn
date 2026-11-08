@@ -55,7 +55,7 @@ public static class SoftwareFlows
           "id": "vericairn.software/upgrade",
           "version": "1.0.0",
           "domain": "software",
-          "purpose": "Upgrade an estate to a published Vericairn release: check it, apply it, leave no runtime of an older release serving the estate, verify the estate with the pinned release, and clear the living documents the upgrade made due. Installing or running it grants nothing.",
+          "purpose": "Upgrade an estate to a published Vericairn release: check it, apply it, leave no runtime of an older release serving the estate, verify the estate with the pinned release, have the root operator adopt history checkpoints once, and clear the living documents the upgrade made due. Installing or running it grants nothing.",
           "subject": {
             "summary": "an estate's upgrade to one published Vericairn release",
             "fields": [
@@ -63,11 +63,13 @@ public static class SoftwareFlows
             ]
           },
           "roles": [
-            { "id": "upgrader", "holder": "either", "brief": "Upgrade the estate to the release with that release's own command line, replace a runtime of an older release that still serves the estate on this machine, verify the estate with the pinned release and clear what the upgrade made due. Restart workers only after their active work has settled." }
+            { "id": "upgrader", "holder": "either", "brief": "Upgrade the estate to the release with that release's own command line, replace a runtime of an older release that still serves the estate on this machine, verify the estate with the pinned release and clear what the upgrade made due. Restart workers only after their active work has settled." },
+            { "id": "root-operator", "holder": "person", "brief": "Sign the estate's adoption checkpoint once, after reading what it would witness and anchor: the root operator's act, never an agent's." }
           ],
           "never": [
             "Never upgrade with a command line of another release than the one the estate is upgraded to.",
-            "Never leave a runtime of an older release serving the estate after its upgrade."
+            "Never leave a runtime of an older release serving the estate after its upgrade.",
+            "Never adopt history checkpoints for the root operator: adoption is the root operator's signature."
           ],
           "steps": [
             {
@@ -138,11 +140,24 @@ public static class SoftwareFlows
               "recovery": "Settle each error the verification lists, under its record type's rules, and verify again; nothing is rewritten."
             },
             {
+              "key": "adopt",
+              "title": "History checkpoints adopted",
+              "kind": "operation",
+              "role": "root-operator",
+              "required": true,
+              "action": "Once, in an estate with no adoption checkpoint: vericairn estate checkpoint --adopt --check shows what adoption would witness and anchor, and the root operator signs it with vericairn estate checkpoint --adopt --by <root-operator> (OPS-07). An estate born with one, as estate init writes it, has this step done.",
+              "done": [
+                { "type": "history-checkpoint", "fields": { "trigger": "adoption" } }
+              ],
+              "recovery": "Adoption is signed once, with the root operator's device; read what the check lists, settle any record it would not anchor, and adopt again. Nothing is adopted twice."
+            },
+            {
               "key": "docs",
               "title": "Living documents the upgrade made due cleared",
               "kind": "operation",
               "role": "upgrader",
               "required": true,
+              "after": ["verify"],
               "action": "Clear every living document the upgrade made due: vericairn docs living lists them; review each that still holds, and revise and review each that does not.",
               "done": [
                 { "type": "living-document", "state": "due", "max": 0 }
