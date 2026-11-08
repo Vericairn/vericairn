@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:09Z",
+  "body": {
+    "note": "The builder's second machine.",
+    "principal": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+    "status": "admitted"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:841eef4554dc4164c2489ed52c8d21d8bde40b380abd1c23b1b36bb72ad26267",
+  "id": "01M6VJK9B5A32AFMM989FPTR5F",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "lrL1T2dhDydFRy9A7Ve79bVgLwqSibgfXk-ms4EtvmvjpgN0dd_UgxASYW3IfPDOElvZpXwPo66TIsRKvVFh3g"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:ff65357ca7ee1797ae3c8067fd6adaba8c9df1caf381011cd97cbc8a378dd514",
+    "id": "01M6VJK9B5A32AFMM989FPTR5D",
+    "type": "device"
+  },
+  "type": "admission"
+}

@@ -466,3 +466,93 @@ one by any principal other than the operator, clears nothing. A reader that lack
 product's `securityReports` in an earlier format is refused as a later format's field. `records describe product` and
 `records describe observation` include these contracts, and `vericairn.records/readers/8` explains the product's new field.
 
+## History checkpoints (0.9.2)
+
+ID-05 adds the `history-checkpoint` type within format 3, as 0.8.4 added
+`template-defaults` and `operator-request`; no record changes and no format number
+is added. An earlier format-3 reader reports a checkpoint as `record.unknown-type`
+rather than ignoring it, so update every participating reader before an estate
+writes one. The design is the estate's signed history design, decision
+`01M6CKCGVFN67GT24703NW01AQ`.
+
+| Field | Contract |
+| --- | --- |
+| `previous` | `{id, hash}` of every checkpoint head the signer's copy held, sorted by id and each once; empty only for the adoption checkpoint, an estate's first. |
+| `inventory` | Hashes of the objects listing the records this checkpoint first witnesses, each once. |
+| `records`, `recordSetHash` | The count and record set hash of everything it witnesses: its inventory and those of the checkpoints it follows, less the removals they acknowledge. The set hash is an estate observation's: SHA-256 of the canonical JSON array of `{hash, id}` sorted by id. |
+| `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
+| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`. This build validates its shape only; what a closing closes is ID-06's. |
+| `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures because this checkpoint lists them. |
+| `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
+
+A checkpoint has no subject and supersedes nothing, and none of its lists names the
+checkpoint itself. An inventory object is UTF-8 text with one line per record and a
+line feed after each: the record's path under `records/`, one space and its content
+hash, as in `admission/2026-10/<record id>.json sha256:<64 hex digits>`.
+Lines are sorted by record id across the checkpoint's objects in the order
+`inventory` names them, each record is listed once, and no object exceeds 8 MiB.
+Objects are content-addressed under `objects/`, so a checkpoint's signature fixes
+every line, and merges of record and object files stay pure additions.
+
+**Signed always.** A checkpoint is signed by an admitted device even under an
+optional charter, as policy records are; an unsigned one is `signature.required`
+and witnesses nothing. Any admitted device, an agent's included, may sign one
+without `anchored` or `removed`: witnessing grants nothing.
+
+**The graph.** A checkpoint counts when its signatures verify and it is either an
+adoption checkpoint by an author who may anchor (below) or follows, through hashes
+that match, only checkpoints that count. A checkpoint whose predecessor is missing,
+altered or does not count witnesses nothing (`history.checkpoint-missing`,
+`history.altered` or `history.checkpoint-invalid`). A checkpoint that counts
+witnesses what its inventory lists and what every checkpoint it follows lists. Two clones that
+each write one after the same head leave two heads after git merges them; the
+next checkpoint names both, and what it witnesses is the union, with no
+reconciliation. The heads, and the records and set hash each head states, are
+checked whenever the estate loads.
+
+**What must be present.** Every record a counting checkpoint witnesses is present
+with its listed hash. An absent record is `history.removed`, another hash or two
+checkpoints listing it with different hashes is `history.altered`, and a missing
+predecessor or inventory object is `history.checkpoint-missing`; each is an error
+naming the path and the witnessing checkpoint, and an altered record counts for
+nothing. Restoring the witnessed bytes settles it, and so does an anchoring
+checkpoint's `removed` entry for that id and hash; only the removals an author who
+may anchor lists count. A record re-added after its removal was acknowledged is part
+of the tail until a checkpoint lists it. When the only listings that disagree with a
+present record are by authors who may not anchor, and the record is signed by one
+who may anchor (with devices whose own admissions rest on signed admissions) or
+is anchored with its present hash, it keeps counting and the estate check warns
+`history.listing-mismatch`, naming each such listing's checkpoint and author. Any
+other record listed with other bytes is `history.altered`, whoever signed it, its
+own signer included. `history.checkpoint-invalid`
+reports a malformed inventory, a checkpoint that lists itself, and a head whose
+`records` or `recordSetHash` differ from what it witnesses.
+
+**Anchoring.** Only the root operator, or a human principal holding `administer`
+through a signed grant from the root operator or an operator whose role rests on
+signatures, whose own principal record rests on signatures and was written by such
+an operator, and whose grant no such operator has since revised away, anchors or acknowledges, never an agent, and only with devices whose
+own admissions rest on signed admissions; another author's lists are
+`history.anchor-author` and count for nothing, while its checkpoint still witnesses.
+An estate's first checkpoint, its adoption, counts only when one who may anchor signs
+it; another author's is `history.adoption-author` and adopts nothing. An estate has
+adopted checkpoints when it holds a counting checkpoint, that is, when the graph of
+counting checkpoints reaches a present adoption checkpoint by an author who may
+anchor; a checkpoint that does not reach one adopts nothing. There, while the
+charter requires signatures, an unsigned record counts only when an anchoring
+checkpoint lists its exact id and hash, whatever its date; one that is not anchored
+is `history.unanchored`, or `signature.required` when dated after the current charter
+revision. An unsigned admission also counts when an anchoring checkpoint lists it,
+besides the format-2 migration's list. Before adoption the earlier rule holds:
+an unsigned record dated at or before the current required revision counts.
+
+**Records that do not count.** A record that does not count is reported and kept:
+an unsigned record the rule above refuses, an unsigned policy record, checkpoint or
+device revision, and an altered witnessed record. From 0.9.2 the model's type and
+subject lookups, currency and supersession leave such a record out, in every estate,
+so no rule that admits, authorizes, accepts, clears or holds reads it, and a record
+that does not count supersedes nothing. A record whose subject or body reference
+does not count reports `record.subject-not-counting` or
+`record.reference-not-counting`. A device revision changes its key or name only when its device
+signed it.
+

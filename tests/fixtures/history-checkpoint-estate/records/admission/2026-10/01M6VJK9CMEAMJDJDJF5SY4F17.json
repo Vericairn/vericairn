@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-13T12:05:18Z",
+  "body": {
+    "note": "Revoked after its closing.",
+    "principal": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+    "revokedAt": "2026-10-13T12:05:18Z",
+    "status": "revoked"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:78a318dfd6f41b5d31f569bf343ea99a32a17336fb35ab0c0e7b63a1cf87bde7",
+  "id": "01M6VJK9CMEAMJDJDJF5SY4F17",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "DHMuEX1LPnVt97-zeJYR9Ymp3773lFXyosIIku6mNw5F_q4TOVnC9egIAHbvE-GGuu5pcGYO4W_MrcNciN2FHA"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:ff65357ca7ee1797ae3c8067fd6adaba8c9df1caf381011cd97cbc8a378dd514",
+    "id": "01M6VJK9B5A32AFMM989FPTR5D",
+    "type": "device"
+  },
+  "supersedes": "01M6VJK9B5A32AFMM989FPTR5F",
+  "type": "admission"
+}

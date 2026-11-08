@@ -109,6 +109,12 @@ public sealed class ValidationContext
             return null;
         }
 
+        if (!Model.Counts(target))
+        {
+            Findings.Error("record.reference-not-counting", $"{Location}#body.{field}", $"'{field}' references {id}, which does not count: it is kept as evidence and grants nothing, so nothing can rest on it.");
+            return null;
+        }
+
         return target;
     }
 

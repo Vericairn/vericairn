@@ -57,6 +57,7 @@ public static class RecordTypeRegistry
         new LivingDocumentType(),
         new DocumentReviewType(),
         new TemplateDefaultsType(),
+        new HistoryCheckpointType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases; not yet admitted.</summary>

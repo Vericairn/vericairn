@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:07Z",
+  "body": {
+    "note": "The builder's device.",
+    "principal": "01M6VJK9AYDXK4J2DGVCXSSM9Z",
+    "status": "admitted"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:b0eab7126fc556b22fe9a69920c58f2b750afa04e1d2486366a8c28a814295ac",
+  "id": "01M6VJK9B46977NMS055NRXG19",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "4CpNENwfoq4KKUA1yXAAG8ORSVW1YXDnhP5pIAt4otgqu7JXGlYkhMqSHS9Hz6JwsRFLxfG6_B6-FXtHf3yX2Q"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:6d3f54c96255726c49a3d8fff1a394d537df5b10fa3366ab60b259899f1cf7b9",
+    "id": "01M6VJK9B34RDJ5JCTTCDW2KER",
+    "type": "device"
+  },
+  "type": "admission"
+}

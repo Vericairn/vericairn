@@ -333,7 +333,7 @@ internal sealed partial class ReleaseCoordinationService(
             {
                 EstateModel currentModel = session.Load();
                 HashSet<string> ownPaths = excluded.Select(e => currentModel.ById[e.Id].ExpectedPath).ToHashSet(StringComparer.Ordinal);
-                EstateModel basisModel = EstateLoader.Load(session.Root, session.Files().Where(f => !ownPaths.Contains(f.Path)).ToArray());
+                EstateModel basisModel = session.LoadFiles(session.Files().Where(f => !ownPaths.Contains(f.Path)).ToArray());
                 var fresh = Admission(basisModel, request, releaseCommit, descriptor, destination, JsonNode.Parse(previousBody.GetRawText())!.AsObject(),
                     currentModel.ById[previousId].Supersedes, probe: false, excluded: excluded);
                 if (recordAccess.RequestDeviceRefusal(currentModel) is { } denied) fresh.Objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", identity, denied.Message)]);

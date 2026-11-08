@@ -40,7 +40,8 @@ internal sealed class PolicyBasis
         IEnumerable<PolicyImplementation>? implementations = null, PolicySubmission? submission = null,
         bool complete = true)
     {
-        Records = validated.Records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+        // Only records that count enter a policy basis: no rule that admits, authorizes, accepts, clears or holds reads the others.
+        Records = validated.CountingRecords.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ThenBy(r => r.ComputedHash, StringComparer.Ordinal).Select(r => new RecordEnvelope(r.Type, r.Id, r.At, r.By,
                 r.Subject, r.Supersedes, r.Body.Clone(), r.DeclaredHash, r.ComputedHash, r.Signatures.ToImmutableArray(), r.Format)).ToImmutableArray();
         Findings = validated.Findings.OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
@@ -99,7 +100,7 @@ internal sealed class PolicyBasis
 
     internal static PolicyBasis Recorded(EstateModel validated, IEnumerable<PolicyRepository>? repositories = null,
         IEnumerable<PolicyImplementation>? implementations = null) => new(validated,
-            validated.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault(),
+            validated.CountingRecords.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault(),
             PolicyTimeOrigin.Recorded, repositories, implementations: implementations);
 
     internal string? UnavailableReason() => unavailable;

@@ -34,7 +34,7 @@ public static class ReleaseContents
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(upTo);
-        return model.Records
+        return model.CountingRecords
             .Where(r => (after is null || string.CompareOrdinal(r.At, after) > 0) && string.CompareOrdinal(r.At, upTo) <= 0)
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();

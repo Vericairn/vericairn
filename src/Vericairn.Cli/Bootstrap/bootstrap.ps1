@@ -1,10 +1,18 @@
 # Vericairn estate bootstrap (PowerShell).
 # Obtains the Vericairn pinned in estate/manifest.json and runs it against this estate.
-# Usage: ./bootstrap.ps1 [vericairn arguments]   (default: estate check)
+# Usage: ./bootstrap.ps1 [--expect <checkpoint>] [vericairn arguments]   (default: estate check)
+# --expect first checks that this copy holds a history checkpoint known elsewhere, by id or hash, and stops unless it does.
 # In source mode VERICAIRN_SOURCE must be clean and at the pin. For development only,
 # VERICAIRN_SOURCE_OVERRIDE=1 allows a different or dirty local source and identifies it explicitly.
 # Runs on Windows PowerShell 5.1 and on PowerShell 7 on any platform.
 $ErrorActionPreference = 'Stop'
+$rest = @($args)
+$expect = $null
+if ($rest.Count -ge 1 -and $rest[0] -eq '--expect') {
+  if ($rest.Count -lt 2 -or -not $rest[1]) { Write-Error 'bootstrap: --expect needs a history checkpoint: its id or hash'; exit 2 }
+  $expect = $rest[1]
+  if ($rest.Count -gt 2) { $rest = @($rest[2..($rest.Count - 1)]) } else { $rest = @() }
+}
 $onWindows = ($env:OS -eq 'Windows_NT')
 $root = $PSScriptRoot
 $manifestPath = Join-Path $root 'estate/manifest.json'
@@ -113,6 +121,11 @@ switch ($mode) {
 
 $exe = Join-Path $bin 'vericairn'
 if ($onWindows) { $exe = "$exe.exe" }
-if ($args.Count -eq 0) { & $exe --estate $root estate check; exit $LASTEXITCODE }
-& $exe --estate $root @args
+if ($expect) {
+  if ($rest.Count -eq 0) { & $exe --estate $root estate check --expect $expect; exit $LASTEXITCODE }
+  & $exe --estate $root estate check --expect $expect
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+if ($rest.Count -eq 0) { & $exe --estate $root estate check; exit $LASTEXITCODE }
+& $exe --estate $root @rest
 exit $LASTEXITCODE

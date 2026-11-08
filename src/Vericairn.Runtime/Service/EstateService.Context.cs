@@ -23,7 +23,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             IReadOnlyList<RecordFile> files = session.Files();
-            EstateModel model = EstateLoader.Load(session.Root, files);
+            EstateModel model = session.LoadFiles(files);
             if (RequestDeviceRefusal(model) is not null)
             {
                 return ContextRefusal("denied", ContextDenied);
@@ -133,7 +133,7 @@ public sealed partial class EstateService
             {
                 // The pin is an identity, never a capability. Check access before decoding it.
                 IReadOnlyList<RecordFile> files = session.Files();
-                EstateModel model = EstateLoader.Load(session.Root, files);
+                EstateModel model = session.LoadFiles(files);
                 if (RequestDeviceRefusal(model) is not null)
                 {
                     return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));

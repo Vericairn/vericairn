@@ -27,6 +27,7 @@ internal static class RecordCompanionText
         "writing-exception" => "Persistent exact-token terms and any recorded removal. There is no expiry; current match counts belong to the writing checker.",
         "authority" or "roster" or "principal" => "Recorded identity, routing or grant terms. A role or preference alone grants no permission.",
         "device" or "admission" => "Recorded device and admission facts. Admission is distinct from possession of a key on this machine.",
+        "history-checkpoint" => "A signed list of records by path and hash, and the checkpoints it follows. Whether it counts, what it witnesses and whether those records are present belong to the estate check; an anchor or acknowledged removal counts only for the root operator or a person holding administer.",
         "work-order" => "Recorded work definition and typed placement. Derived work status and acceptance are separate reader views.",
         "living-document" or "document-revision" => "Recorded declaration or content pin. Generation equality does not establish authored review or clearance.",
         "possibility" => "Recorded possibility and disposition. Adoption is distinct from permission to execute it.",
