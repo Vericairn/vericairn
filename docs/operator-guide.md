@@ -1776,15 +1776,16 @@ The upgrade flow's subject is the version the estate upgrades to:
 | `upgrade` | The estate's observation of the version, from `estate upgrade --to <version>` | |
 | `runtime` | `estate verify` found the pinned release's runtime serving the estate here | `older-runtime` |
 | `verify` | `estate verify` found the estate check and status passing with it | `estate-check` |
-| `adopt` | An adoption history checkpoint that counts, signed once by the root operator or a person holding `administer` | |
+| `adopt` | An adoption history checkpoint that counts, signed once by the root operator or a person holding `administer` with `--expect-plan` naming the plan its check printed | |
 | `docs` | No living document due | |
 
 An upgrade with a runtime of an older release still serving the estate stops at `runtime` until it is replaced: the upgrade's own
 runtime step (OPS-05) replaces it where it can, and `estate verify --by <you>` records what serves the estate on this machine,
 naming the machine by the signing device it holds, so a failed check on any machine holds the step until that machine verifies
 again. `adopt` waits on the person the roster names in `root-operator`, once, in an estate with no adoption checkpoint: its
-action shows `vericairn estate checkpoint --adopt --check` and the signing command, which takes the check's plan hash with
-`--expect-plan` whenever the adoption anchors anything ([history checkpoints](#history-checkpoints-092)). An agent's checkpoint that claims adoption
+action runs `vericairn estate checkpoint --adopt --check`, reads the records it would anchor and the plan hash it prints, then
+has the root operator sign with `vericairn estate checkpoint --adopt --by <root-operator> --expect-plan <plan hash>`, refused if
+what it anchors changed since that check ([history checkpoints](#history-checkpoints-092)). An agent's checkpoint that claims adoption
 adopts nothing (`history.adoption-author`) and leaves the step waiting; an estate that adopted, or was born with an adoption
 checkpoint, has it done. `docs` does not wait on it.
 

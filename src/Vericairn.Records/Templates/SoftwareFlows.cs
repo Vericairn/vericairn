@@ -145,11 +145,11 @@ public static class SoftwareFlows
               "kind": "operation",
               "role": "root-operator",
               "required": true,
-              "action": "Once, in an estate with no adoption checkpoint: vericairn estate checkpoint --adopt --check shows what adoption would witness and anchor, and the root operator signs it with vericairn estate checkpoint --adopt --by <root-operator> (OPS-07). An estate born with one, as estate init writes it, has this step done.",
+              "action": "Once, in an estate with no adoption checkpoint: run vericairn estate checkpoint --adopt --check, read the records it would anchor and the plan hash it prints, then the root operator signs the adoption with vericairn estate checkpoint --adopt --by <root-operator> --expect-plan <plan hash>, which is refused if what it anchors changed since that check. An estate born with one, adopted when its root operator's first device admitted itself, has this step done.",
               "done": [
                 { "type": "history-checkpoint", "fields": { "trigger": "adoption" } }
               ],
-              "recovery": "Adoption is signed once, with the root operator's device; read what the check lists, settle any record it would not anchor, and adopt again. Nothing is adopted twice."
+              "recovery": "Adoption is signed once, with the root operator's device; read what the check lists, settle any record it would not anchor, run the check again for its new plan hash, and adopt again. Nothing is adopted twice."
             },
             {
               "key": "docs",

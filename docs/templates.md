@@ -634,8 +634,10 @@ flow's is `version`. The release flow's `upgrade-estate` step runs the upgrade
 flow by its exact pin and is optional, off by default, for an estate that runs
 the product it releases. The upgrade flow's `adopt` step is the root
 operator's adoption of history checkpoints, a person's role, done once an
-adoption checkpoint that counts exists, which `OPS-07`'s
-`estate checkpoint --adopt` writes. The release flow's `review` option
+adoption checkpoint that counts exists: its action runs
+`estate checkpoint --adopt --check`, then the root operator's
+`estate checkpoint --adopt --by <root-operator> --expect-plan <plan hash>`
+with the plan hash that check printed. The release flow's `review` option
 (`none`, `self` or `independent`,
 `none` by default) sets the review of the set's and the merge's items, which the
 candidate's release review covers.
