@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 18, November 8, 2026. `mcp serve --connection` holds the session's server stream while its harness holds a resource subscription and writes the resource notifications to standard output, in the development build.
+
 Revision 17, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
 
 Revision 16, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
