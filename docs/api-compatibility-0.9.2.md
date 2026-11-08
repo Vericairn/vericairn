@@ -781,3 +781,13 @@ and `estate verify`, which needs the principal's admitted device on this machine
 Each records ordinary `verification` records through the existing record route, with methods
 `vericairn.software/prior-version-tokens`, `vericairn.software/preparation-wording`, `vericairn.software/serving-runtime` and
 `vericairn.software/estate-check`. No record type, field or MCP tool is added.
+
+## Authority revisions (FIX-108)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In every estate,
+a `principal` or `authority` revision dated before the record it supersedes, already reported as `record.supersedes`, now
+counts for nothing. Anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's closing read
+only grants and principal revisions written by the root operator or by an operator who held the role at the revision's time and
+still holds it, decided by dropping revisions until none changes
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). Other records keep reading roles and grants
+as they stood at their time. An estate holding no such revision, such as the first-party estate, reads as before.

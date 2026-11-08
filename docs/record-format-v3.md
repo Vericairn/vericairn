@@ -641,9 +641,13 @@ already read its grants at the action's time. The strongest acts read more stric
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. A role has no closing: a former operator's
-records dated into the time the role stood read as it stood, so close and revoke a person's
-devices when removing their role.
+withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) the grants and principal
+revisions those acts rest on count only when the root operator, or an operator whose role
+stood at the revision's time and still stands, wrote them, decided by dropping revisions until
+none changes; and in every estate a grant or principal revision dated before the record it
+supersedes counts for nothing. Ordinary records keep the reading as it stood. A role has no
+closing: a former operator's records dated into the time the role stood read as it stood, so
+close and revoke a person's devices when removing their role.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The
