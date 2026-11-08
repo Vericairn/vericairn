@@ -87,30 +87,10 @@ internal static class EventRoutes
             return Refused(context, device, StatusCodes.Status400BadRequest, new Problem("invalid", $"wait is a whole number of seconds from 0 to {EventVocabulary.MaxWaitSeconds}.", []));
         }
 
-        (EventSubscription? subscription, IReadOnlyList<EventSelector> selectors, Problem? problem) = host.Service.OpenEventSelection(request.After, request.Filter, request.Selections,
-            request.Principal, device?.Identity, device?.PublicKey, device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
-        if (subscription is null)
-        {
-            Problem refusal = problem ?? new Problem("refused", "The event journal is unavailable.", []);
-            return Refused(context, device, refusal.Code switch
-            {
-                "invalid" => StatusCodes.Status400BadRequest,
-                "unavailable" => StatusCodes.Status503ServiceUnavailable,
-                _ => StatusCodes.Status401Unauthorized,
-            }, refusal);
-        }
-
-        if (subscription.Reset)
-        {
-            return Results.Json(new EventSelectResponse([], [], subscription.Cursor, Reset: true), ProtocolJson.Options);
-        }
-
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping);
-        deadline.CancelAfter(TimeSpan.FromSeconds(wait));
         IDisposable? slot = null;
-        CancellationToken yielding = CancellationToken.None;
         try
         {
+            // A device's slot is taken before anything is derived, as GET /v1/events takes it, so a device at its limit costs no pass.
             if (device is not null)
             {
                 slot = host.EventStreams.TryAcquire(device.Identity, device.Principal);
@@ -120,7 +100,25 @@ internal static class EventRoutes
                         new Problem("refused", $"A device holds at most {StreamsPerDevice} event streams and long polls at once, one principal's devices {StreamsPerPrincipal} and all devices {StreamsPerRuntime}; close one first.", []));
                 }
             }
-            else if (wait > 0)
+
+            (EventSubscription? subscription, IReadOnlyList<EventSelector> selectors, Problem? problem) = host.Service.OpenEventSelection(request.After, request.Filter, request.Selections,
+                request.Principal, device?.Identity, device?.PublicKey, device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
+            if (subscription is null)
+            {
+                // A runtime keeping no journal is told from one briefly unable to read it: the first follows nothing, the second retries.
+                Problem refusal = problem ?? new Problem("refused", "The event journal is unavailable.", []);
+                return Refused(context, device, SelectStatus(refusal.Code), refusal);
+            }
+
+            if (subscription.Reset)
+            {
+                return Results.Json(new EventSelectResponse([], [], subscription.Cursor, Reset: true), ProtocolJson.Options);
+            }
+
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping);
+            deadline.CancelAfter(TimeSpan.FromSeconds(wait));
+            CancellationToken yielding = CancellationToken.None;
+            if (wait > 0 && device is null)
             {
                 // The local socket's MCP servers take turns within their own budget; one that waits out its time for a turn answers
                 // with no event from where it stood, as a long poll that heard nothing does.
@@ -373,6 +371,18 @@ internal static class EventRoutes
         // An unknown key and a key the reader may not read are answered alike.
         return envelope is null ? Results.NotFound() : Results.Json(envelope, ProtocolJson.Options);
     }
+
+    /// <summary>
+    /// The status a selecting read is refused with: 501 for a runtime that keeps no journal, which a follower takes as following
+    /// nothing; 503 for one briefly unable to read it or stopping, and 429 for a busy device, which a follower retries.
+    /// </summary>
+    internal static int SelectStatus(string code) => code switch
+    {
+        "invalid" => StatusCodes.Status400BadRequest,
+        EventVocabulary.NoJournal => StatusCodes.Status501NotImplemented,
+        "unavailable" => StatusCodes.Status503ServiceUnavailable,
+        _ => StatusCodes.Status401Unauthorized,
+    };
 
     private static bool AcceptsStream(HttpRequest request) =>
         MediaTypeHeaderValue.TryParseList(request.Headers.Accept, out IList<MediaTypeHeaderValue>? accepted)

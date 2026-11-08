@@ -118,6 +118,12 @@ public static class EventVocabulary
     /// <summary>From 0.9.2: the most selections one selecting read names.</summary>
     public const int MaxSelections = 32;
 
+    /// <summary>
+    /// From 0.9.2: the problem code of a selecting read on a runtime that keeps no event journal, apart from <c>unavailable</c>, a
+    /// journal briefly unable to be read or a runtime stopping, which a follower retries.
+    /// </summary>
+    public const string NoJournal = "no-journal";
+
     /// <summary>Every kind of event. due and presence are reserved for reminders and presence leases, which later releases raise.</summary>
     public static ImmutableArray<string> Kinds { get; } = ["record", "attention", "ask", "step", "request", "due", "run", "presence"];
 

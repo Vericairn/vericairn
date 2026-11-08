@@ -177,8 +177,9 @@ poll does, with `429` when they are taken. On the local socket a read that waits
 servers, beside the command line's slots and reserve, and one that does not wait holds none. When those four are held,
 a read waits until the one held longest has held its slot five seconds, which then answers at once with what it has,
 and takes its place: one that waits out its own `wait` first answers with no event. An unknown kind or category, a
-malformed filter, more than 32 selections or a `wait` outside 0 to 25 answers 400, and a device naming another
-principal 401.
+malformed filter, more than 32 selections or a `wait` outside 0 to 25 answers 400, a device naming another
+principal 401, a runtime that keeps no journal 501 with the problem `no-journal`, and one briefly unable to read its
+journal, or stopping, 503 with `unavailable`, which a follower retries.
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists
 the additions.
 

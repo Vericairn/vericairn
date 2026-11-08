@@ -423,7 +423,8 @@ public static class OpenApiDocument
             responses["400"] = new JsonObject { ["description"] = "A malformed filter or selection, more than 32 selections or a wait outside 0 to 25 (Problem)." };
             responses["401"] = new JsonObject { ["description"] = "As every request on its profile; and a device naming another principal, or a principal not known here (Problem with code denied)." };
             responses["429"] = new JsonObject { ["description"] = "A device already holds four streams and long polls, or the runtime its limit (Problem). The local socket's reads wait their turn instead." };
-            responses["503"] = new JsonObject { ["description"] = "The runtime keeps no event journal, or it is stopping (Problem with code unavailable)." };
+            responses["501"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code no-journal): a follower follows nothing here." };
+            responses["503"] = new JsonObject { ["description"] = "The journal cannot be read now, or the runtime is stopping (Problem with code unavailable): read again later." };
         }
         else if (path == "/v1/events/{key}")
         {

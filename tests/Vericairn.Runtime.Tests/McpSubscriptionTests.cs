@@ -147,6 +147,21 @@ public sealed class McpSubscriptionTests : IDisposable
         Assert.Equal("invalid", service.OpenEventSelector(new EventFilter(Kinds: ["nothing"])).Problem?.Code);
     }
 
+    [Fact]
+    public async Task ARuntimeKeepingNoJournalAnswersItsOwnProblemAndASessionThereDeclaresNoSubscriptions()
+    {
+        using var estate = new TestEstate(3);
+        using EstateService service = EstateService.Open(estate.Root);
+        Assert.Equal(EventVocabulary.NoJournal, service.EventsSelect(new EventSelectRequest(Wait: 0)).Problem?.Code);
+        Assert.Equal("unavailable", service.Events().Problem?.Code);
+        Assert.False(await new McpResourceWatch(new McpApiEventSource(service, estate.BuilderId)).AvailableAsync(TestContext.Current.CancellationToken));
+
+        // Once the runtime keeps one, the same read answers.
+        service.EnableEvents(directory);
+        Assert.Null(service.EventsSelect(new EventSelectRequest(Wait: 0)).Problem);
+        Assert.True(await new McpResourceWatch(new McpApiEventSource(service, estate.BuilderId)).AvailableAsync(TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         try

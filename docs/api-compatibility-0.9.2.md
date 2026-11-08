@@ -342,8 +342,9 @@ no record type changes. `AGENTS.md` gains one paragraph on reaching the estate f
 API version 1 adds one operation, `POST /v1/events/select`, a read with a request scope and no write ledger: a long poll
 of the event journal that also says, for each event delivered, which of up to 32 selections it passes. The protocol adds
 `EventSelectRequest` (`after`, `filter`, `selections`, `principal`, `wait`), `EventSelection` (a filter and an optional
-`since` cursor), `EventSelectResponse` (`events`, `selected`, `cursor`, `reset`, `problem`) and
-`EventVocabulary.MaxSelections`; the OpenAPI document adds the route and the schemas `EventSelectRequest` and
+`since` cursor), `EventSelectResponse` (`events`, `selected`, `cursor`, `reset`, `problem`),
+`EventVocabulary.MaxSelections` and `EventVocabulary.NoJournal`, the problem code `no-journal` the read answers on a
+runtime that keeps no journal (501 from a daemon), apart from `unavailable` (503), a journal briefly unable to be read; the OpenAPI document adds the route and the schemas `EventSelectRequest` and
 `EventSelectResponse`. `IEstateApi` adds `EventsSelect(request)` and `EventsSelectAsync(request, cancellationToken)`, each
 with a default implementation, so existing implementers stay source-compatible; `CancellationBoundApi` and the SDK's
 `VericairnClient` implement both, with the one-minute deadline `Events` has. A device's read holds one of its own slots,

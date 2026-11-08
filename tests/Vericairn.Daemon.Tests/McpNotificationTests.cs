@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Http;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Model;
@@ -484,8 +485,12 @@ public sealed class McpNotificationTests
     [InlineData(HttpStatusCode.TooManyRequests, true)]
     [InlineData(HttpStatusCode.ServiceUnavailable, true)]
     [InlineData(HttpStatusCode.Unauthorized, false)]
+    [InlineData(HttpStatusCode.NotImplemented, false)]
     public async Task ABusyRuntimeStillDeclaresSubscriptionsAndWhatWasDeclaredHolds(HttpStatusCode status, bool declared)
     {
+        // A busy runtime (429) and one briefly unable to read its journal (503) keep one; one that keeps none (501) declares none.
+        Assert.Equal(StatusCodes.Status501NotImplemented, EventRoutes.SelectStatus(EventVocabulary.NoJournal));
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, EventRoutes.SelectStatus("unavailable"));
         var runtime = new SelectingRuntime { Status = status };
         using var client = new VericairnClient(new HttpClient(runtime) { BaseAddress = new Uri("http://fixture.invalid") });
         var watch = new McpResourceWatch(new McpApiEventSource(client, null));
@@ -851,7 +856,13 @@ internal sealed class SelectingRuntime : HttpMessageHandler
     {
         string body = Status == HttpStatusCode.OK
             ? JsonSerializer.Serialize(new EventSelectResponse([], [], "cursor"), ProtocolJson.Options)
-            : JsonSerializer.Serialize(new Problem(Status == HttpStatusCode.TooManyRequests ? "refused" : Status == HttpStatusCode.Unauthorized ? "denied" : "unavailable", "As the test answers.", []), ProtocolJson.Options);
+            : JsonSerializer.Serialize(new Problem(Status switch
+            {
+                HttpStatusCode.TooManyRequests => "refused",
+                HttpStatusCode.Unauthorized => "denied",
+                HttpStatusCode.NotImplemented => EventVocabulary.NoJournal,
+                _ => "unavailable",
+            }, "As the test answers.", []), ProtocolJson.Options);
         return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
     }
 }

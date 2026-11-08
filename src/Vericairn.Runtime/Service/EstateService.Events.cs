@@ -263,6 +263,11 @@ public sealed partial class EstateService
         IReadOnlyList<EventSelection>? selections, string? principal, string? device = null, string? devicePublicKey = null, string? profile = null)
     {
         selections ??= [];
+        if (journal is null)
+        {
+            return (null, [], NoJournal);
+        }
+
         if (selections.Count > EventVocabulary.MaxSelections)
         {
             return (null, [], new Problem("invalid", $"A read names at most {EventVocabulary.MaxSelections} selections.", []));
@@ -526,6 +531,9 @@ public sealed partial class EstateService
     private static bool Fatal(Exception exception) => exception is OutOfMemoryException or StackOverflowException or AccessViolationException or InsufficientExecutionStackException;
 
     private static readonly Problem EventsUnavailable = new("unavailable", "This runtime keeps no event journal: the daemon keeps it. Start the runtime with 'vericairn runtime start' and read events through it.", []);
+
+    /// <summary>A selecting read's answer on a runtime that keeps no journal, with a code of its own, so a follower follows nothing.</summary>
+    private static readonly Problem NoJournal = EventsUnavailable with { Code = EventVocabulary.NoJournal };
 
     private static string AttentionProjection(string principal) => "attention:" + principal;
 

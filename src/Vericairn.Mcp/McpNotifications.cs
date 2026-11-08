@@ -442,9 +442,9 @@ public sealed class McpApiEventSource : IMcpEventSource
 
     /// <inheritdoc />
     /// <remarks>
-    /// A read that does not wait holds no slot, so it is never refused for being busy. A runtime that answers at all with a busy or
-    /// stopping status keeps a journal, which the daemon always does; only an embedded runtime keeping none, a runtime without the
-    /// selecting read, or a reader it refuses, declares none.
+    /// A read on the local socket that does not wait holds no slot, so it is not refused for being busy. A busy runtime (429) and one
+    /// briefly unable to read its journal or stopping (503) keep a journal all the same, and are retried; a runtime that keeps none
+    /// (the problem <c>no-journal</c>, 501 from a daemon), one without the selecting read, or a reader it refuses, declares none.
     /// </remarks>
     public async Task<bool> AvailableAsync(CancellationToken cancellationToken)
     {
