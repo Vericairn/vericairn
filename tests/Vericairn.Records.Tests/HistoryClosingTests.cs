@@ -407,5 +407,21 @@ public class HistoryClosingTests
         Assert.Contains(model.Trust.Closings, c => c.Record.Id == closing.Id && c.Kind == "grant");
     }
 
+    [Fact]
+    public void AClosingFromADeviceAdmittedOnlyThroughAnAnchorSaysItClosesNothing()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        f.Adopt();
+        RecordEnvelope device = f.Device(f.Estate.OperatorId, "Admitted through an anchor");
+        RecordEnvelope admission = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "Unsigned."), device.Reference);
+        f.Checkpoint(anchored: [admission]);
+        RecordEnvelope closing = f.Close("device", f.BuilderDevice.Id, signer: f.Signer(device));
+        EstateModel model = f.Load();
+        Assert.True(model.Counts(model.ById[closing.Id]));
+        Assert.Empty(model.Trust.Closings);
+        Assert.Contains(model.Findings, x => x.Code == "history.closing-author" && x.Location == closing.ExpectedPath + "#body.closes");
+    }
+
     private static string Errors(EstateModel model) => string.Join('\n', model.Findings.Where(x => x.Severity == Severity.Error));
 }

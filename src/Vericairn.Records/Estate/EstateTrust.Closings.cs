@@ -326,6 +326,17 @@ internal sealed partial class EstateTrust
     /// </summary>
     private IEnumerable<Finding> Unfollowed()
     {
+        // A closing that counts as a checkpoint yet acts not, with no finding of its own, verifies only through an anchoring
+        // checkpoint's anchors, which closings are not judged with: say so rather than leave it silent.
+        foreach (RecordEnvelope checkpoint in model.OfType("history-checkpoint").Where(r => History.CountingCheckpoints.Contains(r.Id) && CheckpointBody.ReadCloses(r.Body) is not null))
+        {
+            string location = checkpoint.ExpectedPath + "#body.closes";
+            if (closings.Any(c => c.Record.Id == checkpoint.Id) || closingFindings.Any(f => f.Location == location)) continue;
+            yield return new Finding(Severity.Error, "history.closing-author", location,
+                "This closing counts as a checkpoint but closes nothing: closings are judged with the format-2 migration's anchors alone, and a device that signed it is admitted only through an anchoring checkpoint. Write the closing from a device admitted by a signed admission.");
+        }
+
+
         foreach (Closing closing in closings)
         {
             (bool followed, string act) = closing.Kind switch
