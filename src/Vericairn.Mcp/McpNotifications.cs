@@ -3,6 +3,7 @@
 
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -119,6 +120,7 @@ public sealed class McpResourceWatch
     private TaskCompletionSource subscribed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool listPending;
     private DateTimeOffset? listSent;
+    private bool? declared;
 
     /// <summary>A session's subscriptions over its event source; <paramref name="time"/> spaces the notifications.</summary>
     public McpResourceWatch(IMcpEventSource source, TimeProvider? time = null)
@@ -142,8 +144,27 @@ public sealed class McpResourceWatch
         get { lock (gate) return [.. entries.Keys.Order(StringComparer.Ordinal)]; }
     }
 
-    /// <summary>Whether this connection can subscribe: its runtime keeps an event journal it may read.</summary>
-    public Task<bool> AvailableAsync(CancellationToken cancellationToken = default) => source.AvailableAsync(cancellationToken);
+    /// <summary>
+    /// Whether this connection can subscribe: its runtime keeps an event journal it may read. The first answer holds for the session,
+    /// so what initialization declared is what <c>resources/subscribe</c> later finds.
+    /// </summary>
+    public async Task<bool> AvailableAsync(CancellationToken cancellationToken = default)
+    {
+        lock (gate)
+        {
+            if (declared is bool known)
+            {
+                return known;
+            }
+        }
+
+        bool answer = await source.AvailableAsync(cancellationToken).ConfigureAwait(false);
+        lock (gate)
+        {
+            declared ??= answer;
+            return declared.Value;
+        }
+    }
 
     /// <summary>
     /// Subscribes to a URI whose changes pass <paramref name="filter"/>; subscribing again to a URI already subscribed changes nothing.
@@ -328,7 +349,9 @@ public sealed class McpResourceWatch
                 failures++;
                 if (log is not null)
                 {
-                    await log.WriteLineAsync($"vericairn mcp: events could not be read now ({ClientFailure.FromException(exception)?.Message ?? exception.Message}); retrying").ConfigureAwait(false);
+                    string why = exception is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } ? "the runtime is busy"
+                        : ClientFailure.FromException(exception)?.Message ?? exception.Message;
+                    await log.WriteLineAsync($"vericairn mcp: events could not be read now ({why}); retrying").ConfigureAwait(false);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Min(failures, 5)))), time, cancellationToken).ConfigureAwait(false);
@@ -392,11 +415,12 @@ public sealed class McpResourceWatch
 }
 
 /// <summary>
-/// A session's events through the estate API (MCP-05), for the server over standard input and output: a long poll of
-/// <c>GET /v1/events</c> for the session's principal follows the journal from the session's own cursor, and for each round, a read
-/// of the same span with each subscription's filter says which events concern it. Each read passes the runtime's audience check;
-/// the cursors are the runtime's, sealed for the principal. On the local socket the operating-system user reads for the acting
-/// principal, or the operator when the session acts for none.
+/// A session's events through the estate API (MCP-05), for the server over standard input and output: one selecting long poll of
+/// <c>POST /v1/events/select</c> for the session's principal follows the journal from the session's own cursor, and the runtime says
+/// for each event which subscriptions it concerns, judging each through what the principal may read. On the local socket these
+/// reads take the MCP servers' own slots, never the command line's, and a session beyond them waits its turn. The cursors are the
+/// runtime's, sealed for the principal; the operating-system user reads for the acting principal, or the operator when the session
+/// acts for none.
 /// </summary>
 public sealed class McpApiEventSource : IMcpEventSource
 {
@@ -405,7 +429,7 @@ public sealed class McpApiEventSource : IMcpEventSource
     private readonly IEstateApi api;
     private readonly string? principal;
     private readonly object gate = new();
-    private readonly Dictionary<string, Interest> interests = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EventSelection> interests = new(StringComparer.Ordinal);
     private string? cursor;
     private bool? available;
 
@@ -417,6 +441,11 @@ public sealed class McpApiEventSource : IMcpEventSource
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A read that does not wait holds no slot, so it is never refused for being busy. A runtime that answers at all with a busy or
+    /// stopping status keeps a journal, which the daemon always does; only an embedded runtime keeping none, a runtime without the
+    /// selecting read, or a reader it refuses, declares none.
+    /// </remarks>
     public async Task<bool> AvailableAsync(CancellationToken cancellationToken)
     {
         if (available is bool known)
@@ -426,17 +455,21 @@ public sealed class McpApiEventSource : IMcpEventSource
 
         try
         {
-            EventsResponse probe = await api.EventsAsync(null, Followed, principal, 0, cancellationToken).ConfigureAwait(false);
+            EventSelectResponse probe = await api.EventsSelectAsync(new EventSelectRequest(Filter: Followed, Principal: principal, Wait: 0), cancellationToken).ConfigureAwait(false);
             available = probe.Problem is null;
         }
         catch (NotSupportedException)
         {
             available = false;
         }
+        catch (HttpRequestException exception) when (exception.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
+        {
+            // Busy or briefly unable to derive: the daemon keeps the journal all the same, and following retries.
+            available = true;
+        }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested && McpEvents.Transient(exception))
         {
-            // Unreachable now, perhaps refused for good: this connection declares no subscriptions, and asks again next time.
-            return false;
+            available = false;
         }
 
         return available.Value;
@@ -448,8 +481,9 @@ public sealed class McpApiEventSource : IMcpEventSource
         ArgumentException.ThrowIfNullOrEmpty(key);
         ArgumentNullException.ThrowIfNull(filter);
 
-        // A read at the journal's head checks the filter and the reader, and names where the subscription starts.
-        EventsResponse opened = await api.EventsAsync(null, filter, principal, 0, cancellationToken).ConfigureAwait(false);
+        // A read at the journal's head that does not wait checks the filter and the reader, and names where the subscription starts.
+        EventSelectResponse opened = await api.EventsSelectAsync(new EventSelectRequest(Filter: Followed, Selections: [new EventSelection(filter)], Principal: principal, Wait: 0),
+            cancellationToken).ConfigureAwait(false);
         if (opened.Problem is { } problem)
         {
             throw new McpResourceException(-32603, problem.Message);
@@ -457,7 +491,7 @@ public sealed class McpApiEventSource : IMcpEventSource
 
         lock (gate)
         {
-            interests[key] = new Interest(filter, opened.Cursor);
+            interests[key] = new EventSelection(filter, opened.Cursor);
             cursor ??= opened.Cursor;
         }
     }
@@ -479,13 +513,17 @@ public sealed class McpApiEventSource : IMcpEventSource
     public async Task<McpEventRound> ReadAsync(TimeSpan wait, CancellationToken cancellationToken)
     {
         string? from;
+        string[] keys;
+        EventSelection[] selections;
         lock (gate)
         {
             from = cursor;
+            keys = [.. interests.Keys];
+            selections = [.. keys.Select(k => interests[k])];
         }
 
-        int seconds = (int)Math.Clamp(Math.Ceiling(wait.TotalSeconds), 0, EventVocabulary.MaxWaitSeconds);
-        EventsResponse response = await api.EventsAsync(from, Followed, principal, seconds, cancellationToken).ConfigureAwait(false);
+        int seconds = (int)Math.Clamp(Math.Floor(wait.TotalSeconds), 0, EventVocabulary.MaxWaitSeconds);
+        EventSelectResponse response = await api.EventsSelectAsync(new EventSelectRequest(from, Followed, selections, principal, seconds), cancellationToken).ConfigureAwait(false);
         if (response.Problem is { Code: "unavailable" } unavailable)
         {
             // The journal cannot be read now: the follower tries again later.
@@ -497,81 +535,28 @@ public sealed class McpApiEventSource : IMcpEventSource
             return new McpEventRound([], Refusal: problem.Message);
         }
 
-        List<(string Key, Interest Interest)> current;
+        if (response.Events is null || response.Selected is null || string.IsNullOrEmpty(response.Cursor))
+        {
+            throw new InvalidOperationException("The runtime's answer to a selecting read named no events or cursor.");
+        }
+
         lock (gate)
         {
             cursor = interests.Count > 0 ? response.Cursor : null;
-            current = [.. interests.Select(i => (i.Key, i.Value))];
         }
 
         if (response.Reset)
         {
-            foreach ((_, Interest interest) in current)
-            {
-                interest.Since = null;
-            }
-
             return new McpEventRound([], Reset: true);
         }
 
-        if (response.Events.Count == 0)
+        var events = new List<McpEvent>(response.Events.Count);
+        for (int i = 0; i < response.Events.Count; i++)
         {
-            return McpEventRound.Empty;
+            IReadOnlyList<int> passed = response.Selected.Count > i ? response.Selected[i] : [];
+            events.Add(new McpEvent(response.Events[i], [.. passed.Where(index => index >= 0 && index < keys.Length).Select(index => keys[index])]));
         }
 
-        HashSet<string>[] touched = [.. response.Events.Select(_ => new HashSet<string>(StringComparer.Ordinal))];
-        foreach ((string key, Interest interest) in current)
-        {
-            string? since = interest.Since;
-            interest.Since = null;
-            if (interest.Filter.Subjects is not { Count: > 0 })
-            {
-                for (int i = 0; i < response.Events.Count; i++)
-                {
-                    if (McpEvents.Passes(interest.Filter, response.Events[i]))
-                    {
-                        touched[i].Add(key);
-                    }
-                }
-
-                continue;
-            }
-
-            if (!response.Events.Any(e => interest.Filter.Kinds is not { Count: > 0 } kinds || kinds.Contains(e.Kind, StringComparer.Ordinal)))
-            {
-                continue;
-            }
-
-            // The same span, read with the subscription's own filter: the runtime relates each event to its subjects through what the
-            // principal may read. A subscription opened during the round reads from where it started.
-            HashSet<string>? keys;
-            try
-            {
-                EventsResponse ranged = await api.EventsAsync(since ?? from ?? response.Cursor, interest.Filter, principal, 0, cancellationToken).ConfigureAwait(false);
-                keys = ranged.Problem is null && !ranged.Reset ? [.. ranged.Events.Select(e => e.Key)] : null;
-            }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested && McpEvents.Transient(exception))
-            {
-                // Unread now: a notification is a hint, so the resource is told it may have changed rather than missing a change.
-                keys = null;
-            }
-
-            for (int i = 0; i < response.Events.Count; i++)
-            {
-                if (keys is null || keys.Contains(response.Events[i].Key))
-                {
-                    touched[i].Add(key);
-                }
-            }
-        }
-
-        return new McpEventRound([.. response.Events.Select((e, i) => new McpEvent(e, touched[i]))]);
-    }
-
-    private sealed class Interest(EventFilter filter, string since)
-    {
-        public EventFilter Filter { get; } = filter;
-
-        public string? Since { get; set; } = since;
+        return new McpEventRound(events);
     }
 }

@@ -149,6 +149,7 @@ public sealed class McpNotificationTests
         EventsResponse withheld = EventsRead(await agent.CallAsync("events_read", NetworkMcp.Args(("after", before), ("wait", 2))));
         Assert.Empty(withheld.Events);
         Assert.True(waited.Elapsed >= TimeSpan.FromSeconds(1.5), "A withheld event must not end a wait early.");
+        Assert.True(waited.Elapsed < TimeSpan.FromSeconds(3.5), $"A wait of two seconds ended after {waited.Elapsed.TotalSeconds:F1}.");
         Assert.NotEqual(before, withheld.Cursor);
 
         // A change it may read is told at once on both, its listing change too, the withheld one having moved no interval.
@@ -313,15 +314,221 @@ public sealed class McpNotificationTests
         {
             JsonObject capabilities = (await client.InitializeAsync())["result"]!["capabilities"]!.AsObject();
             Assert.True(capabilities["resources"]!["subscribe"]!.GetValue<bool>());
+
+            // A session that subscribes to nothing holds no server stream, and so none of its device's stream slots.
+            Assert.NotNull((await client.RequestAsync("ping"))["result"]);
+            await Task.Delay(Quiet, TestContext.Current.CancellationToken);
+            Assert.True(harness.Host.Mcp.Sessions.Named(bridge.Session!) is { Streaming: false });
+
             Assert.NotNull((await client.RequestAsync("resources/subscribe", new JsonObject { ["uri"] = brief }))["result"]);
             await WaitUntilAsync(() => harness.Host.Mcp.Sessions.Named(bridge.Session!) is { Streaming: true });
             Verify(harness, harness.Estate.OperatorId, order);
             await client.NotificationAsync(n => IsUpdated(n, brief));
             await client.NotificationAsync(IsListChanged);
+
+            // Unsubscribed from everything, the bridge lets the stream go.
+            Assert.NotNull((await client.RequestAsync("resources/unsubscribe", new JsonObject { ["uri"] = brief }))["result"]);
+            await WaitUntilAsync(() => harness.Host.Mcp.Sessions.Named(bridge.Session!) is { Streaming: false });
         }
 
         // Its input ended: the bridge let its stream go and ended its session.
         Assert.Equal(0, harness.Host.Mcp.Sessions.Count);
+    }
+
+    [Fact]
+    public async Task FiveFollowingStdioSessionsAndTheCommandLineAllWork()
+    {
+        (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync(mcp: false);
+        await using LocalNetworkHarness owned = harness;
+        string builder = harness.Estate.BuilderId;
+        RecordResponse order = Order(harness);
+        string brief = Uri(harness, "brief", order.Id);
+        var sessions = new List<McpLines>();
+        try
+        {
+            // Four sessions follow the journal, filling the MCP servers' own slots of the local socket.
+            for (int i = 0; i < EventRoutes.McpOnLocalSocket; i++)
+            {
+                sessions.Add(await FollowingAsync(harness, builder, brief));
+            }
+
+            await WaitUntilAsync(() => harness.Host.EventStreams.Mcp == EventRoutes.McpOnLocalSocket);
+
+            // A fifth still declares subscriptions and subscribes, though every MCP slot is held: it waits its turn, never refused.
+            sessions.Add(await FollowingAsync(harness, builder, brief));
+
+            // The command line keeps every one of its own: four long polls and streams of the local socket open at once.
+            await using var watch = new EventFollower(token => harness.Socket.StreamEventsAsync(filter: new EventFilter(Kinds: ["record"]), cancellationToken: token));
+            Assert.Null((await watch.NextAsync()).Event);
+            Task<EventsResponse>[] polls = [.. Enumerable.Range(0, EventRoutes.StreamsPerDevice - 1).Select(_ => harness.Socket.EventsAsync(wait: 2, cancellationToken: TestContext.Current.CancellationToken))];
+            Assert.All(await Task.WhenAll(polls), poll => Assert.Null(poll.Problem));
+            Assert.Equal(EventRoutes.McpOnLocalSocket, harness.Host.EventStreams.Mcp);
+
+            // One write is heard by all five sessions, by the command line's stream, and by a session's events_read waiting its turn.
+            string before = EventsRead(await sessions[0].CallAsync("events_read")).Cursor;
+            string written = Verify(harness, harness.Estate.OperatorId, order);
+            Assert.Equal(written, (await watch.NextEventAsync(e => e.Subject.Id == written)).Subject.Id);
+            foreach (McpLines session in sessions)
+            {
+                await session.NotificationAsync(n => IsUpdated(n, brief));
+            }
+
+            EventsResponse read = EventsRead(await sessions[4].CallAsync("events_read", NetworkMcp.Args(("after", before), ("kinds", new JsonArray("record")), ("wait", EventVocabulary.MaxWaitSeconds))));
+            Assert.Contains(read.Events, e => e.Subject.Id == written);
+        }
+        finally
+        {
+            foreach (McpLines session in sessions)
+            {
+                await session.DisposeAsync();
+            }
+        }
+
+        static async Task<McpLines> FollowingAsync(LocalNetworkHarness harness, string principal, string uri)
+        {
+            McpLines session = Stdio(harness, principal);
+            JsonObject capabilities = (await session.InitializeAsync())["result"]!["capabilities"]!.AsObject();
+            Assert.True(capabilities["resources"]!["subscribe"]!.GetValue<bool>());
+            Assert.NotNull((await session.RequestAsync("resources/subscribe", new JsonObject { ["uri"] = uri }))["result"]);
+            return session;
+        }
+    }
+
+    [Fact]
+    public async Task TheLocalSocketsMcpReadsTakeTurnsWithinTheirOwnBudget()
+    {
+        var slots = new EventStreamSlots();
+        var held = new List<EventStreamSlots.McpLease>();
+        for (int i = 0; i < EventRoutes.McpOnLocalSocket; i++)
+        {
+            held.Add((await slots.AcquireMcpAsync(TestContext.Current.CancellationToken))!);
+        }
+
+        // The command line's slots are untouched by them.
+        using (IDisposable? local = slots.TryAcquire(null, EventStreamSlots.LocalSocket))
+        {
+            Assert.NotNull(local);
+        }
+
+        // One more waits until the oldest has held its turn, which is then asked to yield; once it lets go, the newcomer holds a slot.
+        var waited = Stopwatch.StartNew();
+        var yielded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using CancellationTokenRegistration registration = held[0].Yielding.Register(() => yielded.TrySetResult());
+        Task<EventStreamSlots.McpLease?> next = slots.AcquireMcpAsync(TestContext.Current.CancellationToken);
+        await yielded.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.True(waited.Elapsed >= EventRoutes.McpTurn - TimeSpan.FromMilliseconds(500), $"The oldest yielded after {waited.Elapsed.TotalSeconds:F1} seconds.");
+        Assert.False(held[1].Yielding.IsCancellationRequested);
+        held[0].Dispose();
+        using EventStreamSlots.McpLease? turn = await next.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.NotNull(turn);
+        Assert.Equal(EventRoutes.McpOnLocalSocket, slots.Mcp);
+
+        // A wait that ends before a turn comes takes nothing.
+        using var shortly = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        Assert.Null(await slots.AcquireMcpAsync(shortly.Token));
+        foreach (EventStreamSlots.McpLease lease in held.Skip(1))
+        {
+            lease.Dispose();
+        }
+
+        Assert.Equal(1, slots.Mcp);
+    }
+
+    [Fact]
+    public async Task TheSelectingReadSaysWhichSelectionsEachEventPasses()
+    {
+        (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync(mcp: false);
+        await using LocalNetworkHarness owned = harness;
+        RecordResponse order = Order(harness);
+        var records = new EventFilter(Kinds: ["record"]);
+        EventSelectResponse head = await harness.Socket.EventsSelectAsync(new EventSelectRequest(Filter: records, Wait: 0), TestContext.Current.CancellationToken);
+        Assert.Empty(head.Events);
+        string about = Verify(harness, harness.Estate.OperatorId, order);
+        string unrelated = AddResource(harness);
+        EventSelection[] selections = [new(new EventFilter(Kinds: ["record"], Subjects: [order.Id])), new(new EventFilter(Types: ["resource"])), new(new EventFilter(Types: ["resource"]), Since: head.Cursor)];
+        var events = new List<(EventEnvelope Event, IReadOnlyList<int> Selected)>();
+        string cursor = head.Cursor;
+        while (events.Count < 2)
+        {
+            EventSelectResponse read = await harness.Socket.EventsSelectAsync(new EventSelectRequest(cursor, records, selections, Wait: EventVocabulary.MaxWaitSeconds), TestContext.Current.CancellationToken);
+            Assert.Equal(read.Events.Count, read.Selected.Count);
+            events.AddRange(read.Events.Select((e, i) => (e, read.Selected[i])));
+            cursor = read.Cursor;
+        }
+
+        Assert.Equal([0], events.Single(e => e.Event.Subject.Id == about).Selected);
+        Assert.Equal([1, 2], events.Single(e => e.Event.Subject.Id == unrelated).Selected);
+
+        // A selection only narrows, a malformed one or too many are refused, and a device reads only for its own principal.
+        Assert.Equal(HttpStatusCode.BadRequest, (await Assert.ThrowsAnyAsync<HttpRequestException>(() => harness.Socket.EventsSelectAsync(
+            new EventSelectRequest(Selections: [.. Enumerable.Range(0, EventVocabulary.MaxSelections + 1).Select(_ => new EventSelection(records))], Wait: 0), TestContext.Current.CancellationToken))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Assert.ThrowsAnyAsync<HttpRequestException>(() => harness.Socket.EventsSelectAsync(
+            new EventSelectRequest(Selections: [new(new EventFilter(Kinds: ["nothing"]))], Wait: 0), TestContext.Current.CancellationToken))).StatusCode);
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId);
+        using VericairnClient device = VericairnClient.LocalNetwork(paired, harness.Signer(paired));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Assert.ThrowsAnyAsync<HttpRequestException>(() => device.EventsSelectAsync(
+            new EventSelectRequest(Principal: harness.Estate.OperatorId, Wait: 0), TestContext.Current.CancellationToken))).StatusCode);
+        Assert.Null((await device.EventsSelectAsync(new EventSelectRequest(Wait: 0), TestContext.Current.CancellationToken)).Problem);
+
+        // The contract names the route, its scope and its schemas.
+        Assert.True(RequestScope.Covers("POST /v1/events/select"));
+        Assert.Contains(("POST", "/v1/events/select"), OpenApiDocument.Routes);
+        using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
+        JsonElement schemas = api.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(schemas.TryGetProperty("EventSelectRequest", out _));
+        Assert.True(schemas.GetProperty("EventSelectResponse").GetProperty("properties").TryGetProperty("selected", out _));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.EventsSelect))!.IsAbstract);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, true)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, true)]
+    [InlineData(HttpStatusCode.Unauthorized, false)]
+    public async Task ABusyRuntimeStillDeclaresSubscriptionsAndWhatWasDeclaredHolds(HttpStatusCode status, bool declared)
+    {
+        var runtime = new SelectingRuntime { Status = status };
+        using var client = new VericairnClient(new HttpClient(runtime) { BaseAddress = new Uri("http://fixture.invalid") });
+        var watch = new McpResourceWatch(new McpApiEventSource(client, null));
+        Assert.Equal(declared, await watch.AvailableAsync(TestContext.Current.CancellationToken));
+
+        // The runtime answers differently later: the session keeps what initialization declared, and serves subscriptions only then.
+        runtime.Status = declared ? HttpStatusCode.Unauthorized : HttpStatusCode.OK;
+        Assert.Equal(declared, await watch.AvailableAsync(TestContext.Current.CancellationToken));
+        var server = new McpServer(new ToolRegistry(client, null), "test") { Subscriptions = watch };
+        JsonObject answer = await server.RespondAsync(JsonValue.Create(1), "resources/subscribe", new JsonObject { ["uri"] = "vericairn://e/record/a" }, TestContext.Current.CancellationToken);
+        Assert.Equal(declared, answer["error"]?["code"]?.GetValue<int>() != -32601);
+    }
+
+    [Fact]
+    public async Task ARevocationJustBeforeAHeldBackListChangeEndsTheStreamFirst()
+    {
+        (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        using McpWire agent = NetworkMcp.Wire(harness, paired);
+        await agent.InitializeAsync();
+        await using var stream = new McpStream(await agent.OpenStreamAsync());
+        try
+        {
+            // A write is told at once; the next, within five seconds, waits for its interval.
+            AddResource(harness);
+            await stream.NextAsync(IsListChanged);
+            string journal = (await harness.Socket.EventsAsync(wait: 0, cancellationToken: TestContext.Current.CancellationToken)).Cursor;
+            string second = AddResource(harness);
+            await WaitForAsync(harness, journal, e => e.Subject.Id == second);
+
+            // The device is revoked while no derivation pass runs, so the audience a pass publishes still names it as standing; the
+            // held-back list change falls due, and the stream reads the device's standing afresh and ends before sending it.
+            harness.Host.Service.EventPassStarting = () => throw new InvalidOperationException("No pass runs while the test holds it.");
+            Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(paired.Device, harness.Estate.OperatorId, "The laptop was lost.")).Ok);
+            Assert.True(await TestTiming.CompletesAsync(stream.Completion, TestContext.Current.CancellationToken), "The revoked device's stream stayed open.");
+            Assert.Single(stream.Received, IsListChanged);
+            Assert.Equal(0, harness.Host.Mcp.Sessions.CountFor(paired.Device));
+        }
+        finally
+        {
+            harness.Host.Service.EventPassStarting = null;
+        }
     }
 
     private static McpLines Stdio(LocalNetworkHarness harness, string? principal)
@@ -632,5 +839,19 @@ internal sealed class McpStream : IAsyncDisposable
         {
             // The stream ended or was let go.
         }
+    }
+}
+
+/// <summary>A runtime that answers every selecting read with one status, or an empty batch when it is 200.</summary>
+internal sealed class SelectingRuntime : HttpMessageHandler
+{
+    public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        string body = Status == HttpStatusCode.OK
+            ? JsonSerializer.Serialize(new EventSelectResponse([], [], "cursor"), ProtocolJson.Options)
+            : JsonSerializer.Serialize(new Problem(Status == HttpStatusCode.TooManyRequests ? "refused" : Status == HttpStatusCode.Unauthorized ? "denied" : "unavailable", "As the test answers.", []), ProtocolJson.Options);
+        return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
     }
 }

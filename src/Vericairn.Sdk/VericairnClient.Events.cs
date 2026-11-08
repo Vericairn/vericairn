@@ -22,6 +22,14 @@ public sealed partial class VericairnClient
             false, OperationTimeout?.Invoke(nameof(Events)), cancellationToken);
 
     /// <inheritdoc />
+    public EventSelectResponse EventsSelect(EventSelectRequest request) => Post<EventSelectRequest, EventSelectResponse>("/v1/events/select", request)!;
+
+    /// <inheritdoc />
+    public Task<EventSelectResponse> EventsSelectAsync(EventSelectRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync(nameof(EventsSelect), async token => (await PostAsync<EventSelectRequest, EventSelectResponse>("/v1/events/select", request, cancellationToken: token).ConfigureAwait(false))!,
+            false, OperationTimeout?.Invoke(nameof(EventsSelect)), cancellationToken);
+
+    /// <inheritdoc />
     public EventEnvelope? EventGet(string key, string? principal = null) => Get<EventEnvelope>(EventPath(key, principal), allowNotFound: true);
 
     /// <inheritdoc />

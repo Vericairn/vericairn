@@ -63,6 +63,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         // prepares its record for its device's signature, which writes nothing.
         bool write = signing?.Mode != DeviceSigningMode.Prepare && HttpMethods.IsPost(context.HttpContext.Request.Method) &&
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/events/select", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
@@ -259,6 +260,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         // The reader is the device's own principal; the route refuses a request naming another, and every delivery is judged again.
         ["GET /v1/events"] = null,
         ["GET /v1/events/{key}"] = null,
+        ["POST /v1/events/select"] = typeof(EventSelectRequest),
         ["GET /v1/operator/actions"] = null,
         ["GET /v1/operator/requests"] = null,
         ["POST /v1/operator/requests"] = typeof(OperatorRequestWriteRequest),
@@ -359,6 +361,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
         [typeof(ResourceRequest)] = (_, _, _) => null,
+        // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
+        [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),

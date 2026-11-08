@@ -254,6 +254,79 @@ public sealed partial class EstateService
         }
     }
 
+    /// <summary>
+    /// From 0.9.2 (MCP-05): opens a reader's subscription as <see cref="OpenEvents"/> does, with a selector for each selection, rooted
+    /// against the same records and bound below by its own cursor when that cursor is this epoch's, sealed for the same principal and
+    /// still kept. A selection only narrows what the subscription delivers.
+    /// </summary>
+    public (EventSubscription? Subscription, IReadOnlyList<EventSelector> Selectors, Problem? Problem) OpenEventSelection(string? after, EventFilter? filter,
+        IReadOnlyList<EventSelection>? selections, string? principal, string? device = null, string? devicePublicKey = null, string? profile = null)
+    {
+        selections ??= [];
+        if (selections.Count > EventVocabulary.MaxSelections)
+        {
+            return (null, [], new Problem("invalid", $"A read names at most {EventVocabulary.MaxSelections} selections.", []));
+        }
+
+        var matchers = new List<EventMatcher>(selections.Count);
+        foreach (EventSelection selection in selections)
+        {
+            if (selection?.Filter is null)
+            {
+                return (null, [], new Problem("invalid", "Each selection names a filter.", []));
+            }
+
+            if (EventMatcher.Create(selection.Filter, out EventMatcher? matcher) is Problem invalid)
+            {
+                return (null, [], invalid);
+            }
+
+            matchers.Add(matcher!);
+        }
+
+        (EventSubscription? subscription, Problem? problem) = OpenEvents(after, filter, principal, device, devicePublicKey, profile);
+        if (subscription is null || journal is not { } events)
+        {
+            return (null, [], problem ?? EventsUnavailable);
+        }
+
+        var selectors = new List<EventSelector>(matchers.Count);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            for (int i = 0; i < matchers.Count; i++)
+            {
+                long since = events.TryOpen(selections[i].Since, subscription.Principal, out long position) ? position : 0;
+                selectors.Add(new EventSelector(matchers[i].Rooted(model), since));
+            }
+        }
+
+        return (subscription, selectors, null);
+    }
+
+    /// <inheritdoc />
+    public EventSelectResponse EventsSelect(EventSelectRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RequestDeviceScope? scope = requestDevice.Value is { Closed: false } open ? open : null;
+        (EventSubscription? subscription, IReadOnlyList<EventSelector> selectors, Problem? problem) =
+            OpenEventSelection(request.After, request.Filter, request.Selections, request.Principal, scope?.Device, scope?.PublicKey, scope?.Profile);
+        if (subscription is null)
+        {
+            return new EventSelectResponse([], [], string.Empty, Problem: problem);
+        }
+
+        if (subscription.Reset)
+        {
+            return new EventSelectResponse([], [], subscription.Cursor, Reset: true);
+        }
+
+        // The embedded runtime reads once and waits for nothing: only the daemon holds a long poll.
+        EventBatch batch = subscription.Read(256, selectors);
+        return batch.Refusal is not null ? new EventSelectResponse([], [], string.Empty, Problem: new Problem("denied", batch.Refusal, []))
+            : new EventSelectResponse(batch.Events, batch.SelectedPerEvent, subscription.Cursor, batch.Reset);
+    }
+
     /// <inheritdoc />
     public EventsResponse Events(string? after = null, EventFilter? filter = null, string? principal = null, int? wait = null)
     {

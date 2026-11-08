@@ -172,25 +172,35 @@ carries no content: read the resource again to see what changed. After a gap the
 than seven days, a lost journal), every subscribed resource and the listing are told once.
 
 **Over standard input and output** the notifications are lines between responses, never inside one. The server
-follows the journal, as a long poll of `GET /v1/events` on the local socket for the acting principal (or for the
-operator when the session acts for none), only while the session holds a subscription, so an idle session holds
-none of the runtime's stream slots. The local socket holds at most four streams and long polls at once in all,
-so beyond four following sessions the next waits and retries, and its notifications come later.
+follows the journal with one selecting long poll, `POST /v1/events/select` on the local socket for the acting
+principal (or for the operator when the session acts for none), only while the session holds a subscription: the
+runtime says for each event which of the session's subscriptions it concerns, so a round costs one read however
+many there are. These reads take the MCP servers' own four slots of the local socket, never the command line's,
+so `vericairn events watch` and the command line's other reads are never locked out by MCP sessions. Beyond four
+following sessions they take turns: a session waiting for a slot asks the one that has held its slot longest, once
+it has held it five seconds, to answer at once with what it has, and takes its place; nothing is lost, since each
+reads on from its own cursor, but a notification can come up to a turn later. A read that does not wait, as the
+check behind initialization and each subscription's start, takes no slot, so a session declares subscriptions and
+subscribes even while every slot is held; a busy runtime is retried, never taken for one without a journal.
 
 **Over Streamable HTTP** they ride the session's server stream, the one GET opens, bound to the session's device
 and profile (see [the server stream](#network-mcp-over-streamable-http-092)). The stream reads from where the
 session stands: from its first subscription, and after a stream ends, from where it ended, so a client that
 opens it again within the journal's seven days misses nothing. The bridge, `vericairn mcp serve --connection`,
-holds that stream for its client and writes each notification to standard output as a line between responses;
-it signs nothing a notification says.
+holds that stream for its client while the client holds a subscription the runtime accepted, and lets it go when
+the last one ends, so a session that subscribes to nothing holds none of its device's stream slots. It writes
+each resource notification to standard output as a line between responses, passes on nothing else the stream
+carries, discards a message over 64 KiB unread, and signs nothing a notification says; when the runtime ends a
+session and the bridge opens another, it subscribes the new one to the same resources.
 
 **The audience check.** Every notification passes the same check at delivery as `GET /v1/events`: the
 session's principal must be able to read the event's subject and every source under the matching read's rule,
 and per-principal state, such as attention, reaches only its own principal. A withheld change yields nothing,
 and no notification, interval, count or timing tells it from none. On the network, before any notification
 is sent, including one that waited for its interval, the device must still be admitted with the key that
-opened the session and still permitted its profile: a revocation, a rotated key or a withdrawn profile ends
-the session and its stream first. Operator-request events never reach MCP on any path: a request event, an
+opened the session and still permitted its profile, read afresh from the records as the runtime holds them then,
+not from the last derivation pass: a revocation, a rotated key or a withdrawn profile ends the session and its
+stream first. Operator-request events never reach MCP on any path: a request event, an
 operator request's record, its closing and the attention it raises yield no notification, list change or
 `events_read` envelope, since the operator queue stays off MCP.
 
@@ -207,10 +217,11 @@ operator request's record, its closing and the attention it raises yield no noti
 It returns `EventsResponse` as JSON (`events`, `cursor`, `reset`, `problem`). Its cursors are the runtime's,
 sealed for the reading principal: another principal's cursor, a malformed one, one from another epoch or one
 older than the journal keeps answers `reset` with no events, and the reader reads the state again before
-continuing. A session acting for no principal reads no attention. Over the network it is offered at any scope,
-as the network design allows, and runs the long poll of `GET /v1/events` for the device, which takes one of
-the device's four stream slots while it waits; it never opens a stream. On the embedded runtime it answers that
-the daemon keeps the journal.
+continuing. A session acting for no principal reads no attention. It reads with `POST /v1/events/select`, which
+never streams: over standard input and output a read that waits takes one of the MCP servers' slots in turn, and
+over the network, where it is offered at any scope as the network design allows, one of the device's four stream
+slots while it waits. A wait ends when its seconds do, to the millisecond, however the runtime's own waits
+divide it. On the embedded runtime it answers that the daemon keeps the journal.
 
 **Qualification per harness version.** Whether a harness shows notifications or needs `events_read` differs by
 harness and version, and nothing here claims either for any harness. An estate records what it observed as a
@@ -402,9 +413,9 @@ signed request may have), is about the assignment or attempt the call names, and
 call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
 repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
 nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
-the bridge ends its session. When the runtime declares subscriptions, the bridge also holds the session's
-server stream and writes each notification on it to its client as a line, opening the stream again after the
-runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
+the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
+holds the session's server stream and writes each resource notification on it to its client as a line, opening the
+stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
 `DeviceSignedRecords` or its own code, is Vericairn-aware.
 
 **What a device's signature vouches for.** The bridge binds what the call itself supplies: its

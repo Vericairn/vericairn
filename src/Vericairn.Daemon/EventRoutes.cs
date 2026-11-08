@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -45,12 +46,129 @@ internal static class EventRoutes
     /// <summary>How often an idle stream says it is alive, on a fixed schedule from its opening, never prompted by an event.</summary>
     internal static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// From 0.9.2 (MCP-05): the selecting long polls the local socket's MCP servers hold at once, a budget of their own beside the
+    /// command line's streams and its reserve, so MCP sessions that follow the journal never take the command line's slots.
+    /// </summary>
+    internal const int McpOnLocalSocket = 4;
+
+    /// <summary>
+    /// How long a selecting long poll on the local socket holds its slot before it yields to another waiting for one: it then answers
+    /// at once with what it has, and its caller reads again, so beyond <see cref="McpOnLocalSocket"/> sessions take turns.
+    /// </summary>
+    internal static readonly TimeSpan McpTurn = TimeSpan.FromSeconds(5);
+
     private static readonly string[] SingleParameters = ["principal", "after", "wait"];
 
     public static void Map(IEndpointRouteBuilder app, DaemonHost host)
     {
         app.MapGet("/v1/events", (Func<HttpContext, Task<IResult>>)(context => ServeAsync(context, host)));
         app.MapGet("/v1/events/{key}", (string key, HttpContext context) => Key(key, context, host));
+        app.MapPost("/v1/events/select", (EventSelectRequest request, HttpContext context) => SelectAsync(request, context, host));
+    }
+
+    /// <summary>
+    /// The selecting long poll (MCP-05): as GET /v1/events's long poll, and for each event delivered the selections it passes. A read
+    /// that waits holds a slot while it waits: a device's from its own, and on the local socket one of the MCP servers' own budget,
+    /// waiting its turn when every slot is held; a read that does not wait holds none. Each delivery passes the audience check.
+    /// </summary>
+    private static async Task<IResult> SelectAsync(EventSelectRequest request, HttpContext context, DaemonHost host)
+    {
+        AuthenticatedDevice? device = context.Items.TryGetValue(RequestAuthenticator.DeviceItem, out object? item) ? item as AuthenticatedDevice : null;
+        if (device is not null && request.Principal is not null && request.Principal != device.Principal)
+        {
+            return Refused(context, device, StatusCodes.Status401Unauthorized, new Problem("denied", "Events belong to the requesting device's principal.", []));
+        }
+
+        int wait = request.Wait ?? EventVocabulary.DefaultWaitSeconds;
+        if (wait is < 0 or > EventVocabulary.MaxWaitSeconds)
+        {
+            return Refused(context, device, StatusCodes.Status400BadRequest, new Problem("invalid", $"wait is a whole number of seconds from 0 to {EventVocabulary.MaxWaitSeconds}.", []));
+        }
+
+        (EventSubscription? subscription, IReadOnlyList<EventSelector> selectors, Problem? problem) = host.Service.OpenEventSelection(request.After, request.Filter, request.Selections,
+            request.Principal, device?.Identity, device?.PublicKey, device?.LocalNetwork == true ? RequestAuthenticator.LocalNetworkProfile : null);
+        if (subscription is null)
+        {
+            Problem refusal = problem ?? new Problem("refused", "The event journal is unavailable.", []);
+            return Refused(context, device, refusal.Code switch
+            {
+                "invalid" => StatusCodes.Status400BadRequest,
+                "unavailable" => StatusCodes.Status503ServiceUnavailable,
+                _ => StatusCodes.Status401Unauthorized,
+            }, refusal);
+        }
+
+        if (subscription.Reset)
+        {
+            return Results.Json(new EventSelectResponse([], [], subscription.Cursor, Reset: true), ProtocolJson.Options);
+        }
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, host.Stopping);
+        deadline.CancelAfter(TimeSpan.FromSeconds(wait));
+        IDisposable? slot = null;
+        CancellationToken yielding = CancellationToken.None;
+        try
+        {
+            if (wait > 0 && device is not null)
+            {
+                slot = host.EventStreams.TryAcquire(device.Identity, device.Principal);
+                if (slot is null)
+                {
+                    return Refused(context, device, StatusCodes.Status429TooManyRequests,
+                        new Problem("refused", $"A device holds at most {StreamsPerDevice} event streams and long polls at once, one principal's devices {StreamsPerPrincipal} and all devices {StreamsPerRuntime}; close one first.", []));
+                }
+            }
+            else if (wait > 0)
+            {
+                // The local socket's MCP servers take turns within their own budget; one that waits out its time for a turn answers
+                // with no event from where it stood, as a long poll that heard nothing does.
+                EventStreamSlots.McpLease? lease = await host.EventStreams.AcquireMcpAsync(deadline.Token).ConfigureAwait(false);
+                if (lease is null)
+                {
+                    return context.RequestAborted.IsCancellationRequested ? Results.Empty : Results.Json(new EventSelectResponse([], [], subscription.Cursor), ProtocolJson.Options);
+                }
+
+                slot = lease;
+                yielding = lease.Yielding;
+            }
+
+            using IDisposable listening = subscription.Listen();
+            using var waiting = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, yielding);
+            while (true)
+            {
+                EventBatch batch = subscription.Read(256, selectors);
+                if (batch.Closed)
+                {
+                    return Refused(context, device, StatusCodes.Status503ServiceUnavailable, new Problem("unavailable", "The runtime is stopping; read events again once it serves.", []));
+                }
+
+                if (batch.Refusal is not null)
+                {
+                    return Refused(context, device, StatusCodes.Status401Unauthorized, new Problem("denied", batch.Refusal, []));
+                }
+
+                if (batch.Reset || batch.Events.Count > 0 || wait == 0)
+                {
+                    return Results.Json(new EventSelectResponse(batch.Events, batch.SelectedPerEvent, subscription.Cursor, batch.Reset), ProtocolJson.Options);
+                }
+
+                // A withheld entry wakes this wait like any other, and the wait resumes: nothing returns earlier for it. A turn that
+                // ends for another MCP server answers with no event, from where this read stands.
+                try
+                {
+                    await subscription.WaitAsync(waiting.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return context.RequestAborted.IsCancellationRequested ? Results.Empty : Results.Json(new EventSelectResponse([], [], subscription.Cursor), ProtocolJson.Options);
+                }
+            }
+        }
+        finally
+        {
+            slot?.Dispose();
+        }
     }
 
     private static async Task<IResult> ServeAsync(HttpContext context, DaemonHost host)
@@ -299,8 +417,68 @@ internal sealed class EventStreamSlots
     private readonly object gate = new();
     private readonly Dictionary<string, int> held = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> principals = new(StringComparer.Ordinal);
+    private readonly LinkedList<McpLease> mcp = new();
+    private TaskCompletionSource mcpFreed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int devices;
     private int local;
+
+    /// <summary>How many of the local socket's MCP slots are held.</summary>
+    public int Mcp
+    {
+        get { lock (gate) return mcp.Count; }
+    }
+
+    /// <summary>
+    /// One of the local socket's MCP slots (MCP-05), a budget of its own that never takes the command line's. When every slot is held,
+    /// the oldest holder that has held its slot for <see cref="EventRoutes.McpTurn"/> is asked to yield, and this waits until a slot
+    /// frees: sessions beyond the budget take turns rather than being refused. Null when <paramref name="cancellationToken"/> ends
+    /// the wait first.
+    /// </summary>
+    public async Task<McpLease?> AcquireMcpAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task freed;
+            TimeSpan untilTurn;
+            lock (gate)
+            {
+                if (mcp.Count < EventRoutes.McpOnLocalSocket)
+                {
+                    var lease = new McpLease(this);
+                    lease.Node = mcp.AddLast(lease);
+                    return lease;
+                }
+
+                McpLease oldest = mcp.First!.Value;
+                TimeSpan held = Stopwatch.GetElapsedTime(oldest.Since);
+                if (held >= EventRoutes.McpTurn)
+                {
+                    oldest.Yield();
+                    untilTurn = EventRoutes.McpTurn;
+                }
+                else
+                {
+                    untilTurn = EventRoutes.McpTurn - held;
+                }
+
+                freed = mcpFreed.Task;
+            }
+
+            try
+            {
+                await Task.WhenAny(freed, Task.Delay(untilTurn, cancellationToken)).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                return null;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+    }
 
     /// <summary>A slot for a device of a principal, or for the local socket when <paramref name="device"/> is null; null when a limit is reached.</summary>
     public IDisposable? TryAcquire(string? device, string principal)
@@ -356,6 +534,67 @@ internal sealed class EventStreamSlots
             if (--principals[principal] == 0)
             {
                 principals.Remove(principal);
+            }
+        }
+    }
+
+    private void ReleaseMcp(McpLease lease)
+    {
+        TaskCompletionSource freed;
+        lock (gate)
+        {
+            if (lease.Node is not null)
+            {
+                mcp.Remove(lease.Node);
+                lease.Node = null;
+            }
+
+            freed = mcpFreed;
+            mcpFreed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        freed.TrySetResult();
+    }
+
+    /// <summary>A held MCP slot of the local socket: asked to yield once it has held its turn and another waits.</summary>
+    internal sealed class McpLease : IDisposable
+    {
+        private readonly EventStreamSlots slots;
+        private readonly CancellationTokenSource yielding = new();
+        private int released;
+
+        internal McpLease(EventStreamSlots slots)
+        {
+            this.slots = slots;
+            Since = Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>When it was taken.</summary>
+        internal long Since { get; }
+
+        internal LinkedListNode<McpLease>? Node { get; set; }
+
+        /// <summary>Cancelled when another waits and this one has held its turn: its read answers at once.</summary>
+        internal CancellationToken Yielding => yielding.Token;
+
+        internal void Yield()
+        {
+            try
+            {
+                yielding.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already released.
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref released, 1) == 0)
+            {
+                slots.ReleaseMcp(this);
+                yielding.Dispose();
             }
         }
     }

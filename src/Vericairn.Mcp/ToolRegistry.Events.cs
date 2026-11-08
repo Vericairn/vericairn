@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -38,7 +39,7 @@ public sealed partial class ToolRegistry
     }
 
     /// <summary>
-    /// events_read (MCP-05): a read of <c>GET /v1/events</c> for the acting principal, as a long poll when it waits, with that read's
+    /// events_read (MCP-05): a read of <c>POST /v1/events/select</c> for the acting principal, as a long poll when it waits, with that read's
     /// audience check and sealed cursors. Operator-request events are refused as a filter and dropped from every answer, and an answer
     /// they alone would fill waits on as if they were withheld; a connection acting for no principal reads no attention.
     /// </summary>
@@ -68,12 +69,14 @@ public sealed partial class ToolRegistry
         kinds ??= [.. EventVocabulary.Kinds.Where(k => k != "request" && (actingPrincipal is not null || k != "attention"))];
         var filter = new EventFilter(kinds, types, subjects, to, categories);
         string? after = OptionalArg(arguments, "after");
-        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(wait);
-        var kept = new List<EventEnvelope>();
+        long started = Stopwatch.GetTimestamp();
+        TimeSpan Left() => TimeSpan.FromSeconds(wait) - Stopwatch.GetElapsedTime(started);
+        bool last = wait == 0;
         while (true)
         {
-            int remaining = (int)Math.Clamp(Math.Ceiling((deadline - DateTimeOffset.UtcNow).TotalSeconds), 0, EventVocabulary.MaxWaitSeconds);
-            EventsResponse read = await api.EventsAsync(after, filter, actingPrincipal, remaining, cancellationToken).ConfigureAwait(false);
+            // Whole seconds the runtime may wait, never past the caller's own wait; a fraction left over is slept here, then read once.
+            int seconds = last ? 0 : (int)Math.Clamp(Math.Floor(Left().TotalSeconds), 0, EventVocabulary.MaxWaitSeconds);
+            EventSelectResponse read = await api.EventsSelectAsync(new EventSelectRequest(after, filter, null, actingPrincipal, seconds), cancellationToken).ConfigureAwait(false);
             if (read.Problem is { } refused)
             {
                 return new ToolCallResult(refused.Message, true);
@@ -84,6 +87,7 @@ public sealed partial class ToolRegistry
                 return Json(new EventsResponse([], read.Cursor, Reset: true));
             }
 
+            var kept = new List<EventEnvelope>();
             string cursor = read.Cursor;
             foreach (EventEnvelope envelope in read.Events.Where(e => !McpEvents.OperatorRequest(e)))
             {
@@ -97,13 +101,25 @@ public sealed partial class ToolRegistry
                 kept.Add(envelope);
             }
 
-            // An answer that only operator-request events would fill is no answer: the wait goes on, as it does for a withheld event.
-            if (kept.Count > 0 || read.Events.Count == 0 || remaining == 0)
+            // An answer that only operator-request events would fill is no answer, and neither is a wait that ended early for another
+            // reader's turn: the wait goes on until the caller's own ends, as it does for a withheld event.
+            if (kept.Count > 0 || last)
             {
                 return Json(new EventsResponse(kept, cursor));
             }
 
             after = read.Cursor;
+            TimeSpan left = Left();
+            if (left <= TimeSpan.Zero)
+            {
+                return Json(new EventsResponse(kept, cursor));
+            }
+
+            if (left < TimeSpan.FromSeconds(1))
+            {
+                await Task.Delay(left, cancellationToken).ConfigureAwait(false);
+                last = true;
+            }
         }
     }
 

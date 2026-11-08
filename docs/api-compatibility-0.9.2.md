@@ -338,35 +338,51 @@ no record type changes. `AGENTS.md` gains one paragraph on reaching the estate f
 
 ## MCP subscriptions and notifications (MCP-05)
 
-No route, OpenAPI operation, request or response type of API version 1 is added or changed. A network MCP tool now
-reaches the long poll of `GET /v1/events`, which `events_read` reads for the requesting device; a stream or an event by
-key stays out of a tool's reach, and an in-process request for a stream is answered 406. The session's server stream at
+API version 1 adds one operation, `POST /v1/events/select`, a read with a request scope and no write ledger: a long poll
+of the event journal that also says, for each event delivered, which of up to 32 selections it passes. The protocol adds
+`EventSelectRequest` (`after`, `filter`, `selections`, `principal`, `wait`), `EventSelection` (a filter and an optional
+`since` cursor), `EventSelectResponse` (`events`, `selected`, `cursor`, `reset`, `problem`) and
+`EventVocabulary.MaxSelections`; the OpenAPI document adds the route and the schemas `EventSelectRequest` and
+`EventSelectResponse`. `IEstateApi` adds `EventsSelect(request)` and `EventsSelectAsync(request, cancellationToken)`, each
+with a default implementation, so existing implementers stay source-compatible; `CancellationBoundApi` and the SDK's
+`VericairnClient` implement both, with the one-minute deadline `Events` has. A read that waits holds a slot: a device's
+own, as a long poll does; on the local socket one of four kept for MCP servers, beside the command line's slots and
+reserve, taken in turns of five seconds when all four are held. The daemon can therefore hold up to four more long
+connections than before, of the 32 it admits. A read that does not wait holds none.
+
+A network MCP tool now reaches `POST /v1/events/select`, which `events_read` reads for the requesting device and which
+never streams; `GET /v1/events` and `GET /v1/events/{key}` stay out of a tool's reach. The session's server stream at
 `/mcp` reads the event journal from where the session stands (its first subscription, then where its last stream ended)
-and carries `notifications/resources/updated` and `notifications/resources/list_changed`.
+and carries `notifications/resources/updated` and `notifications/resources/list_changed`; before sending any, it reads
+the device's standing afresh from the runtime's records.
 
 Over MCP, `initialize` declares `resources.subscribe` and `resources.listChanged` true when the connection's runtime keeps
-an event journal (the daemon), and false as before over the embedded runtime, which keeps none; `resources/subscribe` and
-`resources/unsubscribe` are served when they are true and answer "method not found" otherwise. `resources/templates/list`
-adds the templates `goal` and `asks` (six in all), and `resources/list` adds each current goal's progress and, for a
-connection acting for a principal, the asks put to it; both read as `goal_progress` and `asks_list` with `form` `json`
-read, with `_meta` carrying the hash, length and trust label and no `sourceHash`. The read tool `events_read` is added, on
-standard input and output and over the network at any scope. The server's instructions end with a sentence on
-subscriptions and `events_read` instead of saying they are not supported. A client that ignores notifications is
-unaffected; one that called `resources/subscribe` against a daemon now gets a result where it got an error.
+an event journal (the daemon), and false as before over the embedded runtime, which keeps none; what it declares holds for
+the session. `resources/subscribe` and `resources/unsubscribe` are served when they are true and answer "method not found"
+otherwise. `resources/templates/list` adds the templates `goal` and `asks` (six in all), and `resources/list` adds each
+current goal's progress and, for a connection acting for a principal, the asks put to it; both read as `goal_progress` and
+`asks_list` with `form` `json` read, with `_meta` carrying the hash, length and trust label and no `sourceHash`. The read
+tool `events_read` is added, on standard input and output and over the network at any scope. The server's instructions end
+with a sentence on subscriptions and `events_read` instead of saying they are not supported. A client that ignores
+notifications is unaffected; one that called `resources/subscribe` against a daemon now gets a result where it got an
+error.
 
 `Vericairn.Runtime` adds, each additive: in `Vericairn.Runtime.Events` the type `EventSelector`, the overload
-`EventSubscription.Read(max, selectors)` and the init-only `EventBatch.Selected`, empty unless a read named selectors
-(it takes part in the positional record's equality); and `EstateService.OpenEventSelector(filter)`, which validates and
-roots a filter and passes only what is observed after it opened. `Vericairn.Mcp` adds `McpServer.Subscriptions`
-(init-only), the types `McpResourceWatch`, `McpApiEventSource`, `IMcpEventSource`, `McpEventRound`, `McpEvent` and
-`McpEvents`, `ToolRegistry.SubscriptionFilterAsync(uri, cancellationToken)` and `ToolRegistry.EventsReadMaxLimit`, and
-`Orientation.NotificationsProfileSuffix`, `Orientation.EventsReadProfileSuffix` and `Orientation.Observations(api,
-suffix)`. The orientation's agent matrix gains the columns Notifications and events_read; a qualification profile that
-names a harness the matrix lists followed by a version now keys that harness's row, naming the version, where before it
-had a row of its own. `AGENTS.md` is regenerated. `mcp serve` gives its server a watch over the API, and the bridge of
-`mcp serve --connection` holds the session's server stream once the runtime declares subscriptions, writing each
-notification to its client; its additions are internal. The Python peer accepts either declaration and checks six
-templates. Record format remains 3; no record type changes.
+`EventSubscription.Read(max, selectors)`, the init-only `EventBatch.Selected`, empty unless a read named selectors (it takes
+part in the positional record's equality), and the computed `EventBatch.SelectedPerEvent`; and
+`EstateService.OpenEventSelector(filter)`, which validates and roots a filter and passes only what is observed after it
+opened, `EstateService.OpenEventSelection(after, filter, selections, principal, device, devicePublicKey, profile)` and
+`EstateService.EventsSelect(request)`, which the embedded runtime answers once without waiting. `Vericairn.Mcp` adds
+`McpServer.Subscriptions` (init-only), the types `McpResourceWatch`, `McpApiEventSource`, `IMcpEventSource`,
+`McpEventRound`, `McpEvent` and `McpEvents`, `ToolRegistry.SubscriptionFilterAsync(uri, cancellationToken)` and
+`ToolRegistry.EventsReadMaxLimit`, and `Orientation.NotificationsProfileSuffix`, `Orientation.EventsReadProfileSuffix` and
+`Orientation.Observations(api, suffix)`. The orientation's agent matrix gains the columns Notifications and events_read; a
+qualification profile that names a harness the matrix lists followed by a version now keys that harness's row, naming the
+version, where before it had a row of its own. `AGENTS.md` is regenerated. `mcp serve` gives its server a watch over the
+API. The bridge of `mcp serve --connection` holds the session's server stream while its client holds a subscription the
+runtime accepted, writes only resource notifications of at most 64 KiB to its client, and subscribes a session it reopens
+to the same resources; its additions are internal. The Python peer accepts either declaration and checks six templates.
+Record format remains 3; no record type changes.
 
 ## Preparing a documentation set (DOCS-11)
 

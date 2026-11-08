@@ -20,6 +20,9 @@ public sealed record EventBatch(IReadOnlyList<EventEnvelope> Events, string? Ref
     /// empty when the read was given none. A selector is judged only on events the audience check already admitted.
     /// </summary>
     public IReadOnlyList<IReadOnlyList<int>> Selected { get; init; } = [];
+
+    /// <summary>From 0.9.2: one entry per delivered event, as <see cref="Selected"/> has it, or empty entries when no selector was named.</summary>
+    public IReadOnlyList<IReadOnlyList<int>> SelectedPerEvent => Selected.Count == Events.Count ? Selected : [.. Events.Select(_ => (IReadOnlyList<int>)[])];
 }
 
 /// <summary>

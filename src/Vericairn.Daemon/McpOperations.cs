@@ -25,13 +25,14 @@ namespace Vericairn.Daemon;
 internal sealed class McpOperations
 {
     /// <summary>
-    /// The operations that carry their input in a POST body that a network tool sends: the reads among them, and section 8's contributor
-    /// writes. Every other POST is refused before its route runs; reads by GET pass, and of the event routes only the long poll of
-    /// <c>GET /v1/events</c>, which events_read reads (MCP-05): a tool never opens a stream or reads an event by key.
+    /// The operations that carry their input in a POST body that a network tool sends: the reads among them, among them from 0.9.2 the
+    /// selecting long poll events_read reads (MCP-05), which never streams, and section 8's contributor writes. Every other POST is
+    /// refused before its route runs; reads by GET pass, except the event routes: a tool never opens a stream or reads an event by key.
     /// </summary>
     internal static readonly IReadOnlySet<string> Posts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "POST /v1/resources/read",
+        "POST /v1/events/select",
         "POST /v1/releases/check",
         "POST /v1/templates/render",
         "POST /v1/work/attempt",
@@ -61,13 +62,9 @@ internal sealed class McpOperations
 
     /// <summary>Whether a network tool may reach an operation, named as the request scope names it.</summary>
     internal static bool Offered(string operation) =>
-        operation.StartsWith("GET ", StringComparison.OrdinalIgnoreCase)
-            && (!operation.StartsWith("GET /v1/events", StringComparison.OrdinalIgnoreCase) || string.Equals(operation, EventsOperation, StringComparison.OrdinalIgnoreCase))
+        operation.StartsWith("GET ", StringComparison.OrdinalIgnoreCase) && !operation.StartsWith("GET /v1/events", StringComparison.OrdinalIgnoreCase)
             ? !RequestAuthenticator.MachineLocal.Contains(operation)
             : Posts.Contains(operation) && !RequestAuthenticator.MachineLocal.Contains(operation);
-
-    /// <summary>The event journal's read, which a network tool reaches as a long poll only.</summary>
-    internal const string EventsOperation = "GET /v1/events";
 
     /// <summary>The route a request reaches, preferring literal segments to parameters from the left, with its values; null when none.</summary>
     internal (RouteEndpoint Endpoint, RouteValueDictionary Values)? Match(string method, string path)
@@ -183,13 +180,6 @@ internal sealed class McpOperations
             if (!Offered(operation))
             {
                 return Refused(HttpStatusCode.Unauthorized, new Problem("denied", $"{operation} is not offered over network MCP.", []));
-            }
-
-            // events_read reads the journal as a long poll, which answers once; a stream never ends, so no tool may open one.
-            if (string.Equals(operation, EventsOperation, StringComparison.OrdinalIgnoreCase)
-                && request.Headers.Accept.Any(a => string.Equals(a.MediaType, EventVocabulary.StreamMediaType, StringComparison.OrdinalIgnoreCase)))
-            {
-                return Refused(HttpStatusCode.NotAcceptable, new Problem("refused", "A network tool reads events as a long poll, never as a stream.", []));
             }
 
             byte[] body = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);

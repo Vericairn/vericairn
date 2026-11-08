@@ -775,11 +775,10 @@ journal; a server over the embedded runtime declares no subscriptions, and `even
 daemon keeps the journal. A notification is a hint: it says a subscribed resource or the listing may have
 changed, carries no content, and comes at most once a second per URI and once every five seconds for the
 listing, so several changes inside an interval are told once. Over standard input and output a session
-follows the journal only while it holds a subscription, and the local socket holds at most four streams and
-long polls at once in all: beyond four following sessions, with `vericairn events watch` among them, the next
-waits and retries, so its notifications come later. Each round of a stdio session reads the journal once more
-for each subscription whose resource may have changed, and a read that fails tells that resource it may have
-changed rather than risk missing a change. A session holds at most 32 subscriptions, and a subscription lives
+follows the journal only while it holds a subscription, with one selecting long poll a round. Those polls, and
+`events_read`'s waits, take the MCP servers' own four slots of the local socket, never the command line's; beyond
+four sessions waiting at once they take turns of five seconds, so a notification can come up to a turn later, and
+the runtime holds up to four more long connections than before, of the 32 it admits. A session holds at most 32 subscriptions, and a subscription lives
 with its session: a network session's ends on DELETE, an idle hour, its device's revocation or the daemon's
 restart, and a stdio session's when its input ends. Only changes the runtime observes after a subscription
 count, and after a gap the journal cannot honor every subscribed resource and the listing are told once.

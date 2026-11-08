@@ -331,7 +331,7 @@ public sealed class McpServer
             case "resources/subscribe":
             case "resources/unsubscribe":
                 if (Subscriptions is not { } watch || !await SubscribingAsync(cancellationToken).ConfigureAwait(false))
-                    return Error(id, -32601, $"Method not found: {method}; this connection's runtime keeps no event journal it may read.");
+                    return Error(id, -32601, $"Method not found: {method}; this connection declared no resource subscriptions at initialization. They need the estate's running daemon, which keeps the event journal.");
                 if (parameters?["uri"] is not JsonValue subscribedUri || !subscribedUri.TryGetValue(out string? uri) || string.IsNullOrEmpty(uri))
                     return Error(id, -32602, "Invalid params: resource uri is required.");
                 if (method == "resources/unsubscribe")

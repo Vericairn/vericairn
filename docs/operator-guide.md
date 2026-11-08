@@ -1060,8 +1060,9 @@ reading it again and again. It needs the running daemon (`vericairn runtime star
   when it would otherwise poll: each event names only identities, hashes, kinds, states and categories, and a cursor
   from another principal, another epoch or more than a week ago answers `reset`.
 
-The local socket holds at most four streams and long polls at once, with `vericairn events watch` among them, so
-beyond four stdio sessions that hold subscriptions the next waits its turn and hears later. Which harness versions
+Stdio sessions read the journal through their own four slots of the local socket, never the command line's, so
+`vericairn events watch` is never locked out by them; beyond four sessions following at once they take turns of five
+seconds, and one waiting its turn hears up to a turn later. Which harness versions
 show notifications and which need `events_read` is recorded per harness version as a `qualification` with the
 profile `<harness> <version> over MCP notifications` or `<harness> <version> over MCP events_read`, which the
 orientation file's agent matrix shows; this release qualifies no harness. See
