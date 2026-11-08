@@ -27,7 +27,7 @@ internal sealed class RunAdmissionService(
     EstateRecordAccess recordAccess,
     Func<ProviderRegistry> providers,
     Func<WorkerOptions> workerOptions,
-    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, RecordEnvelope, long?, string?, string?, JsonObject?, BriefResponse> assembleBrief,
+    Func<EstateModel, IReadOnlyList<RecordFile>, RecordEnvelope, RecordEnvelope, long?, string?, string?, JsonObject?, IReadOnlyList<string>?, string?, BriefResponse> assembleBrief,
     Func<EstateModel, string, PromptSelection, string?, (JsonObject? Use, Problem? Problem)> preparePrompt)
 {
     private readonly object gate = recordAccess.Gate;
@@ -257,7 +257,8 @@ internal sealed class RunAdmissionService(
 
         string run = Ulid.NewUlid().Value;
         var directory = new RunDirectory(plan.Estate, run);
-        IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent];
+        // --run lets the server keep the searches it serves this run's agent, which settlement records.
+        IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent, "--run", run];
         var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
         // A run never shares the user's temporary directory, where other processes keep their files; it gets its own inside its run
         // directory. Vericairn's MCP server, which runs outside the harness's sandbox, keeps the user's.
@@ -274,6 +275,8 @@ internal sealed class RunAdmissionService(
         try
         {
             directory.Create();
+            // The run's search log exists from the start, so settlement can tell a run that searched nothing from a missing log.
+            Search.ObservedSearches.Start(directory);
             directory.RetainContext(plan.Context, plan.Brief);
             var mcp = new JsonObject
             {
@@ -774,7 +777,13 @@ internal sealed class RunAdmissionService(
             if (problem is not null) return (null, problem.Message, null);
             promptUse = use;
         }
-        BriefResponse contextBrief = assembleBrief(model, files, order, goal, maxBytes, recipient, recipient is null ? null : assignment.Id, promptUse);
+        if (request.Search is { Count: > 0 } && model.Manifest!.RecordFormat < 3)
+        {
+            return (null, "A run's searches are recorded with its intent from record format 3; upgrade the estate before searching for a run's context.", null);
+        }
+
+        // Searches select optional candidates for the agent's package, read as the agent may read; they grant it nothing.
+        BriefResponse contextBrief = assembleBrief(model, files, order, goal, maxBytes, recipient, recipient is null ? null : assignment.Id, promptUse, request.Search, request.Agent);
         if (contextBrief.Problem is not null)
         {
             return (null, contextBrief.Problem.Message, null);
@@ -788,6 +797,8 @@ internal sealed class RunAdmissionService(
         }
 
         selection["contextPackage"] = packageHash;
+        // The intent records each dispatch-time search, with only the candidates every reader of the record may read.
+        if (EstateService.RecordedSelections(package) is { Count: > 0 } searched) selection["contextSelections"] = searched;
         JsonElement accounting = package.GetProperty("payload").GetProperty("accounting");
         selection["allocation"]!["context"] = new JsonObject
         {

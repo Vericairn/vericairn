@@ -66,6 +66,12 @@ public static class ApiRoutes
         app.MapGet($"{v}/context/work/{{key}}/brief", (string key, long? maxBytes, string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) => service.BriefContext(key, maxBytes, recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)) is { } brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/context/work/{{key}}", (string key, long? maxBytes) => Results.Json(service.Context(key, maxBytes), ProtocolJson.Options));
         app.MapGet($"{v}/context/original/{{pin}}", (string pin) => Results.Json(service.ContextRead(pin), ProtocolJson.Options));
+        // Search and search-selected context carry their queries in a POST body: up to five queries of 1,024 bytes do not fit a request line.
+        app.MapPost($"{v}/context/prepare", (ContextRequest request) => Results.Json(service.Context(request), ProtocolJson.Options));
+        app.MapPost($"{v}/context/brief", (BriefContextRequest request) => service.BriefContext(request) is { } brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());
+        app.MapPost($"{v}/search", (SearchRequest request) => Results.Json(service.Search(request), ProtocolJson.Options));
+        app.MapPost($"{v}/search/index", (SearchIndexRequest request) => Results.Json(service.SearchIndex(request), ProtocolJson.Options));
+        app.MapPost($"{v}/search/replay", (SearchReplayRequest request) => Results.Json(service.SearchReplay(request), ProtocolJson.Options));
         app.MapGet($"{v}/context/{{manifest}}/sources/{{source}}", (string manifest, string source) => Results.Json(service.ContextRead(manifest, source), ProtocolJson.Options));
         app.MapGet($"{v}/validate", () => Results.Json(service.Validate(), ProtocolJson.Options));
         app.MapGet($"{v}/check", () => Results.Json(service.Check(), ProtocolJson.Options));

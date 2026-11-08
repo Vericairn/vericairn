@@ -19,8 +19,21 @@ internal static class ContextAssembly
     internal const string Format = "vericairn.context/1";
     internal const string ManifestFormat = "vericairn.context-manifest/1";
 
+    /// <summary>The manifest format of a package that used search: format 1 with the basis's <c>selections</c>.</summary>
+    internal const string SearchManifestFormat = "vericairn.context-manifest/2";
+
     internal sealed record Source(JsonObject Identity, byte[]? Original, bool Mandatory, string Dependency,
-        bool Inline = true, int? ExcerptBytes = null, string State = "missing");
+        bool Inline = true, int? ExcerptBytes = null, string State = "missing", int ExcerptStart = 0)
+    {
+        /// <summary>0 for the explicit selection; n for a candidate of the package's nth search, which always follows it.</summary>
+        internal int Origin { get; init; }
+
+        /// <summary>A search candidate's rank within its search.</summary>
+        internal int Rank { get; init; }
+
+        /// <summary>The search a candidate came from, such as s1.</summary>
+        internal string? Search { get; init; }
+    }
 
     internal static Source Record(RecordEnvelope record, RecordFile file, bool mandatory, string dependency) => new(new JsonObject
     {
@@ -35,7 +48,10 @@ internal static class ContextAssembly
 
     internal static ContextPackage Build(JsonObject basis, IEnumerable<Source> selected, string presentation, long? maxBytes = null)
     {
+        // Search candidates follow the explicit selection, in query and rank order, so they never reorder it; without search the
+        // order, keys and hashes are unchanged.
         List<Source> sources = selected.OrderByDescending(s => s.Mandatory)
+            .ThenBy(s => s.Origin).ThenBy(s => s.Rank)
             .ThenBy(s => s.Identity["kind"]!.GetValue<string>(), StringComparer.Ordinal)
             .ThenBy(s => s.Identity["path"]?.GetValue<string>() ?? s.Identity["byteHash"]!.GetValue<string>(), StringComparer.Ordinal)
             .ThenBy(s => s.Identity["hash"]?.GetValue<string>(), StringComparer.Ordinal)
@@ -60,9 +76,12 @@ internal static class ContextAssembly
                 throw new InvalidOperationException("An original must match its pinned byte hash and size.");
             }
 
-            if (source.ExcerptBytes is int extent && (extent <= 0 || source.Original is null || extent >= source.Original.Length || source.Identity["kind"]!.GetValue<string>() == "record"))
+            if (source.ExcerptBytes is int extent && (extent <= 0 || source.ExcerptStart < 0 || source.Original is null
+                || (long)source.ExcerptStart + extent > source.Original.Length || (source.ExcerptStart == 0 && extent >= source.Original.Length)
+                || source.Identity["kind"]!.GetValue<string>() == "record"
+                || (source.ExcerptStart < source.Original.Length && (source.Original[source.ExcerptStart] & 0xC0) == 0x80)))
             {
-                throw new InvalidOperationException("Excerpts require a proper byte extent of an available non-record source.");
+                throw new InvalidOperationException("Excerpts require a proper byte extent, starting at a UTF-8 boundary, of an available non-record source.");
             }
 
             string key = "s" + i.ToString("D6", CultureInfo.InvariantCulture);
@@ -72,6 +91,7 @@ internal static class ContextAssembly
             identity["mandatory"] = source.Mandatory;
             identity["dependency"] = source.Dependency;
             identity["state"] = source.Original is null ? source.State : "retained";
+            if (source.Search is not null) identity["search"] = new JsonObject { ["selection"] = source.Search, ["rank"] = source.Rank };
             entries.Add(identity);
             bool full = source.Original is not null && source.Inline && source.ExcerptBytes is null;
             if (full)
@@ -106,12 +126,13 @@ internal static class ContextAssembly
                 };
                 if (source.ExcerptBytes is int length)
                 {
-                    var extentNode = new JsonObject { ["unit"] = "bytes", ["start"] = 0, ["length"] = length, ["endExclusive"] = length };
+                    int start = source.ExcerptStart;
+                    var extentNode = new JsonObject { ["unit"] = "bytes", ["start"] = start, ["length"] = length, ["endExclusive"] = start + length };
                     entry["extent"] = extentNode.DeepClone();
                     excerpts.Add(new JsonObject
                     {
                         ["source"] = key, ["originalByteHash"] = source.Identity["byteHash"]!.DeepClone(),
-                        ["extent"] = extentNode, ["encoding"] = "base64", ["content"] = Convert.ToBase64String(source.Original!, 0, length),
+                        ["extent"] = extentNode, ["encoding"] = "base64", ["content"] = Convert.ToBase64String(source.Original!, start, length),
                         ["method"] = "byte excerpt", ["review"] = "derived, not accepted",
                         ["generator"] = Format,
                         ["loss"] = "irreversible reduction of this representation; original retained",
@@ -124,7 +145,7 @@ internal static class ContextAssembly
 
         var manifest = new JsonObject
         {
-            ["format"] = ManifestFormat,
+            ["format"] = basis["selections"] is null ? ManifestFormat : SearchManifestFormat,
             ["basis"] = basis.DeepClone(),
             ["sources"] = entries,
         };

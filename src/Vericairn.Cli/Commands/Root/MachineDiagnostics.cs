@@ -33,6 +33,10 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 : $"enclave   Secure Enclave custody unavailable ({(SecureEnclaveCustody.HelperPath() is null ? $"no {SecureEnclaveCustody.HelperName} helper beside the command line" : "no Secure Enclave available to this process")})");
         }
         context.Output.WriteLine($"records   reads record formats {string.Join(", ", RecordFormats.Reads)}; writes an estate's own format, at most {RecordFormats.Current}");
+        (string? sqlite, string? searchProblem) = Vericairn.Runtime.Search.SearchEngine.Probe();
+        context.Output.WriteLine(searchProblem is null
+            ? $"search    keyword index {Records.Search.SearchSelections.KeywordMethod} on SQLite {sqlite} with FTS5"
+            : $"search    keyword index unavailable: {searchProblem}");
         if (IsEstate(root))
         {
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);

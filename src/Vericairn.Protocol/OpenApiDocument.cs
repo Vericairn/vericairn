@@ -58,6 +58,11 @@ public static class OpenApiDocument
         ("GET", "/v1/context/work/{key}/brief"),
         ("GET", "/v1/context/original/{pin}"),
         ("GET", "/v1/context/{manifest}/sources/{source}"),
+        ("POST", "/v1/context/prepare"),
+        ("POST", "/v1/context/brief"),
+        ("POST", "/v1/search"),
+        ("POST", "/v1/search/index"),
+        ("POST", "/v1/search/replay"),
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
@@ -456,6 +461,20 @@ public static class OpenApiDocument
                 ["description"] = schema + ": estate read access is rechecked; no record, signing or write ledger. Refusals return no content.",
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
             };
+        }
+        else if (path is "/v1/search" or "/v1/search/index" or "/v1/search/replay" or "/v1/context/prepare" or "/v1/context/brief")
+        {
+            string schema = path switch
+            {
+                "/v1/search" => "SearchResponse", "/v1/search/index" => "SearchIndexResponse", "/v1/search/replay" => "SearchReplayResponse",
+                "/v1/context/prepare" => "ContextResponse", _ => "BriefResponse",
+            };
+            responses["200"] = new JsonObject
+            {
+                ["description"] = schema + ": the complete typed result, including any refusal in its problem. This POST is a read; it authors no record, and search results are untrusted content that grants no authority.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference(schema) } },
+            };
+            if (path == "/v1/context/brief") responses["404"] = new JsonObject { ["description"] = "No work order has that key or id." };
         }
         else if (path is "/v1/resume")
         {
@@ -926,7 +945,7 @@ public static class OpenApiDocument
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
             ["GoalVerdict"] = Object(("condition", "integer"), ("verdict", "string"), ("reason", "string"), ("read", "array")),
             ["GoalAcceptRequest"] = Object(("by", "string"), ("statement", "string")),
-            ["GoalStepRequest"] = Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
+            ["GoalStepRequest"] = WithSearch(Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"))),
             ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object"), ("request", "object")),
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
@@ -968,7 +987,21 @@ public static class OpenApiDocument
             ["ReleaseSubmitRequest"] = releaseSubmit,
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string"), ("withdrawal", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
-            ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("prompt", "object")),
+            ["RunStartRequest"] = WithSearch(Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string"), ("prompt", "object"))),
+            ["SearchRequest"] = SearchRequestSchema(),
+            ["SearchExcerpt"] = Required(Object(("start", "integer"), ("length", "integer"), ("text", "string"), ("label", "string")), "start", "length", "text", "label"),
+            ["SearchCandidate"] = SearchCandidateSchema(),
+            ["SearchResponse"] = SearchResponseSchema(),
+            ["SearchIndexRequest"] = Object(("rebuild", "boolean")),
+            ["SearchSegment"] = Required(Object(("audience", "string"), ("passages", "integer"), ("records", "string"), ("documents", "string")), "audience", "passages", "records", "documents"),
+            ["SearchIndexResponse"] = SearchIndexResponseSchema(),
+            ["SearchReplayRequest"] = Object(("selection", "object"), ("record", "string"), ("selectionHash", "string")),
+            ["SearchReplayOutcome"] = SearchReplayOutcomeSchema(),
+            ["SearchReplayResponse"] = SearchReplayResponseSchema(),
+            ["ContextRequest"] = ContextRequestSchema(false),
+            ["BriefContextRequest"] = ContextRequestSchema(true),
+            ["ContextResponse"] = Required(Object(("text", "string"), ("package", "object"), ("problem", "object")), "text"),
+            ["BriefResponse"] = Required(Object(("markdown", "string"), ("json", "object"), ("markdownMeasurement", "object"), ("problem", "object"), ("jsonMeasurement", "object")), "markdown", "json"),
             ["RunStopRequest"] = Object(("by", "string"), ("reason", "string"), ("graceSeconds", "integer")),
             ["RunSettleRequest"] = Object(("by", "string"), ("recordsChecked", "boolean")),
             ["RunSettleResponse"] = Object(("run", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("problem", "object")),
@@ -1010,6 +1043,11 @@ public static class OpenApiDocument
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/prompts" => "PromptSaveRequest",
         "/v1/resources/read" => "ResourceRequest",
+        "/v1/context/prepare" => "ContextRequest",
+        "/v1/context/brief" => "BriefContextRequest",
+        "/v1/search" => "SearchRequest",
+        "/v1/search/index" => "SearchIndexRequest",
+        "/v1/search/replay" => "SearchReplayRequest",
         "/v1/prompts/preferences" => "PromptPreferenceRequest",
         "/v1/prompts/copy" => "PromptCopyRequest",
         "/v1/prompts/use" => "PromptUseRequest",
@@ -1132,6 +1170,11 @@ public static class OpenApiDocument
         ("GET", "/v1/context/work/{key}") => "ContextResponse: compute a deterministic work context package and exact originals; writes nothing.",
         ("GET", "/v1/context/original/{pin}") => "ContextReadResponse: self-contained pinned identity and exact bytes from immutable records or a matching working-tree document. Rechecks access and hashes; writes nothing.",
         ("GET", "/v1/context/{manifest}/sources/{source}") => "ContextReadResponse: legacy manifest handles return original-unavailable after access checking; prepare again for a self-contained pin.",
+        ("POST", "/v1/context/prepare") => "ContextResponse for a work order with up to five searches: the top three new candidates of each become optional sources pinned by exact hash, after the explicit selection, and the manifest (vericairn.context-manifest/2) records every selection. Grants no authority; writes nothing.",
+        ("POST", "/v1/context/brief") => "BriefResponse: the measured agent brief with up to five searches, as POST /v1/context/prepare adds them. Writes nothing.",
+        ("POST", "/v1/search") => "SearchResponse: keyword search of the machine-local index, only of the segments the reader may read, with the vericairn.search-selection/1 record of it. Candidates are untrusted data; writes no record.",
+        ("POST", "/v1/search/index") => "SearchIndexResponse: bring the machine-local index up to date with the records and pins, or rebuild it; the segments the caller may read. Writes no record.",
+        ("POST", "/v1/search/replay") => "SearchReplayResponse: rerun recorded selections on exactly their basis, this copy's or their commit's from local history, and compare; otherwise say why, never approximating. Writes nothing.",
         ("GET", "/v1/progress") => "The progress report: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON with compact current attention references. Record-derived sections agree for the same records; repository checks, latest local agent claims and worker observations are labelled separately and can differ by runtime.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",
@@ -1230,6 +1273,92 @@ public static class OpenApiDocument
         ("POST", "/v1/runtime/certificate") => "Replace the runtime certificate now: paired devices keep working, since the runtime identity signs the new one; for a compromise every other open connection is closed too, and identity replaces the runtime identity as well, after which every device pairs again. On the runtime's own machine only.",
         _ => string.Empty,
     };
+
+    private static JsonObject Required(JsonObject schema, params string[] names)
+    {
+        schema["required"] = new JsonArray(names.Select(n => (JsonNode)n).ToArray());
+        return schema;
+    }
+
+    private static JsonObject Strings(string description, int? maxItems = null)
+    {
+        var schema = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = description };
+        if (maxItems is int max) schema["maxItems"] = max;
+        return schema;
+    }
+
+    private static JsonObject WithSearch(JsonObject schema)
+    {
+        schema["properties"]!["search"] = Strings("Up to five search queries whose top three new candidates each join the run's package as optional sources that grant no authority; the run's intent records each selection.", 5);
+        return schema;
+    }
+
+    private static JsonObject SearchRequestSchema()
+    {
+        JsonObject schema = Required(Object(("query", "string"), ("limit", "integer"), ("allowStale", "boolean"), ("principal", "string"), ("method", "string")), "query");
+        schema["properties"]!["method"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("keyword", "semantic"), ["default"] = "keyword", ["description"] = "Semantic search needs a semantic search Adapter, which this release does not include; it is refused with its reason." };
+        schema["properties"]!["query"]!["maxLength"] = 1024;
+        schema["properties"]!["query"]!["description"] = "At most 1,024 UTF-8 bytes: words, double-quoted phrases and the filters type:, kind:, path:, key:, since:, before: and history. Anything else, including engine syntax, is matched as text.";
+        schema["properties"]!["limit"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 50, ["default"] = 10 };
+        schema["properties"]!["principal"]!["description"] = "The principal the search is for; it narrows what the caller may read and never widens it. A device-signed request names its own principal or none.";
+        return schema;
+    }
+
+    private static JsonObject SearchCandidateSchema()
+    {
+        JsonObject schema = Required(Object(("rank", "integer"), ("score", "integer"), ("kind", "string"), ("state", "string"), ("title", "string"), ("source", "object"),
+            ("pin", "string"), ("fields", "array"), ("audience", "string"), ("excerpt", "object"), ("reason", "string"), ("key", "string")), "rank", "score", "kind", "state", "title", "source", "pin", "fields", "audience");
+        schema["properties"]!["kind"]!["enum"] = new JsonArray("record", "document", "knowledge");
+        schema["properties"]!["state"]!["enum"] = new JsonArray("selected", "duplicate", "below-limit", "excluded", "index-fault");
+        schema["properties"]!["fields"]!["items"] = new JsonObject { ["type"] = "string" };
+        schema["properties"]!["excerpt"] = SchemaReference("SearchExcerpt");
+        schema["properties"]!["score"]!["description"] = "BM25 from the candidate's own audience segment, times 10,000, rounded half away from zero.";
+        return schema;
+    }
+
+    private static JsonObject SearchResponseSchema()
+    {
+        JsonObject schema = Required(Object(("text", "string"), ("selection", "object"), ("candidates", "array"), ("current", "boolean"), ("more", "boolean"),
+            ("completeness", "string"), ("problem", "object"), ("trust", "string")), "text", "candidates", "current", "more");
+        schema["properties"]!["candidates"]!["items"] = SchemaReference("SearchCandidate");
+        schema["properties"]!["selection"]!["description"] = "The vericairn.search-selection/1 record of the search, with its own hash.";
+        return schema;
+    }
+
+    private static JsonObject SearchIndexResponseSchema()
+    {
+        JsonObject schema = Required(Object(("text", "string"), ("method", "string"), ("revision", "string"), ("current", "boolean"), ("segments", "array"),
+            ("indexBytes", "integer"), ("sourceBytes", "integer"), ("elapsedMilliseconds", "integer"), ("problem", "object"), ("unavailable", "array")), "text", "method", "current", "segments");
+        schema["properties"]!["segments"]!["items"] = SchemaReference("SearchSegment");
+        schema["properties"]!["unavailable"]!["items"] = new JsonObject { ["type"] = "string" };
+        return schema;
+    }
+
+    private static JsonObject SearchReplayOutcomeSchema()
+    {
+        JsonObject schema = Required(Object(("selection", "string"), ("replayed", "boolean"), ("matches", "boolean"), ("basis", "string"), ("message", "string"), ("differences", "array")),
+            "selection", "replayed", "basis", "message", "differences");
+        schema["properties"]!["basis"]!["enum"] = new JsonArray("current", "copy", "commit", "unavailable");
+        schema["properties"]!["differences"]!["items"] = new JsonObject { ["type"] = "string" };
+        schema["properties"]!["matches"]!["nullable"] = true;
+        return schema;
+    }
+
+    private static JsonObject SearchReplayResponseSchema()
+    {
+        JsonObject schema = Required(Object(("text", "string"), ("outcomes", "array"), ("problem", "object")), "text", "outcomes");
+        schema["properties"]!["outcomes"]!["items"] = SchemaReference("SearchReplayOutcome");
+        return schema;
+    }
+
+    private static JsonObject ContextRequestSchema(bool brief)
+    {
+        JsonObject schema = brief
+            ? Object(("workOrder", "string"), ("maxBytes", "integer"), ("recipient", "string"), ("assignment", "string"), ("view", "object"), ("principal", "string"))
+            : Object(("workOrder", "string"), ("maxBytes", "integer"), ("principal", "string"));
+        schema["properties"]!["search"] = Strings("Up to five search queries; the top three new candidates of each become optional sources pinned by exact hash that grant no authority.", 5);
+        return Required(schema, "workOrder");
+    }
 
     private const string EventPrincipalDescription = "The principal read for: on the local socket the operating-system user reads for it, by default the operator; a device reads only for its own principal and may omit it.";
 

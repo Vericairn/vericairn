@@ -8,6 +8,9 @@ namespace Vericairn.Cli;
 
 internal sealed record RunChoices(string? Configuration, string[] Execution, long? InputTokens, long? OutputTokens, string? ContextPackage, long? ContextBytes = null)
 {
+    /// <summary>Up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
+    public IReadOnlyList<string>? Search { get; init; }
+
     public static bool TryParse(RunChoices? choices, out JsonElement? execution, out JsonElement? allocation, out string? problem)
     {
         execution = null;

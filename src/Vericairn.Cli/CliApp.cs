@@ -45,6 +45,7 @@ internal static class CliApp
         root.Subcommands.Add(new McpCommand(context));
         root.Subcommands.Add(new ContextCommand(context));
         root.Subcommands.Add(new EventsCommand(context));
+        root.Subcommands.Add(new SearchCommand(context));
         root.Subcommands.Add(new UpdatesCommand(context));
 
         root.Subcommands.Add(new StatusCommand(context, updates));

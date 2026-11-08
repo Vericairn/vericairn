@@ -208,6 +208,8 @@ jobs:
           set -eu
           out/linux-x64/bin/vericairn --version
           out/linux-x64/bin/vericairn sources inspect "$GITHUB_WORKSPACE"
+          # The search index needs SQLite's full-text module in the single-file build's own native library; doctor ranks a probe.
+          out/linux-x64/bin/vericairn doctor | grep -E '^search +keyword index .* with FTS5$'
       - name: Publish Workbench distributables
         shell: bash
         # The desktop ships per platform as an unsigned developer build beside the command line it drives (Workbench finds vericairn
@@ -343,6 +345,7 @@ jobs:
           tar -xzf "dist/vericairn-$VERSION-$RID.tar.gz" -C smoke
           smoke/bin/vericairn --version
           smoke/bin/vericairn sources inspect "$GITHUB_WORKSPACE"
+          smoke/bin/vericairn doctor | grep -E '^search +keyword index .* with FTS5$'
       - name: Run the published Windows command line
         if: runner.os == 'Windows'
         shell: pwsh
@@ -356,3 +359,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./smoke/bin/vericairn.exe sources inspect "$env:GITHUB_WORKSPACE"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $doctor = & ./smoke/bin/vericairn.exe doctor | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($doctor -notmatch '(?m)^search +keyword index .* with FTS5\r?$') { Write-Error "The single-file build lacks SQLite's full-text module: $doctor"; exit 1 }
