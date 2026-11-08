@@ -580,10 +580,10 @@ it stood at the closing's time. The checkpoints between it and the adoption need
 since a closing acts by itself. One whose author may not perform the act is
 `history.closing-author`, as is one that verifies only without the closings before it,
 because one of them closed its signer's device or key or refused that device's admission; it
-closes nothing, anchored or not, and still witnesses what it lists if it counts. One naming a record of another type is `history.checkpoint-invalid`. Two
-concurrent closings, neither following the other, each act, each judged against the
-closings before it. The recovery device signs a device closing and no other checkpoint
-(`signature.recovery-scope`).
+closes nothing, anchored or not, and still witnesses what it lists if it counts. One naming a
+record of another type is `history.checkpoint-invalid`. Two concurrent closings, neither
+following the other, each act, each judged against the closings before it. The recovery
+device signs a device closing and no other checkpoint (`signature.recovery-scope`).
 
 What a closing witnesses is what it and every checkpoint it follows list, with the bytes
 present. From a closing that acts on, these records count only when it witnesses them,

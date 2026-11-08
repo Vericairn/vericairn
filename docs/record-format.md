@@ -214,10 +214,9 @@ is `history.after-closing`, an error that leads `status`, and counts for nothing
 root operator or a person holding `administer` anchors it after reading it. That includes
 a record from another clone written before the closing and merged after it. Such an
 admission or revocation admits or revokes nothing until it is anchored, and such a device
-revision changes no key or name, anchored or not. The closing acts by
-itself: deleting the revocation after it reopens nothing, and a closing that no revocation,
-rotation or grant revision follows still closes, which the estate check warns as
-`history.closing-unfollowed`.
+revision changes no key or name, anchored or not. The closing acts by itself: deleting the
+revocation after it reopens nothing, and a closing that no revocation, rotation or grant
+revision follows still closes, which the estate check warns as `history.closing-unfollowed`.
 
 Roles and grants are read as they stood at a record's time: from each line, the latest
 revision that counts dated at or before the record, unexpired when it was authored and
@@ -228,9 +227,9 @@ evaluation take their recorded time from the records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
 warning `history.dated-after-witness`. In every estate, the runtime refuses a stated time
-more than five minutes past its own clock, such as `records new --at` or `work attempt
---at`. An estate that has not adopted checkpoints, such as the first-party estate before it
-adopts, reads exactly as before.
+more than five minutes past its own clock, such as `records new --at` or
+`work attempt --at`. An estate that has not adopted checkpoints, such as the first-party
+estate before it adopts, reads exactly as before.
 
 ## Published Vericairn dependency observations (0.8.3)
 
