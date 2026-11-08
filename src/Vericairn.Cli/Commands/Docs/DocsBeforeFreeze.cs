@@ -78,9 +78,10 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
     private int Report(string version, string directory, IReadOnlyList<string> names, IReadOnlyList<string> prior, (IEstateApi Api, RecordResponse Product, IReadOnlyList<string> Ids, string By)? recording, bool json)
     {
         GuidesBeforeFreeze.Scan scan;
+        string label = GuidesLabel(directory);
         try
         {
-            scan = GuidesBeforeFreeze.Run(directory, Path.GetFileName(directory), names, prior);
+            scan = GuidesBeforeFreeze.Run(directory, label, names, prior);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.Text.DecoderFallbackException or System.Text.RegularExpressions.RegexMatchTimeoutException)
         {
@@ -115,7 +116,7 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
             commit = observed.Commit;
             foreach (string method in Methods)
             {
-                WriteOutcome outcome = Record(r.Api, r.Product, r.Ids, r.By, method, version, prior, commit, scan);
+                WriteOutcome outcome = Record(r.Api, r.Product, r.Ids, r.By, method, version, prior, commit, scan, (directory, label));
                 if (!outcome.Ok)
                 {
                     if (written.Count > 0) context.Error.WriteLine("Recorded before the refusal: " + string.Join(", ", written.Select(w => w.Id)) + ".");
@@ -130,14 +131,14 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
         {
             context.Output.WriteLine(JsonSerializer.Serialize(new
             {
-                version, prior, guides = Path.GetFileName(directory), read = scan.Read, history = scan.History, skipped = scan.Skipped, commit,
+                version, prior, guides = label, read = scan.Read, history = scan.History, skipped = scan.Skipped, commit,
                 checks = Methods.Select(m => new { method = m, outcome = scan.Of(m).Count == 0 ? "passed" : "failed", findings = scan.Of(m).Select(f => new { path = f.Path, line = f.Line, found = f.Found, text = f.Text }) }),
                 recorded = written,
             }, ProtocolJson.Options));
         }
         else
         {
-            context.Output.WriteLine($"{version} before freezing: {scan.Read.Count} version-tracking guides read for {(prior.Count == 0 ? "no earlier release" : string.Join(", ", prior))}, {scan.History.Count} history documents read for preparation wording only, {scan.Skipped.Count} declared documents not in {Path.GetFileName(directory)}/ (generated with the set).");
+            context.Output.WriteLine($"{version} before freezing: {scan.Read.Count} version-tracking guides read for {(prior.Count == 0 ? "no earlier release" : string.Join(", ", prior))}, {scan.History.Count} history documents read for preparation wording only, {scan.Skipped.Count} declared documents not in {label}/ (generated with the set).");
             foreach (GuidesBeforeFreeze.Finding finding in scan.Findings)
             {
                 context.Output.WriteLine("  " + finding);
@@ -158,19 +159,40 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
     }
 
     /// <summary>One check's verification of the product at the guides' commit, superseding the latest one of the same check and version.</summary>
-    private static WriteOutcome Record(IEstateApi api, RecordResponse product, IReadOnlyList<string> ids, string by, string method, string version, IReadOnlyList<string> prior, string commit, GuidesBeforeFreeze.Scan scan)
+    /// <summary>
+    /// The guides directory as records and output name it: relative to the root of the repository that holds it, or by its own name
+    /// outside one; never a path of this machine.
+    /// </summary>
+    internal static string GuidesLabel(string directory)
     {
+        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        for (DirectoryInfo? at = new(full); at is not null; at = at.Parent)
+        {
+            if (Directory.Exists(Path.Combine(at.FullName, ".git")) || File.Exists(Path.Combine(at.FullName, ".git")))
+            {
+                return Path.GetRelativePath(at.FullName, full).Replace('\\', '/');
+            }
+        }
+
+        return Path.GetFileName(full);
+    }
+
+    private static WriteOutcome Record(IEstateApi api, RecordResponse product, IReadOnlyList<string> ids, string by, string method, string version, IReadOnlyList<string> prior, string commit, GuidesBeforeFreeze.Scan scan,
+        (string Path, string Name) guides)
+    {
+        // A guide's line is quoted as it reads, less any path of this machine it names, so the record stays portable.
+        string Quoted(GuidesBeforeFreeze.Finding finding) => PortableText.Of(finding.ToString(), guides);
         IReadOnlyList<GuidesBeforeFreeze.Finding> found = scan.Of(method);
         string what = method == GuidesBeforeFreeze.PriorVersionMethod
             ? $"no token of {(prior.Count == 0 ? "an earlier release" : string.Join(", ", prior))} outside history sections and labels"
             : "no preparation wording";
         string summary = found.Count == 0
             ? $"Passed at {commit[..12]}: {what} in {scan.Read.Count + scan.History.Count} guides of the {version} set."
-            : $"Failed at {commit[..12]}: {found.Count.ToString(CultureInfo.InvariantCulture)} locations break {what}: " + string.Join("; ", found.Take(20).Select(f => f.ToString()));
+            : $"Failed at {commit[..12]}: {found.Count.ToString(CultureInfo.InvariantCulture)} locations break {what}: " + string.Join("; ", found.Take(20).Select(Quoted));
         var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = version, ["previous"] = ReleaseHistory.Joined(prior) };
         Json.JsonObject body = Checks.VerificationBody(method, commit, $"vericairn docs pass {version} --before", Checks.LocalEnvironment(environment), "self", found.Count == 0 ? "passed" : "failed",
             summary.Length > 8000 ? summary[..7997] + "..." : summary, found.Count == 0 ? 0 : 1, null, null, null,
-            found.Take(50).Select(f => new Checks.Evidence(f.ToString().Length > 2000 ? f.ToString()[..2000] : f.ToString(), null, $"{f.Path}:{f.Line.ToString(CultureInfo.InvariantCulture)}")).ToList(),
+            found.Take(50).Select(f => new Checks.Evidence(Quoted(f).Length > 2000 ? Quoted(f)[..2000] : Quoted(f), null, PortableText.Of($"{f.Path}:{f.Line.ToString(CultureInfo.InvariantCulture)}", guides))).ToList(),
             ["A check of the guides' text at this commit: it finds tokens and phrases, never whether a sentence is true.", "Only the documents the set declares that the guides directory holds were read; generated documents are checked by their generator."]);
         if (api.Health().RecordFormat >= 2)
         {

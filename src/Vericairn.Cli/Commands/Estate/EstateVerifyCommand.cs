@@ -67,11 +67,13 @@ internal sealed class EstateVerification(CommandContext context)
             string where = context.UsingDaemon ? $"the daemon serving it here (process {health.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)})" : "this command line's own runtime, since no daemon serves it here";
             bool elsewhere = !SamePath(health.Root, full) || health.Estate != manifest.Estate;
             bool runtimePassed = !elsewhere && served == pinned;
-            string runtime = elsewhere
-                ? $"The daemon answering this estate's endpoint serves estate {health.Estate} at {health.Root}, not this estate. See 'vericairn --estate {ServingRuntime.Quote(health.Root)} runtime status'."
-                : runtimePassed
-                ? $"Vericairn {served} serves the estate on this machine, through {where}: the release its manifest pins."
-                : $"Vericairn {served} serves the estate on this machine, through {where}; the estate pins release {pinned}. Stop it with '{ServingRuntime.StopCommand(full)}', then start the pinned release's runtime with {ServingRuntime.StartCommand(full, pinned)}, and verify again.";
+            string runtime = RuntimeSummary(elsewhere, health.Estate, served, pinned, where, runtimePassed);
+
+            // The exact commands for this machine name its paths, so they are shown here and never recorded.
+            string? here = elsewhere
+                ? $"See 'vericairn --estate {ServingRuntime.Quote(health.Root)} runtime status'."
+                : runtimePassed ? null
+                : $"Stop it with '{ServingRuntime.StopCommand(full)}', then start the pinned release's runtime with {ServingRuntime.StartCommand(full, pinned)}.";
 
             FindingsResponse check = api.Check();
             string? statusProblem = null;
@@ -85,13 +87,7 @@ internal sealed class EstateVerification(CommandContext context)
             }
 
             bool checkPassed = runtimePassed && check.Errors == 0 && statusProblem is null;
-            string estate = !runtimePassed
-                ? $"Not checked with the pinned release: {runtime}"
-                : check.Errors > 0
-                ? $"The estate check with Vericairn {served} found {check.Errors} errors: " + string.Join("; ", check.Findings.Where(f => f.Severity == "error").Take(20).Select(f => $"{f.Code} in {f.Location}: {f.Message}"))
-                : statusProblem is not null
-                ? $"The estate's status does not derive with Vericairn {served}: {statusProblem}"
-                : $"The estate check with Vericairn {served} found no error ({check.Warnings} warnings), and its status derives.";
+            string estate = EstateSummary(full, runtimePassed, runtime, served, check, statusProblem);
 
             RecordResponse? charter = api.Records("estate").Where(r => r.Current).OrderBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
             if (charter is null)
@@ -116,7 +112,7 @@ internal sealed class EstateVerification(CommandContext context)
             var written = new List<RecordWritten>();
             foreach ((string method, bool passed, string summary) in new[] { (EstateVerifyCommand.ServingRuntimeMethod, runtimePassed, runtime), (EstateVerifyCommand.EstateCheckMethod, checkPassed, estate) })
             {
-                WriteOutcome outcome = Record(api, charter, by, device, method, passed, summary, pinned, served, observed.Commit, limitations);
+                WriteOutcome outcome = Record(api, charter, by, device, method, passed, PortableText.Of(summary, (full, "<estate>")), pinned, served, observed.Commit, limitations);
                 if (!outcome.Ok)
                 {
                     if (written.Count > 0) context.Error.WriteLine("Recorded before the refusal: " + string.Join(", ", written.Select(w => w.Id)) + ".");
@@ -130,7 +126,7 @@ internal sealed class EstateVerification(CommandContext context)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new
                 {
-                    pinned, served, daemon = context.UsingDaemon, commit = observed.Commit,
+                    pinned, served, daemon = context.UsingDaemon, commit = observed.Commit, here,
                     checks = new[] { new { method = EstateVerifyCommand.ServingRuntimeMethod, outcome = runtimePassed ? "passed" : "failed", summary = runtime }, new { method = EstateVerifyCommand.EstateCheckMethod, outcome = checkPassed ? "passed" : "failed", summary = estate } },
                     recorded = written,
                 }, ProtocolJson.Options));
@@ -138,6 +134,11 @@ internal sealed class EstateVerification(CommandContext context)
             else
             {
                 context.Output.WriteLine($"{EstateVerifyCommand.ServingRuntimeMethod}: {(runtimePassed ? "passed" : "failed")}: {runtime}");
+                if (here is not null)
+                {
+                    context.Output.WriteLine("  on this machine: " + here);
+                }
+
                 context.Output.WriteLine($"{EstateVerifyCommand.EstateCheckMethod}: {(checkPassed ? "passed" : "failed")}: {estate}");
                 foreach (RecordWritten record in written)
                 {
@@ -149,15 +150,47 @@ internal sealed class EstateVerification(CommandContext context)
         });
     }
 
-    private static WriteOutcome Record(IEstateApi api, RecordResponse charter, string by, string device, string method, bool passed, string summary, string pinned, string served, string commit, IReadOnlyList<string> limitations)
+    /// <summary>
+    /// The serving runtime's outcome in words a record may carry: the runtime named by its release and process, another estate by its
+    /// id, and the way to replace it by the commands run in the estate's directory, never a path of this machine.
+    /// </summary>
+    internal static string RuntimeSummary(bool elsewhere, string servingEstate, string served, string pinned, string where, bool passed) =>
+        elsewhere
+            ? $"The daemon answering this estate's endpoint on this machine serves estate {servingEstate}, not this estate; 'vericairn runtime status' in that estate's directory shows it."
+            : passed
+            ? $"Vericairn {served} serves the estate on this machine, through {where}: the release its manifest pins."
+            : $"Vericairn {served} serves the estate on this machine, through {where}; the estate pins release {pinned}. Stop it with 'vericairn runtime stop' in the estate's directory, " +
+              $"then start release {pinned}'s runtime with the estate's bootstrap ('./bootstrap runtime start', or '.\\bootstrap.ps1 runtime start' on Windows) or with that release's command line, and verify again.";
+
+    /// <summary>The estate check's outcome in words a record may carry: the findings' estate-relative locations, their messages without a path of this machine.</summary>
+    internal static string EstateSummary(string root, bool runtimePassed, string runtime, string served, FindingsResponse check, string? statusProblem) => PortableText.Of(
+        !runtimePassed
+            ? $"Not checked with the pinned release: {runtime}"
+            : check.Errors > 0
+            ? $"The estate check with Vericairn {served} found {check.Errors} errors: " + string.Join("; ", check.Findings.Where(f => f.Severity == "error").Take(20).Select(f => $"{f.Code} in {f.Location}: {f.Message}"))
+            : statusProblem is not null
+            ? $"The estate's status does not derive with Vericairn {served}: {statusProblem}"
+            : $"The estate check with Vericairn {served} found no error ({check.Warnings} warnings), and its status derives.",
+        (root, "<estate>"));
+
+    /// <summary>A verification's body as estate verify records it: its summary and limitations carry no path of this machine.</summary>
+    internal static Json.JsonObject Body(string method, bool passed, string summary, string pinned, string served, string device, string commit, IReadOnlyList<string> limitations, long recordFormat)
     {
+        string portable = PortableText.Of(summary);
         Json.JsonObject body = Checks.VerificationBody(method, commit, "vericairn estate verify", Checks.LocalEnvironment(new Dictionary<string, string>(StringComparer.Ordinal) { ["release"] = pinned, ["served"] = served, ["device"] = device }),
-            "self", passed ? "passed" : "failed", summary.Length > 8000 ? summary[..7997] + "..." : summary, passed ? 0 : 1, null, null, null, [], limitations);
-        if (api.Health().RecordFormat >= 2)
+            "self", passed ? "passed" : "failed", portable.Length > 8000 ? portable[..7997] + "..." : portable, passed ? 0 : 1, null, null, null, [], limitations.Select(l => PortableText.Of(l)).ToList());
+        if (recordFormat >= 2)
         {
             body["evidenceClass"] = "observation";
             body["observer"] = "automation";
         }
+
+        return body;
+    }
+
+    private static WriteOutcome Record(IEstateApi api, RecordResponse charter, string by, string device, string method, bool passed, string summary, string pinned, string served, string commit, IReadOnlyList<string> limitations)
+    {
+        Json.JsonObject body = Body(method, passed, summary, pinned, served, device, commit, limitations, api.Health().RecordFormat);
 
         string? supersedes = api.Records("verification")
             .Where(v => v.Current && Body(v.Envelope, "method") == method && Environment(v.Envelope, "release") == pinned && Environment(v.Envelope, "device") == device)

@@ -149,7 +149,7 @@ public sealed class DocsBeforeFreezeTests
         CliHarness.Outcome Run(params string[] args) => CliHarness.RunWithApi(f.Service, null, ["--estate", f.Estate.Root, .. args]);
         string declaration = Path.Combine(f.Repository.Root, "docs", "releases", "documents.json");
         f.Repository.WriteFile("docs/releases/documents.json", """["install.md", "guide.md", "cli-reference.md"]""");
-        f.Repository.WriteFile("docs/install.md", "# Installing Widget 0.2.0\n\nRun `widget --version 0.2.0`.\n");
+        f.Repository.WriteFile("docs/install.md", "# Installing Widget 0.2.0\n\nRun `widget --version 0.2.0`, installed under C:\\Widget\\bin or /opt/widget/bin.\n");
         f.Repository.WriteFile("docs/guide.md", "# Guide\n\nFrom 0.1.0, the guide explains the command.\n");
         int before = f.Estate.Load().Records.Count;
 
@@ -186,6 +186,16 @@ public sealed class DocsBeforeFreezeTests
         Assert.Equal(("failed", failedCommit, "0.3.0", f.Product.Id), (EstateModel.BodyString(prior, "outcome"), EstateModel.BodyString(prior, "commit"), GoalPredicates.FieldString(prior, "environment.release"), prior.Subject!.Id));
         Assert.Equal("0.2.0 0.1.0", GoalPredicates.FieldString(prior, "environment.previous"));
         Assert.Contains("docs/install.md:1: prior-version token 0.2.0", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
+
+        // A guide's line is quoted without the machine paths it names, so the record is portable on every platform.
+        Assert.Contains("installed under <path> or <path>", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
+        foreach (RecordEnvelope recorded in model.Current("verification"))
+        {
+            string text = File.ReadAllText(Path.Combine(f.Estate.Root, recorded.ExpectedPath));
+            Assert.DoesNotContain(text.Split('\n'), line => Vericairn.Records.Estate.SecretShapes.AbsolutePath().IsMatch(line));
+            Assert.DoesNotContain(Path.GetFullPath(f.Repository.Root), text, StringComparison.OrdinalIgnoreCase);
+            Assert.False(PortableText.HasMachinePath(recorded.Body.GetRawText().Replace(recorded.Body.GetProperty("environment").GetRawText(), "{}", StringComparison.Ordinal)), recorded.Body.GetRawText());
+        }
         Assert.Equal("passed", EstateModel.BodyString(Assert.Single(model.Current("verification"), v => EstateModel.BodyString(v, "method") == GuidesBeforeFreeze.PreparationMethod), "outcome"));
 
         // Revised and committed, the next check supersedes each earlier one: the latest outcome is the current one.

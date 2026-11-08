@@ -74,6 +74,16 @@ public sealed class EstateVerifyCommandTests
 
             model = EstateLoader.Load(root);
             RecordEnvelope failed = Verification(model, EstateVerifyCommand.ServingRuntimeMethod);
+
+            // No verification names a path of this machine: the estate's root, the daemon's address or a temporary directory.
+            foreach (RecordEnvelope recorded in model.OfType("verification"))
+            {
+                string text = File.ReadAllText(Path.Combine(root, recorded.ExpectedPath));
+                Assert.DoesNotContain(text.Split('\n'), line => SecretShapes.AbsolutePath().IsMatch(line));
+                Assert.DoesNotContain(Path.GetFullPath(root), text, StringComparison.OrdinalIgnoreCase);
+                Assert.False(PortableText.HasMachinePath(EstateModel.BodyString(recorded, "summary") + "\n" + string.Join("\n", recorded.Body.GetProperty("limitations").EnumerateArray().Select(l => l.GetString()))), text);
+            }
+
             Assert.Equal(("failed", runtime.Id, "0.1.0"), (EstateModel.BodyString(failed, "outcome"), failed.Supersedes, GoalPredicates.FieldString(failed, "environment.served")));
 
             // What the upgrade flow's runtime trap reads: a failed check for the pinned release now stands, and the passed one does not.

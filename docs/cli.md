@@ -707,7 +707,8 @@ earlier releases come from the estate's release records, or from `--previous`, w
 `--record --by <principal>` records each check's outcome as a `verification` of the product at the guides' commit, with method
 `vericairn.software/prior-version-tokens` or `vericairn.software/preparation-wording`, `environment.release` the version and
 `environment.previous` the earlier releases it read, separated by spaces, superseding the latest one of the same check and
-version. It refuses a clone with uncommitted changes, since the verification names the commit it read, and refuses `--previous`:
+version. Each location is named relative to the root of the repository that holds the guides, and a machine path a quoted line
+names is recorded as `<path>`. It refuses a clone with uncommitted changes, since the verification names the commit it read, and refuses `--previous`:
 the release flow counts a check only of the earlier releases the records give. Every file is read inside the guides directory:
 `/` and `\` both divide a declared name, and a declared name, or any directory on its way, that is a link is refused. The
 command reads files and changes none; `--before` goes with neither `--assign-to`, `--key`, `--document` nor `--output`.
@@ -730,4 +731,7 @@ vericairn --json estate verify --by <principal>
 
 Exit 0 means both passed and 1 that one failed: a runtime of another release serving the estate fails the runtime check, naming
 it with `runtime stop` and the pinned release's start, and leaves the estate unchecked. The command stops and starts nothing; the
-upgrade's runtime step does that. An estate pinned to a source commit is refused.
+upgrade's runtime step does that. An estate pinned to a source commit is refused. A verification names no path of the machine it
+ran on: the runtime by its release and process, another estate by its id, the commands as run in the estate's directory, and any
+other path in a finding's message as `<path>`; the exact commands for this machine are printed after the check, and `--json`
+gives them as `here`, never recorded.
