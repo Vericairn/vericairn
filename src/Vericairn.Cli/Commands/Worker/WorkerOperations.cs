@@ -87,7 +87,7 @@ internal sealed class WorkerOperations(CommandContext context)
             }
 
             var request = new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage);
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search };
             RunResponse started = options.PrepareOnly ? api.RunPrepare(request) : api.RunStart(request);
             if (!started.Ok)
             {

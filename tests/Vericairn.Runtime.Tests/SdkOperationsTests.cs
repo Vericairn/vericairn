@@ -208,13 +208,15 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(142, synchronous.Length);
-        foreach (string name in new[] { nameof(IEstateApi.SecurityReportsPoll), nameof(IEstateApi.SecurityReportsTriage) })
+        Assert.Equal(147, synchronous.Length);
+        foreach (string name in new[] { nameof(IEstateApi.Search), nameof(IEstateApi.SearchIndex), nameof(IEstateApi.SearchReplay), nameof(IEstateApi.SecurityReportsPoll), nameof(IEstateApi.SecurityReportsTriage) })
         {
             Assert.Single(synchronous, method => method.Name == name);
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name).IsAbstract);
             Assert.False(typeof(IEstateApi).GetMethods().Single(method => method.Name == name + "Async").IsAbstract);
         }
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.Context), [typeof(ContextRequest)])!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.BriefContext), [typeof(BriefContextRequest)])!.IsAbstract);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.DecisionBasis));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.DecisionBasis))!.IsAbstract);
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.DecisionBasisAsync))!.IsAbstract);
