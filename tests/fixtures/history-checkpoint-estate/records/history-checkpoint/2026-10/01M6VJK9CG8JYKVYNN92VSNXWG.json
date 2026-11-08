@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-13T12:05:17Z",
+  "body": {
+    "closes": {
+      "id": "01M6VJK9B5A32AFMM989FPTR5D",
+      "kind": "device"
+    },
+    "inventory": [
+      "sha256:a1a03a105e0c5fbd1bc03972a350c7297ef81b84a337e0d6eff3315226fc95e2"
+    ],
+    "previous": [
+      {
+        "hash": "sha256:716b1b9b3ba745473670292913c12d25765bd1e482d384fbcad08044f1601dfc",
+        "id": "01M6VJK9C8KM0VCFYH7BZNNFRD"
+      }
+    ],
+    "recordSetHash": "sha256:c5c447926d10f8cc83d87a1b6c241b58dad9aa96fa102f9866d60a43860a3a73",
+    "records": 15,
+    "removed": [
+      {
+        "hash": "sha256:354361a4e3df9c06a77b80489d81d24ed310961b23e4ea03447c7921dd400eb9",
+        "id": "01M6VJK9C8KM0VCFYH7BZNNFR9",
+        "reason": "It named a source that had to be withdrawn."
+      }
+    ],
+    "trigger": "closing"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:8db9aca0279617c7cb896359b2205d06740fd36c0a33243e95e437308f17d494",
+  "id": "01M6VJK9CG8JYKVYNN92VSNXWG",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M6VJK9AYDXK4J2DGVCXSSMA1",
+      "signature": "MIJgh65ySMxmQeg3kq7JAUhL4rcNo6KlkSjFN9T0BaU1DMiRxsurkWbDEMVX5PBFo8jPqJ697EaskwBsX26toA"
+    }
+  ],
+  "type": "history-checkpoint"
+}

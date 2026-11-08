@@ -84,6 +84,15 @@ public sealed class EstateBootstrapJourneyTests
             Assert.DoesNotContain("bootstrap: fetching ", warm.Out + warm.Err, StringComparison.Ordinal);
             Assert.DoesNotContain("bootstrap: building ", warm.Out + warm.Err, StringComparison.Ordinal);
             EstateBootstrapTests.AssertInstalled(root);
+
+            // --expect checks the copy against a history checkpoint known elsewhere first, and stops unless it holds it.
+            CliHarness.Outcome expected = await RunBootstrap(shell, root, home, source, payload, download, "--expect", "01J00000000000000000000000", "status");
+            Assert.True(expected.Code == 1, expected.Out + expected.Err);
+            Assert.Contains("history.expected-missing", expected.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("Principals:", expected.Out, StringComparison.Ordinal);
+            CliHarness.Outcome incomplete = await RunBootstrap(shell, root, home, source, payload, download, "--expect");
+            Assert.True(incomplete.Code != 0, incomplete.Out + incomplete.Err);
+            Assert.Contains("--expect needs a history checkpoint", incomplete.Out + incomplete.Err, StringComparison.Ordinal);
         }
         finally { CliHarness.Delete(scratch); }
     }

@@ -42,6 +42,16 @@ public sealed record DesignFileChange(string Path, string Hash);
 /// <param name="Documents">Complete changed design-file membership and current content hashes.</param>
 public sealed record DesignChangeSet(string BaseCommit, string Head, IReadOnlyList<DesignFileChange> Documents);
 
+/// <summary>A record file deleted in a repository's history.</summary>
+/// <param name="Path">Repository-relative path under records/.</param>
+/// <param name="Commit">The newest commit, reachable from the checked-out one, that deleted it.</param>
+public sealed record RecordDeletion(string Path, string Commit);
+
+/// <summary>Record files deleted in the checked-out commit's reachable history (design/signed-history.md § 7).</summary>
+/// <param name="Shallow">True when the clone is shallow, so its history is incomplete and nothing is listed.</param>
+/// <param name="Deleted">Each deleted record file with the newest commit that deleted it, sorted by path.</param>
+public sealed record RecordDeletions(bool Shallow, IReadOnlyList<RecordDeletion> Deleted);
+
 /// <summary>
 /// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
 /// work and never publishes; integration and remote publication are provider operations, not adapter ones.
@@ -85,6 +95,13 @@ public interface ISourceAdapter
     /// Null means unavailable or unsupported; without an observation the estate checks every entry.
     /// </summary>
     IReadOnlySet<string>? IgnoredEstateEntries(string root) => null;
+
+    /// <summary>
+    /// The record files deleted in the checked-out commit's reachable history, merges included, each with the newest commit that deleted
+    /// it, without fetching or changing the repository; a shallow clone reports itself and lists nothing. Null means unavailable or
+    /// unsupported.
+    /// </summary>
+    RecordDeletions? DeletedRecordFiles(string root) => null;
 
     /// <summary>
     /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.

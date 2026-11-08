@@ -81,6 +81,13 @@
       "severity": "warning"
     }
   ],
+  "history": {
+    "adopted": false,
+    "heads": [],
+    "problems": [],
+    "tail": 84,
+    "witnessed": 0
+  },
   "lastObservedByPerson": null,
   "operations": [
     {

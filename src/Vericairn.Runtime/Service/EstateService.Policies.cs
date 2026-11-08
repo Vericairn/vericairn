@@ -156,7 +156,7 @@ public sealed partial class EstateService
         HashSet<string> proofs = model.OfType("result").SelectMany(r => PolicyInputs.Items(PolicyInputs.Get(r.Body, "duties")))
             .SelectMany(d => PolicyInputs.Items(PolicyInputs.Get(d, "proofs"))).SelectMany(p => PolicyInputs.Items(PolicyInputs.Get(p, "records")))
             .Select(r => PolicyInputs.Text(r, "id")).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        foreach (RecordEnvelope record in model.Records)
+        foreach (RecordEnvelope record in model.CountingRecords)
         {
             if (record.Type == "result")
             {
@@ -177,7 +177,7 @@ public sealed partial class EstateService
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectCorruptedException) { objects.Add(new(hash, [], false)); }
         }
         // Live time is sampled after source acquisition, so a deadline crossed while reading cannot use the earlier instant.
-        string? time = live ? RecordParser.FormatTimestamp(PolicyClock.GetUtcNow()) : asOf ?? model.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault();
+        string? time = live ? RecordParser.FormatTimestamp(PolicyClock.GetUtcNow()) : asOf ?? model.CountingRecords.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault();
         return new(model, time, live ? PolicyTimeOrigin.Submission : preview ? PolicyTimeOrigin.Preview : PolicyTimeOrigin.Recorded, repositories, objects, registry.Implementations, submission);
 
         void SelectRepositories(JsonElement value)

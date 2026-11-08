@@ -1,0 +1,22 @@
+{
+  "at": "2026-10-13T12:00:11Z",
+  "body": {
+    "deliverables": [
+      "a test"
+    ],
+    "exitQuestion": "Does it hold?",
+    "inputs": [],
+    "intent": "Exercise checkpoints.",
+    "key": "GOLD-1",
+    "kind": "ordinary",
+    "scope": [
+      "checkpoints"
+    ],
+    "title": "Recorded before signatures were required"
+  },
+  "by": "01M6VJK9ARK66V397R6Q8F9HQM",
+  "format": "vericairn.record/3",
+  "hash": "sha256:0c72f0bfeef76b78394a10f6df3edaa5bf0a9debf08a685ecb36de1766b43cc6",
+  "id": "01M6VJK9B6JXKWDAC7DFC16S09",
+  "type": "work-order"
+}
