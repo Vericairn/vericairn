@@ -505,8 +505,11 @@ or attempt the call names, every field the call supplies unchanged), signed with
 another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
 document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
 ([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
-device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
-principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
+device, and offers the read tools and the contributor writes only. From 0.9.2 (`MCP-05`), when the runtime declares
+resource subscriptions, the bridge also holds the session's server stream and writes each notification on it to standard
+output as a line between answers, as `mcp serve --as` does over a local daemon
+([subscriptions and notifications](mcp.md#subscriptions-and-notifications-092)). It does not take `--as`: the paired
+device's own principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
 key is no longer held here.
 
 ```sh

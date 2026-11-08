@@ -25,7 +25,8 @@ namespace Vericairn.Daemon;
 /// admitted, permitted the profile it arrived on, and an agent's or a service's. A session binds to that device; each tool call
 /// runs as its API operation for that device, judged by the operation's own request scope; and the device signs every record
 /// itself, in two calls. Requests are answered with one JSON body; a GET opens the session's server stream, which carries the
-/// session's own messages to its device alone.
+/// session's own messages to its device alone: from 0.9.2 (MCP-05) the notifications of its resource subscriptions and of writes,
+/// derived from the event journal read for that device with the audience check of GET /v1/events.
 /// </summary>
 internal sealed class McpEndpoint
 {
@@ -58,7 +59,7 @@ internal sealed class McpEndpoint
     {
         this.host = host;
         Enabled = enabled;
-        Sessions = new McpSessions(host.Time);
+        Sessions = new McpSessions(host.Time, host.Service);
         origins = new HashSet<string>(allowedOrigins.Select(o => RuntimeSettings.TryNormalizeOrigin(o, out string? origin, out _) ? origin! : o), StringComparer.Ordinal);
     }
 
@@ -285,7 +286,7 @@ internal sealed class McpEndpoint
 
         try
         {
-            JsonObject answer = await RespondAsync(context, device, id.DeepClone(), method!, message["params"], observing.Token).ConfigureAwait(false);
+            JsonObject answer = await RespondAsync(context, device, session, id.DeepClone(), method!, message["params"], observing.Token).ConfigureAwait(false);
             await Rpc(context, StatusCodes.Status200OK, answer).ConfigureAwait(false);
         }
         finally
@@ -311,13 +312,16 @@ internal sealed class McpEndpoint
             return;
         }
 
-        JsonObject answer = await RespondAsync(context, device, id.DeepClone(), "initialize", parameters, host.Stopping).ConfigureAwait(false);
+        JsonObject answer = await RespondAsync(context, device, session, id.DeepClone(), "initialize", parameters, host.Stopping).ConfigureAwait(false);
         context.Response.Headers[SessionHeader] = session.Id;
         await Rpc(context, StatusCodes.Status200OK, answer).ConfigureAwait(false);
     }
 
-    /// <summary>Answers one request with a server for this request's device: a registry over the API's routes run as that device.</summary>
-    private async Task<JsonObject> RespondAsync(HttpContext context, AuthenticatedDevice device, JsonNode id, string method, JsonNode? parameters, CancellationToken observing)
+    /// <summary>
+    /// Answers one request with a server for this request's device: a registry over the API's routes run as that device, and the
+    /// session's subscriptions, which a subscription's resource read checks through those same routes.
+    /// </summary>
+    private async Task<JsonObject> RespondAsync(HttpContext context, AuthenticatedDevice device, McpSession mcp, JsonNode id, string method, JsonNode? parameters, CancellationToken observing)
     {
         McpOperations routes = Operations;
         var session = new NetworkSession(device.Principal);
@@ -327,6 +331,7 @@ internal sealed class McpEndpoint
         {
             ProtocolVersions = Versions,
             Instructions = McpServer.NetworkDescription,
+            Subscriptions = mcp.Watch,
         };
         return await server.RespondAsync(id, method, parameters, observing).ConfigureAwait(false);
     }
@@ -360,9 +365,10 @@ internal sealed class McpEndpoint
             }
 
             // The stream is bound to the session's device as the event stream is: it ends before the next message once the device is
-            // no longer admitted with its key and profile, and its wake-ups come from the journal, which a revocation enters.
-            (EventSubscription? subscription, Problem? problem) = host.Service.OpenEvents(null, new EventFilter(Kinds: ["record"]), device.Principal,
-                device.Identity, device.PublicKey, profile);
+            // no longer admitted with its key and profile, and its wake-ups come from the journal, which a revocation enters. It reads
+            // from where the session stands, so a stream opened again misses nothing of what its subscriptions follow.
+            (EventSubscription? subscription, Problem? problem) = session.Events is { } events ? events.Open()
+                : host.Service.OpenEvents(null, new EventFilter(Kinds: ["record"]), device.Principal, device.Identity, device.PublicKey, profile);
             if (subscription is null)
             {
                 Problem refusal = problem ?? new Problem("unavailable", "The server stream is unavailable.", []);
@@ -370,8 +376,15 @@ internal sealed class McpEndpoint
                 return;
             }
 
-            using IDisposable listening = subscription.Listen();
-            await StreamAsync(context, session, subscription).ConfigureAwait(false);
+            try
+            {
+                using IDisposable listening = subscription.Listen();
+                await StreamAsync(context, session, subscription).ConfigureAwait(false);
+            }
+            finally
+            {
+                session.Events?.Close(subscription);
+            }
         }
         finally
         {
@@ -392,10 +405,17 @@ internal sealed class McpEndpoint
         {
             await WriteAsync(response, ": vericairn mcp server stream\n\n", end.Token).ConfigureAwait(false);
             StreamOpened?.Invoke(session);
+            McpResourceWatch? watch = session.Watch;
+            if (subscription.Reset && watch is not null)
+            {
+                // The position the session stood at could not be honored: each subscribed resource and the listing may have changed.
+                Queue(session, watch.Apply(new McpEventRound([], Reset: true)));
+            }
+
             DateTimeOffset nextKeepAlive = DateTimeOffset.UtcNow + EventRoutes.KeepAlive;
             while (!end.IsCancellationRequested)
             {
-                EventBatch batch = subscription.Read();
+                (EventBatch batch, McpEventRound round) = session.Events is { } events ? events.Read(subscription) : (subscription.Read(), McpEventRound.Empty);
                 if (batch.Closed)
                 {
                     return;
@@ -408,7 +428,22 @@ internal sealed class McpEndpoint
                     return;
                 }
 
-                // The session's own messages, for its device alone; the journal's events wake the stream and are MCP-05's to send.
+                // Only events the audience check admitted reach the watch: a withheld one changes neither what is sent nor when.
+                if (watch is not null)
+                {
+                    Queue(session, watch.Apply(round));
+                    Queue(session, watch.Due());
+                }
+
+                // The session's own messages, for its device alone, sent only while the device still stands: a revocation, a rotated
+                // key or a withdrawn profile ends the stream before any of them, including a notification that waited for its interval.
+                if (session.Outbox.Reader.Count > 0 && subscription.Refusal() is string withdrawn)
+                {
+                    host.Log($"closed an MCP server stream of device {session.Device}: {withdrawn}");
+                    Sessions.End(session);
+                    return;
+                }
+
                 var text = new StringBuilder();
                 while (session.Outbox.Reader.TryRead(out JsonObject? message))
                 {
@@ -427,7 +462,8 @@ internal sealed class McpEndpoint
                     Task arrived = subscription.WaitAsync(pause.Token);
                     Task queued = session.Outbox.Reader.WaitToReadAsync(pause.Token).AsTask();
                     Task alive = Task.Delay(untilKeepAlive, pause.Token);
-                    Task first = await Task.WhenAny(arrived, queued, alive).ConfigureAwait(false);
+                    Task due = watch?.NextDue() is TimeSpan wait && wait < untilKeepAlive ? Task.Delay(wait, pause.Token) : alive;
+                    Task first = await Task.WhenAny(arrived, queued, due, alive).ConfigureAwait(false);
                     await pause.CancelAsync().ConfigureAwait(false);
                     if (first != alive && first.IsCompletedSuccessfully)
                     {
@@ -454,6 +490,15 @@ internal sealed class McpEndpoint
         catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException)
         {
             // The client left, the session ended, the hour passed or the daemon is stopping: the stream ends.
+        }
+    }
+
+    /// <summary>Queues notifications for the session's stream, which sends them once it has checked the device still stands.</summary>
+    private static void Queue(McpSession session, IReadOnlyList<JsonObject> notifications)
+    {
+        foreach (JsonObject notification in notifications)
+        {
+            session.Outbox.Writer.TryWrite(notification);
         }
     }
 

@@ -219,6 +219,41 @@ public sealed partial class EstateService
         }
     }
 
+    /// <summary>
+    /// From 0.9.2 (MCP-05): validates and roots a filter once, for a subscription's reads to judge each event it delivers by
+    /// (<see cref="EventSubscription.Read(int, IReadOnlyList{EventSelector})"/>). The records first observed are appended before the
+    /// selector is opened, so it passes only what was observed after: an MCP session hears what changed after it subscribed.
+    /// </summary>
+    public (EventSelector? Selector, Problem? Problem) OpenEventSelector(EventFilter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        EventJournal? events = journal;
+        if (events is null)
+        {
+            return (null, EventsUnavailable);
+        }
+
+        if (EventMatcher.Create(filter, out EventMatcher? matcher) is Problem invalid)
+        {
+            return (null, invalid);
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            try
+            {
+                DeriveEventsLocked(model, new EventPass());
+            }
+            catch (Exception exception) when (!Fatal(exception))
+            {
+                return (null, new Problem("unavailable", "The event journal cannot be read now: " + exception.Message, []));
+            }
+
+            return (new EventSelector(matcher!.Rooted(model), events.Head), null);
+        }
+    }
+
     /// <inheritdoc />
     public EventsResponse Events(string? after = null, EventFilter? filter = null, string? principal = null, int? wait = null)
     {

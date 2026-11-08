@@ -32,7 +32,11 @@ internal sealed class McpServeCommand : Command
         var utf8 = new System.Text.UTF8Encoding(false);
         Console.InputEncoding = utf8;
         Console.OutputEncoding = utf8;
-        var server = new McpServer(new ToolRegistry(api, actingAs), CommandContext.VersionText());
+        // From 0.9.2 (MCP-05) the session subscribes to resources when its runtime keeps an event journal: the daemon does.
+        var server = new McpServer(new ToolRegistry(api, actingAs), CommandContext.VersionText())
+        {
+            Subscriptions = new McpResourceWatch(new McpApiEventSource(api, actingAs)),
+        };
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
         server.RunAsync(Console.In, context.Output, context.Error, context.CancellationToken).GetAwaiter().GetResult();
         return Clean;

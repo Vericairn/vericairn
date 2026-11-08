@@ -751,11 +751,34 @@ is reached on loopback and on the local network only, and a device on the local 
 A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
 connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
 the daemon's memory and end when it restarts; the bridge opens a new one once, and other clients initialize
-again after a `404`. A session has one server stream, and in 0.9.2 nothing is sent on it but keep-alive
-comments: resource notifications are `MCP-05`'s, and the bridge does not yet forward the stream to its
-client. Requests are answered with one JSON body, never a stream; long outputs are returned whole. A
-device holds four sessions and runs four requests at once, all devices eight, and server streams share
-the event streams' slots. Every `<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
+again after a `404`. A session has one server stream, which carries its resource notifications
+(`MCP-05`) and keep-alive comments, and the bridge holds it for its client. Requests are answered with one
+JSON body, never a stream; long outputs are returned whole. A device holds four sessions and runs four
+requests at once, all devices eight, and server streams share the event streams' slots. Every
+`<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
+
+## MCP subscription limits (0.9.2)
+
+Resource subscriptions and `events_read` (`MCP-05`) need the estate's running daemon, which keeps the event
+journal; a server over the embedded runtime declares no subscriptions, and `events_read` answers that the
+daemon keeps the journal. A notification is a hint: it says a subscribed resource or the listing may have
+changed, carries no content, and comes at most once a second per URI and once every five seconds for the
+listing, so several changes inside an interval are told once. Over standard input and output a session
+follows the journal only while it holds a subscription, and the local socket holds at most four streams and
+long polls at once in all: beyond four following sessions, with `vericairn events watch` among them, the next
+waits and retries, so its notifications come later. Each round of a stdio session reads the journal once more
+for each subscription whose resource may have changed, and a read that fails tells that resource it may have
+changed rather than risk missing a change. A session holds at most 32 subscriptions, and a subscription lives
+with its session: a network session's ends on DELETE, an idle hour, its device's revocation or the daemon's
+restart, and a stdio session's when its input ends. Only changes the runtime observes after a subscription
+count, and after a gap the journal cannot honor every subscribed resource and the listing are told once.
+Context packages, operator requests and their closings, and another principal's asks are not subscribable;
+operator-request events reach no notification and no `events_read` answer. What counts as a change follows the
+journal's relations: a record or brief is told of records that rest on it up to eight steps away, and a document
+pin of a later revision although its pinned bytes never change. Whether a harness shows notifications or needs
+`events_read` is qualified per harness version by an estate's own observations; this build qualifies no
+harness, and every `<harness> over MCP notifications` and `<harness> over MCP events_read` row is a non-claim
+until an estate records one.
 
 ## Context and hand-over limits
 

@@ -359,7 +359,8 @@ public class McpTests
             Assert.Contains("`estate_status`", agents, StringComparison.Ordinal);
             Assert.Contains("`resources/list`, `resources/templates/list` and `resources/read`", agents, StringComparison.Ordinal);
             Assert.Contains("Hidden, estate-disabled and retired prompts are omitted", agents, StringComparison.Ordinal);
-            Assert.Contains("resources.subscribe=false", agents, StringComparison.Ordinal);
+            Assert.Contains("resources.subscribe=true and resources.listChanged=true; on the embedded runtime, which keeps none, both are false", agents, StringComparison.Ordinal);
+            Assert.Contains("`events_read`", agents, StringComparison.Ordinal);
             Assert.Contains("untrusted content", agents, StringComparison.Ordinal);
 
             // Nothing that changes with the next record or release: no work orders, no pinned release, no generation date.
@@ -396,19 +397,26 @@ public class McpTests
             CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "opencode.json", """{"profile":"OpenCode over MCP","outcome":"non-claim","evidence":[],"summary":"Not observed.","limitations":[]}"""));
             CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "platform.json", """{"profile":"linux-x64","outcome":"non-claim","evidence":[],"summary":"Not a harness.","limitations":[]}"""));
 
+            // From 0.9.2 (MCP-05) a harness version's notifications and events_read are qualified apart: Claude Code heard notifications,
+            // Codex read events_read instead.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "claude-notifications.json", $$"""{"profile":"Claude Code 2.1.296 over MCP notifications","outcome":"qualified","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Heard a subscribed brief's update.","limitations":[]}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "codex-events.json", $$"""{"profile":"Codex 0.163.0 over MCP events_read","outcome":"measured-in-part","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Read events_read; notifications are hidden.","limitations":["One session."]}"""));
+
             CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
             string agents = File.ReadAllText(Path.Combine(output, "AGENTS.md"));
-            Assert.Contains("| Claude Code | qualified for release 0.9.0 |", agents, StringComparison.Ordinal);
-            Assert.Contains("| Codex | non-claim: not observed |", agents, StringComparison.Ordinal);
+            Assert.Contains("| Harness | Observed | Notifications | events_read |", agents, StringComparison.Ordinal);
+            Assert.Contains("| Claude Code | qualified for release 0.9.0 | qualified with 2.1.296 for release 0.9.0 | non-claim: not observed |", agents, StringComparison.Ordinal);
+            Assert.Contains("| Codex | non-claim: not observed | non-claim: not observed | measured-in-part with 0.163.0 for release 0.9.0 |", agents, StringComparison.Ordinal);
             // A harness the build does not name still gets its row, after those it names; a platform profile is not a harness.
-            Assert.Contains("| AutoGen | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 |\n", agents, StringComparison.Ordinal);
+            Assert.Contains("| AutoGen | non-claim: not observed | non-claim: not observed | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 | non-claim: not observed | non-claim: not observed |\n", agents, StringComparison.Ordinal);
             Assert.DoesNotContain("linux-x64", agents, StringComparison.Ordinal);
+            Assert.DoesNotContain("| Claude Code 2.1.296 |", agents, StringComparison.Ordinal);
 
             // A revised qualification replaces the one it supersedes, and a copy generated before it is out of date.
             CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--supersedes", claude, "--body", CliHarness.WriteJson(bodies, "claude-revised.json", $$"""{"profile":"Claude Code over MCP","outcome":"measured-in-part","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Writes were not observed.","limitations":["No result was recorded."]}"""));
             Assert.Equal(1, CliHarness.Run("--estate", root, "mcp", "orientation", "--out", output, "--check").Code);
             CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
-            Assert.Contains("| Claude Code | measured-in-part for release 0.9.0 |", File.ReadAllText(Path.Combine(output, "AGENTS.md")), StringComparison.Ordinal);
+            Assert.Contains("| Claude Code | measured-in-part for release 0.9.0 | qualified with 2.1.296 for release 0.9.0 |", File.ReadAllText(Path.Combine(output, "AGENTS.md")), StringComparison.Ordinal);
         }
         finally
         {
@@ -483,13 +491,13 @@ public class McpTests
             (int code, string output) = await Peer(python!, root);
             Assert.True(code == 0, output);
             Assert.Contains("SKIP work_brief returns markdown: the estate has no work order, so there is no brief to read", output, StringComparison.Ordinal);
-            Assert.Contains("23 of 23 checks passed, 4 skipped", output, StringComparison.Ordinal);
+            Assert.Contains("24 of 24 checks passed, 6 skipped", output, StringComparison.Ordinal);
 
             CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(bodies, "order.json", """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"The peer.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}"""));
             (code, output) = await Peer(python!, root);
             Assert.True(code == 0, output);
             Assert.Contains("PASS work_brief W-1 returns markdown: the estate has no work order MCP-01, so the first one its status lists stands in", output, StringComparison.Ordinal);
-            Assert.Contains("27 of 27 checks passed, 1 skipped", output, StringComparison.Ordinal);
+            Assert.Contains("28 of 28 checks passed, 3 skipped", output, StringComparison.Ordinal);
         }
         finally
         {

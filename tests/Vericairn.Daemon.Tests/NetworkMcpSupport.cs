@@ -224,9 +224,9 @@ internal static class NetworkMcp
 
     public const string Brief = """{"outcome":"Widget","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["widget repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests"],"recovery":"Record a result."}""";
 
-    public static async Task<(LocalNetworkHarness Harness, string Assignment)> StartAsync(bool mcp = true, IReadOnlyList<string>? origins = null)
+    public static async Task<(LocalNetworkHarness Harness, string Assignment)> StartAsync(bool mcp = true, IReadOnlyList<string>? origins = null, long recordFormat = 2)
     {
-        LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(mcp: mcp, mcpOrigins: origins);
+        LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(recordFormat: recordFormat, mcp: mcp, mcpOrigins: origins);
         TestEstate estate = harness.Estate;
         estate.Add("work-order", estate.OperatorId, WorkOrder);
         using JsonDocument brief = JsonDocument.Parse(Brief);

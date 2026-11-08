@@ -30,8 +30,12 @@ public sealed class ResourceMcpTests
         JsonObject[] replies = await DriveAsync(api, null, asynchronous,
             Request("initialize", new() { ["protocolVersion"] = version }),
             Request("resources/list"), Request("resources/templates/list"), Request("prompts/list"),
-            new() { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" });
-        Assert.Equal(4, replies.Length);
+            new() { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" },
+            Request("resources/subscribe", new() { ["uri"] = UriFor(estate, "record", order.Id) }));
+        Assert.Equal(5, replies.Length);
+
+        // An embedded runtime keeps no event journal, so the server declares no subscriptions and serves none (MCP-05).
+        Assert.Equal(-32601, replies[4]["error"]!["code"]!.GetValue<int>());
         JsonNode initialized = Result(replies[0]);
         Assert.Equal(version, initialized["protocolVersion"]!.GetValue<string>());
         JsonNode capabilities = initialized["capabilities"]!;
@@ -44,7 +48,9 @@ public sealed class ResourceMcpTests
         Assert.Contains(resources, r => r!["uri"]!.GetValue<string>() == UriFor(estate, "brief", order.Id));
         Assert.DoesNotContain(resources, r => r!["uri"]!.GetValue<string>().Contains("operator", StringComparison.Ordinal));
         Assert.Null(Result(replies[1])["nextCursor"]);
-        Assert.Equal(4, Result(replies[2])["resourceTemplates"]!.AsArray().Count);
+        // From 0.9.2 goal progress and the session's asks are resources too (MCP-05).
+        Assert.Equal(["brief", "record", "document", "context", "goal", "asks"], Result(replies[2])["resourceTemplates"]!.AsArray()
+            .Select(t => t!["uriTemplate"]!.GetValue<string>().Split('/')[3]));
         Assert.Null(Result(replies[2])["nextCursor"]);
     }
 
@@ -123,6 +129,30 @@ public sealed class ResourceMcpTests
         Assert.False(tool.IsError);
         AssertBytes(content, Encoding.UTF8.GetBytes(tool.Text));
         Assert.Contains("handoff (short)", tool.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheSessionsAsksAreAResourceOfItsOwnPrincipalAlone()
+    {
+        // From 0.9.2 (MCP-05) the asks put to the session's principal are a resource it may subscribe to, read as asks_list in JSON.
+        using var estate = new TestEstate(recordFormat: 3);
+        using EstateService api = EstateService.Open(estate.Root);
+        var registry = new ToolRegistry(api, estate.BuilderId);
+        string own = UriFor(estate, "asks", estate.BuilderId);
+        JsonArray listed = (await registry.ResourcesListAsync(TestContext.Current.CancellationToken))["resources"]!.AsArray();
+        Assert.Single(listed, r => r!["uri"]!.GetValue<string>().Contains("/asks/", StringComparison.Ordinal));
+        Assert.Contains(listed, r => r!["uri"]!.GetValue<string>() == own);
+        JsonObject read = await registry.ResourceReadAsync(own, TestContext.Current.CancellationToken);
+        ToolCallResult tool = await registry.CallAsync("asks_list", new() { ["to"] = estate.BuilderId, ["form"] = "json" }, TestContext.Current.CancellationToken);
+        AssertBytes(read["contents"]![0]!, Encoding.UTF8.GetBytes(tool.Text));
+        Assert.Equal("application/json", read["contents"]![0]!["mimeType"]!.GetValue<string>());
+
+        // Another principal's asks are unavailable to it, and a connection acting for none lists and reads none.
+        await Assert.ThrowsAnyAsync<Exception>(() => registry.ResourceReadAsync(UriFor(estate, "asks", estate.OperatorId), TestContext.Current.CancellationToken));
+        var readOnly = new ToolRegistry(api, null);
+        Assert.DoesNotContain((await readOnly.ResourcesListAsync(TestContext.Current.CancellationToken))["resources"]!.AsArray(), r => r!["uri"]!.GetValue<string>().Contains("/asks/", StringComparison.Ordinal));
+        await Assert.ThrowsAnyAsync<Exception>(() => readOnly.ResourceReadAsync(own, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAnyAsync<Exception>(() => registry.ResourceReadAsync("vericairn://other/asks/" + estate.BuilderId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -236,7 +266,7 @@ public sealed class ResourceMcpTests
         foreach (JsonObject request in requests) if (!request["method"]!.GetValue<string>().StartsWith("notifications/", StringComparison.Ordinal)) request["id"] = ++id;
         using var input = new StringReader(string.Join('\n', requests.Select(r => r.ToJsonString())) + "\n");
         using var output = new StringWriter(CultureInfo.InvariantCulture);
-        var server = new McpServer(new ToolRegistry(api, principal), "test");
+        var server = new McpServer(new ToolRegistry(api, principal), "test") { Subscriptions = new McpResourceWatch(new McpApiEventSource(api, principal)) };
         if (asynchronous) await server.RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
         else server.Run(input, output);
         return output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(s => JsonNode.Parse(s)!.AsObject()).OrderBy(r => r["id"]!.GetValue<int>()).ToArray();

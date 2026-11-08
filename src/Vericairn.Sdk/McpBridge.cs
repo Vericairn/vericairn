@@ -18,7 +18,9 @@ namespace Vericairn.Sdk;
 /// of a write itself. Every HTTP request is signed by this machine's device key, as the connection's requests are; a write is first
 /// prepared, the prepared record is checked to be the one its tool names for this device's principal, and only then is its hash
 /// signed with the same key and the call repeated with the plan and the signature. The bridge decides nothing: the runtime judges
-/// every call as its API operation for this device.
+/// every call as its API operation for this device. From 0.9.2 (MCP-05), when the runtime declares resource subscriptions, the
+/// bridge also holds the session's server stream, signed as every request is, and writes each notification it carries to the
+/// client as a line between responses; it signs nothing a notification says.
 /// </summary>
 internal sealed class McpBridge : IDisposable
 {
@@ -93,7 +95,9 @@ internal sealed class McpBridge : IDisposable
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
         using var writing = new SemaphoreSlim(1, 1);
+        using var streaming = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var pending = new List<Task>();
+        Task? stream = null;
 
         async Task WriteAsync(JsonObject message)
         {
@@ -154,7 +158,14 @@ internal sealed class McpBridge : IDisposable
                 {
                     await Task.WhenAll(pending).ConfigureAwait(false);
                     pending.Clear();
-                    await WriteAsync(await InitializeAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+                    JsonObject initialized = await InitializeAsync(message, cancellationToken).ConfigureAwait(false);
+                    await WriteAsync(initialized).ConfigureAwait(false);
+                    if (stream is null && initialized["result"]?["capabilities"]?["resources"]?["subscribe"] is JsonValue subscribe && subscribe.TryGetValue(out bool subscribing) && subscribing)
+                    {
+                        // The runtime sends the session's notifications on its server stream, which the bridge holds from now on.
+                        stream = Task.Run(() => StreamAsync(WriteAsync, streaming.Token), CancellationToken.None);
+                    }
+
                     continue;
                 }
 
@@ -169,7 +180,117 @@ internal sealed class McpBridge : IDisposable
         finally
         {
             await Task.WhenAll(pending).ConfigureAwait(false);
+            await streaming.CancelAsync().ConfigureAwait(false);
+            if (stream is not null)
+            {
+                await stream.ConfigureAwait(false);
+            }
+
             await EndAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Holds the session's server stream until cancelled, opening it again after the runtime ends it (after its hour, a restart or a
+    /// new session) and waiting longer after each failure; each JSON-RPC notification it carries is written to the client. A stream
+    /// the runtime refuses for good, because the device no longer stands, is retried rarely: the next request says why.
+    /// </summary>
+    private async Task StreamAsync(Func<JsonObject, Task> write, CancellationToken cancellationToken)
+    {
+        int failures = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (session is string open)
+                {
+                    failures = await FollowAsync(open, write, cancellationToken).ConfigureAwait(false) ? 0 : failures + 1;
+                }
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested
+                && exception is HttpRequestException or IOException or TimeoutException or InvalidOperationException or OperationCanceledException)
+            {
+                failures++;
+                log?.WriteLine("vericairn mcp: the server stream dropped: " + (ClientFailure.FromException(exception)?.Message ?? exception.Message));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(failures == 0 ? 0.2 : Math.Min(30, Math.Pow(2, Math.Min(failures, 5)))), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Reads one server stream to its end; false when the runtime refused to open it.</summary>
+    private async Task<bool> FollowAsync(string open, Func<JsonObject, Task> write, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(Endpoint, UriKind.Relative));
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        request.Headers.TryAddWithoutValidation(SessionHeader, open);
+        if (version is not null)
+        {
+            request.Headers.TryAddWithoutValidation(VersionHeader, version);
+        }
+
+        using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return false;
+        }
+
+        Stream body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (body.ConfigureAwait(false))
+        {
+            using var reader = new StreamReader(body, new UTF8Encoding(false));
+            var data = new StringBuilder();
+            string kind = "message";
+            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+            {
+                if (line.Length > 0)
+                {
+                    if (line.StartsWith("data:", StringComparison.Ordinal))
+                    {
+                        data.Append(line.AsSpan(5).TrimStart(' ')).Append('\n');
+                    }
+                    else if (line.StartsWith("event:", StringComparison.Ordinal))
+                    {
+                        kind = line[6..].Trim();
+                    }
+
+                    continue;
+                }
+
+                // Only a JSON-RPC notification goes on: the stream carries no request this bridge would answer for the client.
+                if (kind == "message" && data.Length > 0 && TryParse(data.ToString()) is JsonObject message && Text(message["method"]) is not null && message["id"] is null)
+                {
+                    await write(message).ConfigureAwait(false);
+                }
+
+                data.Clear();
+                kind = "message";
+            }
+        }
+
+        return true;
+    }
+
+    private static JsonObject? TryParse(string text)
+    {
+        try
+        {
+            return JsonNode.Parse(text) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
