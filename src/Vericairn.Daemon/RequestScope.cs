@@ -19,6 +19,15 @@ namespace Vericairn.Daemon;
 /// </summary>
 internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null, Action? beforeWrite = null) : IEndpointFilter
 {
+    /// <summary>
+    /// The key under which a request network MCP runs in this process carries its <see cref="DeviceSigning"/> (MCP-03): its records
+    /// are its device's to sign, never this machine's. Only the daemon's own MCP handler sets it; no HTTP request can.
+    /// </summary>
+    internal static readonly object SigningItem = new();
+
+    /// <summary>The profile a loopback device must be permitted for network MCP, rechecked under the write lock as the local network's is.</summary>
+    internal const string LoopbackProfile = "loopback";
+
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -46,8 +55,13 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             }
         }
 
-        // These reads carry their input in a POST body, with no signing key or write ledger needed.
-        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+        // Network MCP's requests (MCP-03) are signed by their own device only, and on loopback need the loopback profile as well.
+        DeviceSigning? signing = context.HttpContext.Items.TryGetValue(SigningItem, out object? rule) ? rule as DeviceSigning : null;
+        string? profile = device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : signing is not null ? LoopbackProfile : null;
+
+        // These reads carry their input in a POST body, with no signing key or write ledger needed; nor does a write that only
+        // prepares its record for its device's signature, which writes nothing.
+        bool write = signing?.Mode != DeviceSigningMode.Prepare && HttpMethods.IsPost(context.HttpContext.Request.Method) &&
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
@@ -62,20 +76,22 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/search/replay", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
-            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
             return await next(context).ConfigureAwait(false);
         }
 
-        if (!device.LocalNetwork)
+        // A network MCP write is kept in the ledger on loopback too (MCP-03): every network write names the device that asked.
+        if (!device.LocalNetwork && signing is null)
         {
-            return await WriteAsync(context, next, device).ConfigureAwait(false);
+            return await WriteAsync(context, next, device, profile, signing).ConfigureAwait(false);
         }
 
         // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
         // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
         // A device-signed record is signed by the paired device itself. Attention acknowledgment is unsigned presentation state.
         // Neither exception asks a signer on this machine, and both still enter the local-network ledger below.
-        if (!operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
+        // A network MCP write (MCP-03) is signed by its own device, never here, so it asks no signer on this machine either.
+        if (signing is null && !operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/attention/acknowledge", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
         {
             return Denied(context.HttpContext, device, presence);
@@ -97,7 +113,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         object? result;
         try
         {
-            result = await WriteAsync(context, next, device).ConfigureAwait(false);
+            result = await WriteAsync(context, next, device, profile, signing).ConfigureAwait(false);
         }
         catch
         {
@@ -110,9 +126,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     }
 
     /// <summary>Carries the verified device and key to each write, where the service rechecks them under its gate.</summary>
-    private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device)
+    private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device, string? profile, DeviceSigning? signing)
     {
-        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
         beforeWrite?.Invoke();
         object? result = await next(context).ConfigureAwait(false);
         return request.Refusal is Problem denied ? Denied(context.HttpContext, device, denied.Message) : result;
@@ -136,13 +152,14 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             OperatorCloseResponse close => close.Written.Count == 0 ? null : close.Written[^1],
             DocumentPassAssignResponse pass => pass.Written.Count == 0 ? null : pass.Written[^1],
             PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
+            SecurityReportsResponse reports => reports.Triage,
             WorkMovePlanResponse move => move.Written.Count == 0 ? null : move.Written[^1],
             ReleaseReviewBriefResponse review => review.Assignment,
             ReleaseResponse release when operation == "POST /v1/releases/withdraw" => release.Operation ?? release.Release,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false } and not SecurityReportsResponse { Ok: false };
         if (value is AttentionAcknowledgeResponse { Ok: false } or WorkMovePlanResponse { Ok: false } or RunSettleResponse { Ok: false } or OperatorCloseResponse { Ok: false } or ReleaseReviewBriefResponse { Ok: false } or DocumentPassAssignResponse { Ok: false } || operation == "POST /v1/releases/withdraw" && value is ReleaseResponse { Ok: false }) done = false;
         try
         {
@@ -297,6 +314,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/packages/observe"] = typeof(PackagesObserveRequest),
         ["POST /v1/packages/unlist"] = typeof(PackagesUnlistRequest),
         ["POST /v1/packages/deprecate"] = typeof(PackagesDeprecateRequest),
+        ["POST /v1/security-reports/poll"] = typeof(SecurityReportsPollRequest),
+        ["POST /v1/security-reports/triage"] = typeof(SecurityReportTriageRequest),
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
@@ -406,6 +425,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PackagesObserveRequest)] = (_, r, d) => Acting(((PackagesObserveRequest)r).By, d),
         [typeof(PackagesUnlistRequest)] = (_, r, d) => Acting(((PackagesUnlistRequest)r).By, d),
         [typeof(PackagesDeprecateRequest)] = (_, r, d) => Acting(((PackagesDeprecateRequest)r).By, d),
+        [typeof(SecurityReportsPollRequest)] = (_, r, d) => Acting(((SecurityReportsPollRequest)r).By, d),
+        [typeof(SecurityReportTriageRequest)] = (_, r, d) => Acting(((SecurityReportTriageRequest)r).By, d),
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),

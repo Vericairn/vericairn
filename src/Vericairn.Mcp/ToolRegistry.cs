@@ -14,7 +14,7 @@ public sealed record ToolCallResult(string Text, bool IsError, bool Unknown = fa
     /// <summary>A serving daemon release warning, separate from the tool's unchanged result text.</summary>
     public string? Warning { get; init; }
 
-    /// <summary>Labels for the result, sent as its <c>_meta</c>, such as its trust; never instructions.</summary>
+    /// <summary>The result's <c>_meta</c>, labels and never instructions: a search's trust, and from 0.9.2 a network write's prepared record (MCP-03); null for other results.</summary>
     public JsonObject? Meta { get; init; }
 }
 
@@ -48,10 +48,20 @@ public sealed partial class ToolRegistry
 
     /// <summary>A registry over an open estate for an acting principal (null for a read-only connection).</summary>
     public ToolRegistry(IEstateApi api, string? actingPrincipal)
+        : this(api, actingPrincipal, null)
+    {
+    }
+
+    private ToolRegistry(IEstateApi api, string? actingPrincipal, IMcpNetworkSession? network)
     {
         this.api = api ?? throw new ArgumentNullException(nameof(api));
         this.actingPrincipal = string.IsNullOrWhiteSpace(actingPrincipal) ? null : actingPrincipal;
+        this.network = network;
         tools = Define();
+        if (network is not null)
+        {
+            OfferOverNetwork();
+        }
     }
 
     /// <summary>The principal writes are authored by, or null for a read-only connection.</summary>
@@ -89,6 +99,13 @@ public sealed partial class ToolRegistry
     /// <summary>The tools this connection may use, after a cancellable admission check.</summary>
     public async Task<IReadOnlyList<ToolDefinition>> VisibleAsync(CancellationToken cancellationToken = default)
     {
+        if (network is not null)
+        {
+            // Section 8's set over the network: the device's admission is checked on every request, and the runtime judges each call.
+            cancellationToken.ThrowIfCancellationRequested();
+            return tools.Where(OfferedOverNetwork).ToList();
+        }
+
         bool writes = await WritesVisibleAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<string> policyActions = writes ? await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false) : [];
         bool isOperator = writes && await IsOperatorAsync(cancellationToken).ConfigureAwait(false);
@@ -99,12 +116,25 @@ public sealed partial class ToolRegistry
     public ToolCallResult Call(string name, JsonObject? arguments) => CallAsync(name, arguments).GetAwaiter().GetResult();
 
     /// <summary>Calls a tool through the asynchronous API, preserving timeout, cancellation and uncertain effects.</summary>
-    public async Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default)
+    public Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default) =>
+        CallAsync(name, arguments, null, cancellationToken);
+
+    /// <summary>
+    /// Calls a tool with the request's _meta, which a network session's writes read for their two signed steps (MCP-03); over the
+    /// standard streams it is not read.
+    /// </summary>
+    public async Task<ToolCallResult> CallAsync(string name, JsonObject? arguments, JsonObject? meta, CancellationToken cancellationToken = default)
     {
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             ToolDefinition? tool = tools.FirstOrDefault(t => t.Name == name);
+            if (network is not null)
+            {
+                ToolCallResult answered = await CallOverNetworkAsync(network, tool, arguments, meta, cancellationToken).ConfigureAwait(false);
+                return answered.Unknown ? answered : answered with { Warning = (api as IDaemonVersion)?.DaemonVersionWarning };
+            }
+
             if (tool is null || (tool.Writes && (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) ||
                 tool.OperatorOnly && !await IsOperatorAsync(cancellationToken).ConfigureAwait(false) ||
                 tool.PolicyAction is { } action && !(await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false)).Contains(action, StringComparer.Ordinal))))
@@ -162,13 +192,17 @@ public sealed partial class ToolRegistry
             Read("release_submit_check", "Check every release submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and needs no presence; a passing check grants no authority.", ReleaseCheckArguments(),
                 async (api, a, token) =>
                 {
-                    var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), Arg(a, "by"),
+                    // The check speaks for the acting principal, never for a principal named in the arguments. Security reports are the
+                    // operator's: any other connection learns only whether a declaration holds, and starts no read of them.
+                    bool operatorActs = actingPrincipal is not null && await IsOperatorAsync(token).ConfigureAwait(false);
+                    var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), actingPrincipal ?? Arg(a, "by"),
                         OptionalArg(a, "ref"), OptionalArg(a, "workflow"), OptionalArg(a, "reconciliation"), OptionalArg(a, "provider"),
                         a?["settings"] is JsonObject settings ? settings.Deserialize<Dictionary<string, string>>(ProtocolJson.Options) : null,
                         Arg(a, "commit"), Arg(a, "expected"))
                     {
                         ClientBuild = Arg(a, "clientBuild"), Line = OptionalArg(a, "line"), Channel = OptionalArg(a, "channel"),
                         EndOfSupport = OptionalArg(a, "endOfSupport"), BackportOf = a?["backportOf"]?.Deserialize<ReleaseBackportReference>(ProtocolJson.Options),
+                        SecurityReportsUnread = !operatorActs,
                     };
                     ReleaseResponse result = await api.ReleaseCheckAsync(request, token).ConfigureAwait(false);
                     return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), !result.Ok);
@@ -327,7 +361,7 @@ public sealed partial class ToolRegistry
 
     private static JsonObject ReleaseCheckArguments()
     {
-        JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked."),
+        JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked; a connection acting as a principal checks that principal's submission instead."),
             ("commit", "Exact lower-case forty-digit commit."), ("expected", "Expected current product hash."), ("clientBuild", "Full informational version of the submitting client, including source commit."),
             ("repository", "Optional repository destination."), ("provider", "Optional release provider."), ("ref", "Optional provider ref setting."),
             ("workflow", "Optional workflow setting."), ("reconciliation", "Optional settlement of the previous attempt."),

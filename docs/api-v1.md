@@ -168,6 +168,33 @@ follows the stream on the command line. MCP subscriptions and notifications (`MC
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists
 the additions.
 
+## Network MCP at /mcp (0.9.2)
+
+From 0.9.2 (`MCP-03`) the daemon serves the Model Context Protocol over Streamable HTTP at `/mcp` on its loopback and
+local-network listeners, when the operator turned it on with `vericairn runtime configure --mcp on`; never on the local
+socket. `/mcp` is not an operation of API version 1 and is not in the OpenAPI document: no route, request or response type
+of the API is added or changed. Its requests are authenticated as the API's are, signed by one device with the profile's
+request-signing scheme, freshness and replay protection, with a body limit of 1 MiB applied before authentication, and the device must be admitted, permitted
+the profile and an agent's or a service's. Before authentication, its `Host` must name the listener's own address and port
+(or `localhost` on loopback), and an `Origin` it names must be one the operator allowed.
+
+Each tool call runs as its API operation for the requesting device. The daemon runs the operation's own route in its
+process, with that route's binding and request scope and the service call behind it, as a request of that device; so a
+call is refused exactly as the API refuses the same request from that device, a write rechecks the device's standing, key
+and profile under the write lock, and on loopback as on the local network it is kept in `local-network-writes.jsonl`. A network tool
+reaches only the operations its tools use: reads by GET (never the event stream), the POST reads `resources/read`,
+`releases/check` and `templates/render`, and the contributor writes `POST /v1/work/attempt`, `POST /v1/work/progress`,
+`POST /v1/work/result`, `POST /v1/work/amend` and `POST /v1/documents/{id}/reviews`; never a machine-local one.
+
+A network write's record is signed by the requesting device only, in two calls: the first prepares the record the
+operation authors, by the same path `POST /v1/records/prepare` uses, and writes nothing; the second repeats the operation
+with the plan and the device's signature, and the runtime re-authors the record from the request with the plan's id and
+time, writes it only when it is the exact record the device signed, and writes nothing else. A plan is the device's own,
+used once and good for ten minutes. From 0.9.2 a device holds at most 32 prepared records at once, through `/mcp` and
+`POST /v1/records/prepare` alike. The published endpoint (`DaemonEndpoint`) gains `mcp`, the path served, when it is on;
+`vericairn runtime status` shows it. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md#network-mcp-over-streamable-http-mcp-03).
+
 ## Release-basis diagnostics (0.8.3)
 
 FIX-58 changes the failure response of `GET /v1/release-bases/{hash}`. An unknown hash or an
@@ -1170,10 +1197,10 @@ in the body, and partial, pending and changed-target states are never flattened 
 | `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` disables loopback TLS; a configured local-network listener still serves; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
 | `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
-| `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured. From 0.9.2 (OPS-05), also the serving daemon's release, from `GET /v1/health`, against the estate's pin, with a mismatch line and the commands that settle it while they differ |
+| `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured. From 0.9.2 (OPS-05), also the serving daemon's release, from `GET /v1/health`, against the estate's pin, with a mismatch line and the commands that settle it while they differ; and (MCP-03) `/mcp` while the daemon serves network MCP, or that it is configured on for the next start |
 | `vericairn runtime install [--plan]` | Install the daemon as a per-user service that starts at login and restarts after failure: a launchd agent (`~/Library/LaunchAgents`), a systemd user unit (`~/.config/systemd/user`) or a Task Scheduler logon task; `--plan` shows the unit and the commands without installing |
 | `vericairn runtime uninstall` | Remove that service |
-| `vericairn runtime configure [--local-network <address:port>\|off] [--allow-public]` | From 0.6.0, the address the local-network profile listens on from the runtime's next start, or off; without options, the configuration. A wildcard address, or one other networks may reach, needs `--allow-public`. Kept in `runtime.json` beside the live store |
+| `vericairn runtime configure [--local-network <address:port>\|off] [--allow-public] [--mcp on\|off] [--mcp-origin <origin>]` | From 0.6.0, the address the local-network profile listens on from the runtime's next start, or off; without options, the configuration. A wildcard address, or one other networks may reach, needs `--allow-public`. From 0.9.2 (MCP-03), `--mcp` serves network MCP at `/mcp` on the loopback and local-network listeners from the next start, and `--mcp-origin` names the origins a request to it may carry (repeatable, replacing the list; `none` empties it). Kept in `runtime.json` beside the live store |
 | `vericairn runtime rotate [--compromised] [--identity] [--reason <text>]` | From 0.6.0, replace the runtime certificate now: through the daemon when one serves the estate, otherwise in the file the next start serves. `--compromised` also closes every open connection; `--identity` also replaces the runtime identity, and every paired device pairs again |
 
 The service unit lives in the user's own configuration and names this machine's paths, because a service
@@ -1184,7 +1211,7 @@ manager needs them; nothing of it enters a repository.
 | Command | Does |
 |---|---|
 | `vericairn devices pair --principal <id> --by <administrator> [--profile <profile>]...` | On the runtime's machine, with the runtime serving the local-network profile: issue a pairing code and show it once, with its expiry, its attempts, the runtime identity's fingerprint and the command to run on the new device |
-| `vericairn devices writes [<device>]` | On the runtime's machine: what paired devices wrote over the local network, when, which device, for which principal, the operation and the record it produced, from `local-network-writes.jsonl` beside the live store |
+| `vericairn devices writes [<device>]` | On the runtime's machine: what paired devices wrote over the local network, when, which device, for which principal, the operation and the record it produced, from `local-network-writes.jsonl` beside the live store. From 0.9.2 (MCP-03), also network MCP writes on loopback |
 | `vericairn connections add <address> --code <code> --name <name> [--custody <custody>] [--presence true\|false]` | On the new device: pair with the runtime at the address, keep the connection, check it, and name the earlier connections to the same estate it replaced |
 | `vericairn connections list` | Check every connection now and show its state |
 | `vericairn connections remove <id>` | Forget a connection on this machine; the device stays admitted until an administrator revokes it, and its key stays in this machine's custody |

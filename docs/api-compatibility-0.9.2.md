@@ -296,6 +296,47 @@ owner-only from creation, and runs the derivation for as long as it serves. A st
 also derives what that read shows and may write the journal; it writes no record. No record type, record format or
 generated document changes.
 
+## Network MCP over Streamable HTTP (MCP-03)
+
+No route, OpenAPI operation, request or response type of API version 1 is added or changed. The daemon serves the Model
+Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners when the operator turned it on,
+outside the API's route table; each tool call runs the API's own route in the daemon's process for the requesting device,
+with that route's request scope. A message to `/mcp` holds at most 1 MiB, refused before authentication, and a network
+write is kept in `local-network-writes.jsonl` on loopback as on the local network. `DaemonEndpoint` gains the optional
+`Mcp`, serialized as `mcp` (the path served) only while it is on; older clients ignore it and older daemons omit it.
+
+`Vericairn.Daemon` now depends on `Vericairn.Mcp`. `DaemonOptions` adds `Mcp` and `McpAllowedOrigins`, which override the
+runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `AllowedOrigins` and the static
+`TryNormalizeOrigin`; `runtime.json` gains `mcp` and `allowedOrigins`, written on every save, and an older build ignores
+them. A file whose `allowedOrigins` names something other than an origin is refused as unreadable settings.
+
+`Vericairn.Runtime` adds `DeviceSigning` and `DeviceSigningMode` (`Read`, `Prepare`, `Sign`), the overload
+`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.ReadStandings(devices, principals)`, which
+returns a `DeviceStandingsRead`: each device's standing and each principal's kind from one reading of the records. Under a
+`DeviceSigning`, no key on the runtime's machine signs and no record is written unsigned: an operation writes nothing,
+prepares the one record it authors for the requesting device, or writes that record only with the device's signature over
+the plan's exact record, re-authored from the same request with the plan's id and time; every other store is refused.
+An attempt's `startedAt` and a completed progress phase's `completedAt` state the plan's time in both steps. Prepared
+records share one store with `POST /v1/records/prepare`, and from 0.9.2 one device holds at most 32 of them at once,
+answered `unavailable` beyond that; the store's limit of 256 is unchanged. `PrepareRecord` otherwise behaves as before.
+
+`Vericairn.Mcp` adds, each additive: `McpServer.ProtocolVersions` and `McpServer.Instructions` (init-only),
+`McpServer.NetworkDescription` and `McpServer.RespondAsync(id, method, parameters, cancellationToken)`;
+`ToolRegistry.ForNetwork(api, network)`, `ToolRegistry.Network`, `ToolRegistry.NetworkWrites`,
+`ToolRegistry.OfferedOverNetwork(tool)`, `ToolRegistry.Describe(tool)`, the `CallAsync(name, arguments, meta,
+cancellationToken)` overload and the constants `PrepareMeta`, `PlanMeta` and `SignatureMeta`; `ToolCallResult.Meta`;
+and the types `IMcpNetworkSession` and `McpSigning`. `tools/call` now refuses a `_meta` that is not an object and returns
+a result's `_meta` when it has one; over standard input and output `_meta` is not read, and every stdio answer is unchanged
+except the `search` tool's, whose `_meta` labels its trust (CONTEXT-02).
+
+The command line adds `runtime configure --mcp on|off` and `--mcp-origin`, whose `--json` output adds `mcp`,
+`allowedOrigins` and `mcpServed`, and keeps the other settings when one changes; `runtime status` adds the `mcp` line and,
+in `--json`, `mcp`; and `mcp serve --connection`, whose bridge signs only a write's prepared record and only after binding
+the call's arguments, author, subject, type, time and supersession; fields the runtime computes, such as a document
+review's subject and checks or a result's `progressClaim`, are signed on trust in that runtime. The SDK's additions for
+the bridge are internal. Record format remains 3;
+no record type changes. `AGENTS.md` gains one paragraph on reaching the estate from another machine.
+
 ## Preparing a documentation set (DOCS-11)
 
 No route, interface member, protocol type, shipped command or record type is added or changed. `vericairn-docs`, the build
@@ -380,6 +421,66 @@ remains 3; its addition, an operator request's `flowStep`, is in
 [record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
 explanation of `operator-request` now includes `flowStep`.
 
+## Security reports before a release (OPS-11)
+
+Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
+implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
+`POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
+`disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
+of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether the advisory holds every release now:
+a report (in `triage` or `draft` state, or an unknown state) untriaged at its current revision, or a closed or withdrawn
+advisory no operator triage names at any revision; a published advisory never holds. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
+acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
+`ClientOperation.Deadline` gives `SecurityReportsPoll` and `ReleaseCheck` three minutes, since a check may now read GitHub;
+`ReleaseCheck` had the 30-second default.
+
+`ReleaseSubmitRequest` adds the init-only `SecurityReportsUnread` (JSON `securityReportsUnread`, default false): when true,
+declared security reports are not read and a declaration alone answers with the single `release.security-reports`
+objection. It only ever narrows what a caller learns. The MCP server's `release_submit_check` now checks the submission of
+the principal its connection acts as, falling back to the `by` argument only on a connection that acts as none, and sets
+`SecurityReportsUnread` unless that principal is the operator, so no other connection starts a read or sees which reports
+hold. `release submit`, `POST /v1/releases/check` and `release_submit_check` are otherwise unchanged in shape. While a current product
+declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an advisory that holds, named) and
+`release.security-reports-unavailable` (a repository that could not be read completely, or a declared resource that is no
+longer a repository on GitHub), or, for any principal other than
+the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
+intent. Without a declaration, nothing is read and no objection is added.
+
+`AttentionGet` adds, for the operator only, notices of kind `incident` (an advisory that holds) or `information` (any other new or
+changed advisory, for seven days) with subject type `security-report` (subject id
+`<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
+`security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
+and `GET /v1/status` are unchanged. Through WATCH-05's event journal they become attention events for the operator alone,
+categories `incident`, `information` and `failed-check`, whose subjects are opaque keyed names rather than these ids; a
+stored read asks the journal to derive at once. `GET /v1/providers` adds rows of kind `security-advisories`.
+
+`Vericairn.Runtime` adds the contract `vericairn.provider.security-advisories/1`: `Providers.ISecurityAdvisoryReader`,
+`SecurityAdvisory` (with `States`, `Severities`, `SettledStates` and `Validate`), `SecurityAdvisoryListing` and the in-memory
+`MemorySecurityAdvisoryReader`; `ProviderRegistry.Register(ISecurityAdvisoryReader)`, `RegisterIfAbsent`,
+`SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
+`SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.
+`Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
+the command line. It runs `gh api -i rate_limit` to confirm the token's `X-OAuth-Scopes` (`repo` or `repository_advisories:read`)
+and the allowance, then reads the listing page by page with `gh api -i`, following each `Link` header's `after` cursor, each
+page and the whole listing bounded. It follows a next page only on `api.github.com`'s own advisory listing, with exactly one
+`after` cursor of base64 characters, which it decodes, checks and encodes again; anything else fails closed. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+`TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
+`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` judges each
+revision against the declarations and grants in force at its time: while a security-reports declaration names a resource,
+only the operator changes its kind or location (`resource.security-reports-author`), and a repository's location moves only
+by the operator or an `administer` grant, as before (`resource.location-author`). Validation reports, as information under
+the same codes, a revision already in the estate that turns a resource into or out of a repository without that authority,
+or that a later declaration would forbid; the write boundary refuses such a revision when it is new, as it does for
+FIX-97's and FIX-98's rules. `ResourceType` adds the constants `LocationAuthorCode` and `SecurityReportsAuthorCode`, and
+`SecurityReportRules` adds `DeclaresAt`. Record format remains 3; the record
+additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
+`vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
+fixtures include it. The command line adds `security-reports poll` and `security-reports triage`
+([CLI](cli.md#vericairn-security-reports-092)).
+
 ## Keyword search and search-selected context (CONTEXT-02)
 
 `IEstateApi` adds `Search(SearchRequest)`, `SearchIndex(SearchIndexRequest)`, `SearchReplay(SearchReplayRequest)`,
@@ -428,9 +529,10 @@ place.
 null; `GitCommandAdapter` implements it, reading an exact commit's files from local history without checkout or fetch.
 `RunDirectory` adds `SearchesFile`, which the worker creates empty as a run starts. A run's MCP server is now configured as
 `mcp serve --as <agent> --run <run id>`; `mcp serve` adds `--run`, and with it keeps each served search in the run's directory
-for settlement, as logged, not tamper-evident under a harness that does not sandbox the agent. `Vericairn.Mcp` adds
-`ToolCallResult.Meta`, sent as a tool result's `_meta`, and `ToolRegistry.SearchObserved`; the server lists the `search` read
-tool, and `context_prepare` and `work_brief` take an optional `search` argument.
+for settlement, as logged, not tamper-evident under a harness that does not sandbox the agent. `Vericairn.Mcp` sets
+`ToolCallResult.Meta` (added with MCP-03) on the `search` tool's result, sent as its `_meta` over every transport, and adds
+`ToolRegistry.SearchObserved`; the server lists the `search` read tool, and `context_prepare` and `work_brief` take an optional
+`search` argument.
 
 The command line adds `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`,
 `work brief`, `worker run` and `goal step`. `doctor` adds a `search` line. The index, `search.db` beside the live store, is

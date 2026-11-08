@@ -43,6 +43,12 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
+      "vericairn.mcp": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Protocol": "[0.9.0-dev, )"
+        }
+      },
       "vericairn.protocol": {
         "type": "Project"
       },

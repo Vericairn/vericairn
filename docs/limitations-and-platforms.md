@@ -683,6 +683,36 @@ clone, and independently running services are not coordinated by one service's g
 The queue and one-step action are absent from MCP. See [operator actions](operator-actions.md)
 and [checked changes](changes.md).
 
+## Security reports before a release (OPS-11)
+
+From 0.9.2 the `github-security-advisories` reader lists a declared repository's security advisories through the runtime
+user's own `gh` login, read-only, with the same bounded runner as the release provider: one minute per gh command. It reads
+the listing page by page, 100 advisories a page and at most 30 pages, each page's answer at most 16,777,216 characters and all
+of them at most 100,663,296, so a page or listing larger than that is refused rather than truncated. It reads only as an
+administrator of the repository through a token whose `repo` or `repository_advisories:read` scope it can confirm, since GitHub
+hides drafts and private reports from other logins; a fine-grained or app token shows no scopes and is refused. It reads only
+while GitHub's core allowance keeps a fifth of its limit, and at least 100 requests, for the person's own use, and stops
+before a further page once a page leaves no more than that. GitHub keeps repository advisories only for
+public repositories, so a declared private repository's listing is refused and holds releases. It does not use
+conditional requests or webhooks. It follows next pages only on `api.github.com`, so it reads `github.com` and not a GitHub
+Enterprise Server. A repository whose
+listing cannot be completed holds every release until it can; there is no override other than the operator's product
+revision without the declaration.
+
+Observations stay on the machine that read them, in its live store: another machine, or a rebuilt cache, starts with none
+and reads again before a release. An advisory absent from a later complete listing is no longer observed and no longer
+holds. The daemon reads every 5 minutes, and an embedded command only when it polls or checks a release, so attention on a
+machine without a running daemon is as fresh as its last read and says when that was. Each advisory revision is told apart
+by a hash of the whole response, so any edit to a report, its text or credits included, needs a new triage. Reports, in
+`triage` or `draft` state or a state this release does not know, hold a release until triaged at their current revision, and a
+closed or withdrawn advisory until triaged at any revision; a published advisory, or a closed one already triaged, is
+information for a week and holds nothing, whoever changed it. A non-operator learns from a refusal only whether releases are
+held. Triage is the
+operator's alone until a security role exists; agents and other principals cannot record one, see one, or learn from a
+refusal whether a report exists. A triage record names the advisory's identifier and repository, so an estate whose records
+are public should not declare security reports. The estate's GitHub App replaces this reader in a later release, with the
+App's own allowance.
+
 ## Other limitations and artifacts
 
 The generated CLI reference includes every visible option at its declaring command, including the recursive root options and `worker configure`, without trailing whitespace. The structural docs check and build comparison verify document presence, declared command, operation, type and format inventories, retained inputs and complete reference bytes; they do not judge prose or prove behavior. Source regression tests check visible-option coverage and generated whitespace.
@@ -710,6 +740,22 @@ reader consumed that state, are not raised; the records behind them still raise 
 streams share 16 slots, at most four per device and eight per principal, with two more kept for the local
 socket. A reset tells a client only that its cursor could not be honored; how often one comes depends on the
 journal's whole volume, including events that client may not read. The embedded runtime keeps no journal.
+
+## Network MCP limits (0.9.2)
+
+Network MCP (`MCP-03`) serves signed mode only: every request and every record is signed by an admitted
+agent's or service's device, so a client must be Vericairn-aware, through `vericairn mcp serve
+--connection` or its own signing code. Token mode for OAuth-only clients, the public endpoint and its MCP
+gateway, and MCP over the relay are planned for 0.9.3 (`MCP-04`, `REMOTE-10`, the relay); until then `/mcp`
+is reached on loopback and on the local network only, and a device on the local network pairs there first.
+A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
+connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
+the daemon's memory and end when it restarts; the bridge opens a new one once, and other clients initialize
+again after a `404`. A session has one server stream, and in 0.9.2 nothing is sent on it but keep-alive
+comments: resource notifications are `MCP-05`'s, and the bridge does not yet forward the stream to its
+client. Requests are answered with one JSON body, never a stream; long outputs are returned whole. A
+device holds four sessions and runs four requests at once, all devices eight, and server streams share
+the event streams' slots. Every `<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
 
 ## Context and hand-over limits
 

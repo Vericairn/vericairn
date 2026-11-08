@@ -152,6 +152,49 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
         return new VericairnClient(connection, signer, timeout, clock);
     }
 
+    /// <summary>
+    /// The signed HTTP transport of a paired connection, from 0.9.2, for network MCP's bridge (MCP-03): mutual TLS with a certificate
+    /// the device's key issued, the pinned runtime identity proving each connection, and every request signed by the device for this
+    /// estate and identity, as the client's own requests are.
+    /// </summary>
+    internal static HttpClient SignedHttp(RuntimeConnection connection, IRequestSigner signer, TimeSpan? connectTimeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(signer);
+        if (!RuntimeConnection.TryParseAddress(connection.Address, out _, out _))
+        {
+            throw new ArgumentException($"'{connection.Address}' is not an address and port.", nameof(connection));
+        }
+
+        var credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(30),
+            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, credential, cancellationToken, classifyRefusal: true),
+        };
+        return new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    /// <summary>The signed HTTP transport of a daemon's loopback profile, from 0.9.2: pinned to its certificate, every request signed by the device.</summary>
+    internal static HttpClient SignedHttp(DaemonEndpoint endpoint, IRequestSigner signer)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(signer);
+        LoopbackEndpoint loopback = endpoint.Loopback ?? throw new InvalidOperationException("The daemon publishes no loopback endpoint.");
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                CertificateChainPolicy = LocalNetworkTransport.OfflineChainPolicy(),
+                RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is not null && Fingerprint(certificate) == loopback.Certificate,
+            },
+        };
+        return new HttpClient(new SigningHandler(signer, handler), disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = Timeout.InfiniteTimeSpan };
+    }
+
     /// <summary>True when a daemon answers at the endpoint's local socket.</summary>
     public static bool IsAlive(DaemonEndpoint endpoint)
     {

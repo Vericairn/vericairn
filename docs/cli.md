@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 14, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
+Revision 15, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
+
+Revision 14, November 7, 2026. Add `security-reports poll` and `security-reports triage` in the development build.
 
 Revision 13, November 7, 2026. Add a run's stops to `goal step`, `goal show`, `goal next`, `status` and `operator list` in the development build.
 
@@ -480,6 +482,43 @@ vericairn events watch --subject <goal id> --after <cursor>
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
 
+## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
+
+`vericairn runtime configure --mcp on` turns on network MCP (`MCP-03`): from the runtime's next start the daemon serves
+the Model Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners, to agents' and
+services' devices whose every request and record is signed by that device. `--mcp off` stops it; it is off by default
+and never served on the local socket. `--mcp-origin <origin>` names an origin (`scheme://host[:port]`) a request may
+carry, repeated for more; it replaces the list, `--mcp-origin none` empties it, and a request naming any other origin is
+refused before it is authenticated. A request without an `Origin`, as native clients send, needs none. The settings are
+kept in `runtime.json` beside the live store with `--local-network`, and `vericairn runtime status` shows `mcp  /mcp`
+while a daemon serves it.
+
+| Option | Meaning |
+|---|---|
+| `--mcp on\|off` | Serve network MCP at `/mcp` from the runtime's next start, or stop. Off unless set. |
+| `--mcp-origin <origin>` | An origin a request to `/mcp` may name; repeatable; replaces the list; `none` empties it. None by default. |
+
+On the agent's machine, `vericairn mcp serve --connection <connection>` bridges a stdio harness to that estate over a
+connection `vericairn connections add` paired, named by its id or its estate's name. It serves standard input and output
+as `mcp serve` does and forwards each message to the runtime's `/mcp`, signing every request with the connection's
+device. Only a write is prepared: its record is checked to be the one the call asks for (the tool's record type, this
+device's principal as author, no supersession, a time within a plan's ten minutes of this machine's clock, the assignment
+or attempt the call names, every field the call supplies unchanged), signed with the same key and then written; nothing
+another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
+document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
+([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
+device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
+principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
+key is no longer held here.
+
+```sh
+vericairn runtime configure --local-network 192.168.1.20:7443 --mcp on
+vericairn mcp serve --connection <connection id>
+```
+
+See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and the
+[operator's guide](operator-guide.md#an-agent-on-another-machine-network-mcp-092).
+
 ## Preparing a documentation set with the build tooling (0.9.2)
 
 `vericairn-docs`, the build tooling in `tools/Vericairn.DocsTool` and not part of the shipped command line, adds five
@@ -498,6 +537,45 @@ overwrite a person's text or a frozen set.
 
 `--json` prints one JSON object per step. Exit 0 means the step is done or was already done, 1 that the set is incomplete
 (`freeze`) or differs from the build (`compare` within `prepare`), and 2 a refusal. See the [operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092).
+
+## `vericairn security-reports` (0.9.2)
+
+Reads the security advisories of the repositories a product's `securityReports` declaration names, drafts and private
+reports included, and records the operator's triage of one observed revision (OPS-11). While a declared repository cannot be
+read completely, or an advisory holds, `release submit` and its `--check` refuse. A report (an advisory in `triage` or `draft`
+state, or an unknown state) holds until a triage names its current revision, and a closed or withdrawn advisory until a triage
+names it at any revision; a published advisory holds nothing and needs no triage. Both commands are the
+operator's alone; any other principal is refused with the same answer whatever exists. See the
+[operator's guide](operator-guide.md#security-reports-hold-a-release-092).
+
+```sh
+vericairn security-reports poll --by <operator-id>
+vericairn security-reports triage <GHSA identifier> --repository <owner/name> --expected <content hash> --disposition no-action --reason "<your own words>" --by <operator-id>
+```
+
+| Command and option | Meaning |
+|---|---|
+| `poll --by <id>` | Read every declared repository now through its reader and print, per repository, whether the read completed, and per advisory its identifier, state, severity, content hash, and its triage, whether it holds every release untriaged, or that it holds nothing. Records and posts nothing. |
+| `triage <advisory>` | The advisory's GHSA identifier, as `poll` or the attention notice shows it. |
+| `triage --repository <owner/name>` | Required. The advisory's repository. |
+| `triage --expected <hash>` | Required. The observed revision's content hash. A different current revision is refused as a conflict; review it, then triage that one. |
+| `triage --disposition <value>` | Required. `security` (a vulnerability to fix), `duplicate` or `no-action`. |
+| `triage --reason <text>` | Your reason, at most 500 characters and in your own words, never the report's text. Required for `no-action`. |
+| `triage --by <id>` | Required. The operator, on an admitted device. |
+| `--json` | Print the complete `SecurityReportsResponse`: `reads`, `reports` (each with `holds`), `held`, any `triage` record written and any `problem`. |
+
+Exit 0 means a completed read or a recorded triage, and 1 a refusal: another principal, an unknown advisory, a changed
+revision or an invalid disposition. A read that could not complete still exits 0 and names the cause on its repository's
+line, since it is an observation, not a refusal.
+
+| API operation | SDK method and cancellable counterpart |
+|---|---|
+| `POST /v1/security-reports/poll` with `SecurityReportsPollRequest` | `SecurityReportsPoll`, `SecurityReportsPollAsync` |
+| `POST /v1/security-reports/triage` with `SecurityReportTriageRequest` | `SecurityReportsTriage`, `SecurityReportsTriageAsync` |
+
+Both return `SecurityReportsResponse`, and the API binds `by` to the authenticated acting device. `GET /v1/providers` and
+`release providers` list the `github-security-advisories` reader, kind `security-advisories`, with its limits. There is no
+token option and no write to GitHub.
 
 ## Keyword search and search-selected context (0.9.2)
 

@@ -46,6 +46,25 @@ public class PolicyGoldenFixtureTests
             ["key"] = "FIX-90", ["kind"] = "ordinary", ["title"] = "Held fixture", ["intent"] = "Round trip the disclosure hold.", ["scope"] = new JsonArray("The hold."),
             ["exitQuestion"] = "Does the hold round trip?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("fixture"), ["disclosure"] = DisclosureHolds.Held,
         });
+        // A product reads its repositories' security reports before every release, and the operator triages one revision.
+        RecordEnvelope advisories = lines.Add("resource", new JsonObject
+        {
+            ["kind"] = "repository", ["name"] = "Advisories fixture", ["role"] = "Where reports are filed.",
+            ["location"] = new JsonObject { ["github"] = "Example/advisories" }, ["visibility"] = "public",
+        });
+        lines.Add("product", new JsonObject
+        {
+            ["name"] = "Reported", ["slug"] = "reported", ["summary"] = "Fixture product with security reports.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Fixture edition." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Fixture surface." }),
+            ["securityReports"] = new JsonObject { ["provider"] = "github-security-advisories", ["repositories"] = new JsonArray(advisories.Id) },
+        });
+        lines.Add("observation", new JsonObject
+        {
+            ["kind"] = "security-triage", ["asOf"] = "2026-11-02T03:00:00Z", ["summary"] = "The operator triaged a fixture advisory.",
+            ["facts"] = new JsonObject { ["advisory"] = "GHSA-2c4m-9q7r-hx3v", ["repository"] = "Example/advisories", ["contentHash"] = "sha256:" + new string('d', 64), ["disposition"] = "no-action", ["reason"] = "Fixture reason." },
+            ["limitations"] = new JsonArray(),
+        }, subject: advisories.Reference);
         EstateModel lineModel = lines.Estate.Load();
         Assert.False(lineModel.Findings.HasErrors, string.Join('\n', lineModel.Findings));
         // A run's assignment names its flow step and pins its inputs.

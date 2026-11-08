@@ -14,11 +14,18 @@ public sealed partial class EstateService
     /// Carries only the device identity, the key that authenticated this request and any required profile to the write path. Each
     /// write checks them against the records under the estate's gate. Local-socket and embedded operations carry no such scope.
     /// </summary>
-    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile = null)
+    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile = null) => ForDeviceRequest(device, publicKey, profile, null);
+
+    /// <summary>
+    /// From 0.9.2 (MCP-03): the same scope for a request whose records only the requesting device signs, as network MCP's signed
+    /// mode has it. Under <paramref name="signing"/> no key on this machine signs and no record is written unsigned: an operation
+    /// writes nothing, prepares its one record for the device, or writes that record with the device's signature over its plan.
+    /// </summary>
+    public RequestDeviceScope ForDeviceRequest(string device, string publicKey, string? profile, DeviceSigning? signing)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(device);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicKey);
-        var scope = new RequestDeviceScope(this, requestDevice.Value, device, publicKey, profile);
+        var scope = new RequestDeviceScope(this, requestDevice.Value, device, publicKey, profile) { Signing = signing };
         requestDevice.Value = scope;
         return scope;
     }
@@ -74,6 +81,9 @@ public sealed partial class EstateService
         internal string PublicKey { get; }
 
         internal string? Profile { get; }
+
+        /// <summary>How the request's records are signed when only its device signs them; null for every other request.</summary>
+        internal DeviceSigning? Signing { get; init; }
 
         // A background operation may have captured the execution context. Once the request ends it is the runtime's work;
         // it must not retain the completed request's credential, nor lend it to another request.

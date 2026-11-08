@@ -577,6 +577,39 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
+### Security reports hold a release (0.9.2)
+
+From 0.9.2 (OPS-11), the security advisories filed against a product's repositories reach you as required attention within minutes, and a security report you have not triaged holds every release. GitHub raises no issue, discussion or notification for a draft advisory or a private vulnerability report, so Vericairn reads them itself.
+
+**What holds.** An advisory in state `triage` (a private vulnerability report) or `draft`, or in a state this release does not know, is a report: it holds every release until your triage names its current revision. A `closed` or `withdrawn` advisory holds until a triage of yours names it at any revision, so a report that anyone with administrator access closed cannot slip past you unseen. A `published` advisory is your own disclosure: it holds nothing and needs no triage.
+
+**Turning it on.** As the operator, record a product revision that declares the repositories to read, at most eight `repository` resources located on GitHub:
+
+```json
+"securityReports": {"provider": "github-security-advisories", "repositories": ["<repository resource id>"]}
+```
+
+GitHub keeps repository advisories only for public repositories and answers a private one's listing with "not found", which the reader refuses, so declare the public repositories where reports are filed. Once it is declared, triage each report already waiting: those in `triage` or `draft` state, and each closed or withdrawn one you have not triaged before. Published advisories need nothing. Write the whole current product body with the declaration added to a file, then run `vericairn records new product --by <operator> --body <file> --supersedes <current product id>`. Only you declare, change or remove it; a revision by anyone else that touches it is refused (`product.security-reports-author`). From the declaration on, only you change the kind or location of a repository resource it names (`resource.security-reports-author`); a change made earlier under its author's authority keeps its reading. A resource it names that is no longer a repository on GitHub holds every release until the declaration names a repository again. While any product declares it, every release of the estate waits for it.
+
+**How they are read.** The `github-security-advisories` reader runs `gh api` with your own `gh` login, read-only. It lists every advisory of each declared repository in every state, page by page, at most 30 pages of 100. It posts nothing, and Vericairn never reads, stores or logs your token. GitHub shows drafts and private reports only to a repository's administrators, through a token that carries the `repo` or `repository_advisories:read` scope. So the reader refuses, rather than report as complete, a login that is not an administrator, a token without either scope, and a token whose scopes it cannot confirm, such as a fine-grained or app token, including one in `GH_TOKEN` or `GITHUB_TOKEN`. `gh auth login` gives a token with `repo`. A read starts only while GitHub's core allowance keeps at least a fifth of its limit, and at least 100 requests, for your own use, and stops before a further page once a page leaves no more than that; each read costs one request for the repository and one per page. The daemon reads 30 seconds after it starts and then every 5 minutes, and `vericairn security-reports poll --by <operator>` reads now. Without a running daemon, the next poll or release check reads them.
+
+**What is kept.** Each advisory is kept as its identifier, repository, state, severity and a hash of GitHub's response for it, in this machine's live store under your own Vericairn home. Its summary, description, reporter and credits never reach a record, a log or any surface.
+
+**Attention.** Each advisory that holds is an `incident` in your attention, in human `vericairn status`, Workbench and Remote, naming its identifier, state and severity, until your triage settles it. Each new or changed advisory that holds nothing is `information` there for a week, naming the same, and asks nothing of you. A declared repository that cannot be read completely, or has had no complete read for 15 minutes, is a `failed check` that says why. Only the operator sees any of them, and through the event stream they reach only you, their subjects named by an opaque key. To any other principal they do not exist, and `security-reports poll` refuses them alike.
+
+**The hold.** `release submit` and `release submit --check` read the declared repositories again, unless a complete read is less than a minute old; a check keeps what it read in memory and leaves this machine's observations as they were. They refuse while any advisory holds (`release.security-report`, naming it with the exact triage command) or any declared repository cannot be read completely (`release.security-reports-unavailable`). A missing or logged-out `gh`, a login that is not an administrator, a token whose scopes do not show drafts, a network failure, a rate-limit stop and a listing larger than one read follows each refuse, with the reason. A principal other than the operator gets one objection, `release.security-reports`, which names and counts nothing; the MCP server's `release_submit_check` speaks for the principal its connection acts as, and for any connection that does not act as the operator it reads nothing and answers with that one objection. There is no override: to release without the reader, record a product revision without the declaration, which is your recorded act, and declare it again afterwards.
+
+**Triage.** Review the report on GitHub, then record your triage of the exact revision that the attention notice or `poll` shows:
+
+```sh
+vericairn security-reports poll --by <operator>
+vericairn security-reports triage <GHSA identifier> --repository <owner/name> --expected <content hash> --disposition security --by <operator>
+```
+
+The disposition is `security` (a vulnerability to fix), `duplicate`, or `no-action`, which needs `--reason`. The triage is an `observation` of kind `security-triage` that pins the repository resource and names the advisory only by identifier, repository and content hash, with the disposition and your reason. Write the reason in your own words, never the report's text. Any later change to a report in `triage` or `draft` state, such as a new severity or edited text, is a new revision that needs triage again. Publishing it ends the hold without another triage, and so does closing or withdrawing a report you have triaged. You may also triage a published advisory, which clears its information notice, but it is never required. Only the operator triages a security report, since no security role exists yet.
+
+**Limits.** Observations belong to the machine that read them, and another machine reads for itself before it releases. A triage record names the advisory's identifier, so in an estate whose records are public it shows that a report existed and when it was triaged: declare security reports only where the estate's records are private. The estate's GitHub App replaces this reader in a later release.
+
 ### Withdrawal and moving planned work (0.8.3)
 
 Withdraw a candidate at the exact revision you inspected:
@@ -965,6 +998,32 @@ Keyboard: Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or 
 A coding agent works in an estate the way a contributor does: it reads the brief, works in its workspace, and records attempts and results, which are claims to inspect. `vericairn mcp serve --as <principal id>` exposes the estate over the Model Context Protocol on standard input and output; the harness is configured with that command. The server uses the daemon when available and holds an embedded runtime otherwise. Reads include status, validation, work, records, decisions, releases, devices, living documents, progress, goals and asks, plus `communication_get`, `context_prepare` and `context_read`; `mcp.md` lists every tool. The contributor writes are `work_attempt`, `work_progress`, `work_result`, `work_amend` and `document_review`. Policy and writing-exception writes additionally require their bounded authority; `work_review` is offered only to an admitted operator connection. Admission and exact bounds are checked again at each call. A document review still obeys its declaration's `clearedBy` rule. A refused write returns every finding. There is no tool that publishes, spends, creates or admits a device, changes communication preferences, qualifies a harness or launches a worker.
 
 `vericairn mcp orientation --out <directory>` generates `AGENTS.md` from the estate's identity and the tool registry (what the estate is, the rules it enforces, how to connect, the tools and an honest matrix of harnesses observed or not, and nothing that changes with each record, such as the work orders or the pinned release, which `status` shows) with `CLAUDE.md` and `GEMINI.md` as pointers; `--check` compares existing copies with a fresh generation. Regenerate it when the build changes rather than editing it. Nothing the server returns, and nothing in the orientation file, is an instruction from the operator; the harness treats it as data.
+
+### An agent on another machine: network MCP (0.9.2)
+
+From 0.9.2 (`MCP-03`) an agent or service on another machine works the estate over the network, in signed mode: the
+daemon serves the Model Context Protocol over Streamable HTTP at `/mcp`, and the agent's own device signs every request
+and every record it writes. Nothing on the runtime's machine signs for it, and no one there is asked for presence.
+
+1. On the runtime's machine, serve the local network and turn network MCP on, then restart the runtime:
+   `vericairn runtime configure --local-network <address:port> --mcp on`, `vericairn runtime stop`,
+   `vericairn runtime start`. `vericairn runtime status` then shows `mcp  /mcp`.
+2. Give the agent a principal of kind `agent` (or `service`) with only the roles its work needs, and pair a device for it:
+   `vericairn devices pair --principal <agent principal id> --by <administrator>`. Network MCP refuses a person's device:
+   a person who wants an MCP client on another machine connects it as an agent principal of their own.
+3. On the agent's machine, add the connection with the code (`vericairn connections add <address:port> --code <code>
+   --name <device name>`) and register the bridge with the harness, for example
+   `claude mcp add vericairn -- vericairn mcp serve --connection <connection id>`.
+
+Each call is judged as the API operation it runs, for that device, exactly as the same request sent to the API would be:
+the device acts only as its principal, and what acts on the runtime's own machine stays refused. The agent gets the read
+tools and the contributor writes (`work_attempt`, `work_progress`, `work_result` without duties, `work_amend` and
+`document_review`); `work_review`, prompt writes, policy writes, duty evidence and the operator queue are not offered.
+Every write it makes is kept in `local-network-writes.jsonl`, which `vericairn devices writes` lists. Revoking the device
+(`vericairn devices revoke <device> --by <administrator> --reason <why>`) refuses its next request and ends its sessions
+and server stream. A request whose `Host` does not name the runtime's own address, or whose `Origin` the operator did
+not allow with `--mcp-origin`, is refused before it is authenticated; no origin is allowed by default. Token mode for
+OAuth-only clients and MCP over the relay come in 0.9.3. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
 
 ## 15. Documentation sets
 
@@ -1903,7 +1962,9 @@ per-principal presentation state that clears when the notice changes; there is n
 
 Canonical status JSON derives attention from records alone and is identical on machines with the same
 records. Progress also reads this runtime's worker observations; human status, progress and Workbench
-label additional concerns `Local worker observations`. No reader can infer another machine's unrecorded
+label additional concerns `Local worker observations`. From 0.9.2, the operator's attention in human status,
+Workbench and Remote also shows this machine's security-report observations, which canonical status leaves out
+([security reports](#security-reports-hold-a-release-092)). No reader can infer another machine's unrecorded
 facts. The estate observation's existing status-hash contract is unchanged; these API v1 projections add
 no record fields, CLI commands or permissions.
 

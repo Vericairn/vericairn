@@ -21,6 +21,8 @@ public sealed partial class ToolRegistry
     /// <summary>Records a prompt use through its admitted target before returning standard MCP messages.</summary>
     public async Task<JsonObject> PromptGetAsync(string name, JsonObject? arguments, CancellationToken cancellationToken = default)
     {
+        // A recorded prompt use is the operator's judgment, never offered over the network (section 8 of the network design).
+        if (network is not null) throw new McpResourceException(-32601, "Method not found: prompts/get.");
         if (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) || !await IsOperatorAsync(cancellationToken).ConfigureAwait(false))
             throw new UnauthorizedAccessException("A recorded prompt use requires an admitted operator and signing device, as prompt_use does.");
         PromptsResponse library = await api.PromptsAsync(new(actingPrincipal), cancellationToken).ConfigureAwait(false);
