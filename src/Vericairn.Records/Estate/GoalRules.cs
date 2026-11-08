@@ -103,12 +103,18 @@ public static class GoalRules
 
     /// <summary>
     /// True when the principal may grant a goal's budget, which is spending, at a time: the operator holds every reserved action, and
-    /// any other principal needs a grant of the 'spending' scope that is in force then.
+    /// any other principal needs a grant of the 'spending' scope that is in force then. Given the record judged, both are read as they
+    /// stood at its place (<see cref="EstateModel.HasRoleAt"/>).
     /// </summary>
-    public static bool HoldsSpending(EstateModel model, string principal, DateTimeOffset at)
+    public static bool HoldsSpending(EstateModel model, string principal, DateTimeOffset at) => HoldsSpending(model, principal, at, null);
+
+    /// <inheritdoc cref="HoldsSpending(EstateModel, string, DateTimeOffset)"/>
+    public static bool HoldsSpending(EstateModel model, string principal, DateTimeOffset at, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.HasRole(principal, Roles.Operator) || model.HasScope(principal, Scopes.Spending, at);
+        return record is null
+            ? model.HasRole(principal, Roles.Operator) || model.HasScope(principal, Scopes.Spending, at)
+            : model.HasRoleAt(principal, Roles.Operator, record) || model.HasScopeAt(principal, Scopes.Spending, record);
     }
 
     /// <summary>
@@ -116,19 +122,28 @@ public static class GoalRules
     /// sponsor when a person, who needs the authority to spend, and an operator for a goal an agent sponsors; an agent never does (an
     /// agent's proposed goal is proposed, not authorized or funded). Empty when it may.
     /// </summary>
-    public static IReadOnlyList<(string Code, string Message)> ActivationRefusals(EstateModel model, RecordEnvelope goal, string by, DateTimeOffset at)
+    public static IReadOnlyList<(string Code, string Message)> ActivationRefusals(EstateModel model, RecordEnvelope goal, string by, DateTimeOffset at) =>
+        ActivationRefusals(model, goal, by, at, null);
+
+    /// <inheritdoc cref="ActivationRefusals(EstateModel, RecordEnvelope, string, DateTimeOffset)"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The goal.</param>
+    /// <param name="by">Who records the status.</param>
+    /// <param name="at">When.</param>
+    /// <param name="record">The status record judged, whose place authority is read at; null to read it as it is now.</param>
+    public static IReadOnlyList<(string Code, string Message)> ActivationRefusals(EstateModel model, RecordEnvelope goal, string by, DateTimeOffset at, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         Accepter decider = AccepterOf(model, goal);
-        if (!decider.Decides(model, by))
+        if (!decider.Decides(model, by, record))
         {
             return decider.Principal is not null
                 ? [("goal-status.sponsor", "Only the goal's sponsor records it as active.")]
                 : [("goal-status.operator", "A goal an agent sponsors is activated by an operator, who grants its budget: an agent may propose a goal, never activate or fund one.")];
         }
 
-        return HoldsSpending(model, by, at)
+        return HoldsSpending(model, by, at, record)
             ? []
             : [("goal-status.authority", "Activating a goal grants its budget, which is spending: its sponsor holds the operator role or a grant of the 'spending' scope in force.")];
     }
@@ -140,19 +155,33 @@ public static class GoalRules
     /// change as an ask to the sponsor, and anyone may still propose a new goal. <paramref name="goal"/> is the revision a revision
     /// supersedes; its sponsor decides, whatever the revision names.
     /// </summary>
-    public static bool MayRevise(EstateModel model, RecordEnvelope goal, string? by)
+    public static bool MayRevise(EstateModel model, RecordEnvelope goal, string? by) => MayRevise(model, goal, by, null);
+
+    /// <inheritdoc cref="MayRevise(EstateModel, RecordEnvelope, string?)"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The revision a revision supersedes.</param>
+    /// <param name="by">Who records the revision.</param>
+    /// <param name="record">The revision judged, whose place authority is read at; null to read it as it is now.</param>
+    public static bool MayRevise(EstateModel model, RecordEnvelope goal, string? by, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        return AccepterOf(model, goal).Decides(model, by);
+        return AccepterOf(model, goal).Decides(model, by, record);
     }
 
-    /// <summary>Why a principal may not record a revision of a goal (<see cref="MayRevise"/>), in words; empty when it may.</summary>
-    public static IReadOnlyList<(string Code, string Message)> RevisionRefusals(EstateModel model, RecordEnvelope goal, string? by)
+    /// <summary>Why a principal may not record a revision of a goal (<see cref="MayRevise(EstateModel, RecordEnvelope, string?)"/>), in words; empty when it may.</summary>
+    public static IReadOnlyList<(string Code, string Message)> RevisionRefusals(EstateModel model, RecordEnvelope goal, string? by) => RevisionRefusals(model, goal, by, null);
+
+    /// <inheritdoc cref="RevisionRefusals(EstateModel, RecordEnvelope, string?)"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The revision a revision supersedes.</param>
+    /// <param name="by">Who records the revision.</param>
+    /// <param name="record">The revision judged, whose place authority is read at; null to read it as it is now.</param>
+    public static IReadOnlyList<(string Code, string Message)> RevisionRefusals(EstateModel model, RecordEnvelope goal, string? by, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        if (MayRevise(model, goal, by))
+        if (MayRevise(model, goal, by, record))
         {
             return [];
         }
@@ -167,11 +196,18 @@ public static class GoalRules
     /// True when the principal may end a goal as impossible or abandoned: its sponsor, or who decides for it, an operator for a goal
     /// an agent sponsors.
     /// </summary>
-    public static bool MayEnd(EstateModel model, RecordEnvelope goal, string by)
+    public static bool MayEnd(EstateModel model, RecordEnvelope goal, string by) => MayEnd(model, goal, by, null);
+
+    /// <inheritdoc cref="MayEnd(EstateModel, RecordEnvelope, string)"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The goal.</param>
+    /// <param name="by">Who ends it.</param>
+    /// <param name="record">The status record judged, whose place authority is read at; null to read it as it is now.</param>
+    public static bool MayEnd(EstateModel model, RecordEnvelope goal, string by, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        return by == EstateModel.BodyString(goal, "sponsor") || AccepterOf(model, goal).Decides(model, by);
+        return by == EstateModel.BodyString(goal, "sponsor") || AccepterOf(model, goal).Decides(model, by, record);
     }
 
     /// <summary>
@@ -251,8 +287,8 @@ public static class GoalRules
         ArgumentNullException.ThrowIfNull(goal);
         return Ordered(model.About(goal.Id, "goal-status").Where(s => (before is null || Before(s, before)) && EstateModel.BodyString(s, "status") switch
         {
-            "active" => ActivationRefusals(model, goal, s.By, s.AtTime).Count == 0,
-            "impossible" or "abandoned" => MayEnd(model, goal, s.By),
+            "active" => ActivationRefusals(model, goal, s.By, s.AtTime, s).Count == 0,
+            "impossible" or "abandoned" => MayEnd(model, goal, s.By, s),
             _ => true,
         }));
     }
@@ -300,7 +336,7 @@ public static class GoalRules
         ArgumentNullException.ThrowIfNull(basis);
         var refusals = new List<(string Code, string Message)>();
         Accepter accepter = AccepterOf(model, goal, before);
-        if (!accepter.Allows(model, by, before?.AtTime ?? DateTimeOffset.UtcNow))
+        if (!accepter.Allows(model, by, before?.AtTime ?? DateTimeOffset.UtcNow, before))
         {
             refusals.Add(("acceptance.policy", $"A goal is accepted by {accepter.Description}."));
         }
@@ -411,18 +447,38 @@ public static class GoalRules
     /// <param name="Delegate">The principal the sponsor delegated the acceptance of an ordinary goal to, when the delegation stands.</param>
     public sealed record Accepter(string? Principal, string Description, string? Delegate = null)
     {
-        /// <summary>True when the principal decides for the goal, activating, resuming and ending it: its sponsor, or an operator when an agent sponsors it.</summary>
-        public bool Decides(EstateModel model, string? by)
+        /// <summary>
+        /// True when the principal decides for the goal, activating, resuming and ending it: its sponsor, or an operator when an agent
+        /// sponsors it. Given the record judged, the operator role is read as it stood at its place.
+        /// </summary>
+        public bool Decides(EstateModel model, string? by) => Decides(model, by, null);
+
+        /// <inheritdoc cref="Decides(EstateModel, string?)"/>
+        /// <param name="model">The estate.</param>
+        /// <param name="by">The principal.</param>
+        /// <param name="record">The record judged, whose place the role is read at; null to read it as it is now.</param>
+        public bool Decides(EstateModel model, string? by, RecordEnvelope? record)
         {
             ArgumentNullException.ThrowIfNull(model);
-            return by is not null && (Principal is null ? model.HasRole(by, Roles.Operator) : by == Principal);
+            return by is not null && (Principal is null ? record is null ? model.HasRole(by, Roles.Operator) : model.HasRoleAt(by, Roles.Operator, record) : by == Principal);
         }
 
-        /// <summary>True when the principal may accept the goal at a time: who decides for it, or the delegate while it holds the 'accept-work' scope.</summary>
-        public bool Allows(EstateModel model, string? by, DateTimeOffset at)
+        /// <summary>
+        /// True when the principal may accept the goal at a time: who decides for it, or the delegate while it holds the 'accept-work'
+        /// scope. Given the record judged, both are read as they stood at its place.
+        /// </summary>
+        public bool Allows(EstateModel model, string? by, DateTimeOffset at) => Allows(model, by, at, null);
+
+        /// <inheritdoc cref="Allows(EstateModel, string?, DateTimeOffset)"/>
+        /// <param name="model">The estate.</param>
+        /// <param name="by">The principal.</param>
+        /// <param name="at">When.</param>
+        /// <param name="record">The acceptance judged, whose place authority is read at; null to read it as it is now.</param>
+        public bool Allows(EstateModel model, string? by, DateTimeOffset at, RecordEnvelope? record)
         {
             ArgumentNullException.ThrowIfNull(model);
-            return Decides(model, by) || (by is not null && by == Delegate && model.HasScope(by, Scopes.AcceptWork, at));
+            return Decides(model, by, record) || (by is not null && by == Delegate &&
+                (record is null ? model.HasScope(by, Scopes.AcceptWork, at) : model.HasScopeAt(by, Scopes.AcceptWork, record)));
         }
     }
 }

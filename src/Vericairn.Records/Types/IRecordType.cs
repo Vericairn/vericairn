@@ -82,11 +82,17 @@ public sealed class ValidationContext
     /// <summary>The principal record currently describing a principal id.</summary>
     public RecordEnvelope? Principal(string? id) => Model.CurrentPrincipal(id);
 
-    /// <summary>True when the principal currently holds the role.</summary>
-    public bool HasRole(string? principalId, string role) => Model.HasRole(principalId, role);
+    /// <summary>
+    /// True when the principal held the role at this record's place: as it stood at the record's time in an estate that has adopted
+    /// history checkpoints (<see cref="EstateModel.HasRoleAt"/>), as it is now in any other estate.
+    /// </summary>
+    public bool HasRole(string? principalId, string role) => Model.HasRoleAt(principalId, role, Record);
 
-    /// <summary>True when a grant gives the principal the scope and had not expired when this record was authored.</summary>
-    public bool HasScope(string? principalId, string scope) => Model.HasScope(principalId, scope, Record.AtTime);
+    /// <summary>
+    /// True when a grant gave the principal the scope at this record's place and had not expired when it was authored: in an estate that
+    /// has adopted history checkpoints, each grant as it stood then, bounded by closings (<see cref="EstateModel.HasScopeAt"/>).
+    /// </summary>
+    public bool HasScope(string? principalId, string scope) => Model.HasScopeAt(principalId, scope, Record);
 
     /// <summary>Checks that a body field references an existing record of the expected type; returns the record.</summary>
     public RecordEnvelope? RequireReference(string field, string? id, string expectedType)

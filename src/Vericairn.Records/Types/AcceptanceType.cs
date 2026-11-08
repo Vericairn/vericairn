@@ -126,7 +126,7 @@ public sealed class AcceptanceType : IRecordType
     /// </summary>
     internal static Finding? BasisOutcomeFinding(EstateModel model, RecordEnvelope acceptance, string location)
     {
-        if (acceptance.Subject is null || model.HasRole(acceptance.By, Roles.Operator) || !acceptance.Body.TryGetProperty("basis", out System.Text.Json.JsonElement basis)
+        if (acceptance.Subject is null || model.HasRoleAt(acceptance.By, Roles.Operator, acceptance) || !acceptance.Body.TryGetProperty("basis", out System.Text.Json.JsonElement basis)
             || basis.ValueKind != System.Text.Json.JsonValueKind.Array)
         {
             return null;

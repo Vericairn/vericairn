@@ -40,7 +40,7 @@ public static class CustodyExceptions
         ArgumentNullException.ThrowIfNull(goal);
         return exception.Type == "custody-exception"
             && exception.Subject?.Id == goal.Id && exception.Subject.Hash == goal.ComputedHash
-            && GoalRules.AccepterOf(model, goal).Decides(model, exception.By)
+            && GoalRules.AccepterOf(model, goal).Decides(model, exception.By, exception)
             && Expires(exception) is DateTimeOffset expires && at < expires;
     }
 

@@ -783,7 +783,18 @@ public static class FlowRuns
     /// this build only an operator records a review of another's work as a person; another harness's is an agent's on a harness none of
     /// the authors used; an agent never reviews in a role the flow marks a person's. Empty when it may.
     /// </summary>
-    public static IReadOnlyList<string> ReviewerRefusals(EstateModel model, FlowDefinition flow, FlowReview requirement, string role, string reviewer, IReadOnlySet<string> authors)
+    public static IReadOnlyList<string> ReviewerRefusals(EstateModel model, FlowDefinition flow, FlowReview requirement, string role, string reviewer, IReadOnlySet<string> authors) =>
+        ReviewerRefusals(model, flow, requirement, role, reviewer, authors, null);
+
+    /// <inheritdoc cref="ReviewerRefusals(EstateModel, FlowDefinition, FlowReview, string, string, IReadOnlySet{string})"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="flow">The flow.</param>
+    /// <param name="requirement">The review the item takes.</param>
+    /// <param name="role">The reviewing role.</param>
+    /// <param name="reviewer">The principal.</param>
+    /// <param name="authors">The step's authors.</param>
+    /// <param name="record">The record judged, whose place the operator role is read at; null to read it as it is now.</param>
+    public static IReadOnlyList<string> ReviewerRefusals(EstateModel model, FlowDefinition flow, FlowReview requirement, string role, string reviewer, IReadOnlySet<string> authors, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(flow);
@@ -808,7 +819,7 @@ public static class FlowRuns
             refusals.Add("it authored the step's work, as a holder of the step or by an attempt or a result, and a review by its author is not independent");
         }
 
-        if (kind == "human" && !model.HasRole(reviewer, Roles.Operator))
+        if (kind == "human" && !(record is null ? model.HasRole(reviewer, Roles.Operator) : model.HasRoleAt(reviewer, Roles.Operator, record)))
         {
             refusals.Add("a person other than an operator records no review of another's work in this build");
         }
@@ -1000,7 +1011,7 @@ public static class FlowRuns
 
         FlowReview requirement = requirements[0];
         string role = requirement.Role ?? Roles.Reviewer;
-        foreach (string refusal in ReviewerRefusals(context.Model, flow, requirement, role, contributor, Authors(context.Model, carried)))
+        foreach (string refusal in ReviewerRefusals(context.Model, flow, requirement, role, contributor, Authors(context.Model, carried), context.Record))
         {
             context.Error("assignment.review", $"{Routing.NameOf(context.Model, contributor)} does not review step {work}: {refusal}.");
         }

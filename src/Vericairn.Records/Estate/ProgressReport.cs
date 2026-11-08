@@ -197,7 +197,7 @@ public static class ProgressReport
         // A release candidate with no acceptance of its exact hash by an operator, which its publication needs (ReleaseType).
         List<RecordEnvelope> candidates = model.Current("release")
             .Where(r => EstateModel.BodyString(r, "status") == "candidate"
-                && !model.OfType("acceptance").Any(a => a.Subject?.Id == r.Id && a.Subject.Hash == r.ComputedHash && model.HasRole(a.By, Roles.Operator)))
+                && !model.OfType("acceptance").Any(a => a.Subject?.Id == r.Id && a.Subject.Hash == r.ComputedHash && model.HasRoleAt(a.By, Roles.Operator, a)))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
 
         // A goal ready for its acceptance whose accepter is an operator: any operator for a goal an agent sponsors, or a sponsor who is one.

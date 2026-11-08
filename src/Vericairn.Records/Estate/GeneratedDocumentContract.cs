@@ -65,7 +65,7 @@ public static class GeneratedDocumentContract
     public static bool IsRetired(EstateModel model, RecordEnvelope declaration) => EstateModel.BodyString(declaration, "repository") is null
         && model.Current("retirement").Any(r => r.Format >= 3 && EstateModel.BodyString(r, "retiredAt") is not null
             && EstateModel.BodyString(r, "path") == RetirementPath(declaration) && string.CompareOrdinal(r.At, declaration.At) >= 0
-            && SignatureChecks.IsAuthentic(model, r) && (model.HasRole(r.By, Roles.Operator) || model.HasScope(r.By, Scopes.LocalEngineering, r.AtTime)));
+            && SignatureChecks.IsAuthentic(model, r) && (model.HasRoleAt(r.By, Roles.Operator, r) || model.HasScopeAt(r.By, Scopes.LocalEngineering, r)));
 
     /// <summary>Canonical migration proposal bytes, retained as an ordinary result output, not a new record or status ledger.</summary>
     public static byte[] MigrationBasis(RecordEnvelope? previous, JsonElement nextBody)
@@ -94,7 +94,7 @@ public static class GeneratedDocumentContract
             if (!SignatureChecks.IsAuthentic(model, result)) continue;
             if (model.OfType("review").Any(r => r.Subject == result.Reference && r.By != result.By
                 && string.CompareOrdinal(r.At, declaration.At) <= 0 && EstateModel.BodyString(r, "outcome") == "pass"
-                && EstateModel.BodyString(r, "independence") == "operator" && model.HasRole(r.By, Roles.Operator)
+                && EstateModel.BodyString(r, "independence") == "operator" && model.HasRoleAt(r.By, Roles.Operator, r)
                 && SignatureChecks.IsAuthentic(model, r))) yield return result;
         }
     }

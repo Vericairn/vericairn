@@ -497,7 +497,7 @@ public class HistoryCheckpointTests
             Assert.Contains(findings, x => x.Code == code);
         }
 
-        // A closing checkpoint's shape is accepted; closing semantics belong to ID-06.
+        // A closing checkpoint's shape is accepted; what it closes is judged with the estate (HistoryClosingTests).
         JsonObject closing = HistoryFixture.Body(checkpoint);
         closing["trigger"] = "closing";
         closing["previous"] = new JsonArray(new JsonObject { ["id"] = checkpoint.Id, ["hash"] = checkpoint.ComputedHash });

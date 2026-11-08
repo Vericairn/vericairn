@@ -197,7 +197,7 @@ public static class EstateLoader
 
         model.Manifest = manifest;
         SignatureChecks.Run(model, findings);
-        foreach (Finding finding in trust.History.Findings)
+        foreach (Finding finding in trust.History.Findings.Concat(trust.ClosingFindings))
         {
             findings.Add(finding);
         }

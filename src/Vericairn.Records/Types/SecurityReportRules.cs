@@ -104,7 +104,7 @@ public static class SecurityReportRules
             foreach (RecordEnvelope revision in product.OrderBy(p => model.Chain(p).Count).ThenBy(p => p.At, StringComparer.Ordinal))
             {
                 if (Names(revision, lineage)) declared = true;
-                else if (model.HasRole(revision.By, Roles.Operator)) declared = false;
+                else if (model.HasRoleAt(revision.By, Roles.Operator, revision)) declared = false;
             }
             if (declared) return true;
         }

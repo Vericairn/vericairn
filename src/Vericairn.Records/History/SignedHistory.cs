@@ -15,8 +15,10 @@ namespace Vericairn.Records.History;
 public sealed class HistoryState
 {
     internal HistoryState(bool adopted, IReadOnlyList<RecordReference> heads, int witnessed, int tail, IReadOnlyList<Finding> findings, bool inventoriesRead,
-        IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting)
+        IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting,
+        IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null)
     {
+        AdoptionTimes = adoptionTimes ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         CountingCheckpoints = counting;
         Adopted = adopted;
         Heads = heads;
@@ -64,6 +66,16 @@ public sealed class HistoryState
 
     /// <summary>The ids of the checkpoints that count.</summary>
     internal IReadOnlySet<string> CountingCheckpoints { get; }
+
+    /// <summary>The records an adoption checkpoint witnesses with the bytes present, each with that checkpoint's time.</summary>
+    internal IReadOnlyDictionary<string, DateTimeOffset> AdoptionTimes { get; }
+
+    /// <summary>
+    /// When the adoption checkpoint that witnesses a record with these bytes was written, or null when none does: such a record keeps the
+    /// reading it had then (design/signed-history.md § 8).
+    /// </summary>
+    internal DateTimeOffset? AdoptedAt(RecordEnvelope record) =>
+        AdoptionTimes.TryGetValue(record.Id, out DateTimeOffset at) && Entries.TryGetValue(record.Id, out WitnessedEntry? entry) && entry.Entry.Hash == record.ComputedHash ? at : null;
 }
 
 /// <summary>A witnessed record: its inventory line and the checkpoint whose inventory lists it.</summary>
@@ -78,12 +90,20 @@ public sealed record CheckpointDraft(JsonElement Body, IReadOnlyList<byte[]> Obj
 
 /// <summary>A checkpoint's body as read for judging the graph, tolerant of fields its validator reports.</summary>
 internal sealed record CheckpointBody(RecordEnvelope Record, IReadOnlyList<(string Id, string Hash)> Previous, IReadOnlyList<string> Inventory,
-    IReadOnlyList<(string Id, string Hash)> Anchored, IReadOnlyList<(string Id, string Hash)> Removed, long? Records, string? RecordSetHash)
+    IReadOnlyList<(string Id, string Hash)> Anchored, IReadOnlyList<(string Id, string Hash)> Removed, long? Records, string? RecordSetHash,
+    (string Kind, string Id)? Closes = null)
 {
     internal static CheckpointBody Read(RecordEnvelope record) => new(record, Pins(record.Body, "previous"), Strings(record.Body, "inventory"),
         Pins(record.Body, "anchored"), Pins(record.Body, "removed"),
         record.Body.TryGetProperty("records", out JsonElement count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt64(out long n) ? n : null,
-        EstateModel.BodyString(record, "recordSetHash"));
+        EstateModel.BodyString(record, "recordSetHash"), ReadCloses(record.Body));
+
+    /// <summary>What a closing checkpoint names, when its closes field has a kind and an id.</summary>
+    internal static (string Kind, string Id)? ReadCloses(JsonElement body) =>
+        body.ValueKind == JsonValueKind.Object && body.TryGetProperty("closes", out JsonElement closes) && closes.ValueKind == JsonValueKind.Object &&
+        closes.TryGetProperty("kind", out JsonElement kind) && kind.ValueKind == JsonValueKind.String &&
+        closes.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String
+            ? (kind.GetString()!, id.GetString()!) : null;
 
     private static List<(string Id, string Hash)> Pins(JsonElement body, string name) =>
         body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array
@@ -287,6 +307,7 @@ internal sealed class HistoryAnalysis
 
         var entries = new Dictionary<string, WitnessedEntry>(StringComparer.Ordinal);
         var inventories = new Dictionary<string, IReadOnlyList<InventoryEntry>>(StringComparer.Ordinal);
+        var adoptionTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         bool read = objects is not null;
         if (read)
         {
@@ -310,6 +331,7 @@ internal sealed class HistoryAnalysis
                 }
             }
 
+            var agreeingListings = new Dictionary<string, List<WitnessedEntry>>(StringComparer.Ordinal);
             foreach ((string id, List<WitnessedEntry> versions) in listings.OrderBy(l => l.Key, StringComparer.Ordinal))
             {
                 List<WitnessedEntry> standing = [.. versions.Where(v => !acknowledged.Contains(SignatureChecks.AnchorKey(v.Entry.Id, v.Entry.Hash)))];
@@ -320,6 +342,7 @@ internal sealed class HistoryAnalysis
                     List<WitnessedEntry> agreeing = [.. standing.Where(v => v.Entry.Hash == present.ComputedHash)];
                     List<WitnessedEntry> disagreeing = [.. standing.Where(v => v.Entry.Hash != present.ComputedHash)];
                     entries[id] = agreeing.Count > 0 ? agreeing[0] : standing[0];
+                    if (agreeing.Count > 0) agreeingListings[id] = agreeing;
                     if (disagreeing.Count == 0) continue;
 
                     // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
@@ -366,6 +389,7 @@ internal sealed class HistoryAnalysis
                 }
             }
 
+            DatedAfterWitness(counting, byId, agreeingListings, adoptionTimes);
             foreach (RecordReference head in heads)
             {
                 CheckpointBody checkpoint = byId[head.Id];
@@ -381,7 +405,65 @@ internal sealed class HistoryAnalysis
 
         int tail = read ? model.Records.Count(r => !entries.ContainsKey(r.Id)) : model.Records.Count;
         return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,
-            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal));
+            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal), adoptionTimes);
+    }
+
+    /// <summary>
+    /// Notes the records an adoption checkpoint witnesses, which keep the reading they had then, and warns of every other signed record
+    /// dated more than five minutes after the earliest-dated counting checkpoint that witnesses it: a checkpoint witnesses what it lists
+    /// and everything the checkpoints it follows witness, so a record cannot have been written after it (design/signed-history.md § 8).
+    /// </summary>
+    private void DatedAfterWitness(List<CheckpointBody> counting, Dictionary<string, CheckpointBody> byId, Dictionary<string, List<WitnessedEntry>> agreeing,
+        Dictionary<string, DateTimeOffset> adoptionTimes)
+    {
+        var ids = counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, List<string>> predecessors = counting.ToDictionary(c => c.Record.Id, c => c.Previous
+            .Where(p => ids.Contains(p.Id) && byId[p.Id].Record.ComputedHash == p.Hash).Select(p => p.Id).Distinct(StringComparer.Ordinal).ToList(), StringComparer.Ordinal);
+        ILookup<string, string> followers = predecessors.SelectMany(p => p.Value.Select(previous => (Previous: previous, Next: p.Key))).ToLookup(x => x.Previous, x => x.Next, StringComparer.Ordinal);
+
+        // The earliest-dated checkpoint witnessing what each checkpoint lists: itself or one that follows it, judged followers first.
+        var earliest = new Dictionary<string, (DateTimeOffset At, string Id)>(StringComparer.Ordinal);
+        var waiting = counting.ToDictionary(c => c.Record.Id, c => followers[c.Record.Id].Count(), StringComparer.Ordinal);
+        var ready = new Stack<string>(waiting.Where(w => w.Value == 0).Select(w => w.Key).OrderByDescending(id => id, StringComparer.Ordinal));
+        while (ready.TryPop(out string? id))
+        {
+            (DateTimeOffset At, string Id) first = (byId[id].Record.AtTime, id);
+            foreach (string next in followers[id])
+            {
+                if (earliest.TryGetValue(next, out (DateTimeOffset At, string Id) later) && (later.At < first.At || later.At == first.At && string.CompareOrdinal(later.Id, first.Id) < 0)) first = later;
+            }
+
+            earliest[id] = first;
+            foreach (string previous in predecessors[id])
+            {
+                if (--waiting[previous] == 0) ready.Push(previous);
+            }
+        }
+
+        foreach ((string id, List<WitnessedEntry> listed) in agreeing.OrderBy(a => a.Key, StringComparer.Ordinal))
+        {
+            List<WitnessedEntry> adoptions = [.. listed.Where(v => byId[v.Checkpoint].Previous.Count == 0)];
+            if (adoptions.Count > 0)
+            {
+                adoptionTimes[id] = adoptions.Min(v => byId[v.Checkpoint].Record.AtTime);
+                continue;
+            }
+
+            RecordEnvelope record = model.ById[id];
+            if (record.Signatures.Count == 0) continue;
+            (DateTimeOffset At, string Id)? witness = null;
+            foreach (WitnessedEntry listing in listed)
+            {
+                if (!earliest.TryGetValue(listing.Checkpoint, out (DateTimeOffset At, string Id) candidate)) continue;
+                if (witness is not { } known || candidate.At < known.At || candidate.At == known.At && string.CompareOrdinal(candidate.Id, known.Id) < 0) witness = candidate;
+            }
+
+            if (witness is { } by && record.AtTime > by.At + SignedHistory.ClockTolerance)
+            {
+                findings.Warning("history.dated-after-witness", record.ExpectedPath,
+                    $"Dated {record.At}, more than five minutes after history checkpoint {by.Id}, dated {RecordParser.FormatTimestamp(by.At)}, which witnesses it. A record cannot be written after a checkpoint that lists it, so its date or the checkpoint's is not when it was written.");
+            }
+        }
     }
 
     /// <summary>
@@ -467,8 +549,14 @@ internal sealed class HistoryAnalysis
 /// </summary>
 public static class SignedHistory
 {
+    /// <summary>
+    /// How far a record's date may run ahead: past the runtime's clock when it is authored, or past a checkpoint that witnesses it, before
+    /// the date is refused or questioned (design/signed-history.md § 8).
+    /// </summary>
+    internal static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(5);
+
     /// <summary>The codes of the history errors that hold release submission and lead status while one stands.</summary>
-    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored"];
+    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author"];
 
     /// <summary>The estate's history state.</summary>
     public static HistoryState Of(EstateModel model)
@@ -546,7 +634,10 @@ public static class SignedHistory
         foreach ((string id, string hash) in draft.Anchored)
         {
             if (!model.ById.TryGetValue(id, out RecordEnvelope? anchored) || anchored.ComputedHash != hash) return $"It anchors {id} at {hash}, which is not here with that hash.";
-            if (anchored.Signatures.Count > 0) return $"It anchors {id}, which is signed and needs no anchor; only records recorded without a signature are anchored.";
+            if (model.Trust.DeviceRevisionRefused(anchored))
+                return $"It anchors {id}, a device revision a closing refused, which changes no key or name anchored or not; it is not anchored.";
+            if (anchored.Signatures.Count > 0 && !model.Trust.RefusedByClosing(anchored))
+                return $"It anchors {id}, which is signed and needs no anchor; only records recorded without a signature, or refused by a closing, are anchored.";
         }
 
         foreach ((string id, string hash) in draft.Removed)
