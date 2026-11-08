@@ -21,7 +21,8 @@ internal sealed class EstateRecordAccess(
     Func<IReadOnlyList<AuthoredRecord>, string, string?, (IReadOnlyList<RecordWritten> Written, Problem? Problem)> storeTogetherLocked,
     Func<IReadOnlyList<AuthoredRecord>, EstateModel> loadWith,
     Func<EstateModel, Problem?> requestDeviceRefusal,
-    Func<RecordDraft, EstateModel, IReadOnlyList<FindingDto>> checkReleaseRecord)
+    Func<RecordDraft, EstateModel, IReadOnlyList<FindingDto>> checkReleaseRecord,
+    Func<string, string, TriggeredCheckpoint?>? writeCheckpointLocked = null)
 {
     internal object Gate { get; } = gate;
 
@@ -40,4 +41,7 @@ internal sealed class EstateRecordAccess(
     internal IReadOnlyList<FindingDto> CheckReleaseRecord(RecordDraft draft, EstateModel model) => checkReleaseRecord(draft, model);
 
     internal Problem? RequestDeviceRefusal(EstateModel model) => requestDeviceRefusal(model);
+
+    /// <summary>Writes a history checkpoint by itself, with a trigger and signed by the principal's device here: null before adoption (OPS-07).</summary>
+    internal TriggeredCheckpoint? WriteCheckpointLocked(string trigger, string by) => writeCheckpointLocked?.Invoke(trigger, by);
 }

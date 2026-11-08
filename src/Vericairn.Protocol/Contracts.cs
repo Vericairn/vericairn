@@ -44,6 +44,10 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
     [JsonIgnore]
     public bool Ok => Written is not null && Problem is null;
 
+    /// <summary>The history checkpoint a trigger wrote in the same batch as the record, or why none could be (0.9.2); absent when no trigger applied.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TriggeredCheckpoint? Checkpoint { get; init; }
+
     /// <summary>A written outcome.</summary>
     public static WriteOutcome Success(RecordWritten written) => new(written, null);
 
@@ -609,6 +613,10 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 {
     /// <summary>Present only for a read-only submission check; a passing check grants no dispatch authority.</summary>
     public ReleaseCheckDetails? Check { get; init; }
+
+    /// <summary>The history checkpoint with trigger release that the submission wrote before its check, in an estate that adopted checkpoints (0.9.2); absent otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TriggeredCheckpoint? Checkpoint { get; init; }
 }
 
 /// <summary>
@@ -819,6 +827,10 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check)
 /// <param name="Anchored">The admissions recorded without a signature that the move to record format 2 anchors, by id; the migration that lists them is signed by the operator or a principal with the 'administer' scope.</param>
 public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration, IReadOnlyList<string>? Anchored = null)
 {
+    /// <summary>The history checkpoint with trigger upgrade written in the same batch as the migration, in an estate that adopted checkpoints, or why none could be (0.9.2); absent otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TriggeredCheckpoint? Checkpoint { get; init; }
+
     /// <summary>The followed line after applying this plan.</summary>
     public string Line { get; init; } = "current";
 

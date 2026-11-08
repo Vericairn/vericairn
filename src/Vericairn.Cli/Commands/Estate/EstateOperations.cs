@@ -13,6 +13,7 @@ using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Store;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
+using HistoryLine = Vericairn.Records.History.HistoryLine;
 
 namespace Vericairn.Cli;
 
@@ -113,22 +114,70 @@ internal sealed class EstateOperations(CommandContext context)
 
     public int Check(string root, bool json, string? expect = null) =>
         IsEstate(root)
-            ? context.WithApi(root, api => context.ReportFindings(Expecting(api.Check(), expect, () => ExpectedCandidates(api, expect)), json))
+            ? context.WithApi(root, api => context.ReportFindings(Expecting(api.Check(), expect, () => ExpectedCandidates(api, expect), root), json))
             : context.WithFiles(root, model => context.ReportFindings(Expecting(ToFindings(Combined(model), $"{model.Records.Count} records"), expect,
-                () => model.Records.Where(r => r.Type == "history-checkpoint").Select(r => (r.Id, r.ComputedHash, r.ExpectedPath, model.Counts(r))).ToList()), json));
+                () => model.Records.Where(r => r.Type == "history-checkpoint").Select(r => (r.Id, r.ComputedHash, r.ExpectedPath, model.Counts(r))).ToList(), null), json));
 
     /// <summary>
     /// The check with an expected checkpoint (design/signed-history.md § 9): an error refuses a copy that lacks it, so a fresh machine
-    /// checks against a head known elsewhere rather than trusting whatever history the copy happens to hold.
+    /// checks against a head known elsewhere rather than trusting whatever history the copy happens to hold. In an estate, this machine
+    /// remembers the result, and a checkpoint held here and by the main line as the newest it verified.
     /// </summary>
-    private static FindingsResponse Expecting(FindingsResponse findings, string? expect, Func<IReadOnlyList<(string Id, string Hash, string Path, bool Counts)>> candidates)
+    private static FindingsResponse Expecting(FindingsResponse findings, string? expect, Func<IReadOnlyList<(string Id, string Hash, string Path, bool Counts)>> candidates, string? estateRoot)
     {
         if (expect is null) return findings;
-        Finding? missing = global::Vericairn.Records.History.SignedHistory.Expect(candidates(), expect);
+        (Finding? missing, (string Id, string Hash, string Path)? held) = global::Vericairn.Records.History.SignedHistory.ExpectMatch(candidates(), expect);
         FindingDto finding = missing is null
             ? new("info", "history.expected", EstateLayout.RecordsDirectory, $"This copy holds the expected history checkpoint {expect.Trim()}, signed and counting.")
             : new("error", missing.Code, missing.Location, missing.Message);
-        return findings with { Errors = findings.Errors + (missing is null ? 0 : 1), Findings = [.. findings.Findings, finding] };
+        List<FindingDto> added = [finding];
+        if (estateRoot is not null && EstateManifest.Load(Path.GetFullPath(estateRoot), new FindingList()) is { } manifest &&
+            HistoryMemory.RememberExpected(estateRoot, manifest.Estate, manifest.Profile, expect, held, CommandProviders.SourceAdapter, DateTimeOffset.UtcNow) is string note)
+            added.Add(new("info", "history.remembered", EstateLayout.RecordsDirectory, note));
+        return findings with { Errors = findings.Errors + (missing is null ? 0 : 1), Findings = [.. findings.Findings, .. added] };
+    }
+
+    /// <summary>Writes or adopts history checkpoints, or shows what that would witness and anchor (design/signed-history.md §§ 9 and 10).</summary>
+    public int Checkpoint(string root, string? by, bool adopt, bool check, bool json)
+    {
+        if (!check && by is null) return context.Fail("--by is required unless --check: name the principal whose admitted device on this machine signs" + (adopt ? ", the root operator or a person holding administer." : "."));
+        return context.WithApi(root, api =>
+        {
+            (HistoryCheckpointResponse? response, Problem? problem) = api.HistoryCheckpoint(new HistoryCheckpointRequest(by, adopt, check));
+            if (response is null) return context.Fail(problem?.Message ?? "refused");
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+                return problem is null ? Clean : context.Fail(problem.Message);
+            }
+
+            string heads = response.Heads.Count == 0 ? "none" : string.Join(", ", response.Heads.Select(h => $"{h.Id} ({HistoryLine.ShortHash(h.Hash)})"));
+            if (response.Trigger == "adoption")
+            {
+                context.Output.WriteLine($"{(response.Applied ? "adopted" : "would adopt")}: witnesses {response.Witnessed:N0} records; anchors {response.Anchored.Count:N0} unsigned records that count today");
+                Section("anchors", response.Anchored, r => $"{r.Type}  {r.At}  {r.Path}  added in {r.Commit ?? "an unknown commit"}");
+                Section("unsigned records that count for nothing today and stay so", response.NotCounting, r => $"{r.Type}  {r.At}  {r.Path}");
+                Section("records signed by a device revoked now", response.ByRevokedDevices, r => $"{r.Type}  {r.At}  {r.Path}  device {r.Device}");
+                Section("record files deleted in history, which no checkpoint can witness", response.DeletedInHistory, d => $"{d.Path}  deleted in {d.Commit}");
+                if (!response.Applied)
+                    context.Output.WriteLine("Adoption keeps every reading as it is and admits nothing new; from then on the runtime writes checkpoints at upgrades, release submissions, charter revisions and intervals. The root operator signs it with vericairn estate checkpoint --adopt --by <root operator>.");
+            }
+            else
+            {
+                context.Output.WriteLine($"{(response.Applied ? "wrote" : "would write")} a history checkpoint: witnesses {response.Witnessed:N0} records, listing the {response.Listed:N0} no checkpoint witnessed yet; follows {heads}");
+            }
+
+            if (response.Unavailable is { } unavailable) context.Output.WriteLine("unavailable: " + unavailable);
+            if (response.Written is { } written) context.Output.WriteLine($"{written.Path}  {written.Id}  {written.Hash}");
+            return problem is null ? Clean : context.Fail(problem.Message);
+        }, readOnly: check);
+
+        void Section<T>(string title, IReadOnlyList<T> items, Func<T, string> line)
+        {
+            if (items.Count == 0) return;
+            context.Output.WriteLine(title + ":");
+            foreach (T item in items) context.Output.WriteLine("  " + line(item));
+        }
     }
 
     private static List<(string Id, string Hash, string Path, bool Counts)> ExpectedCandidates(IEstateApi api, string? expect)
@@ -324,6 +373,8 @@ internal sealed class EstateOperations(CommandContext context)
             {
                 context.Output.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");
             }
+
+            context.ReportCheckpoint(plan.Checkpoint);
 
             return Clean;
         }, readOnly: check, upgrade: true);

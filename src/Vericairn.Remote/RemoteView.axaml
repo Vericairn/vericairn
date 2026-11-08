@@ -51,6 +51,7 @@
       <TextBlock x:Name="StatusText" IsVisible="{Binding ShowHome}" Text="{Binding StatusLine}" AutomationProperties.Name="{Binding StatusLine}" />
       <TextBlock Classes="muted" FontSize="{DynamicResource RemoteSmallFontSize}" IsVisible="{Binding ShowHome}" Text="{Binding ConnectionMessage}" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding ObservationAge}" AutomationProperties.Name="Observation age" />
+      <TextBlock x:Name="HistoryText" IsVisible="{Binding ShowHome}" Text="{Binding History}" TextWrapping="Wrap" AutomationProperties.Name="History checkpoints" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding DetailMessage}" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding CacheMessage}" />
       <TextBlock IsVisible="{Binding ShowHome}" Text="{Binding DecisionStorageProblem}" />

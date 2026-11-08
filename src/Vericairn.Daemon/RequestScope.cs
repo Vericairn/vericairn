@@ -307,6 +307,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/security-reports/triage"] = typeof(SecurityReportTriageRequest),
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
+        ["POST /v1/history/checkpoints"] = typeof(HistoryCheckpointRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
         ["GET /v1/reconcile"] = null,
         ["GET /v1/recover/inspect"] = null,
@@ -412,6 +413,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(SecurityReportTriageRequest)] = (_, r, d) => Acting(((SecurityReportTriageRequest)r).By, d),
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
+        [typeof(HistoryCheckpointRequest)] = (_, r, d) => ((HistoryCheckpointRequest)r).Check ? Optional(((HistoryCheckpointRequest)r).By, d) : Acting(((HistoryCheckpointRequest)r).By, d) ?? Adoption((HistoryCheckpointRequest)r, d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
@@ -486,6 +488,15 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private static string? Upgrade(AuthenticatedDevice device) =>
         device.LocalNetwork
             ? "Applying an upgrade acts on the runtime's own machine and is refused over the local network; its plan (check) is not."
+            : null;
+
+    /// <summary>
+    /// Adopting history checkpoints anchors the unsigned records that count today and changes what counts for the whole estate; it is the
+    /// root operator's signature on the runtime's own machine, so over the local network only its check is given.
+    /// </summary>
+    private static string? Adoption(HistoryCheckpointRequest request, AuthenticatedDevice device) =>
+        device.LocalNetwork && request.Adopt
+            ? "Adopting history checkpoints is the root operator's signature on the runtime's own machine and is refused over the local network; its check is not."
             : null;
 
     /// <summary>A recovery key is a file on the runtime's machine, used there only.</summary>

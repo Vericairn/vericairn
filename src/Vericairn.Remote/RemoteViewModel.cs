@@ -231,6 +231,13 @@ public sealed partial class RemoteViewModel : Observable
     public string StopsAsOf { get => stopsAsOf; private set => Set(ref stopsAsOf, value); }
     private string stopsAsOf = string.Empty;
 
+    /// <summary>
+    /// The estate's history line from the last observation, in the words status prints: adopted or not, the heads by the short hash a fresh
+    /// machine checks a copy against with estate check --expect, the witnessed count, the tail and the standing problems.
+    /// </summary>
+    public string History { get => history; private set => Set(ref history, value); }
+    private string history = string.Empty;
+
     /// <summary>The runtime this phone reaches.</summary>
     public NodeView? Node { get => node; private set => Set(ref node, value); }
 
@@ -379,6 +386,7 @@ public sealed partial class RemoteViewModel : Observable
         Products = observation?.Products ?? [];
         Stops = view?.Stops ?? [];
         StopsAsOf = view?.StopsAsOf ?? string.Empty;
+        History = view?.History ?? string.Empty;
         Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";
         ObservationAge = observation is null ? "age unknown" : RemoteFreshness.Age(observation.AsOf, clock);
         Communication = observation is null ? "Communication settings have not been observed." :

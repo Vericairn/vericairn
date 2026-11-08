@@ -52,7 +52,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
             (draft, model) => AuthorLocked(draft, model),
-            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, WriteCheckpointLocked);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, goal, maxBytes, recipient, assignment, promptUse) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal),
@@ -261,6 +261,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 all.Add(finding);
             }
 
+            // The machine's memory of the newest history checkpoint it verified (design/signed-history.md § 7).
+            foreach (Finding finding in RolledBack(model))
+            {
+                all.Add(finding);
+            }
+
+            if (Remembered(model) is { } remembered) all.Add(remembered);
             return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
     }
@@ -1659,6 +1666,25 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
             if (migration is null) return (null, new Problem("refused", migrationRefusal!, []));
             AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
+            // In an estate that has adopted history checkpoints the upgrade writes one with trigger upgrade in the same batch, signed by the
+            // device then writing (design/release-procedure.md § 7). A checkpoint that cannot be written never blocks the upgrade; the
+            // response says why. Migrations that rewrite record files would change what it lists, so none is written with them.
+            TriggeredCheckpoint? upgradeCheckpoint = null;
+            if (global::Vericairn.Records.History.SignedHistory.Adopted(model))
+            {
+                (AuthoredRecord? checkpoint, string? skipped) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
+                    ? (null, "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.")
+                    : CheckpointLocked(LoadWith(proposed), "upgrade", request.By);
+                if (checkpoint is not null && JudgeProposedLocked([.. proposed, checkpoint]) is Problem refusedCheckpoint)
+                {
+                    skipped = "The history checkpoint was refused, so the upgrade was written without it: " + Describe(refusedCheckpoint);
+                    checkpoint = null;
+                }
+
+                if (checkpoint is not null) proposed = [.. proposed, checkpoint];
+                upgradeCheckpoint = checkpoint is null ? skipped is null ? null : new TriggeredCheckpoint("upgrade", null, skipped) : new TriggeredCheckpoint("upgrade", null, null);
+            }
+
             if (JudgeProposedLocked(proposed) is Problem rejected) return (null, rejected);
             DocumentChangePlan generated = PrepareDocuments(model, proposed);
             if (generated.Status != DocumentGenerationStatus.Success)
@@ -1695,6 +1721,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null, null,
                 regenerated.IsEmpty ? null : [.. regenerated.Select(m => m.Change)]);
             RecordWritten? stored = written.FirstOrDefault(r => r.Id == migration.Envelope.Id);
+            if (upgradeCheckpoint is { Skipped: null } && proposed[^1].Envelope.Type == "history-checkpoint")
+            {
+                RecordWritten? checkpointWritten = written.FirstOrDefault(r => r.Id == proposed[^1].Envelope.Id);
+                upgradeCheckpoint = upgradeCheckpoint with { Written = checkpointWritten, Skipped = checkpointWritten is null ? "The history checkpoint was not stored: " + Describe(storageProblem) : null };
+            }
+
             var outcome = new WriteOutcome(stored, storageProblem);
             if (outcome.Written is null)
             {
@@ -1714,7 +1746,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", $"Migration {outcome.Written.Id} is recorded, and the manifest could not be replaced: {exception.Message} Rerun the upgrade to finish it; the estate check reports upgrade.incomplete until then.", []));
             }
 
-            return (response with { Applied = true, Migration = outcome.Written }, outcome.Problem);
+            return (response with { Applied = true, Migration = outcome.Written, Checkpoint = upgradeCheckpoint }, outcome.Problem);
         }
     }
 
@@ -2306,6 +2338,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(refusal!);
         }
 
+        // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
+        if (TriggerOf(draft, current, signers) is string trigger)
+        {
+            return UnderWriteLock(() => StoreWithCheckpointLocked(record, current, trigger, draft.By), WriteOutcome.Fail);
+        }
+
         return UnderWriteLock(() => StoreAuthoredLocked(record, current), WriteOutcome.Fail);
     }
 
@@ -2612,7 +2650,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             bool routing = journal.Records.Any(r => r.Type == "assignment");
             // A run's work order holds its steps one by one: the batch is moot once its own step is held again.
             FlowRuns.StepRef? flowStep = stored.Where(r => r.Type == "assignment").Select(r => FlowRuns.StepOf(model.ById[r.Id])).FirstOrDefault(s => s is not null);
-            bool moot = stored.Count == 0 || missing.Count == 0 || (routing &&
+            // A record stored without the history checkpoint its trigger wrote with it needs nothing more: the next checkpoint witnesses it.
+            bool moot = stored.Count == 0 || missing.Count == 0 || missing.All(r => r.Type == "history-checkpoint") || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)

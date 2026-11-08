@@ -206,6 +206,9 @@ public sealed partial class ShellViewModel : Observable
     /// <summary>The pinned Vericairn.</summary>
     public string Pin => estate.Pin;
 
+    /// <summary>The history line, in the words status prints: adopted or not, heads by short hash, witnessed count, tail and standing problems.</summary>
+    public string History => connection is null ? string.Empty : estate.History;
+
     /// <summary>The runtime vocabulary word.</summary>
     public string RuntimeMode => connection?.Mode ?? "unavailable";
 
@@ -399,6 +402,7 @@ public sealed partial class ShellViewModel : Observable
             Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
+            Raise(nameof(History));
             await ShowRegionAsync(SelectedRegion, cancellationToken: cancellationToken).ConfigureAwait(true);
         }
         catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)

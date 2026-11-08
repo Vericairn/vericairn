@@ -603,3 +603,55 @@ when there are none. `vericairn estate bootstrap --force` writes the new scripts
 history, merges included, that is absent here and that no history checkpoint witnessed; a witnessed one is already the
 error `history.removed`. The warning depends on the clone, so it is not part of the canonical status. In a shallow
 clone it is reported unavailable, as information.
+
+From OPS-07 the check also keeps this machine's memory of the estate's history, beside the clone's live store under the
+Vericairn home and never in the estate: the newest checkpoint it verified and the main-line commit that held it. The main
+line is the local branch the origin's `HEAD` names, else `main`, else `master`, whatever is checked out. When the main line
+no longer holds that checkpoint, as after a rewrite that removed the newest checkpoints with the records after them, the
+check warns `history.rolled-back`; a checkout of another branch warns nothing. `--expect` remembers its result too, and a
+checkpoint it finds that the main line holds replaces what the machine remembered, which is how an intended rewrite is
+accepted. `history.remembered`, information, says what the machine remembers. Neither is part of the canonical status.
+
+## `vericairn estate checkpoint` (0.9.2)
+
+`vericairn estate checkpoint` writes a history checkpoint now, signed by the admitted device on this machine of the principal
+`--by` names, in an estate that has adopted history checkpoints: it follows every head, lists every record no checkpoint
+witnesses yet and has trigger `manual`. Witnessing grants nothing, so any admitted device, an agent's included, may write
+one. `--check` shows what it would witness, signing and writing nothing; `--json` returns the plan or the checkpoint
+written.
+
+```sh
+vericairn estate checkpoint --check
+vericairn estate checkpoint --by <principal id>
+vericairn estate checkpoint --adopt --check
+vericairn estate checkpoint --adopt --by <root operator id>
+```
+
+`--adopt` adopts history checkpoints, once ([signed history](operator-guide.md#history-checkpoints-092)): the estate's first
+checkpoint, with trigger `adoption`, witnesses every record present and anchors the unsigned records that count today, so
+adoption changes no reading and admits nothing new. Only the root operator or a person holding `administer` signs it; any
+other principal, an agent above all, is refused before anything is signed. `--adopt --check` lists what it would witness and
+anchor: the count, each unsigned record it anchors with its type, date, path and the commit that added it, the unsigned
+records that count for nothing today and stay so, records signed by a device revoked now, and record files deleted in the
+repository's history, which no checkpoint can witness; it says what it cannot list in a shallow clone or outside a git
+repository. A new estate needs none of this: it adopts at birth, when the root operator's first device admits itself while
+the estate holds nothing but what `estate init` wrote, and `devices admit` prints the adoption checkpoint after the admission.
+An estate that has adopted refuses `--adopt`; one that has not refuses a checkpoint without it.
+
+The runtime also writes checkpoints by itself in an estate that has adopted, each in the same batch as its act and signed by
+the device then writing: at `estate upgrade --to` (trigger `upgrade`), at `release submit` before its check (trigger
+`release`), after a charter revision (trigger `charter`), and once the unwitnessed tail holds 500 records or its oldest
+record is 24 hours old (trigger `interval`), on the next write signed on this machine for its author by a device that needs no
+person's presence. A command that writes one prints it after its own record:
+
+```text
+records/history-checkpoint/<YYYY-MM>/<id>.json  <id>  sha256:<hash>  (history checkpoint, trigger charter)
+```
+
+With `--json`, the record's output adds a `checkpoint` object with `trigger` and `written`. A checkpoint that cannot be
+written never blocks the act: the record is written alone and standard error says why. Only one trigger anchors: a charter
+revision to required signatures by the root operator or a person holding `administer` anchors the unsigned records that count
+before it. A release submission is the
+exception: its gate refuses with `history.checkpoint` and says why. `status` shows the history line, for example
+`History: adopted · head 9f86d081884c7d65 · 5,140 witnessed · tail 12 · no problems`; its sixteen hexadecimal digits name the
+head to `estate check --expect`.

@@ -212,7 +212,12 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     {
         if (outcome.Written is RecordWritten written)
         {
-            Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
+            if (json && outcome.Checkpoint is { } triggered)
+                Output.WriteLine(JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash, checkpoint = triggered }, ProtocolJson.Options));
+            else
+                Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
+            if (!json) ReportCheckpoint(outcome.Checkpoint);
+            else if (outcome.Checkpoint?.Skipped is { } skipped) Error.WriteLine("warning: " + skipped);
             if (outcome.Problem is { } interrupted) return Fail(interrupted.Message);
             return Clean;
         }
@@ -225,6 +230,17 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         }
 
         return Fail(problem.Message);
+    }
+
+    /// <summary>
+    /// The history checkpoint a trigger wrote with an act (0.9.2): its path, id and hash with its trigger, or, as a warning, why none was
+    /// written; nothing when no trigger applied.
+    /// </summary>
+    public void ReportCheckpoint(TriggeredCheckpoint? checkpoint)
+    {
+        if (checkpoint is null) return;
+        if (checkpoint.Written is { } written) Output.WriteLine($"{written.Path}  {written.Id}  {written.Hash}  (history checkpoint, trigger {checkpoint.Trigger})");
+        else if (checkpoint.Skipped is { } skipped) Error.WriteLine("warning: " + skipped);
     }
 
     public int ReportFindings(FindingsResponse findings, bool json)

@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
+using Vericairn.Records.Updates;
 
 namespace Vericairn.Records.Estate;
 
@@ -35,6 +36,7 @@ public static class OperatorActions
         AddPublications(model, items, operators);
         AddObligations(model, items);
         AddReservedWork(model, items, states);
+        AddAdoption(model, items);
 
         // An invalid estate cannot provide an actionable authority claim. Keep its queue visible, but offer inspection only.
         if (model.Findings.HasErrors)
@@ -275,6 +277,30 @@ public static class OperatorActions
             items.Add(item);
         }
     }
+
+    /// <summary>
+    /// Adopting history checkpoints, the root operator's step once after the estate's upgrade to a release that writes them
+    /// (design/signed-history.md § 10; design/release-procedure.md § 7, the upgrade's adopt step): listed while no adoption checkpoint
+    /// counts in an estate pinned to such a release, with the check to read first and the signing command. Only the root operator or a
+    /// person holding administer adopts; an agent's adoption counts for nothing, so it never removes the item.
+    /// </summary>
+    private static void AddAdoption(EstateModel model, JsonArray items)
+    {
+        if (model.Manifest is not { RecordFormat: >= 3, Mode: "release", Version: { } version } manifest || !ReleaseFollowing.IsNewer(version, LastReleaseWithoutCheckpoints)) return;
+        if (History.SignedHistory.Adopted(model)) return;
+        RecordEnvelope? source = manifest.Release is { } pin && model.ById.TryGetValue(pin.Id, out RecordEnvelope? pinned) ? pinned : model.CurrentEstate;
+        if (source is null) return;
+        string by = model.RootOperator ?? "<root operator>";
+        JsonObject item = Item("history-adoption", source, "Adopt history checkpoints", "not adopted",
+            $"The estate is pinned to {version}, which writes history checkpoints, and no adoption checkpoint counts. Adoption witnesses every record present and anchors the unsigned records that count today, so it changes no reading; from then on the runtime writes checkpoints at upgrades, release submissions, charter revisions and intervals.",
+            [$"The root operator reads what adoption would witness and anchor with vericairn estate checkpoint --adopt --check, then signs it once with vericairn estate checkpoint --adopt --by {by}. A person holding administer may sign instead; an agent's adoption counts for nothing."],
+            [source]);
+        item["inspect"] = "vericairn estate checkpoint --adopt --check";
+        items.Add(item);
+    }
+
+    /// <summary>The newest release that does not write history checkpoints: an estate pinned to a later one lists adoption until it adopts.</summary>
+    internal const string LastReleaseWithoutCheckpoints = "0.9.1";
 
     private static void AddReservedWork(EstateModel model, JsonArray items, Dictionary<string, string> states)
     {

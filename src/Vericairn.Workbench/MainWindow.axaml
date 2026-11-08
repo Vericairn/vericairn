@@ -178,6 +178,7 @@
               </ListBox>
               <Button Name="ProgressButton" Content="Open the progress report" MinHeight="28" HorizontalAlignment="Left" Click="OnOpenProgress" />
               <SelectableTextBlock MinHeight="24" Text="{Binding LastPersonObservation}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.Name="Last human observation" />
+              <SelectableTextBlock Name="HistoryText" MinHeight="24" Text="{Binding History}" TextWrapping="Wrap" AutomationProperties.Name="History checkpoints" />
               <WrapPanel>
                 <Button Name="HandoffButton" Content="Hand-over and resume" MinHeight="28" Margin="0,0,8,0" Click="OnOpenHandoff" />
                 <Button Name="ObserveEstateButton" Content="Record my observation" MinHeight="28" Click="OnObserveEstate" />

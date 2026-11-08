@@ -164,6 +164,11 @@ public static class ApiRoutes
             (UpgradeResponse? plan, Problem? problem) = service.Upgrade(request);
             return plan is not null ? Results.Json(plan, ProtocolJson.Options) : Results.Json(problem, ProtocolJson.Options, statusCode: StatusCodes.Status409Conflict);
         });
+        app.MapPost($"{v}/history/checkpoints", (HistoryCheckpointRequest request) =>
+        {
+            (HistoryCheckpointResponse? checkpoint, Problem? problem) = service.HistoryCheckpoint(request);
+            return checkpoint is not null ? Results.Json(checkpoint, ProtocolJson.Options) : Results.Json(problem, ProtocolJson.Options, statusCode: StatusCodes.Status409Conflict);
+        });
         app.MapPost($"{v}/estate/export", (ExportRequest request) =>
         {
             (ExportResponse? export, Problem? problem) = service.Export(request);

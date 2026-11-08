@@ -52,6 +52,19 @@ public sealed record RecordDeletion(string Path, string Commit);
 /// <param name="Deleted">Each deleted record file with the newest commit that deleted it, sorted by path.</param>
 public sealed record RecordDeletions(bool Shallow, IReadOnlyList<RecordDeletion> Deleted);
 
+/// <summary>The commit that added each record file, as the checked-out commit's history shows it (design/signed-history.md § 10).</summary>
+/// <param name="Shallow">True when the clone is shallow, so its history is incomplete and nothing is listed.</param>
+/// <param name="Added">Each record file's repository-relative path under records/, with the oldest reachable commit that added it.</param>
+public sealed record RecordOrigins(bool Shallow, IReadOnlyDictionary<string, string> Added);
+
+/// <summary>
+/// An estate's main line (design/signed-history.md § 7): the local branch its history is judged through whatever is checked out, and
+/// that branch's tip.
+/// </summary>
+/// <param name="Branch">The branch: the one the clone's origin HEAD names when held locally, else main, else master.</param>
+/// <param name="Commit">The branch's tip commit.</param>
+public sealed record EstateMainLine(string Branch, string Commit);
+
 /// <summary>
 /// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
 /// work and never publishes; integration and remote publication are provider operations, not adapter ones.
@@ -102,6 +115,21 @@ public interface ISourceAdapter
     /// unsupported.
     /// </summary>
     RecordDeletions? DeletedRecordFiles(string root) => null;
+
+    /// <summary>
+    /// The commit that added each record file in the checked-out commit's reachable history, the oldest when several did, without fetching
+    /// or changing the repository; a shallow clone reports itself and lists nothing. Null means unavailable or unsupported.
+    /// </summary>
+    RecordOrigins? RecordFileOrigins(string root) => null;
+
+    /// <summary>
+    /// The estate's main line: the local branch the clone's origin HEAD names when it is held locally, else main, else master, and its tip,
+    /// whatever is checked out; read without fetching or changing the repository. Null when there is none or it is unavailable.
+    /// </summary>
+    EstateMainLine? MainLine(string root) => null;
+
+    /// <summary>A file's exact bytes at a commit, without fetching or changing the repository; null when absent or unavailable.</summary>
+    byte[]? FileAtCommit(string root, string commit, string path) => null;
 
     /// <summary>
     /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.

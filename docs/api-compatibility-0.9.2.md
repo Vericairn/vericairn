@@ -529,3 +529,49 @@ Func<string, byte[]?>)`, which reads checkpoint inventories through the given ob
 and `EstateStatus.HistoryProblems` and `EstateStatus.HistoryJson`. `Vericairn.Runtime` adds the default interface member
 `ISourceAdapter.DeletedRecordFiles(string)` with the records `RecordDeletion` and `RecordDeletions`, implemented by the git
 adapter; existing implementations compile unchanged and report the warning unavailable by returning null.
+
+## Writing and adopting history checkpoints (OPS-07)
+
+The API adds one route, `POST /v1/history/checkpoints` with `HistoryCheckpointRequest` `{by, adopt, check}`, returning
+`HistoryCheckpointResponse` `{trigger, applied, adopted, witnessed, listed, heads, anchored, notCounting, byRevokedDevices,
+deletedInHistory, unavailable, written}`, or a `Problem` with status 409 when refused. `IEstateApi` adds the default members
+`HistoryCheckpoint` and `HistoryCheckpointAsync`; an implementation that does not override them answers `unsupported`, so
+existing implementations compile unchanged. The SDK client and `CancellationBoundApi` implement both. With `check` it signs and
+writes nothing and needs no `by`. Without `adopt` it writes a checkpoint with trigger `manual` and is refused before adoption;
+with `adopt` it writes the adoption checkpoint, anchoring the unsigned records that count, and is refused for any principal
+other than the root operator or a human holding `administer`, and over the local network, where only its check is served. A
+device-signed request (MCP-03) cannot write one. Protocol adds `HistoryCheckpointRequest`, `HistoryCheckpointResponse`,
+`HistoryCheckpointPin`, `HistoryRecordItem`, `HistoryDeletedFile` and `TriggeredCheckpoint` `{trigger, written, skipped}`.
+
+`WriteOutcome`, `UpgradeResponse` and `ReleaseResponse` add an optional `checkpoint` member, a `TriggeredCheckpoint`, omitted
+when no trigger applied: the checkpoint the runtime wrote in the same batch as the record, the migration or before the release
+submission's check, or, with `written` null, why none was. In an estate that has adopted checkpoints, a record write sets off
+trigger `charter` for a charter revision, whose checkpoint, for a revision to required signatures by the root operator or a
+human holding `administer`, anchors the unsigned records that count before it, and trigger `interval` once the unwitnessed tail holds 500 records or its oldest
+record is 24 hours old, when the write is signed by this machine's device for its author and that device is not a person's
+with presence; `estate upgrade --to` sets off `upgrade`, and `release submit` writes `release` before its check. The root
+operator's first device admitting itself in an estate that holds only what `estate init` wrote, the root operator's devices
+and no checkpoint sets off `adoption`, anchoring the unsigned records init wrote. A checkpoint that cannot be written never
+refuses the record or the upgrade; it refuses the release submission with the objection `history.checkpoint`. `release submit
+--check` (`POST /v1/releases/check`) writes nothing, as before. The command line prints a written checkpoint after its record,
+marked `(history checkpoint, trigger <trigger>)`, and a skipped one as a warning on standard error; with `--json`, `records new`
+and the other writes add `checkpoint` beside `path`, `id` and `hash` when present.
+
+The text status (`status`, `GET /v1/status` `text`) always shows the history line after the pinned release, `History:
+adopted|not adopted · head(s) <16 hex digits> · <n> witnessed · tail <n> · no problems|<n> problems`; standing history
+problems follow it as before. The canonical JSON is unchanged. The state language adds the `history` vocabulary, `not adopted`
+and `adopted`. `EstateView` adds `History`, `HistoryState` and `HistoryLabel`; Workbench's home and Remote's home show the
+line. `operator list` (`GET /v1/operator/actions`) adds an item of kind `history-adoption`, state `not adopted`, in an estate
+pinned in release mode to a version after 0.9.1 that has not adopted; it names the check and the signing command in `inspect`
+and `waitsOn` and carries no record command. `estate check` (`GET /v1/check`) adds `history.rolled-back`, a warning when the
+main line no longer holds the newest checkpoint this machine verified, or information when that cannot be told, and
+`history.remembered`, information naming what the machine remembers; neither is in the canonical status. The upgrade's batch
+journal treats a stored record whose history checkpoint was not stored as complete.
+
+`Vericairn.Records` adds, each additively: `SignedHistory.IntervalRecords`, `IntervalAge`, `IntervalDue`, `TailRecords`,
+`PlanAdoption` and `ExpectMatch`; `AdoptionPlan`; `HistoryState.OldestTailAt`; and `History.HistoryLine` (`States`,
+`ShortDigits`, `ShortHash`, `Render`, `FromStatus`). `Vericairn.Runtime` adds `Store.HistoryMemory` and the default interface
+members `ISourceAdapter.RecordFileOrigins`, `MainLine` and `FileAtCommit` with the records `RecordOrigins` and
+`EstateMainLine`, implemented by the git adapter; existing implementations compile unchanged and report what they cannot tell
+as unavailable. The command line adds `estate checkpoint` with `--by`, `--adopt` and `--check`
+([CLI](cli.md#vericairn-estate-checkpoint-092)). Record format remains 3; no record type or field changes.
