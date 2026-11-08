@@ -2844,8 +2844,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return true;
     }
 
-    /// <summary>The clock a stated authoring time is held to: the runtime never authors a record dated more than five minutes past it.</summary>
-    internal TimeProvider AuthoringClock { get; set; } = TimeProvider.System;
+    /// <summary>
+    /// The clock a stated authoring time is held to, the runtime's own clock unless a test gives another: the runtime never authors a
+    /// record dated more than five minutes past it.
+    /// </summary>
+    internal TimeProvider? AuthoringClock { get; set; }
 
     /// <summary>
     /// Why a stated authoring time is refused, or null: a record is never dated more than five minutes past this runtime's clock, since a
@@ -2853,7 +2856,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private string? FutureTimeRefusal(DateTimeOffset? at)
     {
-        DateTimeOffset now = AuthoringClock.GetUtcNow();
+        DateTimeOffset now = (AuthoringClock ?? WorkerOptions.Clock).GetUtcNow();
         return at is { } stated && stated > now + global::Vericairn.Records.History.SignedHistory.ClockTolerance
             ? $"Not written: the authoring time {RecordParser.FormatTimestamp(stated)} is more than five minutes past this runtime's clock, {RecordParser.FormatTimestamp(now)}. A record states when it was written, never a later time."
             : null;
