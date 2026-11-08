@@ -47,8 +47,8 @@ internal sealed partial class EstateTrust
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, bool> trustedOperators = new(StringComparer.Ordinal);
-    private readonly HashSet<string> checkingOperators = new(StringComparer.Ordinal);
+    private readonly List<RecordEnvelope> principalRecords;
+    private (IReadOnlySet<string> Accepted, IReadOnlySet<string> Now)? standing;
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -60,6 +60,7 @@ internal sealed partial class EstateTrust
         admissionsBySubject = model.OfType("admission").Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
         successors = TrustTypes.SelectMany(model.OfType).Where(r => r.Supersedes is not null).ToLookup(r => r.Supersedes!, StringComparer.Ordinal);
         rawSupersededBy = model.SupersededBy;
+        principalRecords = [.. model.OfType("principal")];
         FirstEstate = model.RawFirstEstate();
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
@@ -150,6 +151,8 @@ internal sealed partial class EstateTrust
         bool Judge(RecordEnvelope r)
         {
             if (History.Altered.Contains(r.Id)) return false;
+            // A grant or principal revision dated before the record it supersedes counts for nothing.
+            if (RefusedAuthorityRevision(r)) return false;
             if (r.Type == "admission") return AdmissionCounts(r, Mode.Anchors);
             if (r.Type == "history-checkpoint") return History.CountingCheckpoints.Contains(r.Id);
             // A revision of a required charter that the root operator did not sign changes nothing (FIX-79), so it does not count.
@@ -580,12 +583,13 @@ internal sealed partial class EstateTrust
     private const string Now = "9999-12-31T23:59:59Z";
 
     /// <summary>
-    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
-    /// always; otherwise a person whose role, through revisions that rest on signatures, stood at the record's time and still stands, so a
-    /// later revision taking it away withdraws the power for every checkpoint.
+    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing and writing the grants
+    /// and principal revisions they rest on: the root operator always; otherwise a person whose role, through accepted revisions, stood at
+    /// the record's time and still stands now (<see cref="Standing"/>), so a later revision taking it away withdraws the power for every
+    /// checkpoint.
     /// </summary>
     private bool StandingOperator(string principal, string at) =>
-        principal == RootOperator && RootOperator is not null || TrustedOperator(principal, at) && TrustedOperator(principal, Now);
+        principal == RootOperator && RootOperator is not null || TrustedOperator(principal, at) && Standing().Now.Contains(principal);
 
     /// <summary>
     /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
@@ -636,6 +640,11 @@ internal sealed partial class EstateTrust
         return current.Id;
     }
 
+    /// <summary>Whether a grant or principal revision counts for nothing in authority reads, whoever signed it: one dated before the record it supersedes.</summary>
+    internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
+        revision.Type is "principal" or "authority" && revision.Supersedes is not null &&
+        model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) && previous.Type == revision.Type && string.CompareOrdinal(revision.At, previous.At) < 0;
+
     /// <summary>
     /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor"/> that does not depend on a
     /// signature: the root operator, or a person holding administer that still stands (<see cref="StandingAdministrator"/>), judged for a
@@ -650,42 +659,71 @@ internal sealed partial class EstateTrust
         return StandingAdministrator(probe, Acting);
     }
 
-    /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>
+    /// <summary>
+    /// Whether a grant revision counts for the strongest acts: it rests on signatures, is not refused as an authority revision, and its
+    /// author is the root operator or an operator whose role stood at its time and still stands (<see cref="StandingOperator"/>). A
+    /// principal revision counts when it is among <see cref="Standing"/>'s accepted revisions.
+    /// </summary>
     private bool TrustedRevision(RecordEnvelope revision) =>
-        (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null) ||
-        (AuthenticBySignatures(revision) && TrustedOperator(revision.By, revision.At));
+        revision.Type == "principal"
+            ? Standing().Accepted.Contains(revision.Id)
+            : !RefusedAuthorityRevision(revision) && AuthenticBySignatures(revision) && StandingOperator(revision.By, revision.At);
 
     /// <summary>
-    /// The principal record that describes a principal at a time: among the revisions of its line dated at or before the time that rest on
-    /// signatures and were written by a trusted operator, the single one no other of them supersedes. Revisions anyone else wrote, signed
-    /// or not, are not read.
+    /// The principal record that describes a principal at a time, for the strongest acts: among its accepted revisions dated at or before
+    /// the time, the single one no other of them supersedes.
     /// </summary>
-    private RecordEnvelope? PrincipalAt(string principal, string at)
+    private RecordEnvelope? PrincipalAt(string principal, string at) => HeadAt(Standing().Accepted, principal, at);
+
+    /// <summary>Whether a principal is the root operator, or held the operator role at a time through accepted revisions.</summary>
+    private bool TrustedOperator(string principal, string at) =>
+        principal == RootOperator && RootOperator is not null || IsOperator(PrincipalAt(principal, at));
+
+    /// <summary>
+    /// The principal revisions the strongest acts read, and who stands as an operator now. Every revision that rests on signatures and is
+    /// not refused as an authority revision starts accepted, as does the root operator's own first record. Then, until nothing changes,
+    /// a revision is dropped when its author, other than the root operator, did not hold the operator role at its time or does not hold it
+    /// now, both read from the revisions still accepted. Revisions are only ever dropped, so the result is reached and does not depend on
+    /// the order revisions are read in. A revision by an operator who has since lost the role counts for nothing here, and with it every
+    /// revision resting on it, so a backdated record gives an operator whose role was removed none of these acts.
+    /// </summary>
+    private (IReadOnlySet<string> Accepted, IReadOnlySet<string> Now) Standing()
     {
-        List<RecordEnvelope> revisions = model.OfType("principal")
-            .Where(p => PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p)).ToList();
-        List<RecordEnvelope> heads = revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id)).ToList();
+        lock (gate)
+        {
+            if (standing is { } known) return known;
+            List<RecordEnvelope> principals = principalRecords;
+            var accepted = new HashSet<string>(principals.Where(p => p.Id == RootOperator && p.By == RootOperator && p.Supersedes is null ||
+                !RefusedAuthorityRevision(p) && AuthenticBySignatures(p)).Select(p => p.Id), StringComparer.Ordinal);
+            HashSet<string> standingNow;
+            while (true)
+            {
+                standingNow = new HashSet<string>(principals.Where(p => accepted.Contains(p.Id)).Select(PrincipalIdentity).Distinct(StringComparer.Ordinal)
+                    .Where(p => p == RootOperator || IsOperator(HeadAt(accepted, p, Now))), StringComparer.Ordinal);
+                List<string> dropped = [.. principals.Where(p => accepted.Contains(p.Id) && p.By != RootOperator &&
+                    !(p.Id == RootOperator && p.By == RootOperator && p.Supersedes is null) &&
+                    (!standingNow.Contains(p.By) || !IsOperator(HeadAt(accepted, p.By, p.At)))).Select(p => p.Id)];
+                if (dropped.Count == 0) break;
+                accepted.ExceptWith(dropped);
+            }
+
+            standing = (accepted, standingNow);
+            return standing.Value;
+        }
+    }
+
+    /// <summary>The single head, among the given revisions of a principal's line dated at or before a time, that no other of them supersedes.</summary>
+    private RecordEnvelope? HeadAt(IReadOnlySet<string> accepted, string principal, string at)
+    {
+        List<RecordEnvelope> revisions = [.. principalRecords.Where(p => accepted.Contains(p.Id) && PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0)];
+        List<RecordEnvelope> heads = [.. revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id))];
         return heads.Count == 1 ? heads[0] : null;
     }
 
-    /// <summary>Whether a principal is the root operator, or held the operator role at a time through revisions that rest on signatures.</summary>
-    private bool TrustedOperator(string principal, string at)
-    {
-        if (principal == RootOperator && RootOperator is not null) return true;
-        string key = principal + " " + at;
-        lock (gate)
-        {
-            if (trustedOperators.TryGetValue(key, out bool known)) return known;
-            if (!checkingOperators.Add(key)) return false;
-            RecordEnvelope? head = PrincipalAt(principal, at);
-            bool value = head is not null && EstateModel.BodyString(head, "kind") == "human" &&
-                head.Body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array &&
-                roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
-            checkingOperators.Remove(key);
-            trustedOperators[key] = value;
-            return value;
-        }
-    }
+    /// <summary>Whether a principal record describes a person holding the operator role.</summary>
+    private static bool IsOperator(RecordEnvelope? head) =>
+        head is not null && EstateModel.BodyString(head, "kind") == "human" && head.Body.TryGetProperty("roles", out JsonElement roles) &&
+        roles.ValueKind == JsonValueKind.Array && roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
 
     private string PrincipalIdentity(RecordEnvelope principal)
     {
