@@ -345,10 +345,10 @@ of the event journal that also says, for each event delivered, which of up to 32
 `EventVocabulary.MaxSelections`; the OpenAPI document adds the route and the schemas `EventSelectRequest` and
 `EventSelectResponse`. `IEstateApi` adds `EventsSelect(request)` and `EventsSelectAsync(request, cancellationToken)`, each
 with a default implementation, so existing implementers stay source-compatible; `CancellationBoundApi` and the SDK's
-`VericairnClient` implement both, with the one-minute deadline `Events` has. A read that waits holds a slot: a device's
-own, as a long poll does; on the local socket one of four kept for MCP servers, beside the command line's slots and
-reserve, taken in turns of five seconds when all four are held. The daemon can therefore hold up to four more long
-connections than before, of the 32 it admits. A read that does not wait holds none.
+`VericairnClient` implement both, with the one-minute deadline `Events` has. A device's read holds one of its own slots,
+as a long poll does. On the local socket a read that waits holds one of four slots kept for MCP servers, beside the
+command line's slots and reserve, taken in turns of five seconds when all four are held, and one that does not wait holds
+none. The daemon can therefore hold up to four more long connections than before, of the 32 it admits.
 
 A network MCP tool now reaches `POST /v1/events/select`, which `events_read` reads for the requesting device and which
 never streams; `GET /v1/events` and `GET /v1/events/{key}` stay out of a tool's reach. The session's server stream at

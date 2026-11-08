@@ -172,11 +172,11 @@ this journal (`MCP-05`, [The MCP server](mcp.md#subscriptions-and-notifications-
 each a filter with an optional `since` cursor below which it passes nothing (a cursor that cannot be honored bounds
 nothing). `EventSelectResponse` is `EventsResponse` with `selected`, for each event the indices of the selections
 it passes. A selection only narrows: an event the audience check or the read's own filter withholds passes none,
-and nothing tells it from none. It never streams. A read that waits holds a slot while it waits: a device's own, as
-a long poll does, with `429` when they are taken; on the local socket one of four kept for MCP servers, beside the
-command line's slots and reserve. When those four are held, a read waits until the one held longest has held its
-slot five seconds, which then answers at once with what it has, and takes its place: one that waits out its own
-`wait` first answers with no event. A read that does not wait holds no slot. An unknown kind or category, a
+and nothing tells it from none. It never streams. A device's read holds one of its own slots while it runs, as a long
+poll does, with `429` when they are taken. On the local socket a read that waits holds one of four slots kept for MCP
+servers, beside the command line's slots and reserve, and one that does not wait holds none. When those four are held,
+a read waits until the one held longest has held its slot five seconds, which then answers at once with what it has,
+and takes its place: one that waits out its own `wait` first answers with no event. An unknown kind or category, a
 malformed filter, more than 32 selections or a `wait` outside 0 to 25 answers 400, and a device naming another
 principal 401.
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists

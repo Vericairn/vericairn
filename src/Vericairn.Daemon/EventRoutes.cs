@@ -68,9 +68,10 @@ internal static class EventRoutes
     }
 
     /// <summary>
-    /// The selecting long poll (MCP-05): as GET /v1/events's long poll, and for each event delivered the selections it passes. A read
-    /// that waits holds a slot while it waits: a device's from its own, and on the local socket one of the MCP servers' own budget,
-    /// waiting its turn when every slot is held; a read that does not wait holds none. Each delivery passes the audience check.
+    /// The selecting long poll (MCP-05): as GET /v1/events's long poll, and for each event delivered the selections it passes. A device
+    /// holds one of its own slots for every read, as GET /v1/events has it. On the local socket a read that waits holds one of the MCP
+    /// servers' own budget, waiting its turn when every slot is held, and one that does not wait holds none, so a session declares and
+    /// starts its subscriptions however busy that budget is. Each delivery passes the audience check.
     /// </summary>
     private static async Task<IResult> SelectAsync(EventSelectRequest request, HttpContext context, DaemonHost host)
     {
@@ -110,7 +111,7 @@ internal static class EventRoutes
         CancellationToken yielding = CancellationToken.None;
         try
         {
-            if (wait > 0 && device is not null)
+            if (device is not null)
             {
                 slot = host.EventStreams.TryAcquire(device.Identity, device.Principal);
                 if (slot is null)
