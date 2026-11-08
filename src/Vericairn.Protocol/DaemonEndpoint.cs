@@ -28,4 +28,11 @@ public sealed record LocalNetworkEndpoint(string Host, int Port, string Identity
 /// <param name="Api">API version.</param>
 /// <param name="Loopback">The loopback profile, when served.</param>
 /// <param name="LocalNetwork">The local-network profile, when the operator configured an address; from 0.6.0.</param>
-public sealed record DaemonEndpoint(string Kind, string Address, int ProcessId, string StartedAt, string Root, string Api, LoopbackEndpoint? Loopback = null, LocalNetworkEndpoint? LocalNetwork = null);
+public sealed record DaemonEndpoint(string Kind, string Address, int ProcessId, string StartedAt, string Root, string Api, LoopbackEndpoint? Loopback = null, LocalNetworkEndpoint? LocalNetwork = null)
+{
+    /// <summary>
+    /// From 0.9.2 (MCP-03): the path at which the daemon serves network MCP over Streamable HTTP on its loopback and local-network
+    /// listeners, /mcp, when the operator turned it on; null when it is off. Older daemons omit it.
+    /// </summary>
+    public string? Mcp { get; init; }
+}

@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class DevicesWritesCommand : Command
 {
     public DevicesWritesCommand(CommandContext context)
-        : base("writes", "List what paired devices wrote over the local network through this machine's runtime: when, which device, for which principal, the operation and the record it produced. A record a paired device asks for is signed by a device of the same principal held here, so this is where the paired device behind it is kept.")
+        : base("writes", "List what paired devices wrote over the local network through this machine's runtime: when, which device, for which principal, the operation and the record it produced. A record a paired device asks for is signed by a device of the same principal held here, so this is where the paired device behind it is kept. From 0.9.2 it also lists network MCP writes on loopback, which their own device signed.")
     {
         var operations = new DeviceOperations(context);
         var writesDeviceArgument = new Argument<string?>("device") { Description = "A paired device's id, to list its writes only.", Arity = ArgumentArity.ZeroOrOne };

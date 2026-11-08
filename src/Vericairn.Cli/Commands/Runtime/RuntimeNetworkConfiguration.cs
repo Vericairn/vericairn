@@ -11,7 +11,7 @@ namespace Vericairn.Cli;
 
 internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 {
-    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json)
+    public int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json, string? mcp = null, string[]? origins = null)
     {
         try
         {
@@ -25,14 +25,45 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                 return context.Fail("--allow-public allows the address --local-network gives; give both.");
             }
 
-            string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
-            RuntimeSettings settings;
-            string? exposure = null;
-            if (localNetwork is null)
+            bool? serveMcp = mcp?.ToLowerInvariant() switch
             {
-                settings = RuntimeSettings.Load(directory);
+                null => null,
+                "on" => true,
+                "off" => false,
+                _ => throw new ArgumentException($"--mcp is on or off, not '{mcp}'."),
+            };
+            List<string>? allowed = null;
+            if (origins is { Length: > 0 })
+            {
+                allowed = [];
+                foreach (string origin in origins)
+                {
+                    if (origin.Equals("none", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (origins.Length > 1)
+                        {
+                            return context.Fail("--mcp-origin none empties the list; give it alone.");
+                        }
+
+                        continue;
+                    }
+
+                    if (!RuntimeSettings.TryNormalizeOrigin(origin, out string? normalized, out string? problem))
+                    {
+                        return context.Fail(problem! + " Nothing was changed.");
+                    }
+
+                    if (!allowed.Contains(normalized!, StringComparer.Ordinal))
+                    {
+                        allowed.Add(normalized!);
+                    }
+                }
             }
-            else
+
+            string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
+            RuntimeSettings settings = RuntimeSettings.Load(directory);
+            string? exposure = null;
+            if (localNetwork is not null)
             {
                 string? address = null;
                 if (!localNetwork.Equals("off", StringComparison.OrdinalIgnoreCase))
@@ -52,7 +83,22 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
                     address = endpoint.ToString();
                 }
 
-                settings = new RuntimeSettings(address, AllowPublic: exposure is not null);
+                settings = settings with { LocalNetwork = address, AllowPublic = exposure is not null };
+            }
+
+            if (serveMcp is bool on)
+            {
+                settings = settings with { Mcp = on };
+            }
+
+            if (allowed is not null)
+            {
+                settings = settings with { AllowedOrigins = allowed };
+            }
+
+            bool changed = localNetwork is not null || serveMcp is not null || allowed is not null;
+            if (changed)
+            {
                 settings.Save(directory);
             }
 
@@ -61,7 +107,11 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             string? served = running?.LocalNetwork is LocalNetworkEndpoint lan ? new System.Net.IPEndPoint(System.Net.IPAddress.Parse(lan.Host), lan.Port).ToString() : null;
             if (json)
             {
-                context.Output.WriteLine(JsonSerializer.Serialize(new { localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, served = alive ? served : null, restart = alive && localNetwork is not null }, ProtocolJson.Options));
+                context.Output.WriteLine(JsonSerializer.Serialize(new
+                {
+                    localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, mcp = settings.Mcp, allowedOrigins = settings.AllowedOrigins,
+                    served = alive ? served : null, mcpServed = alive ? running!.Mcp is not null : (bool?)null, restart = alive && changed,
+                }, ProtocolJson.Options));
                 return Clean;
             }
 
@@ -72,10 +122,20 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             {
                 context.Output.WriteLine("  allowed with --allow-public: a wildcard or public address, where every device that reaches it may try to pair");
             }
+            context.Output.WriteLine(settings.Mcp
+                ? "network MCP is on: /mcp on the loopback and local-network listeners, from the runtime's next start, for agents' and services' devices that sign every request"
+                : "network MCP is off: /mcp is not served");
+            if (settings.Mcp || settings.AllowedOrigins.Count > 0)
+            {
+                context.Output.WriteLine(settings.AllowedOrigins.Count == 0
+                    ? "  origins allowed for /mcp: none, so a request naming an origin is refused"
+                    : $"  origins allowed for /mcp: {string.Join(", ", settings.AllowedOrigins)}");
+            }
             if (alive)
             {
                 context.Output.WriteLine(served is null ? $"  daemon {running!.ProcessId} serves no local-network profile now" : $"  daemon {running!.ProcessId} serves it now at {served}");
-                if (localNetwork is not null)
+                context.Output.WriteLine(running!.Mcp is null ? $"  daemon {running.ProcessId} serves no network MCP now" : $"  daemon {running.ProcessId} serves network MCP now at {running.Mcp}");
+                if (changed)
                 {
                     context.Output.WriteLine("  the running daemon keeps its listeners until it restarts: 'vericairn runtime stop', then 'vericairn runtime start'");
                 }
@@ -83,7 +143,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             return context.Fail(exception.Message);
         }

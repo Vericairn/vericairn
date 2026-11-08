@@ -69,12 +69,17 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
             : RequestSigning.LocalNetworkDigest(Binding.Estate, Binding.Identity, method, target, signedAt, body);
 
     /// <summary>Starts the runtime on loopback's local-network profile, on a clock the test moves, or on the system's when <paramref name="systemClock"/>.</summary>
-    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false, Action<string>? log = null)
+    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false, Action<string>? log = null,
+        bool mcp = false, IReadOnlyList<string>? mcpOrigins = null)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
         var time = new ManualTime(DateTimeOffset.UtcNow, running: true);
-        var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity, Log = log };
+        var options = new DaemonOptions
+        {
+            LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time,
+            ReplayCapacity = replayCapacity, Log = log, Mcp = mcp, McpAllowedOrigins = mcpOrigins,
+        };
         DaemonHost host = await DaemonTestHome.StartAsync(
             estate.Root,
             options: options,
@@ -215,12 +220,25 @@ internal sealed class MutualTls : IDisposable
     }
 
     /// <summary>Sends a request with the given headers; a JSON body when given.</summary>
-    public async Task<(HttpStatusCode Status, string Body)> SendAsync(HttpMethod method, string target, (string Device, string SignedAt, string Signature)? headers, string? json = null)
+    public async Task<(HttpStatusCode Status, string Body)> SendAsync(HttpMethod method, string target, (string Device, string SignedAt, string Signature)? headers, string? json = null,
+        IReadOnlyDictionary<string, string>? extra = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(target, UriKind.Relative));
         if (json is not null)
         {
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        }
+
+        foreach ((string name, string value) in extra ?? new Dictionary<string, string>())
+        {
+            if (name == "Host")
+            {
+                request.Headers.Host = value;
+            }
+            else
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
         }
 
         if (headers is { } signed)
@@ -235,8 +253,9 @@ internal sealed class MutualTls : IDisposable
     }
 
     /// <summary>Signs a request with a device and sends it.</summary>
-    public Task<(HttpStatusCode Status, string Body)> SendSignedAsync(IRequestSigner signer, HttpMethod method, string target, string? json = null) =>
-        SendAsync(method, target, Sign(signer, method.Method, target, json), json);
+    public Task<(HttpStatusCode Status, string Body)> SendSignedAsync(IRequestSigner signer, HttpMethod method, string target, string? json = null,
+        IReadOnlyDictionary<string, string>? extra = null) =>
+        SendAsync(method, target, Sign(signer, method.Method, target, json), json, extra);
 
     public void Dispose() => http.Dispose();
 }

@@ -752,6 +752,22 @@ streams share 16 slots, at most four per device and eight per principal, with tw
 socket. A reset tells a client only that its cursor could not be honored; how often one comes depends on the
 journal's whole volume, including events that client may not read. The embedded runtime keeps no journal.
 
+## Network MCP limits (0.9.2)
+
+Network MCP (`MCP-03`) serves signed mode only: every request and every record is signed by an admitted
+agent's or service's device, so a client must be Vericairn-aware, through `vericairn mcp serve
+--connection` or its own signing code. Token mode for OAuth-only clients, the public endpoint and its MCP
+gateway, and MCP over the relay are planned for 0.9.3 (`MCP-04`, `REMOTE-10`, the relay); until then `/mcp`
+is reached on loopback and on the local network only, and a device on the local network pairs there first.
+A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
+connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
+the daemon's memory and end when it restarts; the bridge opens a new one once, and other clients initialize
+again after a `404`. A session has one server stream, and in 0.9.2 nothing is sent on it but keep-alive
+comments: resource notifications are `MCP-05`'s, and the bridge does not yet forward the stream to its
+client. Requests are answered with one JSON body, never a stream; long outputs are returned whole. A
+device holds four sessions and runs four requests at once, all devices eight, and server streams share
+the event streams' slots. Every `<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
+
 ## Context and hand-over limits
 
 Context packages measure exact UTF-8 payload bytes including accounting overhead. Tokens, harness framing and model fit remain unknown without a qualified local tokenizer; this build includes none and makes no network tokenization call. A context byte allocation is not a spending cap. Mandatory material must fit; optional selected sources have a complete withheld list. The remainder of the document catalogue is outside the selection, so an empty withheld list is not a whole-estate read claim. A human `work brief` keeps its full selected scope with no byte limit set; preparation and MCP briefs without an allocation withhold named optional bodies.

@@ -482,6 +482,43 @@ vericairn events watch --subject <goal id> --after <cursor>
 A script that follows `events watch` and runs `goal step` acts with its own principal's authority and stays Community. See
 [API version 1](api-v1.md#the-event-stream-092) and the [operator's guide](operator-guide.md#events-092).
 
+## Network MCP: `runtime configure --mcp` and `mcp serve --connection` (0.9.2)
+
+`vericairn runtime configure --mcp on` turns on network MCP (`MCP-03`): from the runtime's next start the daemon serves
+the Model Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners, to agents' and
+services' devices whose every request and record is signed by that device. `--mcp off` stops it; it is off by default
+and never served on the local socket. `--mcp-origin <origin>` names an origin (`scheme://host[:port]`) a request may
+carry, repeated for more; it replaces the list, `--mcp-origin none` empties it, and a request naming any other origin is
+refused before it is authenticated. A request without an `Origin`, as native clients send, needs none. The settings are
+kept in `runtime.json` beside the live store with `--local-network`, and `vericairn runtime status` shows `mcp  /mcp`
+while a daemon serves it.
+
+| Option | Meaning |
+|---|---|
+| `--mcp on\|off` | Serve network MCP at `/mcp` from the runtime's next start, or stop. Off unless set. |
+| `--mcp-origin <origin>` | An origin a request to `/mcp` may name; repeatable; replaces the list; `none` empties it. None by default. |
+
+On the agent's machine, `vericairn mcp serve --connection <connection>` bridges a stdio harness to that estate over a
+connection `vericairn connections add` paired, named by its id or its estate's name. It serves standard input and output
+as `mcp serve` does and forwards each message to the runtime's `/mcp`, signing every request with the connection's
+device. Only a write is prepared: its record is checked to be the one the call asks for (the tool's record type, this
+device's principal as author, no supersession, a time within a plan's ten minutes of this machine's clock, the assignment
+or attempt the call names, every field the call supplies unchanged), signed with the same key and then written; nothing
+another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
+document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
+([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
+device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
+principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
+key is no longer held here.
+
+```sh
+vericairn runtime configure --local-network 192.168.1.20:7443 --mcp on
+vericairn mcp serve --connection <connection id>
+```
+
+See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and the
+[operator's guide](operator-guide.md#an-agent-on-another-machine-network-mcp-092).
+
 ## Preparing a documentation set with the build tooling (0.9.2)
 
 `vericairn-docs`, the build tooling in `tools/Vericairn.DocsTool` and not part of the shipped command line, adds five
