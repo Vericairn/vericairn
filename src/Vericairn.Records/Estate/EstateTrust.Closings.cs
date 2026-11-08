@@ -110,7 +110,7 @@ internal sealed partial class EstateTrust
                     // Its signature findings say why it does not verify; one that verifies but for a closing before it is said here.
                     if (bound.Count > 0 && AuthenticWith(checkpoint.Record, NoClosings))
                         closingFindings.Add(new Finding(Severity.Error, "history.closing-author", checkpoint.Record.ExpectedPath + "#body.closes",
-                            "This closing is signed by a device, or with a key, that a closing before it closed, so it closes nothing, anchored or not; it still witnesses what it lists if it counts."));
+                            "This closing does not verify against the closings before it: one of them closed the device or the key that signed it, or refused that device's admission. It closes nothing, anchored or not, and still witnesses what it lists if it counts."));
                 }
                 else if (Close(checkpoint, closes, predecessors) is { } closing)
                 {

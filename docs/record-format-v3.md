@@ -578,9 +578,9 @@ names, reach an adoption checkpoint by one who may anchor; when its signatures v
 against the closings before it in that order; and when its author may perform the act, as
 it stood at the closing's time. The checkpoints between it and the adoption need not count,
 since a closing acts by itself. One whose author may not perform the act is
-`history.closing-author`, as is one signed by a device or with a key that a closing before
-it closed; it closes nothing, anchored or not, and still witnesses what it lists if it
-counts. One naming a record of another type is `history.checkpoint-invalid`. Two
+`history.closing-author`, as is one that verifies only without the closings before it,
+because one of them closed its signer's device or key or refused that device's admission; it
+closes nothing, anchored or not, and still witnesses what it lists if it counts. One naming a record of another type is `history.checkpoint-invalid`. Two
 concurrent closings, neither following the other, each act, each judged against the
 closings before it. The recovery device signs a device closing and no other checkpoint
 (`signature.recovery-scope`).
