@@ -546,6 +546,14 @@ revision. An unsigned admission also counts when an anchoring checkpoint lists i
 besides the format-2 migration's list. Before adoption the earlier rule holds:
 an unsigned record dated at or before the current required revision counts.
 
+**Who writes them (OPS-07).** `vericairn estate checkpoint` writes one with trigger `manual` and, with `--adopt`, the
+adoption checkpoint, anchoring the unsigned records that count; a new estate's root operator's first device writes the
+adoption when it admits itself. In an estate that has adopted, the runtime writes one in the same batch as the act, signed by
+the device then writing: `upgrade` at an estate upgrade, `release` at a release submission before its check, `charter` after
+a charter revision, anchoring the unsigned records that count before a revision to required signatures by one who may
+anchor, and `interval` once the unwitnessed tail holds 500 records or its oldest record is 24 hours old. `closing` is ID-06's.
+No field changes; a reader judges every checkpoint the same way, whatever its trigger.
+
 **Records that do not count.** A record that does not count is reported and kept:
 an unsigned record the rule above refuses, an unsigned policy record, checkpoint or
 device revision, an altered witnessed record and a record a closing refuses (below). From 0.9.2 the model's type and

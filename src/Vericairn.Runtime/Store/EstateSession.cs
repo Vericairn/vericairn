@@ -31,6 +31,9 @@ public sealed class EstateSession : IDisposable
     internal long ParsedFiles => parseCache.ParsedFiles;
     internal bool IsReadOnly => readOnly;
 
+    /// <summary>The Vericairn home this session keeps its machine-local state under.</summary>
+    internal string Home => home;
+
     // The response envelope must come from the very bytes whose model was just judged, not a second full store read/sync.
     internal RecordFile? LoadedFile(string path) => loadedFiles?.ByPath.GetValueOrDefault(path);
 

@@ -13,7 +13,9 @@ store, and no real-device qualification is recorded for it.
 - **Estates:** the phone keeps a connection to each estate it paired with; you choose which one the home shows, and pair with
   another from the home.
 - **Home**, for the selected estate, with its connection state (connecting, current, cached, partial, denied or unavailable) and
-  how fresh the content is:
+  how fresh the content is, and, from 0.9.2, its history line in the words `status` prints: whether the estate has adopted history
+  checkpoints, its heads by the sixteen hexadecimal digits a fresh machine names to `estate check --expect`, how many records they
+  witness, the unwitnessed tail and the standing problems ([history checkpoints](operator-guide.md#history-checkpoints-092)):
   - **Attention:** what waits on the signed-in principal, from status and required communication attention, most urgent first.
     Each notice shows its subject, reason, work state, attention state, freshness and next action. Policy conditions and recurring
     duties retain their policy, rule, subject, level, owner and evaluation basis; each duty occurrence remains separate. From

@@ -117,7 +117,8 @@ public sealed class PublishedDependencyCommandsTests
                     "--by", original.By, "--body", charter, "--supersedes", current.Id);
                 CliHarness.Outcome check = CliHarness.Ok("--estate", root, "estate", "check");
                 Assert.Empty(check.Err);
-                Assert.Contains($"{5 + revision} records: 0 errors, 0 warnings", check.Out, StringComparison.Ordinal);
+                // The estate adopted history checkpoints at birth, with its first device, so each revision writes a checkpoint with it.
+                Assert.Contains($"{6 + 2 * revision} records: 0 errors, 0 warnings", check.Out, StringComparison.Ordinal);
                 Assert.DoesNotContain("record.subject-stale", check.Out, StringComparison.Ordinal);
 
                 model = CommandContext.LoadCopy(root);
@@ -143,7 +144,7 @@ public sealed class PublishedDependencyCommandsTests
             Assert.Equal("record.subject-stale", finding.GetProperty("Code").GetString());
             Assert.Equal("warning", finding.GetProperty("severity").GetString());
             Assert.Equal(observed.Json.GetProperty("path").GetString(), finding.GetProperty("Location").GetString());
-            Assert.Equal(8, CommandContext.LoadCopy(root).Records.Count);
+            Assert.Equal(11, CommandContext.LoadCopy(root).Records.Count);
         }
         finally { CliHarness.Delete(root, scratch); }
     }

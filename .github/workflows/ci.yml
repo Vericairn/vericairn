@@ -160,6 +160,13 @@ jobs:
             printf probe | secret-tool store --label "Vericairn CI probe" application vericairn-ci probe 1
             test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
             python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'
+      - name: Measure history checkpoints at 100,000 records
+        if: matrix.share == 1
+        # The signed history design's section 11 cost test, on each platform beside the suites rather than in their time budget:
+        # the inventory's size, the adoption's objects and what verifying checkpoints adds, written to this step's log.
+        env:
+          VERICAIRN_COST_TESTS: "1"
+        run: dotnet artifacts/bin/Vericairn.Records.Tests/release/Vericairn.Records.Tests.dll --filter-class Vericairn.Records.Tests.HistoryCostTests --show-live-output on
       - name: Smoke the CLI
         if: matrix.share == 1
         run: dotnet run --no-build --configuration Release --project src/Vericairn.Cli -- records describe

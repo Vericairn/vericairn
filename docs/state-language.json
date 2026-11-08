@@ -154,6 +154,10 @@
       "attention",
       "accept"
     ],
+    "history": [
+      "not adopted",
+      "adopted"
+    ],
     "flow-delivery": [
       "due",
       "delivered",

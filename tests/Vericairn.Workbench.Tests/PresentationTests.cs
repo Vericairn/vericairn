@@ -44,6 +44,8 @@ public class PresentationTests
         Assert.Equal(Vericairn.Records.Estate.FlowPosition.ItemStates, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-item").States.Select(s => s.Value));
         Assert.Equal(Vericairn.Records.Estate.FlowStops.Kinds, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-stop").States.Select(s => s.Value));
         Assert.Equal(Vericairn.Records.Estate.FlowStops.Deliveries, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-delivery").States.Select(s => s.Value));
+        Assert.Equal(Vericairn.Records.History.HistoryLine.States, StateLanguage.Vocabularies.Single(v => v.Subject == "history").States.Select(s => s.Value));
+        Assert.StartsWith("History: " + StateLanguage.Vocabularies.Single(v => v.Subject == "history").States[1].Value + " ·", Vericairn.Records.History.HistoryLine.Render(true, ["sha256:" + new string('a', 64)], 1, 1, 0), StringComparison.Ordinal);
         Assert.All(Vericairn.Records.Estate.FlowStops.Kinds, kind => Assert.True(StateLanguage.NeedsPerson("flow-stop", kind)));
         Assert.False(StateLanguage.NeedsPerson("flow-delivery", "closed"));
         Assert.True(StateLanguage.NeedsPerson("step-route", "request"));

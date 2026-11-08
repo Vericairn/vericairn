@@ -65,16 +65,15 @@ public static class EstateStatus
         text.Append("Estate: ").Append(estate is null ? "(no charter)" : $"{EstateModel.BodyString(estate, "name")} ({EstateModel.BodyString(estate, "slug")})")
             .Append(" · record format ").Append((model.Manifest?.RecordFormat ?? RecordFormats.Current).ToString(CultureInfo.InvariantCulture)).Append(" · ").Append(model.Records.Count.ToString(CultureInfo.InvariantCulture)).Append(" records\n");
         text.Append("Vericairn: ").Append(model.Manifest?.Describe() ?? "(no manifest)").Append('\n');
-        // A removed, altered or missing witnessed record leads the status while it stands (design/signed-history.md § 7).
+        // The history line (design/signed-history.md § 9), the same words Workbench and Remote show; a removed, altered or missing
+        // witnessed record leads the status while it stands (§ 7).
         List<Finding> history = HistoryProblems(model);
-        if (history.Count > 0)
+        History.HistoryState state = History.SignedHistory.Of(model);
+        text.Append(History.HistoryLine.Render(state.Adopted, state.Heads.Select(h => h.Hash), state.Witnessed, state.Tail, history.Count));
+        text.Append(history.Count > 0 ? " with what history checkpoints witness; release submission waits until each is settled\n" : "\n");
+        foreach (Finding finding in history)
         {
-            text.Append("History: ").Append(history.Count.ToString(CultureInfo.InvariantCulture)).Append(history.Count == 1 ? " problem" : " problems")
-                .Append(" with what history checkpoints witness; release submission waits until each is settled\n");
-            foreach (Finding finding in history)
-            {
-                text.Append("  ").Append(finding).Append('\n');
-            }
+            text.Append("  ").Append(finding).Append('\n');
         }
 
         RecordEnvelope? observation = LastObservationByPerson(model);

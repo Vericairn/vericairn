@@ -25,6 +25,7 @@ internal static class ReleaseOutput
                 context.Output.WriteLine($"Client build: {check.ClientBuild ?? "unavailable"}; runtime build: {check.RuntimeBuild}");
                 context.Output.WriteLine($"Retained basis would be {check.BasisBytes} bytes; nothing retained.");
             }
+            if (response.Checkpoint?.Written is not null) context.ReportCheckpoint(response.Checkpoint);
             foreach (RecordWritten? written in new[] { response.Operation, response.Candidate, response.Release })
             {
                 if (written is not null)

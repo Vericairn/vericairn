@@ -1,0 +1,476 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text.Json;
+using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
+using Vericairn.Records.History;
+using Vericairn.Records.Identity;
+using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
+using Vericairn.Records.Updates;
+using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Store;
+
+namespace Vericairn.Runtime.Service;
+
+/// <summary>
+/// Writing and adopting history checkpoints (design/signed-history.md §§ 9 and 10; OPS-07): <c>estate checkpoint</c> and its adoption,
+/// the checkpoints the runtime writes by itself in the same batch as an act, and the machine's memory of the newest checkpoint it verified.
+/// </summary>
+public sealed partial class EstateService
+{
+    private const string Adoption = "adoption";
+    private const string Interval = "interval";
+
+    /// <summary>How long before the commit that added it a record's stated time may be before adoption's check points it out.</summary>
+    private static readonly TimeSpan BackdatingNotice = TimeSpan.FromDays(1);
+
+    /// <summary>A test's Vericairn home for the machine's memory of history; the session's home when null.</summary>
+    internal string? HistoryMemoryHome { get; set; }
+
+    /// <summary>A prepared checkpoint and the inventory objects this preparation stored, which a refusal removes again.</summary>
+    private sealed record PreparedCheckpoint(AuthoredRecord Record, IReadOnlyList<string> NewObjects);
+
+    /// <summary>What this clone's memory says of the copy: the newest checkpoint verified, whether the copy holds it counting, and whether the main line still does (null when that cannot be told).</summary>
+    private sealed record MemoryStanding(HistoryMemory.Verified Verified, bool CopyHolds, bool? MainHolds);
+
+    /// <inheritdoc />
+    public (HistoryCheckpointResponse? Checkpoint, Problem? Problem) HistoryCheckpoint(HistoryCheckpointRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string trigger = request.Adopt ? Adoption : "manual";
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            HistoryState state = SignedHistory.Of(model);
+            if (request.Adopt && state.Adopted)
+                return (null, new Problem("refused", $"This estate has adopted history checkpoints already; its {(state.Heads.Count == 1 ? "head is" : "heads are")} {string.Join(", ", state.Heads.Select(h => h.Id))}. Write a checkpoint with vericairn estate checkpoint --by <principal>.", []));
+            if (!request.Adopt && !state.Adopted)
+                return (null, new Problem("refused", "This estate has not adopted history checkpoints, and until it does only its adoption writes one. Read what adoption would witness and anchor with vericairn estate checkpoint --adopt --check; the root operator then signs it once with vericairn estate checkpoint --adopt --expect-plan <plan hash> --by <root operator>.", []));
+            if (!request.Adopt && request.ExpectPlan is not null)
+                return (null, new Problem("refused", "--expect-plan names an adoption's plan; a checkpoint written without --adopt anchors nothing.", []));
+            if (model.Manifest is not { RecordFormat: >= 3 })
+                return (null, new Problem("refused", "History checkpoints are records of format 3; upgrade the estate to record format 3 first.", []));
+            // A copy whose newest verified checkpoint is gone may have been rewritten: adopting it would witness and anchor what the rewrite
+            // left, a backdated record among them, so neither the adoption nor its check goes ahead (design/signed-history.md § 7).
+            if (request.Adopt && RolledBackRefusal(model) is string rolledBack) return (null, new Problem("refused", rolledBack, []));
+            if (!request.Check && (request.By is null || !Ulid.IsValid(request.By)))
+                return (null, new Problem("refused", "The principal whose admitted device signs the checkpoint must be a ULID: pass --by.", []));
+            if (request.Adopt && !request.Check && AdoptionRefusal(model, request.By!) is string refusal)
+                return (null, new Problem("refused", refusal, []));
+            if (!request.Check && RequestDeviceRefusal(model) is Problem denied) return (null, denied);
+            if (!request.Check && requestDevice.Value is { Closed: false, Signing: not null })
+                return (null, new Problem("refused", "A history checkpoint is signed on the runtime's machine by a device it holds; a device-signed request cannot write one.", []));
+
+            if (request.Check) return (Plan(model, trigger, request.Adopt, null), null);
+            if (session.IsReadOnly) return (null, new Problem("refused", "This copy is opened read-only; nothing was written.", []));
+
+            // The checkpoint follows the heads and lists the tail of the files as they are under the working tree's write lock.
+            return UnderWriteLock(() =>
+            {
+                EstateModel current = LoadWith([]);
+                if (request.Adopt && SignedHistory.Adopted(current)) return ((HistoryCheckpointResponse?)null, (Problem?)new Problem("refused", "Another writer adopted history checkpoints first; nothing was written.", []));
+                IReadOnlyList<RecordEnvelope>? anchored = null;
+                if (request.Adopt)
+                {
+                    AdoptionPlan plan = SignedHistory.PlanAdoption(current);
+                    if (PlanRefusal(plan, request.ExpectPlan) is string mismatch) return (null, new Problem("refused", mismatch, []));
+                    anchored = plan.Anchored;
+                }
+
+                (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, trigger, request.By!, anchored);
+                if (checkpoint is null) return (null, new Problem("refused", skipped ?? "No history checkpoint could be written.", []));
+                (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record], request.Adopt ? "Adopt history checkpoints." : "Write a history checkpoint.", null, null, null);
+                if (written.Count == 0)
+                {
+                    RemoveObjects(checkpoint);
+                    return (null, problem ?? new Problem("refused", "The checkpoint was not written.", []));
+                }
+
+                EstateModel after = LoadWith([]);
+                return (Plan(current, trigger, request.Adopt, written[0]) with { Adopted = SignedHistory.Adopted(after) }, problem);
+            }, problem => (null, problem));
+        }
+    }
+
+    /// <summary>
+    /// Why an adoption may not anchor the plan given (design/signed-history.md § 10): an adoption that anchors anything is bound to the
+    /// check its signer read, by the hash of the anchored set the check printed, so that what is signed is what was read.
+    /// </summary>
+    private static string? PlanRefusal(AdoptionPlan plan, string? expected)
+    {
+        if (expected is null)
+            return plan.Anchored.Count == 0 ? null
+                : $"Adoption anchors {plan.Anchored.Count} unsigned records. Read them with vericairn estate checkpoint --adopt --check and pass the plan hash it prints with --expect-plan, so that the adoption anchors exactly what you read. Nothing was signed.";
+        string named = expected.Trim();
+        if (!named.StartsWith(ContentHash.Prefix, StringComparison.Ordinal)) named = ContentHash.Prefix + named;
+        return string.Equals(named, plan.AnchoredHash, StringComparison.OrdinalIgnoreCase) ? null
+            : "The records adoption would anchor are not the plan you named: the estate changed since that check, or the hash is another plan's. Read vericairn estate checkpoint --adopt --check again. Nothing was signed.";
+    }
+
+    /// <summary>
+    /// Why a principal may not adopt (design/signed-history.md §§ 6 and 10): adoption anchors records and changes what counts for the whole
+    /// estate, so it is the root operator's, or a person's holding administer now through a grant that rests on signatures, as the history
+    /// judges anchors, never an agent's. The model then judges the signed adoption as it judges every checkpoint, its devices included.
+    /// </summary>
+    private static string? AdoptionRefusal(EstateModel model, string by) =>
+        model.Trust.AnchorerAt(by, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)) ? null
+            : $"Adopting history checkpoints anchors the unsigned records that count today and changes what counts in the whole estate, so it is signed by the root operator or a person holding administer through a grant that rests on signatures, never an agent; principal {by} is neither. Nothing was written.";
+
+    /// <summary>What a checkpoint witnesses and anchors, or would, with the commits that added the anchored records and the deletions in history.</summary>
+    private HistoryCheckpointResponse Plan(EstateModel model, string trigger, bool adopt, RecordWritten? written)
+    {
+        HistoryState state = SignedHistory.Of(model);
+        IReadOnlyList<RecordEnvelope> tail = SignedHistory.TailRecords(model);
+        List<HistoryCheckpointPin> heads = [.. state.Heads.Select(h => new HistoryCheckpointPin(h.Id, h.Hash!))];
+        if (!adopt)
+            return new HistoryCheckpointResponse(trigger, written is not null, state.Adopted, state.Witnessed + tail.Count, tail.Count, heads, [], [], [], [], null, written);
+
+        AdoptionPlan plan = SignedHistory.PlanAdoption(model);
+        var unavailable = new List<string>();
+        ISourceAdapter? git = model.Manifest?.Profile == "repository-synced" ? Providers.Source("git") : null;
+        bool repository = IsRepository(model.Root);
+        RecordOrigins? origins = git is not null && repository ? git.RecordFileOrigins(model.Root) : null;
+        if (git is null) unavailable.Add("The commits that added records and the record files deleted in history come from the git adapter, which does not serve this copy.");
+        else if (!repository) unavailable.Add("This estate is not a git repository, so the commits that added records and the record files deleted in history cannot be listed.");
+        else if (origins is null) unavailable.Add("The commits that added records could not be read from the repository.");
+        else if (origins.Shallow) unavailable.Add("This clone is shallow, so the commits that added records and the record files deleted in history cannot be listed; a full clone lists them.");
+        bool complete = origins is { Shallow: false };
+        List<HistoryDeletedFile> deleted = [];
+        if (git is not null && repository && git.DeletedRecordFiles(model.Root) is { Shallow: false } deletions)
+            deleted = [.. deletions.Deleted.Where(d => model.FilePaths?.Contains(d.Path) != true && !model.ById.ContainsKey(Path.GetFileNameWithoutExtension(d.Path))).Select(d => new HistoryDeletedFile(d.Path, d.Commit))];
+        else if (git is not null && repository && complete) unavailable.Add("The record files deleted in history could not be read from the repository.");
+
+        IReadOnlySet<string> migration = model.Trust.MigrationAnchors;
+        HistoryRecordItem Item(RecordEnvelope record, string? device = null)
+        {
+            string? commit = origins?.Added.GetValueOrDefault(record.ExpectedPath);
+            DateTimeOffset? committed = origins is not null && origins.AddedAt.TryGetValue(record.ExpectedPath, out DateTimeOffset at) ? at : null;
+            var notes = new List<string>();
+            if (complete && commit is null) notes.Add("no commit holds this file yet");
+            if (committed is { } time && record.AtTime < time - BackdatingNotice)
+                notes.Add($"dated {record.At}, more than a day before the commit that added it ({RecordParser.FormatTimestamp(time)})");
+            if (plan.AlreadyAnchored.Contains(record.Id))
+                notes.Add(migration.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))
+                    ? "already anchored by the format-2 migration; adoption lists it again" : "already anchored; adoption lists it again");
+            return new(record.Id, record.Type, record.At, record.ExpectedPath, commit, device, committed is { } c ? RecordParser.FormatTimestamp(c) : null,
+                notes.Count == 0 ? null : string.Join("; ", notes));
+        }
+
+        List<string> uncommitted = complete ? [.. model.Records.Select(r => r.ExpectedPath).Where(p => !origins!.Added.ContainsKey(p)).Order(StringComparer.Ordinal)] : [];
+        return new HistoryCheckpointResponse(trigger, written is not null, state.Adopted, plan.Witnessed, tail.Count, heads,
+            [.. plan.Anchored.Select(r => Item(r))], [.. plan.NotCounting.Select(r => Item(r))], [.. plan.ByRevokedDevices.Select(r => Item(r.Record, r.Device))],
+            deleted, unavailable.Count == 0 ? null : string.Join(" ", unavailable), written) { PlanHash = plan.AnchoredHash, Uncommitted = uncommitted };
+    }
+
+    private static bool IsRepository(string root) => Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
+
+    /// <summary>
+    /// Prepares and signs a checkpoint over a model, its inventory objects stored first, signed by the principal's admitted device held on
+    /// this machine: the device then writing (design/signed-history.md § 9). Null with the reason when it cannot be; null without one when
+    /// no checkpoint is asked: before adoption, for any trigger but adoption, and for an interval when the device then writing is a
+    /// person's with presence, which is never asked for one, or there is none. The model must be read under the write lock when the
+    /// checkpoint is stored with it. Objects this preparation stored are removed again when it fails, and by the caller when the
+    /// checkpoint is not stored, so a refused checkpoint leaves none behind.
+    /// </summary>
+    /// <remarks>
+    /// The hook for closings (design/signed-history.md § 8, ID-06): a revocation, key rotation or narrowing grant revision stores, in one
+    /// batch and before its own record, the checkpoint this prepares over the copy as it is, with trigger closing, <paramref name="closes"/>
+    /// naming what it closes and <paramref name="signer"/> the key that performs the act, since only someone who could perform the act signs
+    /// its closing; StoreTogetherUnderLock then stores [closing, act].
+    /// </remarks>
+    private (PreparedCheckpoint? Checkpoint, string? Skipped) CheckpointLocked(EstateModel model, string trigger, string by, IEnumerable<RecordEnvelope>? anchored = null,
+        (string Kind, string Id)? closes = null, IRecordSigner? signer = null)
+    {
+        if (requestDevice.Value is { Closed: false, Signing: not null })
+            return (null, trigger == Interval ? null : "A device-signed request signs only its own record, so no history checkpoint was written with it; the next checkpoint witnesses it.");
+        if (trigger != Adoption && !SignedHistory.Adopted(model)) return (null, null);
+        using JsonDocument probe = JsonDocument.Parse("{}");
+        if (signer is null && (ResolveSigner(model, new RecordDraft("history-checkpoint", by, probe.RootElement), out signer) is not null || signer is null))
+            return (null, trigger == Interval ? null : $"Principal {by} has no admitted device whose key this machine holds, so no history checkpoint with trigger {trigger} was written; the next checkpoint witnesses what this one would have.");
+        if (trigger == Interval && model.Current("device").FirstOrDefault(d => model.Chain(d)[0] == signer.DeviceId) is { } device && EstateModel.BodyString(device, "presence") == "required")
+            return (null, null);
+
+        var stored = new List<string>();
+        CheckpointDraft draft;
+        try
+        {
+            draft = SignedHistory.Prepare(model, trigger, anchored, closes: closes);
+            foreach (byte[] bytes in draft.Objects)
+            {
+                string hash = ContentHash.Sha256(bytes);
+                if (session.Objects.Has(hash)) continue;
+                session.Objects.Put(bytes);
+                stored.Add(hash);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            RemoveObjects(stored);
+            return (null, $"No history checkpoint with trigger {trigger} was written: {exception.Message}");
+        }
+
+        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body), model, [signer]);
+        if (checkpoint is null || checkpoint.Envelope.Signatures.Count == 0)
+        {
+            RemoveObjects(stored);
+            return (null, $"No history checkpoint with trigger {trigger} was written: {refusal ?? "it would be unsigned."}");
+        }
+
+        return (new PreparedCheckpoint(checkpoint, stored), null);
+    }
+
+    private void RemoveObjects(PreparedCheckpoint checkpoint) => RemoveObjects(checkpoint.NewObjects);
+
+    // Content-addressed objects this preparation added and nothing stored refers to; one that cannot be removed stays, inert.
+    private void RemoveObjects(IEnumerable<string> hashes)
+    {
+        foreach (string hash in hashes)
+        {
+            try { session.Objects.Remove(hash); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { }
+        }
+    }
+
+    /// <summary>
+    /// The checkpoint a single write sets off (design/signed-history.md § 9; OPS-07), or null: the root operator's first device admitting
+    /// itself in a newborn estate adopts at birth; in an estate that has adopted, a charter revision writes one with trigger charter, and
+    /// any other write signed by this machine's device for its author one with trigger interval once the tail is due. Only a write this
+    /// machine signs for its author sets one off: a device-signed request, a record presigned elsewhere and a write signed with keys the
+    /// caller names, such as a device signing its own record, set off none, so the runtime never signs or anchors for a signer elsewhere.
+    /// </summary>
+    private string? TriggerOf(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    {
+        if (signers is not null || draft.Type == "history-checkpoint" || requestDevice.Value is { Closed: false, Signing: not null } || session.IsReadOnly) return null;
+        if (draft.Type == "admission" && Newborn(current, draft)) return Adoption;
+        if (!SignedHistory.Adopted(current)) return null;
+        if (draft.Type == "estate" && draft.Supersedes is not null) return "charter";
+        return SignedHistory.IntervalDue(current, DateTimeOffset.UtcNow) ? Interval : null;
+    }
+
+    /// <summary>
+    /// Whether an admission is the first authority of a newborn estate, which adopts at birth (design/signed-history.md § 10: estate init
+    /// adopts at birth): the root operator admitting its own first device while the estate holds nothing but what estate init wrote, the
+    /// root operator's devices and no checkpoint. An estate with any other record adopts as the operator's explicit step instead.
+    /// </summary>
+    private static bool Newborn(EstateModel model, RecordDraft draft)
+    {
+        string? root = model.RootOperator;
+        if (root is null || draft.By != root || draft.Subject is not { Type: "device" } subject || SignatureChecks.FirstAuthority(model, root) is not null) return false;
+        if (draft.Body.ValueKind != JsonValueKind.Object || !draft.Body.TryGetProperty("status", out JsonElement status) || status.ValueKind != JsonValueKind.String || status.GetString() != "admitted" || model.Manifest is not { RecordFormat: >= 3 }) return false;
+        if (!model.ById.TryGetValue(subject.Id, out RecordEnvelope? device) || EstateModel.BodyString(device, "principal") != root) return false;
+        return model.Records.All(r => r.Type switch
+        {
+            "estate" => r.Supersedes is null && r.Id == model.Manifest.Estate,
+            "principal" => r.Id == root && r.Supersedes is null,
+            "observation" => VericairnReleaseObservation.Is(r) && model.Manifest.Release?.Id == r.Id,
+            "device" => EstateModel.BodyString(r, "principal") == root,
+            _ => false,
+        });
+    }
+
+    /// <summary>
+    /// Stores a record with the checkpoint its trigger writes, in one batch, the record first. A checkpoint that cannot be written never
+    /// blocks the record: the record is judged and stored alone, and the outcome says why no checkpoint was written. Caller holds the gate
+    /// and the write lock.
+    /// </summary>
+    private WriteOutcome StoreWithCheckpointLocked(AuthoredRecord record, EstateModel current, string trigger, string by)
+    {
+        EstateModel withRecord = LoadWith([record]);
+        IReadOnlyList<RecordEnvelope>? anchored = trigger switch
+        {
+            Adoption => SignedHistory.PlanAdoption(withRecord).Anchored,
+            "charter" => CharterAnchors(current, record.Envelope),
+            _ => null,
+        };
+        (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(withRecord, trigger, by, anchored);
+        if (checkpoint is null)
+        {
+            WriteOutcome alone = StoreAuthoredLocked(record, current);
+            return skipped is null || alone.Written is null ? alone : alone with { Checkpoint = new TriggeredCheckpoint(trigger, null, skipped) };
+        }
+
+        (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([record, checkpoint.Record],
+            $"Store the record and the history checkpoint its {trigger} trigger writes with it.", null, null, null);
+        if (written.Count == 0)
+        {
+            RemoveObjects(checkpoint);
+            WriteOutcome alone = StoreAuthoredLocked(record, current);
+            return alone.Written is null ? alone : alone with { Checkpoint = new TriggeredCheckpoint(trigger, null, "The history checkpoint was refused, so the record was written alone: " + Describe(problem)) };
+        }
+
+        // The record was stored; a checkpoint stopped after it is the checkpoint's failure alone, reported with it and never as the record's.
+        RecordWritten? stored = written.Count > 1 ? written[1] : null;
+        if (stored is null) RemoveObjects(checkpoint);
+        return new WriteOutcome(written[0], stored is null ? null : problem) { Checkpoint = new TriggeredCheckpoint(trigger, stored, stored is null ? "The history checkpoint was not stored: " + Describe(problem) : null) };
+    }
+
+    /// <summary>
+    /// What a charter revision's checkpoint anchors (design/signed-history.md § 6): a revision moving the charter to required signatures,
+    /// by the root operator or a person holding administer, is followed in the same batch by a checkpoint anchoring the unsigned records
+    /// that count before it and no anchor lists yet, so an earlier optional period leaves nothing to backdate into and no reading changes.
+    /// Any other revision, and any other author's, anchors nothing; a revision to required that would leave unsigned records counting
+    /// for nothing is then refused as before.
+    /// </summary>
+    private static List<RecordEnvelope>? CharterAnchors(EstateModel current, RecordEnvelope revision)
+    {
+        if (RequiresSignatures(current.CurrentEstate) || !RequiresSignatures(revision) || AdoptionRefusal(current, revision.By) is not null) return null;
+        IReadOnlySet<string> anchors = SignatureChecks.Anchored(current);
+        List<RecordEnvelope> anchored = [.. SignedHistory.PlanAdoption(current).Anchored.Where(r => !anchors.Contains(SignatureChecks.AnchorKey(r.Id, r.ComputedHash)))];
+        return anchored.Count == 0 ? null : anchored;
+    }
+
+    private static bool RequiresSignatures(RecordEnvelope? charter) =>
+        charter is not null && charter.Body.ValueKind == JsonValueKind.Object && charter.Body.TryGetProperty("policies", out JsonElement policies) &&
+        policies.ValueKind == JsonValueKind.Object && policies.TryGetProperty("signatures", out JsonElement policy) && policy.ValueKind == JsonValueKind.String && policy.GetString() == "required";
+
+    /// <summary>
+    /// Writes a checkpoint by itself for an act that records nothing in the same batch, such as the release gate's before the submission
+    /// check (design/release-procedure.md § 7): null before adoption; otherwise the checkpoint written or why none could be. Caller holds the gate.
+    /// </summary>
+    internal TriggeredCheckpoint? WriteCheckpointLocked(string trigger, string by)
+    {
+        // Read from the canonical files, as the release gates do, so that an estate that has not adopted leaves the live cache untouched.
+        if (!SignedHistory.Adopted(session.Read())) return null;
+        return UnderWriteLock(() =>
+        {
+            (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(LoadWith([]), trigger, by);
+            if (checkpoint is null) return new TriggeredCheckpoint(trigger, null, skipped ?? "No history checkpoint was asked.");
+            (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record], $"Write the history checkpoint with trigger {trigger}.", null, null, null);
+            if (written.Count == 1) return new TriggeredCheckpoint(trigger, written[0], null);
+            RemoveObjects(checkpoint);
+            return new TriggeredCheckpoint(trigger, null, "The history checkpoint was not written: " + Describe(problem));
+        }, problem => new TriggeredCheckpoint(trigger, null, problem.Message));
+    }
+
+    /// <summary>
+    /// The release gate's objections from this machine's memory (design/signed-history.md § 7; design/release-procedure.md § 7): while
+    /// the memory holds a verified checkpoint, a copy that has not adopted, or whose main line no longer holds that checkpoint, may have
+    /// been rewritten, and no release is submitted from it.
+    /// </summary>
+    internal IReadOnlyList<FindingDto> HistoryObjections(EstateModel model)
+    {
+        if (Standing(model) is not { } standing) return [];
+        string? why = !SignedHistory.Adopted(model) ? "this copy has not adopted history checkpoints"
+            : standing.MainHolds == false ? "the main line no longer holds it"
+            : !standing.CopyHolds && standing.MainHolds is null ? "this copy no longer holds it"
+            : null;
+        return why is null ? [] :
+        [
+            new FindingDto("error", "history.rolled-back", standing.Verified.Path,
+                $"This machine verified history checkpoint {standing.Verified.Id} ({HistoryLine.ShortHash(standing.Verified.Hash)}) on {standing.Verified.VerifiedAt}, and {why}: its history may have been rewritten to remove the newest checkpoints together with the records after them. Restore that history from a clone or remote that holds it, or check this copy against a head the main line holds with vericairn estate check --expect <checkpoint>, before submitting a release."),
+        ];
+    }
+
+    /// <summary>Why adoption, and its check, do not go ahead on this clone: its memory holds a verified checkpoint the copy no longer holds.</summary>
+    private string? RolledBackRefusal(EstateModel model) =>
+        Standing(model) is { CopyHolds: false } standing
+            ? $"This machine verified history checkpoint {standing.Verified.Id} ({HistoryLine.ShortHash(standing.Verified.Hash)}) on {standing.Verified.VerifiedAt}, and this copy no longer holds it: its history may have been rewritten to remove the checkpoints together with the records after them, and adopting now would witness and anchor what the rewrite left. Restore that history from a clone or remote that holds it, or check this copy against a head the main line holds with vericairn estate check --expect <checkpoint>, which this machine then remembers instead. Nothing was signed."
+            : null;
+
+    /// <summary>What this clone's memory says of the copy, or null when it remembers no checkpoint or cannot be read.</summary>
+    private MemoryStanding? Standing(EstateModel model)
+    {
+        if (model.Manifest is not { } manifest) return null;
+        HistoryMemory.Remembered? remembered;
+        try
+        {
+            remembered = new HistoryMemory(model.Root, manifest.Estate, manifest.Profile, HistoryMemoryHome ?? session.Home).Read();
+        }
+        catch (Exception exception) when (HistoryMemory.Unavailable(exception))
+        {
+            return null;
+        }
+
+        if (remembered?.Checkpoint is not { } verified) return null;
+        bool copy = model.ById.TryGetValue(verified.Id, out RecordEnvelope? held) && held.ComputedHash == verified.Hash && model.Counts(held);
+        bool? main = null;
+        if (manifest.Profile == "repository-synced" && IsRepository(model.Root) && Providers.Source("git") is { } git && git.MainLine(model.Root) is { } line)
+            main = HistoryMemory.Holds(git, model.Root, line, verified.Path, verified.Hash);
+        return new MemoryStanding(verified, copy, main);
+    }
+
+    private static string Describe(Problem? problem) => problem is null ? "no reason was given."
+        : problem.Findings.Count == 0 ? problem.Message : problem.Message + " " + string.Join(" ", problem.Findings.Where(f => f.Severity == "error").Select(f => $"{f.Code}: {f.Message}"));
+
+    /// <summary>
+    /// The machine's memory at check time (design/signed-history.md § 7): warns history.rolled-back when the main line no longer holds the
+    /// newest checkpoint this machine verified, a branch checkout judged through the main line; otherwise remembers the newest counting
+    /// head the main line holds that follows the one remembered. It depends on the machine, so it stays out of the canonical status.
+    /// </summary>
+    private FindingList RolledBack(EstateModel model)
+    {
+        var findings = new FindingList();
+        // Only a clone has a main line; an estate directory that is not a repository has nothing to judge here.
+        if (model.Manifest is not { Profile: "repository-synced" } manifest || Providers.Source("git") is not { } git || !IsRepository(model.Root)) return findings;
+        HistoryMemory memory;
+        HistoryMemory.Remembered? remembered;
+        try
+        {
+            memory = new HistoryMemory(model.Root, manifest.Estate, manifest.Profile, HistoryMemoryHome ?? session.Home);
+            remembered = memory.Read();
+        }
+        catch (Exception exception) when (HistoryMemory.Unavailable(exception))
+        {
+            findings.Warning("history.rolled-back", EstateLayout.RecordsDirectory, $"This machine's memory of the newest history checkpoint it verified cannot be read, since {HistoryMemory.Describe(exception)}, so a rewrite of this clone's history cannot be told.");
+            return findings;
+        }
+
+        EstateMainLine? main = git.MainLine(model.Root);
+        if (main is null)
+        {
+            if (remembered?.Checkpoint is not null || SignedHistory.Adopted(model))
+                findings.Info("history.rolled-back", EstateLayout.RecordsDirectory, "Unavailable: this clone has no main line (a local branch the origin's HEAD names, main or master), so whether it still holds the newest history checkpoint this machine verified cannot be told.");
+            return findings;
+        }
+
+        if (remembered?.Checkpoint is { } verified && !HistoryMemory.Holds(git, model.Root, main, verified.Path, verified.Hash))
+        {
+            findings.Warning("history.rolled-back", verified.Path,
+                $"This machine verified history checkpoint {verified.Id} ({HistoryLine.ShortHash(verified.Hash)}) on {verified.VerifiedAt}, held by commit {verified.Commit} of {verified.Branch}, and the main line ({main.Branch} at {main.Commit}) no longer holds it: its history may have been rewritten to remove the newest checkpoints together with the records after them. Restore that history from a clone or remote that holds it; if the rewrite was intended, check this copy against a head the main line holds with vericairn estate check --expect <checkpoint>, which this machine then remembers instead. Until then this clone neither adopts nor submits a release.");
+            return findings;
+        }
+
+        // The memory moves only forward along the history it verified: to a head that follows the checkpoint remembered.
+        HistoryState state = SignedHistory.Of(model);
+        RecordReference? newest = state.Heads
+            .Where(h => remembered?.Checkpoint is not { } known || h.Id != known.Id && SignedHistory.Follows(model, h.Id, known.Id))
+            .Where(h => model.ById.TryGetValue(h.Id, out RecordEnvelope? head) && HistoryMemory.Holds(git, model.Root, main, head.ExpectedPath, h.Hash!))
+            .OrderBy(h => h.Id, StringComparer.Ordinal).LastOrDefault();
+        if (newest is null || session.IsReadOnly) return findings;
+        try
+        {
+            memory.Write(new HistoryMemory.Remembered(manifest.Estate,
+                new HistoryMemory.Verified(newest.Id, newest.Hash!, model.ById[newest.Id].ExpectedPath, main.Branch, main.Commit, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)), remembered?.Expect));
+        }
+        catch (Exception exception) when (HistoryMemory.Unavailable(exception))
+        {
+            findings.Warning("history.rolled-back", EstateLayout.RecordsDirectory, $"This machine cannot remember the newest history checkpoint it verified, since {HistoryMemory.Describe(exception)}.");
+        }
+
+        return findings;
+    }
+
+    /// <summary>What this machine remembers of the estate's history, for the check's information line; null when nothing.</summary>
+    private Finding? Remembered(EstateModel model)
+    {
+        if (model.Manifest is not { } manifest) return null;
+        try
+        {
+            if (new HistoryMemory(model.Root, manifest.Estate, manifest.Profile, HistoryMemoryHome ?? session.Home).Read() is not { } remembered) return null;
+            var parts = new List<string>();
+            if (remembered.Checkpoint is { } verified)
+                parts.Add($"the newest history checkpoint it verified is {verified.Id} ({HistoryLine.ShortHash(verified.Hash)}), held by commit {verified.Commit} of {verified.Branch} on {verified.VerifiedAt}");
+            if (remembered.Expect is { Checkpoint: { } expected } expect)
+                parts.Add($"its latest estate check --expect found checkpoint {expected} held on {expect.CheckedAt}");
+            return parts.Count == 0 ? null : new Finding(Severity.Info, "history.remembered", EstateLayout.RecordsDirectory, "This machine remembers that " + string.Join("; ", parts) + ".");
+        }
+        catch (Exception exception) when (HistoryMemory.Unavailable(exception))
+        {
+            return null;
+        }
+    }
+}

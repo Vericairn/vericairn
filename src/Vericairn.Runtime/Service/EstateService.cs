@@ -52,7 +52,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
             (draft, model) => AuthorLocked(draft, model),
-            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, WriteCheckpointLocked, HistoryObjections);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, goal, maxBytes, recipient, assignment, promptUse, searches, agent) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),
@@ -261,6 +261,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 all.Add(finding);
             }
 
+            // The machine's memory of the newest history checkpoint it verified (design/signed-history.md § 7).
+            foreach (Finding finding in RolledBack(model))
+            {
+                all.Add(finding);
+            }
+
+            if (Remembered(model) is { } remembered) all.Add(remembered);
             return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
     }
@@ -1670,62 +1677,99 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (AuthoredRecord? migration, string? migrationRefusal) = AuthorLocked(migrationDraft, model);
             if (migration is null) return (null, new Problem("refused", migrationRefusal!, []));
             AuthoredRecord[] proposed = dependency is null ? [migration] : [dependency, migration];
-            if (JudgeProposedLocked(proposed) is Problem rejected) return (null, rejected);
-            DocumentChangePlan generated = PrepareDocuments(model, proposed);
-            if (generated.Status != DocumentGenerationStatus.Success)
-                return (null, new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
-
-            var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
-            var createdDirectories = new HashSet<string>(StringComparer.Ordinal);
+            // In an estate that has adopted history checkpoints the upgrade writes one with trigger upgrade in the same batch, signed by the
+            // device then writing (design/release-procedure.md § 7). A checkpoint that cannot be written never blocks the upgrade; the
+            // response says why. Migrations that rewrite record files would change what it lists, so none is written with them.
+            // Objects a prepared checkpoint stored are removed again unless the checkpoint itself is stored.
+            PreparedCheckpoint? upgradePrepared = null;
+            bool keepCheckpointObjects = false;
             try
             {
-                EnableUpgradeWrites();
-                foreach ((string relative, byte[] bytes) in context.Staged.OrderBy(s => s.Key, StringComparer.Ordinal))
+                TriggeredCheckpoint? upgradeCheckpoint = null;
+                if (global::Vericairn.Records.History.SignedHistory.Adopted(model))
                 {
-                    string full = Path.Combine(session.Root, relative.Replace('/', Path.DirectorySeparatorChar));
-                    previousContents[relative] = File.Exists(full) ? File.ReadAllBytes(full) : null;
-                    string? parent = Path.GetDirectoryName(full);
-                    while (parent is not null && parent != session.Root && !Directory.Exists(parent))
+                    (PreparedCheckpoint? checkpoint, string? skipped) = context.Staged.Keys.Any(k => k.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
+                        ? (null, "The migrations rewrite record files, so no history checkpoint was written with the upgrade; the next checkpoint witnesses them.")
+                        : CheckpointLocked(LoadWith(proposed), "upgrade", request.By);
+                    upgradePrepared = checkpoint;
+                    if (checkpoint is not null && JudgeProposedLocked([.. proposed, checkpoint.Record]) is Problem refusedCheckpoint)
                     {
-                        createdDirectories.Add(parent);
-                        parent = Path.GetDirectoryName(parent);
+                        skipped = "The history checkpoint was refused, so the upgrade was written without it: " + Describe(refusedCheckpoint);
+                        checkpoint = null;
                     }
-                    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-                    File.WriteAllBytes(full, bytes);
+
+                    if (checkpoint is not null) proposed = [.. proposed, checkpoint.Record];
+                    upgradeCheckpoint = checkpoint is null ? skipped is null ? null : new TriggeredCheckpoint("upgrade", null, skipped) : new TriggeredCheckpoint("upgrade", null, null);
                 }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                RestoreFiles(session.Root, previousContents, createdDirectories);
-                return (null, new Problem("refused", $"The upgrade could not write its files and was undone: {exception.Message}", []));
-            }
 
-            UpgradeStage?.Invoke("staged");
-            // The migration record comes before the manifest: a run that stops between them leaves a record that says what to finish,
-            // never a moved manifest with nothing recording the move.
-            (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null, null,
-                regenerated.IsEmpty ? null : [.. regenerated.Select(m => m.Change)]);
-            RecordWritten? stored = written.FirstOrDefault(r => r.Id == migration.Envelope.Id);
-            var outcome = new WriteOutcome(stored, storageProblem);
-            if (outcome.Written is null)
-            {
-                RestoreFiles(session.Root, previousContents, createdDirectories);
-                if (written.Count > 0)
-                    return (null, new Problem("reconcile-required", $"Verified dependency observation {written[0].Id} was stored, but its migration was not. Inspect the interrupted batch with estate reconcile before retrying the upgrade; the manifest has not moved.", []));
-                return (null, outcome.Problem);
-            }
+                if (JudgeProposedLocked(proposed) is Problem rejected) return (null, rejected);
+                DocumentChangePlan generated = PrepareDocuments(model, proposed);
+                if (generated.Status != DocumentGenerationStatus.Success)
+                    return (null, new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
 
-            UpgradeStage?.Invoke("recorded");
-            try
-            {
-                ReplaceManifest(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                return (null, new Problem("refused", $"Migration {outcome.Written.Id} is recorded, and the manifest could not be replaced: {exception.Message} Rerun the upgrade to finish it; the estate check reports upgrade.incomplete until then.", []));
-            }
+                var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
+                var createdDirectories = new HashSet<string>(StringComparer.Ordinal);
+                try
+                {
+                    EnableUpgradeWrites();
+                    foreach ((string relative, byte[] bytes) in context.Staged.OrderBy(s => s.Key, StringComparer.Ordinal))
+                    {
+                        string full = Path.Combine(session.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+                        previousContents[relative] = File.Exists(full) ? File.ReadAllBytes(full) : null;
+                        string? parent = Path.GetDirectoryName(full);
+                        while (parent is not null && parent != session.Root && !Directory.Exists(parent))
+                        {
+                            createdDirectories.Add(parent);
+                            parent = Path.GetDirectoryName(parent);
+                        }
+                        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                        File.WriteAllBytes(full, bytes);
+                    }
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    RestoreFiles(session.Root, previousContents, createdDirectories);
+                    return (null, new Problem("refused", $"The upgrade could not write its files and was undone: {exception.Message}", []));
+                }
 
-            return (response with { Applied = true, Migration = outcome.Written }, outcome.Problem);
+                UpgradeStage?.Invoke("staged");
+                // The migration record comes before the manifest: a run that stops between them leaves a record that says what to finish,
+                // never a moved manifest with nothing recording the move.
+                (IReadOnlyList<RecordWritten> written, Problem? storageProblem) = StoreTogetherLocked(proposed, "Pin a published Vericairn release and record its migration.", null, null,
+                    regenerated.IsEmpty ? null : [.. regenerated.Select(m => m.Change)]);
+                RecordWritten? stored = written.FirstOrDefault(r => r.Id == migration.Envelope.Id);
+                if (upgradeCheckpoint is { Skipped: null } && proposed[^1].Envelope.Type == "history-checkpoint")
+                {
+                    RecordWritten? checkpointWritten = written.FirstOrDefault(r => r.Id == proposed[^1].Envelope.Id);
+                    keepCheckpointObjects = checkpointWritten is not null;
+                    upgradeCheckpoint = upgradeCheckpoint with { Written = checkpointWritten, Skipped = checkpointWritten is null ? "The history checkpoint was not stored: " + Describe(storageProblem) : null };
+                }
+
+                var outcome = new WriteOutcome(stored, storageProblem);
+                if (outcome.Written is null)
+                {
+                    RestoreFiles(session.Root, previousContents, createdDirectories);
+                    if (written.Count > 0)
+                        return (null, new Problem("reconcile-required", $"Verified dependency observation {written[0].Id} was stored, but its migration was not. Inspect the interrupted batch with estate reconcile before retrying the upgrade; the manifest has not moved.", []));
+                    return (null, outcome.Problem);
+                }
+
+                UpgradeStage?.Invoke("recorded");
+                try
+                {
+                    ReplaceManifest(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return (null, new Problem("refused", $"Migration {outcome.Written.Id} is recorded, and the manifest could not be replaced: {exception.Message} Rerun the upgrade to finish it; the estate check reports upgrade.incomplete until then.", []));
+                }
+
+                return (response with { Applied = true, Migration = outcome.Written, Checkpoint = upgradeCheckpoint }, outcome.Problem);
+            }
+            finally
+            {
+                if (upgradePrepared is not null && !keepCheckpointObjects) RemoveObjects(upgradePrepared);
+            }
         }
     }
 
@@ -2317,6 +2361,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(refusal!);
         }
 
+        // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
+        if (TriggerOf(draft, current, signers) is string trigger)
+        {
+            return UnderWriteLock(() => StoreWithCheckpointLocked(record, current, trigger, draft.By), WriteOutcome.Fail);
+        }
+
         return UnderWriteLock(() => StoreAuthoredLocked(record, current), WriteOutcome.Fail);
     }
 
@@ -2623,7 +2673,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             bool routing = journal.Records.Any(r => r.Type == "assignment");
             // A run's work order holds its steps one by one: the batch is moot once its own step is held again.
             FlowRuns.StepRef? flowStep = stored.Where(r => r.Type == "assignment").Select(r => FlowRuns.StepOf(model.ById[r.Id])).FirstOrDefault(s => s is not null);
-            bool moot = stored.Count == 0 || missing.Count == 0 || (routing &&
+            // A record stored without the history checkpoint its trigger wrote with it needs nothing more: the next checkpoint witnesses it.
+            // Not so a charter revision or an admission, whose checkpoint anchors or adopts: without it unsigned records may stop counting
+            // or the estate is left unadopted, so the task stays.
+            bool moot = stored.Count == 0 || missing.Count == 0 ||
+                missing.All(r => r.Type == "history-checkpoint") && stored.All(r => r.Type is not ("estate" or "admission")) || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)

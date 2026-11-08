@@ -232,11 +232,16 @@ internal sealed partial class ReleaseCoordinationService(
     }
 
     /// <summary>Claims a release identity before dispatch and records the provider's receipt.</summary>
-    internal ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Submit(request, checkOnly: false);
+    internal ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request)
+    {
+        var checkpoint = new System.Runtime.CompilerServices.StrongBox<TriggeredCheckpoint?>();
+        ReleaseResponse response = Submit(request, checkOnly: false, checkpoint);
+        return checkpoint.Value is null ? response : response with { Checkpoint = checkpoint.Value };
+    }
 
     internal ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => Submit(request, checkOnly: true);
 
-    private ReleaseResponse Submit(ReleaseSubmitRequest request, bool checkOnly)
+    private ReleaseResponse Submit(ReleaseSubmitRequest request, bool checkOnly, System.Runtime.CompilerServices.StrongBox<TriggeredCheckpoint?>? checkpoint = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         request = request with { Product = request.Product ?? "", By = request.By ?? "", Version = request.Version ?? "" };
@@ -273,6 +278,8 @@ internal sealed partial class ReleaseCoordinationService(
         // Security reports are read before the gate is taken and only here, before any durable claim: their objections are never
         // retained or written into an intent, so no advisory identity reaches a record through a refused or canceled submission.
         IReadOnlyList<FindingDto> security = securityReports(request.By, !checkOnly, request.SecurityReportsUnread);
+        // A copy this machine saw hold a newer checkpoint than it holds now may have been rewritten: no release goes from it (OPS-07).
+        setup.AddRange(recordAccess.HistoryObjections(prepared));
         List<string> basisEvidence = [];
         List<RecordReference> excluded = [];
         RecordEnvelope claimRevision;
@@ -282,6 +289,21 @@ internal sealed partial class ReleaseCoordinationService(
         // All gates run before the durable claim. Resolving a provider ref is not part of admission.
         lock (gate)
         {
+            // The release gate (design/release-procedure.md § 7): in an estate that has adopted history checkpoints, a checkpoint with
+            // trigger release, signed by the device then writing, is written before the submission's check, so the admitted basis is a
+            // witnessed history. It is not written for a submission its setup already refuses, and one that cannot be written refuses the
+            // submission, saying why.
+            if (!checkOnly && setup.Count == 0 && security.Count == 0 && recordAccess.WriteCheckpointLocked("release", request.By) is { } written)
+            {
+                if (checkpoint is not null) checkpoint.Value = written;
+                if (written.Written is null)
+                {
+                    var objection = new FindingDto("error", "history.checkpoint", "release",
+                        $"The release gate writes a history checkpoint with trigger release before the submission check, and none could be written: {written.Skipped}");
+                    return ReleaseProblem(identity, "not-started", new Problem("refused", "Release admission refused: history.checkpoint: " + objection.Message + " No build or provider call was made.", [objection]));
+                }
+            }
+
             EstateModel model = session.Read();
             RecordEnvelope? current = model.Current("operation").FirstOrDefault(r => EstateModel.BodyString(r, "identity") == identity);
             string? status = current is null ? null : EstateModel.BodyString(current, "status");

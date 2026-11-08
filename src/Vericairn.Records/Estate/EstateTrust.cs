@@ -636,6 +636,20 @@ internal sealed partial class EstateTrust
         return current.Id;
     }
 
+    /// <summary>
+    /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor"/> that does not depend on a
+    /// signature: the root operator, or a person holding administer that still stands (<see cref="StandingAdministrator"/>), judged for a
+    /// checkpoint no closing witnesses yet. What the runtime checks before it signs an adoption or a charter revision's anchors.
+    /// </summary>
+    internal bool AnchorerAt(string by, string at)
+    {
+        if (by == RootOperator && RootOperator is not null) return true;
+        if (!RecordParser.IsTimestamp(at)) return false;
+        using JsonDocument empty = JsonDocument.Parse("{}");
+        var probe = new RecordEnvelope("history-checkpoint", Identity.Ulid.NewUlid().Value, at, by, null, null, empty.RootElement.Clone(), "", "", []);
+        return StandingAdministrator(probe, Acting);
+    }
+
     /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>
     private bool TrustedRevision(RecordEnvelope revision) =>
         (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null) ||

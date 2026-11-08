@@ -176,7 +176,11 @@ of the root operator or a person holding `administer` lists its exact id and has
 whatever date it states; an agent never anchors. An estate that has not adopted keeps
 the earlier boundary: an unsigned record dated at or before the current required
 charter revision counts. The first-party estate holds no checkpoint, so its reading
-is unchanged until it adopts.
+is unchanged until it adopts. A new estate adopts at birth, when its root operator's
+first device admits itself; an existing one adopts when the root operator runs
+`vericairn estate checkpoint --adopt`, and from then on the runtime writes checkpoints
+at upgrades, release submissions, charter revisions and intervals ([operator's
+guide](operator-guide.md#history-checkpoints-092)).
 
 In every estate from 0.9.2, a record that does not count, such as an unsigned record
 refused by the signature policy or an altered witnessed record, is reported and kept as evidence, and no rule that admits,

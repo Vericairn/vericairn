@@ -67,6 +67,9 @@ public sealed class HistoryState
     /// <summary>The ids of the checkpoints that count.</summary>
     internal IReadOnlySet<string> CountingCheckpoints { get; }
 
+    /// <summary>The earliest time a record of the unwitnessed tail states, or null when the tail is empty: what the interval trigger reads.</summary>
+    public string? OldestTailAt { get; internal init; }
+
     /// <summary>The records an adoption checkpoint witnesses with the bytes present, each with that checkpoint's time.</summary>
     internal IReadOnlyDictionary<string, DateTimeOffset> AdoptionTimes { get; }
 
@@ -82,6 +85,23 @@ public sealed class HistoryState
 /// <param name="Entry">The inventory line.</param>
 /// <param name="Checkpoint">The id of the checkpoint that lists it, the earliest by id when several do.</param>
 internal sealed record WitnessedEntry(InventoryEntry Entry, string Checkpoint);
+
+/// <summary>What adopting history checkpoints would witness and anchor in a copy (design/signed-history.md § 10).</summary>
+/// <param name="Adopted">Whether the copy has already adopted: it holds a counting checkpoint.</param>
+/// <param name="Witnessed">How many records the adoption checkpoint would witness: every record present.</param>
+/// <param name="Anchored">The unsigned records that count today, which the adoption anchors, sorted by id.</param>
+/// <param name="NotCounting">The unsigned records that count for nothing today; adoption witnesses them and they stay so.</param>
+/// <param name="ByRevokedDevices">Records signed by a device revoked now, each with that device, sorted by id; a device's own records are left out.</param>
+/// <param name="AlreadyAnchored">The ids among <paramref name="Anchored"/> that an anchor already lists, the format-2 migration's or a checkpoint's.</param>
+public sealed record AdoptionPlan(bool Adopted, int Witnessed, IReadOnlyList<RecordEnvelope> Anchored, IReadOnlyList<RecordEnvelope> NotCounting,
+    IReadOnlyList<(RecordEnvelope Record, string Device)> ByRevokedDevices, IReadOnlySet<string> AlreadyAnchored)
+{
+    /// <summary>
+    /// The hash of the anchored set, the record set hash of its ids and hashes: what <c>estate checkpoint --adopt --check</c> prints and
+    /// <c>--adopt --expect-plan</c> names, so that the adoption signed anchors exactly what was read.
+    /// </summary>
+    public string AnchoredHash => RecordSets.Hash(Anchored.Select(r => (r.Id, r.ComputedHash)));
+}
 
 /// <summary>A checkpoint prepared for signing: its body and the inventory objects to store before it.</summary>
 /// <param name="Body">The record body.</param>
@@ -403,9 +423,26 @@ internal sealed class HistoryAnalysis
             }
         }
 
-        int tail = read ? model.Records.Count(r => !entries.ContainsKey(r.Id)) : model.Records.Count;
+        // Without the inventories nothing is known to be witnessed, and the records are not walked: a projection that reads none of them
+        // stays as cheap as before. With them, the tail and the time its oldest record states, which the interval trigger reads.
+        int tail = read ? 0 : model.Records.Count;
+        string? oldest = null;
+        if (read && counting.Count > 0)
+        {
+            foreach (RecordEnvelope record in model.Records)
+            {
+                if (entries.ContainsKey(record.Id)) continue;
+                tail++;
+                if (RecordParser.IsTimestamp(record.At) && (oldest is null || string.CompareOrdinal(record.At, oldest) < 0)) oldest = record.At;
+            }
+        }
+        else if (read)
+        {
+            tail = model.Records.Count;
+        }
+
         return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,
-            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal), adoptionTimes);
+            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal), adoptionTimes) { OldestTailAt = oldest };
     }
 
     /// <summary>
@@ -558,6 +595,98 @@ public static class SignedHistory
     /// <summary>The codes of the history errors that hold release submission and lead status while one stands.</summary>
     internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author"];
 
+    /// <summary>How many records the unwitnessed tail holds when the runtime writes an interval checkpoint (design/signed-history.md § 9).</summary>
+    public const int IntervalRecords = 500;
+
+    /// <summary>How old the tail's oldest record is when the runtime writes an interval checkpoint (design/signed-history.md § 9).</summary>
+    public static readonly TimeSpan IntervalAge = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Whether an interval checkpoint falls due as a write adds records: in an estate that has adopted checkpoints, once the tail would
+    /// hold <see cref="IntervalRecords"/> records or its oldest record is <see cref="IntervalAge"/> old at the time given.
+    /// </summary>
+    public static bool IntervalDue(EstateModel model, DateTimeOffset now, int adding = 1)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        HistoryState state = Of(model);
+        if (!state.Adopted) return false;
+        if ((long)state.Tail + adding >= IntervalRecords) return true;
+        return state.OldestTailAt is { } oldest && DateTimeOffset.TryParseExact(oldest, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset at) && now - at >= IntervalAge;
+    }
+
+    /// <summary>The records present that no counting checkpoint witnesses: the unwitnessed tail, sorted by id.</summary>
+    public static IReadOnlyList<RecordEnvelope> TailRecords(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        HistoryState state = Of(model);
+        return [.. model.Records.Where(r => !state.InventoriesRead || !state.Entries.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// What adopting checkpoints would witness and anchor in this copy (design/signed-history.md § 10): every record present, the
+    /// unsigned records that count today, which the adoption anchors so that it judges history as found, the unsigned records that count
+    /// for nothing today and stay so, and the records signed by a device revoked now. Adoption keeps every reading as it is: an unsigned
+    /// admission or record that does not count is never anchored, so adoption admits and authorizes nothing new.
+    /// </summary>
+    public static AdoptionPlan PlanAdoption(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        HistoryState state = Of(model);
+        List<RecordEnvelope> unsigned = [.. model.Records.Where(r => r.Signatures.Count == 0).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        List<RecordEnvelope> anchored = [.. unsigned.Where(r => r.Type != "history-checkpoint" && model.Counts(r))];
+        List<RecordEnvelope> excluded = [.. unsigned.Where(r => !anchored.Contains(r))];
+        var revoked = new List<(RecordEnvelope Record, string Device)>();
+        Dictionary<string, bool> revokedDevices = new(StringComparer.Ordinal);
+        foreach (RecordEnvelope record in model.Records.Where(r => r.Signatures.Count > 0).OrderBy(r => r.Id, StringComparer.Ordinal))
+        {
+            foreach (string device in record.Signatures.Select(s => s.Device).Distinct(StringComparer.Ordinal))
+            {
+                // A device's own records name it, and say nothing more about what it signed.
+                if (record.Type == "device" && model.Chain(record)[0] == device) continue;
+                if (!revokedDevices.TryGetValue(device, out bool isRevoked))
+                {
+                    RecordEnvelope? current = model.ById.TryGetValue(device, out RecordEnvelope? first) && first.Type == "device" ? model.Latest(first) : null;
+                    isRevoked = current is not null && SignatureChecks.AdmissionOf(model, current) is { } admission && EstateModel.BodyString(admission, "status") == "revoked";
+                    revokedDevices[device] = isRevoked;
+                }
+
+                if (isRevoked)
+                {
+                    revoked.Add((record, device));
+                    break;
+                }
+            }
+        }
+
+        IReadOnlySet<string> anchors = model.Trust.Anchors;
+        return new AdoptionPlan(state.Adopted, model.Records.Count, anchored, excluded, revoked,
+            anchored.Where(r => anchors.Contains(SignatureChecks.AnchorKey(r.Id, r.ComputedHash))).Select(r => r.Id).ToHashSet(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Whether a checkpoint follows another, through the hashes its predecessors name: what lets a machine advance its memory of the newest
+    /// checkpoint it verified only along the history it already verified. A checkpoint follows itself.
+    /// </summary>
+    public static bool Follows(EstateModel model, string checkpoint, string ancestor)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var byId = model.Records.Where(r => r.Type == "history-checkpoint" && r.Format >= 3).ToDictionary(r => r.Id, CheckpointBody.Read, StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>([checkpoint]);
+        while (queue.TryDequeue(out string? id))
+        {
+            if (id == ancestor) return true;
+            if (!seen.Add(id) || !byId.TryGetValue(id, out CheckpointBody? body)) continue;
+            foreach ((string previous, string hash) in body.Previous)
+            {
+                if (byId.TryGetValue(previous, out CheckpointBody? predecessor) && predecessor.Record.ComputedHash == hash) queue.Enqueue(previous);
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The estate's history state.</summary>
     public static HistoryState Of(EstateModel model)
     {
@@ -669,7 +798,19 @@ public static class SignedHistory
     public const int MinimumExpectedDigits = 16;
 
     /// <summary>Whether the given checkpoints, by id, hash, path and whether each counts, hold the expected one; null when they do.</summary>
-    public static Finding? Expect(IEnumerable<(string Id, string Hash, string Path, bool Counts)> checkpoints, string expected)
+    public static Finding? Expect(IEnumerable<(string Id, string Hash, string Path, bool Counts)> checkpoints, string expected) => ExpectMatch(checkpoints, expected).Missing;
+
+    /// <summary>
+    /// Whether the given checkpoints hold the expected one, as <see cref="Expect(IEnumerable{ValueTuple{string, string, string, bool}}, string)"/>
+    /// says, with the one the name matches when it does: what a machine remembers of an <c>estate check --expect</c>.
+    /// </summary>
+    public static (Finding? Missing, (string Id, string Hash, string Path)? Matched) ExpectMatch(IEnumerable<(string Id, string Hash, string Path, bool Counts)> checkpoints, string expected)
+    {
+        (Finding? missing, (string Id, string Hash, string Path, bool Counts)? match) = ExpectCore(checkpoints, expected);
+        return (missing, missing is null && match is { } held ? (held.Id, held.Hash, held.Path) : null);
+    }
+
+    private static (Finding? Missing, (string Id, string Hash, string Path, bool Counts)? Match) ExpectCore(IEnumerable<(string Id, string Hash, string Path, bool Counts)> checkpoints, string expected)
     {
         ArgumentNullException.ThrowIfNull(checkpoints);
         ArgumentException.ThrowIfNullOrWhiteSpace(expected);
@@ -678,17 +819,17 @@ public static class SignedHistory
         bool byId = text.Length == 26 && Ulid.IsValid(text);
         bool byHash = !byId && hex.Length is >= MinimumExpectedDigits and <= 64 && hex.All(char.IsAsciiHexDigit);
         if (!byId && !byHash)
-            return new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names no checkpoint: give its id, its full content hash or at least {MinimumExpectedDigits} hexadecimal digits of the hash.");
+            return (new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names no checkpoint: give its id, its full content hash or at least {MinimumExpectedDigits} hexadecimal digits of the hash."), null);
         string lower = hex.ToLowerInvariant();
         List<(string Id, string Hash, string Path, bool Counts)> matches = [.. checkpoints.Where(c =>
             byId ? c.Id == text : c.Hash.StartsWith(ContentHash.Prefix, StringComparison.Ordinal) && c.Hash[ContentHash.Prefix.Length..].StartsWith(lower, StringComparison.Ordinal))];
         if (matches.Count > 1)
-            return new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names {matches.Count.ToString(CultureInfo.InvariantCulture)} checkpoints here; give more of its hash.");
+            return (new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"'{expected}' names {matches.Count.ToString(CultureInfo.InvariantCulture)} checkpoints here; give more of its hash."), null);
         if (matches.Count == 0)
-            return new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"This copy lacks the expected history checkpoint {expected}: its newest history may have been removed with the tail, or it is behind the copy that checkpoint came from. Fetch or restore that history before relying on this copy.");
+            return (new Finding(Severity.Error, "history.expected-missing", EstateLayout.RecordsDirectory, $"This copy lacks the expected history checkpoint {expected}: its newest history may have been removed with the tail, or it is behind the copy that checkpoint came from. Fetch or restore that history before relying on this copy."), null);
         if (!matches[0].Counts)
-            return new Finding(Severity.Error, "history.expected-missing", matches[0].Path, $"The expected history checkpoint {matches[0].Id} is here but does not count: it is unsigned, its signature does not verify, it was altered, or its author may not adopt.");
-        return null;
+            return (new Finding(Severity.Error, "history.expected-missing", matches[0].Path, $"The expected history checkpoint {matches[0].Id} is here but does not count: it is unsigned, its signature does not verify, it was altered, or its author may not adopt."), matches[0]);
+        return (null, matches[0]);
     }
 
     /// <summary>What a copy's heads witness together, read through its objects; null when an inventory is missing or malformed.</summary>

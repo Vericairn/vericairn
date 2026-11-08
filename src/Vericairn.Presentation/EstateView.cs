@@ -100,6 +100,18 @@ public sealed class EstateView
     /// <summary>The pinned Vericairn: mode and version or commit.</summary>
     public string Pin { get; private set; } = "unknown";
 
+    /// <summary>
+    /// The history line (design/signed-history.md § 9), in the words status prints: adopted or not, the heads by the short hash
+    /// <c>estate check --expect</c> accepts, how many records they witness, the unwitnessed tail and the standing problems.
+    /// </summary>
+    public string History { get; private set; } = "History: unknown";
+
+    /// <summary>The history state word, in the state language's history vocabulary; null when the status gives none.</summary>
+    public string? HistoryState { get; private set; }
+
+    /// <summary>The history state's label.</summary>
+    public string HistoryLabel => StateLanguage.Label("history", HistoryState);
+
     /// <summary>When the status was observed, as the runtime stamped it or as the client received it.</summary>
     public string AsOf { get; private set; } = string.Empty;
 
@@ -169,6 +181,13 @@ public sealed class EstateView
         if (document.TryGetProperty("vericairn", out JsonElement pin) && pin.ValueKind == JsonValueKind.Object)
         {
             view.Pin = $"{Str(pin, "mode")} {Str(pin, "version") ?? Str(pin, "commit")}".Trim();
+        }
+
+        if (Vericairn.Records.History.HistoryLine.FromStatus(document) is { } line)
+        {
+            view.History = line;
+            view.HistoryState = document.GetProperty("history").TryGetProperty("adopted", out JsonElement adopted) && adopted.ValueKind == JsonValueKind.True
+                ? Vericairn.Records.History.HistoryLine.States[1] : Vericairn.Records.History.HistoryLine.States[0];
         }
 
         view.WorkOrders = Rows(document, "workOrders", e => new WorkOrderRow(Str(e, "key") ?? "?", Str(e, "kind") ?? "?", Str(e, "title") ?? "?", Str(e, "status") ?? "?", Str(e, "id") ?? string.Empty));
