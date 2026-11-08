@@ -17,7 +17,9 @@ namespace Vericairn.Cli.Tests;
 /// A release of a small product on the software pack's release flow from the command line, with a test release provider (the
 /// estate's design/release-procedure.md § 10): its placed work accepted, the guides checked before freezing, the set and its merge
 /// handed on, the submission dispatched and the candidate observed through the provider, the Reviewer's review, the operator's
-/// acceptance and publication each put to the operator only when next, the documentation pass and the carrier closed.
+/// acceptance and publication each put to the operator only when next, the documentation pass and the carrier closed. Journey J49
+/// on the release flow (the estate's design/goals.md § 14): the release is a goal whose plan names vericairn.software/release, and once
+/// its run is complete the evaluator judges its conditions and its sponsor, the operator, accepts it.
 /// </summary>
 [Collection("cli")]
 public class ReleaseFlowJourneyTests
@@ -29,7 +31,7 @@ public class ReleaseFlowJourneyTests
     private static readonly string[] GitOptions = ["-c", "core.autocrlf=false", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
     [Fact]
-    public void AReleaseRunsFromPlacedWorkToTheClosedCarrierOnTheFlowWithATestProvider()
+    public void J49_AReleaseGoalRunsOnTheReleaseFlowFromItsActivationToItsSponsorsAcceptanceWithATestProvider()
     {
         string root = CliHarness.TempDirectory("release-flow");
         string scratch = CliHarness.TempDirectory("release-flow-scratch");
@@ -55,7 +57,9 @@ public class ReleaseFlowJourneyTests
                 $$"""{"roles":[{"role":"release-manager","principals":["{{builder}}"]},{"role":"submitter","principals":["{{builder}}"]},{"role":"reviewer","principals":["{{reviewer}}"]},{"role":"decider","principals":["{{op}}"]},{"role":"publisher","principals":["{{op}}"]}]}"""));
 
             string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Release " + Version, "--objective", "Release the widget.",
-                "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""", "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2",
+                "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""", "--done", $$$"""{"type":"release","subject":"{{{product}}}","fields":{"version":"{{{Version}}}","status":"published"}}""",
+                "--done", """{"evidence":"The release notes describe what the release changes.","check":"An evaluator reads the notes the documentation set names against the placed work."}""",
+                "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2",
                 "--flow", "vericairn.software/release@1.0.0", "--subject", "carrier=" + carrier, "--subject", "product=" + product, "--subject", "version=" + Version,
                 "--subject", "repository=" + Repository).Id;
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
@@ -115,6 +119,21 @@ public class ReleaseFlowJourneyTests
             Assert.Equal(("done", "stopped"), (State(root, goal, "docs-after"), State(root, goal, "close")));
             CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"work-order:{carrier}:{HashOf(root, carrier)}", "--body", CliHarness.WriteJson(scratch, "close.json", """{"statement":"Release 0.2.0 is published and nothing it made due is open.","basis":[],"self":true}"""));
             Assert.Contains("the run is complete", CliHarness.Ok("--estate", root, "goal", "show", goal).Out, StringComparison.Ordinal);
+
+            // The runtime's verdicts stand on the carrier's closing and the published release; the notes wait for the evaluator, who
+            // authored none of the run's steps, unlike the release manager.
+            JsonElement shown = CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json;
+            Assert.Equal(["met", "met", "unknown"], shown.GetProperty("conditions").EnumerateArray().Select(c => c.GetProperty("verdict").GetString()));
+            Assert.False(shown.GetProperty("ready").GetBoolean());
+            Refused(root, "other than any step's author", "goal", "evaluate", goal, "--by", builder, "--summary", "My own release.", "--verdict", "3:met:I wrote the notes.");
+            CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the release, its notes and the placed work.", "--verdict", "3:met:The notes describe W-1, the release's one change.", "--read", "3:" + candidate);
+            Assert.True(CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("ready").GetBoolean());
+
+            // Neither the release manager nor the evaluator accepts the goal; its sponsor does, on that evaluation.
+            Refused(root, "A goal is accepted by its sponsor", "goal", "accept", goal, "--by", builder, "--statement", "Released.");
+            Refused(root, "never accepted by its evaluator", "goal", "accept", goal, "--by", reviewer, "--statement", "Released.");
+            CliHarness.Ok("--estate", root, "--json", "goal", "accept", goal, "--by", op, "--statement", "Widget 0.2.0 is released on the flow, its notes describe it, and its carrier is closed.");
+            Assert.Equal("achieved", CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("status").GetString());
             CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
             Assert.True(check.Code == 0, check.Out);
         }
@@ -177,6 +196,13 @@ public class ReleaseFlowJourneyTests
     }
 
     private static string HashOf(string root, string id) => EstateLoader.Load(root).ById[id].ComputedHash;
+
+    private static void Refused(string root, string because, params string[] args)
+    {
+        CliHarness.Outcome outcome = CliHarness.Run(["--estate", root, .. args]);
+        Assert.True(outcome.Code == 2, $"vericairn {string.Join(' ', args)} exited {outcome.Code}, not refused\n{outcome.Out}\n{outcome.Err}");
+        Assert.Contains(because, outcome.Err, StringComparison.Ordinal);
+    }
 
     private static JsonElement[] Steps(string root, string goal) =>
         CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("flow").GetProperty("steps").EnumerateArray().ToArray();
