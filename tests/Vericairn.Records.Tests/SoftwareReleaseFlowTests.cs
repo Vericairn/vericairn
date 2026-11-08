@@ -62,6 +62,9 @@ public class SoftwareReleaseFlowTests
             [("client-build", "release.client-build"), ("default-head", "release.default-head"), ("document-hold", "document.release-hold")],
             flow.Step("gate")!.Traps.Where(t => t.Check is not null).Select(t => (t.Name, t.Check!)).ToArray());
         Assert.All(flow.Step("gate")!.Traps.Where(t => t.Check is not null), t => Assert.Empty(t.Holds));
+        // The release checkpoint is the submission's own, written before its admission check; the check writes nothing.
+        Assert.Contains("release submit --check with it: every objection with its next action, with nothing recorded and no history checkpoint written", flow.Step("gate")!.Action, StringComparison.Ordinal);
+        Assert.Contains("vericairn release submit itself writes the checkpoint with trigger release, signed by the device then writing, before its own admission check", flow.Step("gate")!.Action, StringComparison.Ordinal);
 
         FlowDefinition upgrading = FlowDefinition.Resolve(model, new TemplatePin(upgrade.Id, upgrade.Version, upgrade.Hash));
         Assert.Equal(["check", "upgrade", "runtime", "verify", "adopt", "docs"], upgrading.Steps.Select(s => s.Key).ToArray());

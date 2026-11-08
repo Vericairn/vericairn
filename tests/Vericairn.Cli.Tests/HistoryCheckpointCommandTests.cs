@@ -103,6 +103,13 @@ public class HistoryCheckpointCommandTests
 
             // Afterwards the agent's checkpoint witnesses, and a write it makes reports no checkpoint unless a trigger falls due.
             Assert.Contains("wrote a history checkpoint", CliHarness.Ok("--estate", root, "estate", "checkpoint", "--by", builder).Out, StringComparison.Ordinal);
+
+            // A revocation in the adopted estate is stored after its closing, which the command prints after the revocation.
+            string spare = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", builder, "--name", "Spare build machine", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "devices", "admit", spare, "--by", op, "--note", "The builder's spare machine.");
+            CliHarness.Outcome revoked = CliHarness.Ok("--estate", root, "devices", "revoke", spare, "--by", op, "--reason", "The spare machine is retired.");
+            Assert.Contains("(history checkpoint, trigger closing)", revoked.Out, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
         }
         finally
         {

@@ -150,6 +150,9 @@ public sealed class EstateSession : IDisposable
     /// <summary>Loads and validates a given set of this estate's record files, with its objects.</summary>
     internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, ObjectReader);
 
+    /// <summary>A file set judged with every record's roles and grants read at its own time, for adoption's check alone (design/signed-history.md § 10).</summary>
+    internal EstateModel LoadFilesAtRecordTime(IReadOnlyList<RecordFile> files) => EstateLoader.LoadAtRecordTime(Root, files, ObjectReader);
+
     /// <summary>
     /// The estate's records as identities only, with the exact record files they were parsed from, from one snapshot: ids, hashes,
     /// bodies, supersession and the manifest, never a judgment (no validation finding, authority, signature or admission). Parsing
