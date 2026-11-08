@@ -41,7 +41,10 @@ def main():
     check("initialize negotiates 2025-06-18", init["result"]["protocolVersion"] == "2025-06-18", init["result"]["serverInfo"]["version"])
     check("instructions are descriptive", "must" not in init["result"]["instructions"].lower())
     capabilities = init["result"]["capabilities"]
-    check("resources declare no subscriptions or list changes", capabilities.get("resources") == {"subscribe": False, "listChanged": False})
+    # From 0.9.2 the server subscribes when the estate's runtime keeps an event journal (a running daemon) and declares both or neither.
+    subscribing = capabilities.get("resources", {}).get("subscribe") is True
+    check("resources declare subscriptions and list changes together", capabilities.get("resources") in ({"subscribe": False, "listChanged": False}, {"subscribe": True, "listChanged": True}),
+          "subscribing" if subscribing else "no event journal here")
     check("tools and prompts declare no list changes", all(capabilities.get(name, {}).get("listChanged") is False for name in ("tools", "prompts")))
     call("notifications/initialized", notify=True)
     check("ping answers", call("ping")["result"] == {})
@@ -51,11 +54,12 @@ def main():
     check("no write tool without --as", ("--as" in extra) or not any(x in names for x in ["work_attempt", "work_result", "work_amend"]))
     check("every tool has an object schema", all(t["inputSchema"]["type"] == "object" for t in tools))
     templates = call("resources/templates/list")["result"]
-    check("four resource templates", len(templates["resourceTemplates"]) == 4 and "nextCursor" not in templates)
+    kinds = [urlsplit(t["uriTemplate"].replace("{estate}", "estate").replace("{key}", "key")).path.split("/")[1] for t in templates["resourceTemplates"]]
+    check("six resource templates", kinds == ["brief", "record", "document", "context", "goal", "asks"] and "nextCursor" not in templates, ", ".join(kinds))
     listing = call("resources/list")["result"]
     check("resource listing is complete", isinstance(listing.get("resources"), list) and "nextCursor" not in listing)
     resources = listing["resources"]
-    for kind in ("brief", "record", "document", "context"):
+    for kind in ("brief", "record", "document", "context", "goal", "asks"):
         offered = next((r for r in resources if urlsplit(r["uri"]).path.startswith("/" + kind + "/")), None)
         if offered is None:
             skip(kind + " resource", "the estate has no current resource of this kind")
@@ -83,7 +87,20 @@ def main():
     check("prompt offers match read-tool visibility", [p["name"] for p in prompts] == [p["identity"] for p in library["prompts"]] and all(not any(p.get(flag) for flag in ("hidden", "disabled", "retired")) for p in library["prompts"]))
     check("prompt offers carry category and arguments", all("vericairn/category" in p["_meta"] and isinstance(p["arguments"], list) for p in prompts))
     check("prompt get requires a name", call("prompts/get", {}).get("error", {}).get("code") == -32602)
-    check("resource subscription is unsupported", call("resources/subscribe", {}).get("error", {}).get("code") == -32601)
+    if subscribing:
+        record_uri = next((r["uri"] for r in resources if urlsplit(r["uri"]).path.startswith("/record/")), None)
+        check("subscription needs a uri", call("resources/subscribe", {}).get("error", {}).get("code") == -32602)
+        if record_uri is None:
+            skip("resource subscription", "the estate has no record to subscribe to")
+        else:
+            check("resource subscription and unsubscription answer", call("resources/subscribe", {"uri": record_uri}).get("result") == {} and call("resources/unsubscribe", {"uri": record_uri}).get("result") == {})
+    else:
+        check("resource subscription is unsupported without an event journal", call("resources/subscribe", {}).get("error", {}).get("code") == -32601)
+    events = call("tools/call", {"name": "events_read", "arguments": {}})["result"]
+    if subscribing:
+        check("events_read answers a cursor", (not events.get("isError")) and "cursor" in json.loads(events["content"][0]["text"]))
+    else:
+        check("events_read says the journal is the daemon's", events.get("isError") is True and "daemon" in events["content"][0]["text"])
     status = call("tools/call", {"name": "estate_status", "arguments": {}})["result"]
     doc = json.loads(status["content"][0]["text"])
     check("estate_status returns the canonical document", (not status.get("isError")) and "workOrders" in doc and "records" in doc, f"{doc.get('records')} records")

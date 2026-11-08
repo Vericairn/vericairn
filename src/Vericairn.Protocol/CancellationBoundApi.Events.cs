@@ -14,6 +14,13 @@ public sealed partial class CancellationBoundApi
         ForwardAsync(token => inner.EventsAsync(after, filter, principal, wait, token), cancellationToken);
 
     /// <inheritdoc />
+    public EventSelectResponse EventsSelect(EventSelectRequest request) => inner.EventsSelectAsync(request, cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<EventSelectResponse> EventsSelectAsync(EventSelectRequest request, CancellationToken cancellationToken = default) =>
+        ForwardAsync(token => inner.EventsSelectAsync(request, token), cancellationToken);
+
+    /// <inheritdoc />
     public EventEnvelope? EventGet(string key, string? principal = null) => inner.EventGetAsync(key, principal, cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

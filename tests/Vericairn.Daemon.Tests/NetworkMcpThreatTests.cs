@@ -184,8 +184,10 @@ public class NetworkMcpThreatTests
         // What the tools reach in this process: the routes' reads, section 8's writes, never the machine's, the operator's or a run.
         Assert.True(McpOperations.Offered("POST /v1/work/attempt"));
         Assert.True(McpOperations.Offered("GET /v1/status"));
+        // From 0.9.2 events_read reads the selecting long poll (MCP-05), which never streams; the stream and an event by key are no tool's.
+        Assert.True(McpOperations.Offered("POST /v1/events/select"));
         foreach (string refusedOperation in new[] { "POST /v1/runs", "POST /v1/work/review", "POST /v1/operator/record", "POST /v1/operator/close", "POST /v1/records/signed",
-            "POST /v1/records", "POST /v1/devices/admit", "POST /v1/pairings", "POST /v1/shutdown", "POST /v1/goals/{id}/step", "POST /v1/releases/submit", "GET /v1/events",
+            "POST /v1/records", "POST /v1/devices/admit", "POST /v1/pairings", "POST /v1/shutdown", "POST /v1/goals/{id}/step", "POST /v1/releases/submit", "GET /v1/events", "GET /v1/events/{key}",
             "POST /v1/prompts/use", "POST /v1/estate-policies", "POST /v1/attention/acknowledge" })
         {
             Assert.False(McpOperations.Offered(refusedOperation), refusedOperation);

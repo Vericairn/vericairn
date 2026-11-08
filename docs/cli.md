@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 18, November 8, 2026. `mcp serve --connection` holds the session's server stream while its harness holds a resource subscription and writes the resource notifications to standard output, in the development build.
+
 Revision 17, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
 
 Revision 16, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
@@ -511,8 +513,11 @@ or attempt the call names, every field the call supplies unchanged), signed with
 another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
 document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
 ([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
-device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
-principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
+device, and offers the read tools and the contributor writes only. From 0.9.2 (`MCP-05`), while the harness holds a
+resource subscription the runtime accepted, the bridge also holds the session's server stream and writes each resource
+notification on it to standard output as a line between answers, as `mcp serve --as` does over a local daemon
+([subscriptions and notifications](mcp.md#subscriptions-and-notifications-092)). It does not take `--as`: the paired
+device's own principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
 key is no longer held here.
 
 ```sh

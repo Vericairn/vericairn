@@ -108,6 +108,7 @@ public static class OpenApiDocument
         ("GET", "/v1/asks"),
         ("GET", "/v1/events"),
         ("GET", "/v1/events/{key}"),
+        ("POST", "/v1/events/select"),
         ("GET", "/v1/operator/actions"),
         ("GET", "/v1/operator/requests"),
         ("POST", "/v1/operator/requests"),
@@ -410,6 +411,21 @@ public static class OpenApiDocument
             responses["401"] = new JsonObject { ["description"] = "As every request on its profile; and a device naming another principal, or a principal not known here (Problem with code denied). A device that loses admission, its key or its profile mid-stream has the stream closed before the next event." };
             responses["429"] = new JsonObject { ["description"] = "The device already holds four streams and long polls, or the runtime its limit (Problem)." };
             responses["503"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code unavailable)." };
+        }
+        else if (path == "/v1/events/select")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "EventSelectResponse: the events after the cursor the reader may read, each with the indices of the selections it passes, and the cursor to continue from; "
+                    + "with reset, re-read state first. A selection only narrows: an event the audience check withholds passes none, and no count, cursor, error or timing tells it from none. "
+                    + "On the local socket a read waiting for its turn, or yielding its turn to another, answers with no event from where it stood.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("EventSelectResponse") } },
+            };
+            responses["400"] = new JsonObject { ["description"] = "A malformed filter or selection, more than 32 selections or a wait outside 0 to 25 (Problem)." };
+            responses["401"] = new JsonObject { ["description"] = "As every request on its profile; and a device naming another principal, or a principal not known here (Problem with code denied)." };
+            responses["429"] = new JsonObject { ["description"] = "A device already holds four streams and long polls, or the runtime its limit (Problem). The local socket's reads wait their turn instead." };
+            responses["501"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code no-journal): a follower follows nothing here." };
+            responses["503"] = new JsonObject { ["description"] = "The journal cannot be read now, or the runtime is stopping (Problem with code unavailable): read again later." };
         }
         else if (path == "/v1/events/{key}")
         {
@@ -836,6 +852,8 @@ public static class OpenApiDocument
             ["EventReference"] = EventReferenceSchema(),
             ["EventEnvelope"] = EventEnvelopeSchema(),
             ["EventsResponse"] = EventsResponseSchema(),
+            ["EventSelectRequest"] = EventSelectRequestSchema(),
+            ["EventSelectResponse"] = EventSelectResponseSchema(),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -1065,6 +1083,7 @@ public static class OpenApiDocument
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/prompts" => "PromptSaveRequest",
         "/v1/resources/read" => "ResourceRequest",
+        "/v1/events/select" => "EventSelectRequest",
         "/v1/context/prepare" => "ContextRequest",
         "/v1/context/brief" => "BriefContextRequest",
         "/v1/search" => "SearchRequest",
@@ -1242,6 +1261,7 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
         ("GET", "/v1/events") => "Follow the estate's events after a cursor, as server-sent events or a long poll, narrowed by kind, record type, subject, recipient and category. Delivery is at least once within retention; each event passes the audience check at delivery. Writes nothing.",
         ("GET", "/v1/events/{key}") => "The newest event with a key that the reader may read; unknown and unreadable keys are answered alike. Writes nothing.",
+        ("POST", "/v1/events/select") => "From 0.9.2: a long poll of the events after a cursor, as GET /v1/events answers one, that also says for each event which of up to 32 selections it passes, so one read serves a follower with many interests, such as an MCP session's subscriptions. A device's read holds one of its own slots; on the local socket a read that waits holds one of the MCP servers' own four, taken in turns. Never streams; writes nothing.",
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
@@ -1443,6 +1463,47 @@ public static class OpenApiDocument
         response["properties"]!["events"]!["items"] = SchemaReference("EventEnvelope");
         response["properties"]!["problem"]!["nullable"] = true;
         response["description"] = "The events after the cursor the reader may read, and the cursor to continue from; with reset, re-read state first.";
+        return response;
+    }
+
+    private static JsonObject EventFilterSchema()
+    {
+        JsonObject filter = Object(("kinds", "array"), ("types", "array"), ("subjects", "array"), ("to", "array"), ("categories", "array"));
+        foreach (string name in new[] { "kinds", "types", "subjects", "to", "categories" })
+        {
+            filter["properties"]![name]!["items"] = new JsonObject { ["type"] = "string" };
+            filter["properties"]![name]!["maxItems"] = EventVocabulary.MaxFilterValues;
+        }
+
+        filter["nullable"] = true;
+        filter["description"] = "Every non-empty list narrows; a value in any one of a list's entries matches. Subjects are record ids; a goal matches its work orders, steps and runs.";
+        return filter;
+    }
+
+    private static JsonObject EventSelectRequestSchema()
+    {
+        JsonObject request = Object(("after", "string"), ("filter", "object"), ("selections", "array"), ("principal", "string"), ("wait", "integer"));
+        request["properties"]!["filter"] = EventFilterSchema();
+        JsonObject selection = Object(("filter", "object"), ("since", "string"));
+        selection["required"] = new JsonArray("filter");
+        selection["properties"]!["filter"] = EventFilterSchema();
+        selection["properties"]!["since"]!["description"] = "A cursor the reader holds: only events after it pass. One that cannot be honored bounds nothing.";
+        request["properties"]!["selections"]!["items"] = selection;
+        request["properties"]!["selections"]!["maxItems"] = EventVocabulary.MaxSelections;
+        request["properties"]!["wait"]!["minimum"] = 0;
+        request["properties"]!["wait"]!["maximum"] = EventVocabulary.MaxWaitSeconds;
+        request["description"] = "A selecting long poll: what the read delivers, the narrower selections each delivered event is judged by, and how long to wait (20 seconds by default).";
+        return request;
+    }
+
+    private static JsonObject EventSelectResponseSchema()
+    {
+        JsonObject response = Object(("events", "array"), ("selected", "array"), ("cursor", "string"), ("reset", "boolean"), ("problem", "object"));
+        response["required"] = new JsonArray("events", "selected", "cursor", "reset");
+        response["properties"]!["events"]!["items"] = SchemaReference("EventEnvelope");
+        response["properties"]!["selected"]!["items"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "integer" } };
+        response["properties"]!["problem"]!["nullable"] = true;
+        response["description"] = "The events after the cursor the reader may read, for each the indices of the selections it passes, and the cursor to continue from; with reset, re-read state first.";
         return response;
     }
 

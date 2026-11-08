@@ -283,6 +283,7 @@ public sealed partial class ToolRegistry
                     "json" => new ToolCallResult((await api.OperatorRequestsAsync(OptionalArg(a, "to"), cancellationToken: token).ConfigureAwait(false)).Json.GetRawText(), false),
                     string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                 }),
+            Read("events_read", EventsReadDescription, EventsReadArguments(), (api, a, token) => EventsReadAsync(api, a, token)),
             Write("policy_declare", "PolicyDeclare: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
                 Arguments(("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["expected", "body"],
                 async (api, a, token) => Outcome(await api.PolicyDeclareAsync(new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "declare" },
