@@ -565,34 +565,75 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether the author of a checkpoint may anchor records and acknowledge removals in it (design/signed-history.md § 6): the root
-    /// operator, or a person holding administer through a grant that rests on signatures, never an agent; and the checkpoint signed by
-    /// devices whose own admissions rest on signatures, none of them a recovery device. The same test tells whether any other record was
-    /// signed by one who may anchor.
+    /// operator, or a person holding administer through a grant that rests on signatures and still stands (<see cref="StandingAdministrator"/>),
+    /// never an agent; and the checkpoint signed by devices whose own admissions rest on signatures, none of them a recovery device. The
+    /// same test tells whether any other record was signed by one who may anchor.
     /// </summary>
     internal bool MayAnchor(RecordEnvelope checkpoint)
     {
         if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
         if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        return HumanAdministerAt(checkpoint);
+        return StandingAdministrator(checkpoint, Acting);
     }
 
+    /// <summary>The time after every record: what a role or grant reads as at it is what stands now.</summary>
+    private const string Now = "9999-12-31T23:59:59Z";
+
     /// <summary>
-    /// Whether a record's author is a person who held administer at the record's time, as it stood then (design/signed-history.md § 8):
-    /// through a grant revision dated at or before the record, unexpired then, that no later revision dated at or before it replaces,
-    /// and that no closing closed without witnessing the record. Only grant and principal revisions that rest on signatures and were
-    /// written by a trusted operator decide: a revision anyone else writes neither grants nor withdraws administer, and a later narrowing
-    /// withdraws nothing from an earlier record.
+    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
+    /// always; otherwise a person whose role, through revisions that rest on signatures, stood at the record's time and still stands, so a
+    /// later revision taking it away withdraws the power for every checkpoint.
     /// </summary>
-    private bool HumanAdministerAt(RecordEnvelope record)
+    private bool StandingOperator(string principal, string at) =>
+        principal == RootOperator && RootOperator is not null || TrustedOperator(principal, at) && TrustedOperator(principal, Now);
+
+    /// <summary>
+    /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
+    /// adoption and signing a device's closing. A grant revision that rests on signatures and was written by a trusted operator stood at
+    /// the record's time, dated at or before it, unexpired then and replaced by no such revision by then; every such revision that has
+    /// replaced it since, whatever its date, still gives the author administer, unexpired at the record's time; and no closing among those
+    /// given closed a revision of that grant's line without witnessing the record. So a later narrowing, revocation or closing withdraws
+    /// these powers for every checkpoint, as before signed history; only other records read a grant purely as it stood.
+    /// </summary>
+    private bool StandingAdministrator(RecordEnvelope record, IReadOnlyList<Closing> bound)
     {
         if (PrincipalAt(record.By, record.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
         DateTimeOffset at = record.AtTime;
-        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == record.By &&
-            grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
-            scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) &&
-            string.CompareOrdinal(grant.At, record.At) <= 0 && !EstateModel.Expired(grant, at) && TrustedRevision(grant) &&
+        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && TrustedRevision(grant) &&
             !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && TrustedRevision(s)) &&
-            !GrantClosedFor(grant, record, anchorsCount: false));
+            Still(grant) && !bound.Any(c => c.Kind == "grant" && c.Line == LineOf(grant) && !Witnesses(c, record)));
+
+        // Every trusted revision replacing the grant since still gives administer, unexpired at the record's time.
+        bool Still(RecordEnvelope grant)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
+            var queue = new Queue<RecordEnvelope>([grant]);
+            while (queue.TryDequeue(out RecordEnvelope? current))
+            {
+                foreach (RecordEnvelope next in successors[current.Id].Where(s => s.Type == "authority" && seen.Add(s.Id) && TrustedRevision(s)))
+                {
+                    if (!Administers(next, record.By, at)) return false;
+                    queue.Enqueue(next);
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>Whether a grant revision gives a principal administer, unexpired at a time.</summary>
+    private static bool Administers(RecordEnvelope grant, string principal, DateTimeOffset at) =>
+        EstateModel.BodyString(grant, "grantee") == principal && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
+        scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) && !EstateModel.Expired(grant, at);
+
+    /// <summary>The line of an authority revision: the id of its first record.</summary>
+    internal string LineOf(RecordEnvelope grant)
+    {
+        RecordEnvelope current = grant;
+        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
+        while (current.Supersedes is not null && model.ById.TryGetValue(current.Supersedes, out RecordEnvelope? previous) && previous.Type == "authority" && seen.Add(previous.Id))
+            current = previous;
+        return current.Id;
     }
 
     /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>

@@ -634,6 +634,8 @@ public static class SignedHistory
         foreach ((string id, string hash) in draft.Anchored)
         {
             if (!model.ById.TryGetValue(id, out RecordEnvelope? anchored) || anchored.ComputedHash != hash) return $"It anchors {id} at {hash}, which is not here with that hash.";
+            if (model.Trust.DeviceRevisionRefused(anchored))
+                return $"It anchors {id}, a device revision a closing refused, which changes no key or name anchored or not; it is not anchored.";
             if (anchored.Signatures.Count > 0 && !model.Trust.RefusedByClosing(anchored))
                 return $"It anchors {id}, which is signed and needs no anchor; only records recorded without a signature, or refused by a closing, are anchored.";
         }

@@ -142,7 +142,7 @@ public static class FlowStops
     /// person who holds the act. Its command is checked apart, against the records.
     /// </summary>
     private static string? Unproven(EstateModel model, RecordEnvelope goal, RecordEnvelope request) =>
-        !Routing.MayTakeStep(model, goal, request.By, request.AtTime) ? $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps"
+        !Routing.MayTakeStep(model, goal, request.By, request.AtTime, request) ? $"{Routing.NameOf(model, request.By)} recorded it, and does not take the run's steps"
         : !FlowPosition.HoldsReservedAct(model, EstateModel.BodyString(request, "to")) ? "it is put to no person who holds the act"
         : null;
 

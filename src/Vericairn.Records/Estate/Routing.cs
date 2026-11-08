@@ -181,7 +181,7 @@ public static class Routing
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
-        return principal is not null && GoalsOf(model, order, before).Any(g => GoalRules.AccepterOf(model, g, before).Decides(model, principal));
+        return principal is not null && GoalsOf(model, order, before).Any(g => GoalRules.AccepterOf(model, g, before).Decides(model, principal, before));
     }
 
     /// <summary>
@@ -216,7 +216,7 @@ public static class Routing
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
         return GoalRules.IsPerson(model, principal)
-            && (principal == person || model.HasRole(principal, Roles.Operator) || DecidesForStep(model, principal, order, before));
+            && (principal == person || (before is null ? model.HasRole(principal, Roles.Operator) : model.HasRoleAt(principal, Roles.Operator, before)) || DecidesForStep(model, principal, order, before));
     }
 
     /// <summary>
@@ -224,12 +224,22 @@ public static class Routing
     /// activation; or a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
     /// operator's authority. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for that goal.
     /// </summary>
-    public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at)
+    public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at) => MayTakeStep(model, goal, principal, at, null);
+
+    /// <inheritdoc cref="MayTakeStep(EstateModel, RecordEnvelope, string?, DateTimeOffset)"/>
+    /// <param name="model">The estate.</param>
+    /// <param name="goal">The goal.</param>
+    /// <param name="principal">The principal.</param>
+    /// <param name="at">When.</param>
+    /// <param name="record">The record judged, whose place roles and grants are read at; null to read them as they are now.</param>
+    public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at, RecordEnvelope? record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         return principal is not null && model.CurrentPrincipal(principal) is not null
-            && (model.HasRole(principal, Roles.Operator) || GoalRules.AccepterOf(model, goal).Decides(model, principal) || model.HasScope(principal, Scopes.LocalEngineering, at));
+            && (record is null
+                ? model.HasRole(principal, Roles.Operator) || GoalRules.AccepterOf(model, goal).Decides(model, principal) || model.HasScope(principal, Scopes.LocalEngineering, at)
+                : model.HasRoleAt(principal, Roles.Operator, record) || GoalRules.AccepterOf(model, goal).Decides(model, principal, record) || model.HasScopeAt(principal, Scopes.LocalEngineering, record));
     }
 
     /// <summary>

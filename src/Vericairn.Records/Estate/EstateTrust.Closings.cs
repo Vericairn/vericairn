@@ -18,17 +18,25 @@ namespace Vericairn.Records.Estate;
 /// <param name="Target">The id the closing names: a device record, the device revision whose key is replaced, or the grant revision.</param>
 /// <param name="Identity">For a device or a key, the device's identity.</param>
 /// <param name="Key">For a key, the public key closed.</param>
-/// <param name="Grant">For a grant, the revision closed.</param>
+/// <param name="Grant">For a grant, the revision named.</param>
 /// <param name="Rotation">For a key, the rotation that replaces it: the act the closing precedes, which the closing does not refuse.</param>
 /// <param name="Before">The closing and every checkpoint it follows: what they list is what the closing witnesses.</param>
-internal sealed record Closing(RecordEnvelope Record, string Kind, string Target, string? Identity, string? Key, RecordEnvelope? Grant, string? Rotation, IReadOnlySet<string> Before);
+/// <param name="Line">For a grant, the line of the revision named: the id of its first record.</param>
+/// <param name="Closed">For a grant, the revisions closed: the one named and every revision of its line dated at or before it.</param>
+internal sealed record Closing(RecordEnvelope Record, string Kind, string Target, string? Identity, string? Key, RecordEnvelope? Grant, string? Rotation, IReadOnlySet<string> Before,
+    string? Line = null, IReadOnlyList<RecordEnvelope>? Closed = null)
+{
+    /// <summary>Whether this closing closes a grant revision.</summary>
+    internal bool Closes(RecordEnvelope grant) => Closed is not null && Closed.Any(r => r.Id == grant.Id);
+}
 
 /// <summary>
 /// Closings (design/signed-history.md § 8). They are judged first, in checkpoint order: every checkpoint after those it follows, ids
 /// breaking ties. A closing acts when the checkpoints it follows, present with the hashes it names, reach an adoption by one who may
-/// anchor, when it verifies against the closings before it in that order, and when it is signed by one who may perform the act: the
-/// operator, a person holding administer or the operator's recovery device for a device, the device itself for its own key, and an
-/// operator for a grant revision. A closing acts by itself, so the checkpoints between it and the adoption need not count: closings
+/// anchor, when it verifies against the closings before it in that order, and when it is signed by one who may perform the act: an
+/// operator, a person holding administer or an operator's recovery device for a device, the device itself for its own key, and an
+/// operator for a grant revision, the role or grant still standing and closed by no closing before it. A grant closing closes the
+/// revision it names and every revision of the same line dated at or before it. A closing acts by itself, so the checkpoints between it and the adoption need not count: closings
 /// only ever refuse. Concurrent closings each act, since neither is before the other. Every later judgment reads the closings that act:
 /// a record one of them refuses does not count, an admission or revocation it refuses neither admits nor revokes, and a device revision
 /// it refuses changes no key or name.
@@ -112,7 +120,7 @@ internal sealed partial class EstateTrust
                         closingFindings.Add(new Finding(Severity.Error, "history.closing-author", checkpoint.Record.ExpectedPath + "#body.closes",
                             "This closing does not verify against the closings before it: one of them closed the device or the key that signed it, or refused that device's admission. It closes nothing, anchored or not, and still witnesses what it lists if it counts."));
                 }
-                else if (Close(checkpoint, closes, predecessors) is { } closing)
+                else if (Close(checkpoint, closes, predecessors, bound) is { } closing)
                 {
                     acting.Add(closing);
                     actingIds.Add(id);
@@ -152,7 +160,7 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>The closing a checkpoint on the path makes, or null with the finding that says why it closes nothing.</summary>
-    private Closing? Close(CheckpointBody checkpoint, (string Kind, string Id) closes, Dictionary<string, List<CheckpointBody>> predecessors)
+    private Closing? Close(CheckpointBody checkpoint, (string Kind, string Id) closes, Dictionary<string, List<CheckpointBody>> predecessors, IReadOnlyList<Closing> bound)
     {
         RecordEnvelope record = checkpoint.Record;
         string location = record.ExpectedPath + "#body.closes";
@@ -166,14 +174,17 @@ internal sealed partial class EstateTrust
 
         string? identity = expected == "device" ? IdentityOf(target) : null;
         string? key = closes.Kind == "key" ? EstateModel.BodyString(target, "publicKey") : null;
+        // The strongest acts read the signer's role or grant as it still stands: a later revision taking it away, or a closing before this
+        // one closing that grant, withdraws the power. A recovery device signs for an operator only.
+        bool recovery = record.Signatures.Any(s => Recovers(s.Device));
         string? problem = closes.Kind switch
         {
-            "device" => TrustedOperator(record.By, record.At) || HumanAdministerAt(record) ? null
-                : "A device is closed only by the operator, a person holding administer or the operator's recovery device.",
+            "device" => StandingOperator(record.By, record.At) || !recovery && StandingAdministrator(record, bound) ? null
+                : "A device is closed only by an operator, a person holding administer or an operator's recovery device, the role or grant still standing.",
             "key" => key is not null && record.By == EstateModel.BodyString(target, "principal") &&
                 record.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? device) && device.Type == "device" && IdentityOf(device) == identity) ? null
                 : "A key is closed only by its own device, for that device's principal.",
-            _ => TrustedOperator(record.By, record.At) ? null : "A grant revision is closed only by an operator, who may revise it.",
+            _ => StandingOperator(record.By, record.At) ? null : "A grant revision is closed only by an operator, who may revise it, the role still standing.",
         };
         if (problem is not null)
         {
@@ -198,7 +209,13 @@ internal sealed partial class EstateTrust
                 IdentityOf(previous) == identity && EstateModel.BodyString(previous, "publicKey") == key && EstateModel.BodyString(r, "publicKey") is { } replacing &&
                 replacing != key && DeviceRevisionCounts(r, previous))
             .OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault()?.Id;
-        return new Closing(record, closes.Kind, closes.Id, identity, key, closes.Kind == "grant" ? target : null, rotation, ancestors);
+        if (closes.Kind != "grant") return new Closing(record, closes.Kind, closes.Id, identity, key, null, rotation, ancestors);
+        // A grant closing closes the revision it names and every revision of its line dated at or before it, so a record dated into an
+        // earlier revision's time is bounded as one dated into the named revision's.
+        string line = LineOf(target);
+        List<RecordEnvelope> closed = [.. model.OfType("authority").Where(r => LineOf(r) == line && string.CompareOrdinal(r.At, target.At) <= 0)
+            .Append(target).DistinctBy(r => r.Id).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)];
+        return new Closing(record, closes.Kind, closes.Id, identity, key, target, rotation, ancestors, line, closed);
     }
 
     /// <summary>Whether a signed record verifies, in the mode with anchors, against the closings given.</summary>
@@ -264,9 +281,11 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// The closing that refuses a record relying on a grant revision it closed: a record by the revision's grantee, dated while the
-    /// revision was in force, that the closing does not witness and no anchor lists. Admissions, devices, grants and checkpoints are judged
-    /// by their own rules and rely on no grant here.
+    /// The closing that refuses a record relying on a grant revision it closed: a record by a closed revision's grantee, dated while that
+    /// revision was in force, that the closing does not witness and no anchor lists. Since a closing closes every revision of the line
+    /// up to the one it names, the window runs from the line's first revision to the first revision after them. The rule fails closed: it
+    /// refuses every such record by the grantee, not only those that needed the grant. Admissions, devices, grants and checkpoints are
+    /// judged by their own rules and rely on no grant here.
     /// </summary>
     internal Closing? GrantRefuser(RecordEnvelope record, bool anchorsCount = true)
     {
@@ -274,10 +293,11 @@ internal sealed partial class EstateTrust
         if (anchorsCount && anchorsKnown && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return null;
         foreach (Closing closing in closings)
         {
-            if (closing.Grant is not { } grant || EstateModel.BodyString(grant, "grantee") != record.By || Witnesses(closing, record)) continue;
+            if (closing.Closed is not { } closed || Witnesses(closing, record)) continue;
             // In force at the record's time: dated at or before it, unexpired then, and no revision that counts replaces it by then.
-            if (string.CompareOrdinal(grant.At, record.At) <= 0 && !EstateModel.Expired(grant, record.AtTime) &&
-                !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && Counts(s)))
+            if (closed.Any(grant => EstateModel.BodyString(grant, "grantee") == record.By && string.CompareOrdinal(grant.At, record.At) <= 0 &&
+                    !EstateModel.Expired(grant, record.AtTime) &&
+                    !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && Counts(s))))
                 return closing;
         }
 
@@ -289,12 +309,21 @@ internal sealed partial class EstateTrust
     {
         if (!closingsKnown || !grantClosings) return false;
         if (anchorsCount && anchorsKnown && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return false;
-        return closings.Any(c => c.Kind == "grant" && c.Target == grant.Id && !Witnesses(c, record));
+        return closings.Any(c => c.Closes(grant) && !Witnesses(c, record));
     }
 
-    /// <summary>Whether a closing that acts refuses a record, anchors aside: what an anchoring checkpoint may anchor after reading it.</summary>
+    /// <summary>
+    /// Whether a closing that acts refuses a record, anchors aside: what an anchoring checkpoint may anchor after reading it. A device
+    /// revision a closing refuses is not among them, since no anchor restores it.
+    /// </summary>
     internal bool RefusedByClosing(RecordEnvelope record) =>
-        Refuser(record, Acting, Mode.Signatures) is not null || GrantRefuser(record, anchorsCount: false) is not null;
+        !(record.Type == "device" && record.Supersedes is not null) &&
+        (Refuser(record, Acting, Mode.Signatures) is not null || GrantRefuser(record, anchorsCount: false) is not null);
+
+    /// <summary>Whether a record is a device revision that a closing refuses, which changes no key or name, anchored or not.</summary>
+    internal bool DeviceRevisionRefused(RecordEnvelope record) =>
+        record.Type == "device" && record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == "device" &&
+        RevisionRefused(record, previous);
 
     /// <summary>Whether a record is a closing checkpoint naming a device: the one checkpoint a recovery device signs.</summary>
     private static bool ClosesDevice(RecordEnvelope record) =>

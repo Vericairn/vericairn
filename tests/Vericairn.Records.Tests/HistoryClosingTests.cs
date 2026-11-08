@@ -423,5 +423,197 @@ public class HistoryClosingTests
         Assert.Contains(model.Findings, x => x.Code == "history.closing-author" && x.Location == closing.ExpectedPath + "#body.closes");
     }
 
+    [Fact]
+    public void AGrantClosingClosesEveryEarlierRevisionOfItsLine()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope first = f.Grant(f.Estate.BuilderId, decision, [Scopes.Administer, Scopes.LocalEngineering]);
+        f.Estate.SetClock(f.Estate.Clock.AddHours(1));
+        RecordEnvelope renewed = f.Grant(f.Estate.BuilderId, decision, [Scopes.Administer, Scopes.LocalEngineering], supersedes: first.Id);
+        f.Require();
+        f.Adopt();
+        RecordEnvelope closing = f.Close("grant", renewed.Id);
+        f.Grant(f.Estate.BuilderId, decision, [Scopes.LocalEngineering], supersedes: renewed.Id);
+        DateTimeOffset resume = f.Estate.Clock;
+
+        // Dated into the first revision's time and into the renewed one's: the closing names the renewed revision and closes both.
+        f.Estate.SetClock(first.AtTime.AddMinutes(10));
+        RecordEnvelope intoFirst = f.Estate.Add("principal", f.Estate.BuilderId, Helper.Replace("Helper", "Into the first revision", StringComparison.Ordinal), signer: f.BuilderSigner);
+        f.Estate.SetClock(renewed.AtTime);
+        RecordEnvelope intoRenewed = f.Estate.Add("principal", f.Estate.BuilderId, Helper.Replace("Helper", "Into the renewed revision", StringComparison.Ordinal), signer: f.BuilderSigner);
+        f.Estate.SetClock(resume);
+        EstateModel model = f.Load();
+        Closing acting = Assert.Single(model.Trust.Closings);
+        Assert.Equal([first.Id, renewed.Id], acting.Closed!.Select(r => r.Id));
+        foreach (RecordEnvelope backdated in new[] { intoFirst, intoRenewed })
+        {
+            Assert.False(model.Counts(model.ById[backdated.Id]));
+            Assert.False(model.HasScopeAt(f.Estate.BuilderId, Scopes.Administer, model.ById[backdated.Id]));
+            Assert.Contains(model.Findings, x => x.Code == "history.after-closing" && x.Location == backdated.ExpectedPath && x.Message.Contains(closing.Id, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void AGrantClosingBeforeAShortenedExpiryBoundsTheLongerOne()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope grant = f.Estate.Add("authority", f.Estate.OperatorId, $$"""{"grantee":"{{f.Estate.BuilderId}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}","expires":"2027-12-31T00:00:00Z"}""", signer: f.OperatorSigner);
+        f.Estate.SetClock(f.Estate.Clock.AddHours(1));
+        f.Require();
+        f.Adopt();
+        RecordEnvelope closing = f.Close("grant", grant.Id);
+        RecordEnvelope shortened = f.Estate.Add("authority", f.Estate.OperatorId, $$"""{"grantee":"{{f.Estate.BuilderId}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}","expires":"{{RecordParser.FormatTimestamp(f.Estate.Clock.AddMinutes(10))}}"}""", supersedes: grant.Id, signer: f.OperatorSigner);
+        DateTimeOffset resume = f.Estate.Clock;
+        f.Estate.SetClock(grant.AtTime.AddSeconds(30));
+        RecordEnvelope backdated = f.Estate.Add("principal", f.Estate.BuilderId, Helper.Replace("Helper", "Backdated", StringComparison.Ordinal), signer: f.BuilderSigner);
+        f.Estate.SetClock(resume.AddMinutes(20));
+        RecordEnvelope expired = f.Estate.Add("principal", f.Estate.BuilderId, Helper.Replace("Helper", "After the shortened expiry", StringComparison.Ordinal), signer: f.BuilderSigner);
+        EstateModel model = f.Load();
+        Assert.True(model.Counts(model.ById[shortened.Id]));
+        Assert.False(model.Counts(model.ById[backdated.Id]));
+        Assert.Contains(model.Findings, x => x.Code == "history.after-closing" && x.Location == backdated.ExpectedPath && x.Message.Contains(closing.Id, StringComparison.Ordinal));
+        Assert.True(model.Counts(model.ById[expired.Id]));
+        Assert.Contains(model.Findings, x => x.Code == "principal.author" && x.Location == expired.ExpectedPath);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ANarrowedAdministratorAnchorsNothingWhateverItsCheckpointsDate(bool closed, bool intoRenewed)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Administrator","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope device, _) = f.Admitted(person.Id, "The administrator's device");
+        RecordEnvelope first = f.Grant(person.Id, decision, [Scopes.Administer]);
+        f.Estate.SetClock(f.Estate.Clock.AddHours(1));
+        RecordEnvelope renewed = f.Grant(person.Id, decision, [Scopes.Administer], supersedes: first.Id);
+        f.Require();
+        f.Adopt();
+        if (closed) f.Close("grant", renewed.Id);
+        f.Grant(person.Id, decision, [Scopes.LocalEngineering], supersedes: renewed.Id);
+
+        // An unsigned record claiming the operator, and the narrowed administrator's checkpoint, dated back into a revision's time, anchoring it.
+        RecordEnvelope forged = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("NAR-1", "Unsigned"));
+        DateTimeOffset resume = f.Estate.Clock;
+        f.Estate.SetClock(intoRenewed ? renewed.AtTime : first.AtTime.AddMinutes(10));
+        RecordEnvelope anchoring = f.Checkpoint(person.Id, f.Signer(device), anchored: [forged]);
+        f.Estate.SetClock(resume);
+        EstateModel model = f.Load();
+        Assert.False(model.Trust.MayAnchor(model.ById[anchoring.Id]));
+        Assert.False(model.Counts(model.ById[forged.Id]));
+        Assert.Contains(model.Findings, x => x.Code == "history.anchor-author" && x.Location.StartsWith(anchoring.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnAdministratorWhoseGrantWasClosedClosesNoDevice()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Administrator","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope device, _) = f.Admitted(person.Id, "The administrator's device");
+        RecordEnvelope grant = f.Grant(person.Id, decision, [Scopes.Administer]);
+        f.Estate.SetClock(f.Estate.Clock.AddHours(1));
+        f.Require();
+        f.Adopt();
+        f.Close("grant", grant.Id);
+        f.Grant(person.Id, decision, [Scopes.LocalEngineering], supersedes: grant.Id);
+        DateTimeOffset resume = f.Estate.Clock;
+
+        // Dated into the closed grant's time and following its closing, the administrator closes the root operator's device.
+        f.Estate.SetClock(grant.AtTime.AddMinutes(10));
+        RecordEnvelope deviceClosing = f.Close("device", f.OperatorDevice.Id, person.Id, f.Signer(device));
+        f.Estate.SetClock(resume);
+        RecordEnvelope byOperator = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("ADM-1", "By the operator afterwards"), signer: f.OperatorSigner);
+        EstateModel model = f.Load();
+        Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == deviceClosing.Id);
+        Assert.Contains(model.Findings, x => x.Code == "history.closing-author" && x.Location == deviceClosing.ExpectedPath + "#body.closes");
+        Assert.True(model.Counts(model.ById[byOperator.Id]));
+    }
+
+    [Fact]
+    public void OnlyAnOperatorsRecoveryDeviceClosesADevice()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Administrator","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope device, _) = f.Admitted(person.Id, "The administrator's device");
+        RecordEnvelope recovery = f.Device(person.Id, "The administrator's recovery key");
+        JsonObject offline = HistoryFixture.Body(recovery);
+        offline["custody"] = "offline";
+        offline["purpose"] = "recovery";
+        RecordEnvelope revised = f.Estate.Add("device", person.Id, offline.ToJsonString(), supersedes: recovery.Id, signer: f.Signer(recovery));
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(person.Id, "The administrator's recovery key."), revised.Reference, signer: f.OperatorSigner);
+        f.Grant(person.Id, decision, [Scopes.Administer]);
+        f.Require();
+        f.Adopt();
+        RecordEnvelope byRecovery = f.Close("device", f.BuilderDevice.Id, person.Id, f.Signer(recovery));
+        EstateModel model = f.Load();
+        Assert.True(SignatureChecks.Recovers(model, recovery.Id));
+        Assert.Empty(model.Trust.Closings);
+        Assert.Contains(model.Findings, x => x.Code == "history.closing-author" && x.Location == byRecovery.ExpectedPath + "#body.closes");
+
+        // The administrator's own device closes it.
+        RecordEnvelope byDevice = f.Close("device", f.BuilderDevice.Id, person.Id, f.Signer(device));
+        Assert.Equal(byDevice.Id, Assert.Single(f.Load().Trust.Closings).Record.Id);
+    }
+
+    [Fact]
+    public void ADeviceRevisionAClosingRefusedIsNotAnchored()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        f.Adopt();
+        f.Close("device", f.BuilderDevice.Id);
+        JsonObject renamed = HistoryFixture.Body(f.BuilderDevice);
+        renamed["name"] = "Renamed after its closing";
+        RecordEnvelope rename = f.Estate.Add("device", f.Estate.BuilderId, renamed.ToJsonString(), supersedes: f.BuilderDevice.Id, signer: f.BuilderSigner);
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("ANC-1", "After the closing"), signer: f.BuilderSigner);
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(model.ById[rename.Id]));
+        string? refusal = SignedHistory.AuthoringRefusal(model, StoredDraft(f, model, [model.ById[rename.Id]]));
+        Assert.Contains("a device revision a closing refused", refusal, StringComparison.Ordinal);
+        Assert.Null(SignedHistory.AuthoringRefusal(model, StoredDraft(f, model, [model.ById[order.Id]])));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ALaterPromotionMakesNoEarlierHandOverAnOperators(bool adopted)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope sponsor = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Sponsor","roles":["contributor"]}""", signer: f.OperatorSigner);
+        RecordEnvelope taker = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Taker","roles":["contributor"]}""", signer: f.OperatorSigner);
+        RecordEnvelope other = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Other","roles":["contributor"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope device, _) = f.Admitted(other.Id, "The other person's device");
+        RecordEnvelope goal = f.Estate.Add("goal", f.Estate.OperatorId, $$"""{"title":"Build the widget","objective":"Ship the widget.","completion":[{"evidence":"It ships.","check":"Read it."}],"constraints":[],"kind":"finite","sponsor":"{{sponsor.Id}}","budget":{"wallMinutes":600,"attemptsPerStep":5,"concurrency":5},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""", signer: f.OperatorSigner);
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, $$"""{"key":"HAND-1","kind":"ordinary","title":"Build it","intent":"Build it.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{goal.Id}}"}],"deliverables":["widget"]}""", signer: f.OperatorSigner);
+        f.Estate.Add("assignment", f.Estate.OperatorId, HandOverAssignment(f.Estate.BuilderId), order.Reference, signer: f.OperatorSigner);
+        f.Require();
+        if (adopted) f.Adopt();
+
+        // Another person, not an operator, hands the agent's step over to the taker; the operator promotes that person afterwards.
+        RecordEnvelope handOver = f.Estate.Add("assignment", other.Id, HandOverAssignment(taker.Id), order.Reference, signer: f.Signer(device));
+        f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Other","roles":["operator"]}""", supersedes: other.Id, signer: f.OperatorSigner);
+        EstateModel model = f.Load();
+        if (adopted)
+            Assert.Contains(model.Findings, x => x.Code == "assignment.handover" && x.Location == handOver.ExpectedPath);
+        else
+            Assert.DoesNotContain(model.Findings, x => x.Code == "assignment.handover" && x.Location == handOver.ExpectedPath);
+    }
+
+    private static string HandOverAssignment(string contributor) =>
+        $$$"""{"contributor":"{{{contributor}}}","brief":{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}}""";
+
+    private static System.Text.Json.JsonElement StoredDraft(HistoryFixture f, EstateModel model, IEnumerable<RecordEnvelope> anchored)
+    {
+        CheckpointDraft draft = SignedHistory.Prepare(model, "manual", anchored);
+        f.StoreObjects(draft);
+        return draft.Body;
+    }
+
     private static string Errors(EstateModel model) => string.Join('\n', model.Findings.Where(x => x.Severity == Severity.Error));
 }
