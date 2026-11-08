@@ -482,6 +482,23 @@ public class SearchTests
     }
 
     [Fact]
+    public void ReplayRebuildsABasisFromAmongManyRecordsOfItsOwnSecond()
+    {
+        // More records share the selection's second than any subset search could try; their ids order them by when they were made.
+        using var estate = new SearchEstate();
+        var second = new DateTimeOffset(2026, 11, 1, 12, 0, 30, TimeSpan.Zero);
+        for (int i = 0; i < 12; i++) estate.Add("decision", SearchEstate.Decision($"Keyword note {i}", "A keyword index note.", "note"), at: second);
+        using EstateService service = estate.Open();
+        SearchResponse taken = service.Search(new SearchRequest("keyword index"));
+        Assert.Equal("2026-11-01T12:00:30Z", taken.Selection!.Value.GetProperty("index").GetProperty("asOf").GetString());
+        for (int i = 0; i < 12; i++) estate.Add("decision", SearchEstate.Decision($"Later keyword note {i}", "A later keyword index note.", "later"), at: second);
+        SearchReplayOutcome replayed = Assert.Single(service.SearchReplay(new SearchReplayRequest(taken.Selection)).Outcomes);
+        Assert.True(replayed.Replayed, replayed.Message);
+        Assert.Equal("copy", replayed.Basis);
+        Assert.True(replayed.Matches, string.Join('\n', replayed.Differences));
+    }
+
+    [Fact]
     public void ACommitWithAFileNameThatIsNotUtf8IsReadWithoutThatFile()
     {
         TestPrerequisites.RequireGit();

@@ -569,19 +569,30 @@ public sealed partial class EstateService
         return Compare(hash, "commit", SearchRunner.Run(atCommit.Index, atCommit.Snapshot, query, ReaderOf(atCommit.Index), limit), selection, opaque);
     }
 
-    // The record files of a basis as of a time: every record before it, and of the few recorded in that same second, the ones whose
-    // record-set hash reproduces the selection's own. Times have whole seconds, so later records of that second are told apart by hash.
+    // The record files of a basis as of a time: every record before it, and of those recorded in that same second, the ones whose
+    // record-set hash reproduces the selection's own. Times have whole seconds, so later records of that second are told apart by
+    // hash: first as a prefix in id order (a ULID orders records by when they were made, so a basis holds the earlier ones, however
+    // many share the second), then, for a few, as any subset.
     private static HashSet<string> RecordsAsOf(EstateModel model, string asOf, string? recordedSet)
     {
         List<RecordEnvelope> before = model.Records.Where(r => string.CompareOrdinal(r.At, asOf) < 0).ToList();
         List<RecordEnvelope> ties = model.Records.Where(r => r.At == asOf).OrderBy(r => r.Id, StringComparer.Ordinal).ToList();
         IEnumerable<RecordEnvelope> chosen = before.Concat(ties);
-        if (recordedSet is not null && ties.Count is > 0 and <= 10)
+        bool Reproduces(List<RecordEnvelope> set) => KeywordIndex.RecordSetHash(set.Select(r => (r.Id, r.ComputedHash))) == recordedSet;
+        if (recordedSet is null || ties.Count == 0) return chosen.Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
+        for (int count = ties.Count; count >= 0; count--)
+        {
+            List<RecordEnvelope> prefix = [.. before, .. ties.Take(count)];
+            if (!Reproduces(prefix)) continue;
+            return prefix.Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
+        }
+
+        if (ties.Count <= 10)
         {
             for (int mask = (1 << ties.Count) - 1; mask >= 0; mask--)
             {
                 List<RecordEnvelope> set = [.. before, .. ties.Where((_, i) => (mask & (1 << i)) != 0)];
-                if (KeywordIndex.RecordSetHash(set.Select(r => (r.Id, r.ComputedHash))) != recordedSet) continue;
+                if (!Reproduces(set)) continue;
                 chosen = set;
                 break;
             }
