@@ -133,7 +133,20 @@ public static class FlowRuns
     /// force before a record when one is given (otherwise now), applying to the estate or to the run's product, whose rule of kind
     /// <see cref="PolicyKind"/> names the flow.
     /// </summary>
-    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, string flowId, string? product, RecordEnvelope? before = null)
+    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, string flowId, string? product, RecordEnvelope? before = null) =>
+        PolicyRequired(model, [flowId], product, before);
+
+    /// <summary>
+    /// The steps and items an estate policy requires of a resolved flow: those a policy requires of the flow or of any base it extends, so
+    /// that an extension never turns off a step a policy requires of its base.
+    /// </summary>
+    public static IReadOnlyDictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, FlowDefinition flow, string? product, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        return PolicyRequired(model, flow.Chain.Select(c => c.Id).ToList(), product, before);
+    }
+
+    private static Dictionary<string, RecordEnvelope> PolicyRequired(EstateModel model, IReadOnlyList<string> flowIds, string? product, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
         var required = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
@@ -155,7 +168,7 @@ public static class FlowRuns
             foreach (JsonElement rule in TJson.Array(policy.Body, "rules").Where(r => TJson.Text(r, "kind") == PolicyKind))
             {
                 JsonElement parameters = TJson.Object(rule, "parameters");
-                if (TJson.Text(parameters, "flow") != flowId)
+                if (!flowIds.Contains(TJson.Text(parameters, "flow") ?? string.Empty, StringComparer.Ordinal))
                 {
                     continue;
                 }
@@ -291,7 +304,7 @@ public static class FlowRuns
             return refusals;
         }
 
-        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(model, flow.Pin.Id, product, before);
+        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(model, flow, product, before);
         var turnedOff = new List<string>();
         var itemsOff = new List<string>();
         foreach (JsonProperty choice in choices.EnumerateObject())
@@ -434,7 +447,7 @@ public static class FlowRuns
             context.Error(code, message);
         }
 
-        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(context.Model, resolved.Pin.Id, product, context.Record);
+        IReadOnlyDictionary<string, RecordEnvelope> required = PolicyRequired(context.Model, resolved, product, context.Record);
         Configuration configuration = Configure(context.Model, context.Record, resolved, context.Record);
 
         // The run's effective configuration, not only the goal's own options, carries every step a policy requires: a wider default,
@@ -556,6 +569,33 @@ public static class FlowRuns
             if (bound is not null)
             {
                 bindings["subject." + name] = bound;
+            }
+        }
+
+        // {previous}: for a flow about a product's version, the earlier releases its guides must not name as current.
+        if (FlowContract.BindsPrevious(flow.SubjectFields) && bindings.GetValueOrDefault("subject.product") is string product && bindings.GetValueOrDefault("subject.version") is string version)
+        {
+            bindings["previous"] = ReleaseHistory.Joined(ReleaseHistory.Previous(model, product, version));
+        }
+
+        return bindings;
+    }
+
+    /// <summary>
+    /// The values one step instance binds: the run's, and the id of the record that carries each of its inputs now ({input.&lt;name&gt;.id}).
+    /// A binding the records do not give is left out, so a predicate naming it holds for no record. A reserved step's {request} is bound
+    /// as its position derives it, from the request its operator closed for its current ask (<see cref="FlowStops.ClosedRequest"/>).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> Bindings(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, string? item, Func<FlowInput, RecordEnvelope?> carrier)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(carrier);
+        var bindings = new Dictionary<string, string>(Bindings(model, goal, flow, item), StringComparer.Ordinal);
+        foreach (FlowInput input in step.Inputs)
+        {
+            if (carrier(input) is RecordEnvelope record)
+            {
+                bindings["input." + input.Name + ".id"] = record.Id;
             }
         }
 

@@ -91,11 +91,15 @@ public sealed record FlowOutput(string Name, string Kind, string? MediaType, str
     public string? Counts => FlowContract.Counted(Kind, RecordType);
 }
 
-/// <summary>A check a step runs before its action, named and explained: here, record predicates that must hold.</summary>
+/// <summary>
+/// A check a step runs before its action, named and explained: record predicates the position reads, which hold when the trap is clear,
+/// or a named check the step's action runs on its machine before it acts, such as an objection of release submit, or both.
+/// </summary>
 /// <param name="Name">The trap's name.</param>
 /// <param name="Summary">What it guards against.</param>
-/// <param name="Holds">The predicates that hold when the trap is clear.</param>
-public sealed record FlowTrap(string Name, string Summary, IReadOnlyList<JsonElement> Holds);
+/// <param name="Holds">The predicates that hold when the trap is clear; empty for a trap only its action checks.</param>
+/// <param name="Check">The check or objection the step's action runs and refuses on, when it names one; never read from records.</param>
+public sealed record FlowTrap(string Name, string Summary, IReadOnlyList<JsonElement> Holds, string? Check = null);
 
 /// <summary>A branch: steps entered only when its predicates hold, such as a withdrawal, and the step the run returns to.</summary>
 /// <param name="Name">The branch's name.</param>
@@ -481,6 +485,17 @@ public sealed class FlowDefinition
             }
         }
 
+        // A reserved step done by the operator's close of its request never waits on a step done at no time the records give, in the
+        // merged order an extension's steps take among its base's.
+        HashSet<string> branched = branches.SelectMany(b => b.Steps).ToHashSet(StringComparer.Ordinal);
+        List<FlowContract.ClosingShape> closing = steps.Select(s => new FlowContract.ClosingShape(s.Key, s.After,
+            s.Inputs.Select(i => i.Step).Append(TJson.Text(TJson.Object(s.When, "due"), "from")).OfType<string>().ToList(),
+            !s.Required || branched.Contains(s.Key), FlowContract.Untimed(s.Kind, s.Outputs.Count, s.Done), FlowContract.ClosesByRequest(s.Reserved, s.Done))).ToList();
+        foreach ((string reserved, string waited) in FlowContract.Unclosable(closing))
+        {
+            errors.Add($"{FlowContract.UnclosableCode}: {FlowContract.UnclosableMessage(reserved, waited)}");
+        }
+
         if (errors.Count > 0)
         {
             throw new InvalidOperationException("The flow does not resolve: " + string.Join(" ", errors));
@@ -551,6 +566,11 @@ public sealed class FlowDefinition
 
         foreach (JsonElement predicate in step.Requires.Concat(step.Done).Concat(step.Traps.SelectMany(t => t.Holds)))
         {
+            if (Bindings(predicate).Contains("previous", StringComparer.Ordinal) && !FlowContract.BindsPrevious(fields))
+            {
+                yield return $"{where}: step '{step.Key}' binds {{previous}}, and the flow's subject names no product and version.";
+            }
+
             foreach (string binding in Bindings(predicate).Where(b => b.StartsWith("subject.", StringComparison.Ordinal)))
             {
                 if (!fields.TryGetValue(binding["subject.".Length..], out string? type) || type == "list")
@@ -586,7 +606,7 @@ public sealed class FlowDefinition
     private static FlowStep Read(JsonElement content, TemplatePin pin, string? previous)
     {
         List<string> after = TJson.Object(content, "after").ValueKind == JsonValueKind.Array ? TJson.Strings(content, "after").ToList() : previous is null ? [] : [previous];
-        List<FlowTrap> traps = TJson.Array(content, "traps").Select(t => new FlowTrap(TJson.Text(t, "name")!, TJson.Text(t, "summary")!, TJson.Array(t, "holds").ToList())).ToList();
+        List<FlowTrap> traps = TJson.Array(content, "traps").Select(t => new FlowTrap(TJson.Text(t, "name")!, TJson.Text(t, "summary")!, TJson.Array(t, "holds").ToList(), TJson.Text(t, "check"))).ToList();
         List<FlowInput> inputs = TJson.Array(content, "inputs").Select(i => new FlowInput(TJson.Text(i, "name")!, TJson.Text(i, "from")!, TJson.Text(i, "field"), TJson.Text(i, "step"), TJson.Text(i, "output"))).ToList();
         List<FlowOutput> outputs = TJson.Array(content, "outputs").Select(o => new FlowOutput(TJson.Text(o, "name")!, TJson.Text(o, "kind")!, TJson.Text(o, "mediaType"), TJson.Text(o, "recordType"), TJson.Text(o, "recordKind"),
             !TJson.Flag(o, "optional"), TJson.Text(o, "default") != "off",

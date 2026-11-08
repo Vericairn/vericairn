@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 17, November 7, 2026. Add `docs pass --before` and `estate verify` in the development build.
+
 Revision 16, November 7, 2026. Add `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`, `work brief`, `worker run` and `goal step`, in the development build.
 
 Revision 15, November 7, 2026. Add `estate check --expect` and the bootstrap's `--expect` in the development build.
@@ -678,3 +680,61 @@ and outrank the real sources; the report names the skipped path. It records noth
 [operator's guide](operator-guide.md#searching-for-context-092).
 
 `vericairn doctor` adds a `search` line confirming that this build's SQLite has the full-text module the index uses.
+
+## `vericairn docs pass --before` (0.9.2)
+
+`docs pass <version> --before` checks the version-tracking guides before a release's documentation set is frozen, the release
+flow's `docs-before-freeze` step (PROC-07). It reads each document the set's declaration names that the guides directory holds as
+a plain file, `docs/` beside `docs/releases/documents.json` by default (`--guides` names another), and finds two things:
+
+- a token of an earlier release standing as the current one: a version of one of the two newest published releases of the
+  product before `<version>`, or of a candidate withdrawn since, outside a history section and a label. A history section's
+  heading speaks of history, changes or earlier releases; a section with `<!-- vericairn:history -->` under its heading counts too,
+  while a marker before the first heading marks nothing. A heading labelled with a release, such as `(0.8.3)`, describes current
+  behaviour and is read like any other. A token stands as history in a label that holds only the release and work-order keys,
+  such as `(0.9.1)`, `(FIX-90, 0.9.1)` or `(from 0.9.1)`, unless the label follows a word such as `release`, `version` or
+  `current`; just after `From`, `since`, `in`, `until`, `before`, `after`, `fixed in` and the like; before `or earlier`; in a link
+  to a versioned page or set; and on a `Revision` line. A document whose name carries a version, such as
+  `api-compatibility-0.9.1.md`, is read for preparation wording only;
+- preparation wording, such as notes that are a placeholder, `under preparation`, `not yet rendered`, `pre-build`,
+  `the builder must`, `TODO` or `TBD`.
+
+```sh
+vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --product <product>
+vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --previous 1.1.0 --previous 1.0.0
+vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --product <product> --record --by <principal>
+```
+
+Each location is printed with its line. Exit 0 means both checks passed, 1 that one found a location, and 2 a refusal. The
+earlier releases come from the estate's release records, or from `--previous`, which needs no estate and records nothing.
+`--record --by <principal>` records each check's outcome as a `verification` of the product at the guides' commit, with method
+`vericairn.software/prior-version-tokens` or `vericairn.software/preparation-wording`, `environment.release` the version and
+`environment.previous` the earlier releases it read, separated by spaces, superseding the latest one of the same check and
+version. Each location is named relative to the root of the repository that holds the guides, and a machine path a quoted line
+names is recorded as `<path>`. It refuses a clone with uncommitted changes, since the verification names the commit it read, and refuses `--previous`:
+the release flow counts a check only of the earlier releases the records give. Every file is read inside the guides directory:
+`/` and `\` both divide a declared name, and a declared name, or any directory on its way, that is a link is refused. The
+command reads files and changes none; `--before` goes with neither `--assign-to`, `--key`, `--document` nor `--output`.
+
+## `vericairn estate verify` (0.9.2)
+
+`estate verify --by <principal>` checks, on this machine, an estate pinned to a published release after its upgrade, the upgrade
+flow's `runtime` and `verify` steps (PROC-07). It reads which runtime serves the estate, a daemon or, when none does, this
+command line's own, and compares its release with the one the manifest pins; with the pinned release serving it, it runs the
+estate check and derives the status. It records each outcome as a `verification` of the estate's charter at the estate
+repository's commit, method `vericairn.software/serving-runtime` or `vericairn.software/estate-check`, with `environment.release`
+the pinned release, `environment.served` the serving one and `environment.device` the signing device this machine holds for the
+principal, superseding only this machine's latest one of the same check and release, so a pass on one machine never hides
+another machine's failed check. The principal needs an admitted device whose key this machine holds.
+
+```sh
+vericairn estate verify --by <principal>
+vericairn --json estate verify --by <principal>
+```
+
+Exit 0 means both passed and 1 that one failed: a runtime of another release serving the estate fails the runtime check, naming
+it with `runtime stop` and the pinned release's start, and leaves the estate unchecked. The command stops and starts nothing; the
+upgrade's runtime step does that. An estate pinned to a source commit is refused. A verification names no path of the machine it
+ran on: the runtime by its release and process, another estate by its id, the commands as run in the estate's directory, and any
+other path in a finding's message as `<path>`; the exact commands for this machine are printed after the check, and `--json`
+gives them as `here`, never recorded.
