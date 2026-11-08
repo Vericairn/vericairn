@@ -120,6 +120,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>The goal's evaluations.</summary>
     public ObservableCollection<EvaluationRow> Evaluations { get; } = [];
 
+    /// <summary>For a run, its stops in the order the flow reaches them, the same stops status shows.</summary>
+    public ObservableCollection<StopRow> Stops { get; } = [];
+
+    /// <summary>True while the goal shown is a run with a stop to show.</summary>
+    public bool HasStops => Stops.Count > 0;
+
     /// <summary>Reads the goals again and shows the one named, else the one shown, else the first open one.</summary>
     public async Task FillAsync(string? goal = null, CancellationToken cancellationToken = default)
     {
@@ -167,6 +173,8 @@ public sealed class GoalsWorkspace : Document
         Spend.Clear();
         Asks.Clear();
         Evaluations.Clear();
+        Stops.Clear();
+        Raise(nameof(HasStops));
         IEstateApi? estate = api();
         if (selected is null || estate is null)
         {
@@ -218,6 +226,13 @@ public sealed class GoalsWorkspace : Document
         {
             Evaluations.Add(row);
         }
+
+        foreach (StopRow row in view.Stops)
+        {
+            Stops.Add(row);
+        }
+
+        Raise(nameof(HasStops));
     }
 }
 

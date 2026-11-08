@@ -142,6 +142,11 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
+            if (route.State == "request")
+            {
+                return RequestStep(model, current, taken, request);
+            }
+
             if (route.State != "agent")
             {
                 return Ask(model, current, taken, request);
@@ -504,6 +509,6 @@ public sealed partial class EstateService
             Providers.Launchers.Select(l => (l.Launcher, l.Harness)).ToList(),
             identity => held.TryGetValue(identity, out bool known) ? known : held[identity] = stores.Any(s => s.Has(identity)),
             (goal, agent) => CustodyGuard.Refusals(model, CustodyGuard.Guarded(model, goal, agent), stores, Environment.UserName),
-            DateTimeOffset.UtcNow);
+            FlowClock.GetUtcNow());
     }
 }

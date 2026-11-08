@@ -1418,11 +1418,11 @@ producer included; independence is what an item's review requires, not its evide
 holds only for a principal of this estate.
 
 `goal step` never dispatches a reserved step; it stops, waiting on the operator, and no grant in this build lets an agent
-carry it. Nor does it dispatch an `operation`, `decision`, `effect`, `exchange` or `flow` step: each counts once its done
-predicates hold, recorded by whoever carries it. In this build an exchange's export and intake are not executed, an effect
-has no API or browser route, and nothing takes a run's next steps automatically; a person carries them. A stop is shown in the
-run's position and in `goal step`'s message; its operator request, and its place in status, Workbench and Remote, are not
-built yet, and a step with no available principal is reported rather than asked of the sponsor.
+carry it. From 0.9.2 `goal step` records the step's operator request instead (see
+[stops and their surfaces](#stops-and-their-surfaces-092)). Nor does it dispatch an `operation`, `decision`, `effect`,
+`exchange` or `flow` step: each counts once its done predicates hold, recorded by whoever carries it. In this build an
+exchange's export and intake are not executed, an effect has no API or browser route, and nothing takes a run's next steps
+automatically; a person carries them. A step with no available principal is reported rather than asked of the sponsor.
 
 ### Hand-offs, reviews and failure routes (0.9.2)
 
@@ -1491,6 +1491,80 @@ to rerun from a fresh assignment, until a revision or a review clears it; a hold
 `goal show` and `goal next` show all of this. Each step lists its attempts under every assignment, with their results, and how
 many runs of its attempts per step it has used. They also show its reviews before hand-off, its required attention, the
 failure its latest work stands on, and whether it reruns from a fresh assignment. A run lists its own required attention.
+
+### Stops and their surfaces (0.9.2)
+
+A run stops for a person only where a person holds a step's role or an item's review, where a step is a reserved act
+(`accept-release`, `publish`, `spend`, `use-credential` or `security-review`) with no grant in force within its bounds, where
+required attention arises, and where the run is complete and the goal is ready to accept. No grant of a reserved act takes
+effect in this build, so every reserved step waits on the operator.
+
+A reserved step waits on the operator as an operator request. When the step is next, `goal next` routes it as `request`, put
+to the first person with the operator role that its role names, else the goal's sponsor when the sponsor is one, else the root
+operator. The request carries the step's exact command: its declared `action` with each placeholder bound from the records as
+they stand then ([templates](templates.md#flows-092)). The command is computed only then. A later reserved step, still
+`blocked`, shows none, and nothing stores one ahead. Whoever takes the run's steps runs `goal step`: an operator, the goal's
+sponsor when the sponsor is a person, or a principal with the `local-engineering` scope. It records the request and dispatches
+nothing: no assignment, ask or run. The request's `flowStep` names the run's goal, the step and its instance. Its subject is the
+run's work order, and its one content item is the command. A `publish` step's request is of kind `publication`. The request
+grants nothing.
+
+```sh
+vericairn goal next <goal>
+vericairn goal step <goal> --by <operator>
+vericairn operator list
+```
+
+A request is delivered on `operator list`, status and required attention only while it is due. It is due while its step waits
+on the operator, it carries exactly the command the records give now, a principal who takes the run's steps recorded it, and
+no earlier request carries the step. When the records change before the operator acts, the request is withdrawn from delivery.
+For example, a new master that an input of the step takes makes the step wait again on its review, or changes the command.
+Once the step is next again, `goal next` routes it as `request` again. `goal step` then revises the request to carry the new
+command when the same principal recorded it; otherwise a new request carries the step. `operator list` and its JSON's
+`withdrawn` name each open request that is not delivered, as `withdrawn` or `settled`, with why. Each stays open until its
+operator closes it with `operator done` or `dismiss`.
+
+The step is done only from the records of the operator's own act. Its done predicates and any record item count a record only
+when its signatures are authentic and its author was a person with the operator role when it was made; a result counts only
+on the same terms. A record's claimed author, an unsigned or altered record, and an act made before its author became an
+operator never count, while a past act of an operator whose role was later revoked still does. Under a charter where
+signatures are optional, the operator therefore signs a reserved act. A reserved step's done predicates name no `state`, which
+other records decide. Closing the request does not complete the step, and neither does an agent's record of the act nor an
+agent's close citing the operator's words; the step's reasons name each record that does not count. Once the operator's act
+is recorded, the request is `settled` and no longer delivered. A request the addressed operator closed with their own signed
+close, while its command still holds, is not made again (route `closed`), and the step waits for the act's record. Any other
+close, an agent's among them, leaves the step's request due again. A request recorded by a principal who does not take the
+run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
+command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
+status and attention show the checked command first and label that prose as not checked.
+
+Every surface shows a run's stops the same way, from the records:
+
+- status: its text, read now, and the canonical JSON's `runs` when there are runs, each with its goal, flow, steps done,
+  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
+- `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
+- the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
+- Workbench's home, from canonical status with its as-of time, and its Goals workspace, read now;
+- Remote's Attention, from canonical status with its as-of time.
+
+Each stop names the step, or `<step> review` for an item's review, `the run` for the run's own attention and `the goal` for its
+acceptance. It says why it waits (`person`, `reserved`, `attention` or `accept`), who it waits on, how it reaches them, and for
+a reserved step that is next its exact command. Only a live read shows that command: human status, `goal show`, `goal next`,
+the Goals workspace, `operator list` and attention, which read the real clock. Canonical status and a hand-over package, which
+trust each record's claimed time, show the stop without it. A stop reaches its person in one of these ways:
+
+- `due`: the next `goal step` delivers it, as an assignment and an ask, an ask, or an operator request;
+- `delivered`: its assignment, ask or request waits on the person;
+- `closed`: its ask was answered or its request closed, and it is not asked again while that holds;
+- `queued`: three stops of the estate's runs already reach that person;
+- `outside`: `goal step` does not carry it, so nothing is recorded to reach the person in this build. That is an effect or an
+  exchange a person carries, a watch past its limit, a step no one is named for, or the goal's acceptance.
+
+At most three stops reach one person at a time across every run. Those already delivered count first; then each due stop in
+the flows' order, the earliest position in its flow first and, at the same position, the older run first. `goal next` routes a
+fourth as `queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it,
+or its request is settled or withdrawn. Remote shows the stops as canonical status gives them. It answers asks as before, and
+it carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
 
 ## 19. Pairing, local-network connections and revocation
 
@@ -1962,7 +2036,10 @@ records dismissal. Each is one signed step, with the original request retained.
 The [operator request guide](operator-requests.md) explains exact draft hashes,
 publication intent and observed destinations, cited operator words for an agent's
 close, observations that close a request, and carrying existing open asks over.
-Request closure does not accept work or answer a decision question.
+Request closure does not accept work or answer a decision question. From 0.9.2 a
+run's reserved step waits on the operator as a request that `goal step` records;
+it is delivered only while it carries the command the records give now (see
+[stops and their surfaces](#stops-and-their-surfaces-092)).
 
 ## 31. Asking for help: the support bundle
 

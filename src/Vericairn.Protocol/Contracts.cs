@@ -388,17 +388,22 @@ public sealed record GoalStepRequest(string By, string? Repository = null, IRead
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
 /// <param name="Goal">The goal's current revision.</param>
-/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), or none (nothing to dispatch).</param>
+/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), request (an operator request recorded for a run's reserved act, from 0.9.2), or none (nothing to dispatch).</param>
 /// <param name="Message">What happened and what follows, in words.</param>
 /// <param name="Ok">Whether the step was taken as routed, or there was nothing to take.</param>
 /// <param name="Step">The step taken: its work order's key.</param>
-/// <param name="Route">Its route: agent, person, reserved or unavailable.</param>
+/// <param name="Route">Its route: agent, person, reserved, unavailable, attention or request.</param>
 /// <param name="Principal">The principal it reached: the agent, or the person asked.</param>
 /// <param name="Assignment">The assignment written to the chosen principal, when this call wrote one.</param>
 /// <param name="Ask">The ask written, when this call wrote one.</param>
 /// <param name="Run">For an agent, what starting its run did.</param>
 /// <param name="Problem">Why nothing was dispatched.</param>
-public sealed record GoalStepResponse(string Goal, string Outcome, string Message, bool Ok, string? Step = null, string? Route = null, string? Principal = null, RecordWritten? Assignment = null, RecordWritten? Ask = null, RunResponse? Run = null, Problem? Problem = null);
+public sealed record GoalStepResponse(string Goal, string Outcome, string Message, bool Ok, string? Step = null, string? Route = null, string? Principal = null, RecordWritten? Assignment = null, RecordWritten? Ask = null, RunResponse? Run = null, Problem? Problem = null)
+{
+    /// <summary>For a run's reserved act, the operator request this call wrote, carrying the step's exact command; it grants nothing (0.9.2).</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public RecordWritten? Request { get; init; }
+}
 
 /// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
 /// <param name="Assignment">The agent's assignment, which holds the step.</param>
