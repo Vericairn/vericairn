@@ -22,3 +22,8 @@ above, as main rendered it before PROC-06 (0.9.2). An estate without runs keeps 
 `statusHash` a person's observation pins; a test renders each estate with the current build and compares, the
 policy estate's `documents` member apart, since its living document names a generator only tests install. A later
 change to canonical status for estates without runs updates these files deliberately.
+
+`flows/vericairn-first-party-release-1.0.0.json` is a copy of Vericairn's first-party extension of the software pack's
+release flow, the flow file the first-party estate keeps under its own `docs/templates`; it is never part of the software
+pack. Records tests install it byte for byte into a test estate, check that it pins the shipped release flow by hash and run
+its steps. A change to the shipped release flow changes that hash, so the copy and the estate's file are updated together.
