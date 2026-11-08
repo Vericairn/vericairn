@@ -57,12 +57,12 @@ public sealed class GoalStatusType : IRecordType
         if (status == "active")
         {
             // Activation and resumption grant the budget: the sponsor, a person within the authority to spend, or an operator when an agent sponsors it.
-            foreach ((string code, string message) in GoalRules.ActivationRefusals(context.Model, goal, context.Record.By, context.Record.AtTime))
+            foreach ((string code, string message) in GoalRules.ActivationRefusals(context.Model, goal, context.Record.By, context.Record.AtTime, context.Record))
             {
                 context.Error(code, message);
             }
         }
-        else if (status is "impossible" or "abandoned" && !GoalRules.MayEnd(context.Model, goal, context.Record.By))
+        else if (status is "impossible" or "abandoned" && !GoalRules.MayEnd(context.Model, goal, context.Record.By, context.Record))
         {
             context.Error("goal-status.sponsor", $"Only the goal's sponsor, or an operator for a goal an agent sponsors, records it as {status}.");
         }

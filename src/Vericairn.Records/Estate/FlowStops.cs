@@ -318,7 +318,9 @@ public static class FlowStops
     public static DateTimeOffset RecordedTime(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return model.Records.Count == 0 ? DateTimeOffset.UnixEpoch : model.Records.Max(r => r.AtTime);
+        // In an estate that has adopted history checkpoints, only records that count give the recorded time (design/signed-history.md § 8).
+        IReadOnlyList<RecordEnvelope> records = History.SignedHistory.Adopted(model) ? model.CountingRecords : model.Records;
+        return records.Count == 0 ? DateTimeOffset.UnixEpoch : records.Max(r => r.AtTime);
     }
 
     /// <summary>The runs status shows: every current goal that is a run and is active, paused, budget-limited or blocked, oldest first, with its position.</summary>

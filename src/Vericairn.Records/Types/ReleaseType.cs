@@ -175,7 +175,7 @@ public sealed class ReleaseType : IRecordType
                 return;
             }
 
-            bool accepted = context.Model.OfType("acceptance").Any(a => a.Subject?.Id == candidate.Id && a.Subject.Hash == candidate.ComputedHash && context.HasRole(a.By, Roles.Operator));
+            bool accepted = context.Model.OfType("acceptance").Any(a => a.Subject?.Id == candidate.Id && a.Subject.Hash == candidate.ComputedHash && context.Model.HasRoleAt(a.By, Roles.Operator, a));
             if (!accepted)
             {
                 context.Error("release.unaccepted", "Publication follows the operator's acceptance of the exact candidate; none is recorded.");

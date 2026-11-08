@@ -144,7 +144,7 @@ public sealed class GoalType : IRecordType
         // 01M50A8KHJT1MSSS84KZKHKRHB); anyone may propose a new goal.
         if (context.Find(context.Record.Supersedes) is { Type: "goal" } revised)
         {
-            foreach ((string code, string message) in GoalRules.RevisionRefusals(context.Model, revised, context.Record.By))
+            foreach ((string code, string message) in GoalRules.RevisionRefusals(context.Model, revised, context.Record.By, context.Record))
             {
                 context.Error(code, message);
             }

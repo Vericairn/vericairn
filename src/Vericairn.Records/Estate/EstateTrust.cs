@@ -12,16 +12,17 @@ namespace Vericairn.Records.Estate;
 /// <summary>
 /// What an estate's signatures, anchors and history checkpoints establish, judged once from every record the loader read and before
 /// any rule reads them: which signatures verify, which admissions and device revisions count, the charter, the history graph and
-/// which records count at all (design/signed-history.md §§ 5 to 7). A record that does not count is kept as evidence and reported,
+/// which records count at all (design/signed-history.md §§ 5 to 8). A record that does not count is kept as evidence and reported,
 /// and the model's indexes leave it out, so no rule that admits, authorizes, accepts, clears or holds reads it.
 /// </summary>
 /// <remarks>
 /// Everything here reads the records as loaded, never the model's counting indexes, so the judgment cannot depend on itself. The root
 /// operator is read from the first charter. Signatures are judged in two modes: without anchors, where only signed admissions count,
 /// which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count; and with
-/// anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it.
+/// anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are judged
+/// before anything else, in checkpoint order, and every later judgment reads the closings that act (EstateTrust.Closings.cs).
 /// </remarks>
-internal sealed class EstateTrust
+internal sealed partial class EstateTrust
 {
     internal enum Mode
     {
@@ -65,6 +66,10 @@ internal sealed class EstateTrust
         FirstAuthority = model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).FirstOrDefault();
 
+        // Closings come first: each is judged against the closings before it in checkpoint order, with the format-2 migration's anchors
+        // as they stand before any closing, and then every judgment is made afresh with the closings that act (design/signed-history.md § 8).
+        JudgeClosings(objects);
+
         // Anchors are judged by signatures alone, so that nothing they anchor can be what makes them count.
         MigrationAnchors = ComputeMigrationAnchors();
         HistoryAnalysis analysis = HistoryAnalysis.Anchoring(this, model);
@@ -75,6 +80,7 @@ internal sealed class EstateTrust
         Charter = ComputeCharter();
         Required = Charter is not null && RequiresSignatures(Charter);
         History = analysis.Complete(objects, files);
+        closingFindings.AddRange(Unfollowed());
     }
 
     /// <summary>The manifest this judgment read the record format from.</summary>
@@ -128,7 +134,7 @@ internal sealed class EstateTrust
 
     /// <summary>
     /// Whether a record counts. A witnessed record present with another hash does not; otherwise each kind follows its rule: admissions
-    /// <see cref="AdmissionCounts"/>, device revisions <see cref="DeviceRevisionCounts"/>, checkpoints the history graph, charter revisions
+    /// <see cref="AdmissionCounts(RecordEnvelope, Mode)"/>, device revisions <see cref="DeviceRevisionCounts"/>, checkpoints the history graph, charter revisions
     /// <see cref="CharterRevisionCounts"/>, other signed records <see cref="Authentic"/> and unsigned records <see cref="Unsigned"/>.
     /// </summary>
     internal bool Counts(RecordEnvelope record)
@@ -150,10 +156,12 @@ internal sealed class EstateTrust
             if (r.Type == "estate" && r.Supersedes is not null && model.ById.TryGetValue(r.Supersedes, out RecordEnvelope? revised) && revised.Type == "estate" &&
                 !CharterRevisionCounts(revised, r))
                 return false;
-            // A device revision counts when its device signed it and the revision it follows counts.
+            // A device revision counts when its device signed it, no closing refuses it and the revision it follows counts.
             if (r.Type == "device" && r.Supersedes is not null && model.ById.TryGetValue(r.Supersedes, out RecordEnvelope? previous) && previous.Type == "device")
-                return DeviceRevisionCounts(r, previous) && Counts(previous);
-            return r.Signatures.Count > 0 ? Authentic(r) : Unsigned(r).Counts;
+                return DeviceRevisionCounts(r, previous) && !RevisionRefused(r, previous) && Counts(previous);
+            bool counts = r.Signatures.Count > 0 ? Authentic(r) : Unsigned(r).Counts;
+            // A record relying on a grant revision that a closing closed counts only when that closing witnesses it.
+            return counts && GrantRefuser(r) is null;
         }
     }
 
@@ -197,12 +205,23 @@ internal sealed class EstateTrust
         lock (gate)
         {
             if (verified.TryGetValue((record.Id, mode), out FindingList? known) && model.ById.TryGetValue(record.Id, out RecordEnvelope? same) && ReferenceEquals(same, record)) return known;
-            var findings = new FindingList();
-            for (int i = 0; i < record.Signatures.Count; i++) Verify(record, i, (deviceId, at) => AdmissionStateAt(deviceId, at, mode), findings);
-            Rotation(record, findings);
+            FindingList findings = VerifyWith(record, mode, Acting);
             if (model.ById.TryGetValue(record.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, record)) verified[(record.Id, mode)] = findings;
             return findings;
         }
+    }
+
+    /// <summary>
+    /// The findings of verifying a record's signatures and rotation in a mode, bounded by the closings given: an admission they refuse
+    /// neither admits nor revokes, and a record they refuse is after its closing.
+    /// </summary>
+    private FindingList VerifyWith(RecordEnvelope record, Mode mode, IReadOnlyList<Closing> bound)
+    {
+        var findings = new FindingList();
+        for (int i = 0; i < record.Signatures.Count; i++) Verify(record, i, (deviceId, at) => AdmissionStateAt(deviceId, at, mode, bound), findings);
+        Rotation(record, findings);
+        if (Refuser(record, bound, mode) is { } closing) findings.Add(AfterClosing(record, closing));
+        return findings;
     }
 
     /// <summary>The identity of a device record: the id of the first record of its line.</summary>
@@ -215,7 +234,7 @@ internal sealed class EstateTrust
         return current.Id;
     }
 
-    /// <summary>A device's revisions that count, first record first: each next one the lowest-id successor its device signed.</summary>
+    /// <summary>A device's revisions that count, first record first: each next one the lowest-id successor its device signed that no closing refuses.</summary>
     internal IReadOnlyList<RecordEnvelope> DeviceChain(string identity)
     {
         lock (gate)
@@ -227,7 +246,7 @@ internal sealed class EstateTrust
                 chain.Add(first);
                 var seen = new HashSet<string>(StringComparer.Ordinal) { first.Id };
                 RecordEnvelope current = first;
-                while (successors[current.Id].Where(s => s.Type == "device" && !seen.Contains(s.Id) && DeviceRevisionCounts(s, current))
+                while (successors[current.Id].Where(s => s.Type == "device" && !seen.Contains(s.Id) && DeviceRevisionCounts(s, current) && !RevisionRefused(s, current))
                     .OrderBy(s => s.Id, StringComparer.Ordinal).FirstOrDefault() is { } next)
                 {
                     seen.Add(next.Id);
@@ -301,19 +320,25 @@ internal sealed class EstateTrust
 
     /// <summary>
     /// Whether an admission can admit or revoke. A signed one does. An unsigned one does at record format 1, and otherwise only with
-    /// anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash.
+    /// anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a closing refuses neither admits
+    /// nor revokes.
     /// </summary>
-    internal bool AdmissionCounts(RecordEnvelope admission, Mode mode)
+    internal bool AdmissionCounts(RecordEnvelope admission, Mode mode) => AdmissionCounts(admission, mode, Acting);
+
+    private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound)
     {
         if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
-        return admission.Signatures.Count > 0 || Format < 2 || (mode == Mode.Anchors && anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)));
+        bool counts = admission.Signatures.Count > 0 || Format < 2 || (mode == Mode.Anchors && anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)));
+        return counts && (bound.Count == 0 || Refuser(admission, bound, mode) is null);
     }
 
     /// <summary>The admission state of a device at a time, from the admissions about its line that count in the mode.</summary>
-    internal SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode)
+    internal SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode) => AdmissionStateAt(deviceId, at, mode, Acting);
+
+    private SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode, IReadOnlyList<Closing> bound)
     {
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => AdmissionCounts(a, mode)))
+        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => AdmissionCounts(a, mode, bound)))
         {
             if (admission.Id != FirstAuthority?.Id && SelfSigned(admission)) continue;
             string? status = EstateModel.BodyString(admission, "status");
@@ -365,7 +390,8 @@ internal sealed class EstateTrust
     /// <param name="Named">The device record the signature names, whose line admissions are read along.</param>
     /// <param name="OwnRecord">Whether the record is one of that device's own records, which its keys alone verify.</param>
     /// <param name="SelfAdmission">Whether the record is the root operator's admission of that very device.</param>
-    private sealed record SignatureProof(Finding? Problem, string Identity, string Named, bool OwnRecord, bool SelfAdmission);
+    /// <param name="Key">The public key the signature verifies with, when it verifies.</param>
+    private sealed record SignatureProof(Finding? Problem, string Identity, string Named, bool OwnRecord, bool SelfAdmission, string? Key = null);
 
     private SignatureProof Proof(RecordEnvelope record, int index)
     {
@@ -416,7 +442,8 @@ internal sealed class EstateTrust
         }
 
         byte[] digest = RecordSigning.Digest(record.ComputedHash);
-        if (!keys.Any(key => key is not null && RecordSigning.Verify(key, digest, signature.Signature)))
+        string? verifying = keys.FirstOrDefault(key => key is not null && RecordSigning.Verify(key, digest, signature.Signature));
+        if (verifying is null)
         {
             // A key the device held at another time names the revision, so a key used after its rotation, or a rotation dated
             // earlier than it was made, reads as what it is.
@@ -426,12 +453,13 @@ internal sealed class EstateTrust
                 : new(new Finding(Severity.Error, "signature.invalid", location, $"The signature by device {identity} does not verify against the record's content hash with the key the device held when it was authored."), identity, signature.Device, ownRecord, false);
         }
 
-        // A recovery device signs its own device records, admissions and revocations, and nothing else.
-        if (Recovers(signature.Device) && record.Type is not ("device" or "admission"))
-            return new(new Finding(Severity.Error, "signature.recovery-scope", location, $"Device {identity} is a recovery device, which signs only device records, admissions and revocations."), identity, signature.Device, ownRecord, false);
+        // A recovery device signs its own device records, admissions and revocations, and the closing written before a revocation it
+        // signs (design/identity-and-connectivity.md § 3), and nothing else.
+        if (Recovers(signature.Device) && record.Type is not ("device" or "admission") && !ClosesDevice(record))
+            return new(new Finding(Severity.Error, "signature.recovery-scope", location, $"Device {identity} is a recovery device, which signs only device records, admissions, revocations and the closing checkpoint before a revocation."), identity, signature.Device, ownRecord, false);
         bool selfAdmission = record.Type == "admission" && record.By == RootOperator && record.Subject?.Id is { } subject &&
             model.ById.TryGetValue(subject, out RecordEnvelope? admitted) && admitted.Type == "device" && IdentityOf(admitted) == identity;
-        return new(null, identity, signature.Device, ownRecord, selfAdmission);
+        return new(null, identity, signature.Device, ownRecord, selfAdmission, verifying);
     }
 
     private void Verify(RecordEnvelope record, int index, Func<string, string, SignatureChecks.AdmissionState> state, FindingList findings)
@@ -545,15 +573,26 @@ internal sealed class EstateTrust
     {
         if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
         if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        if (PrincipalAt(checkpoint.By, checkpoint.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
-        DateTimeOffset at = checkpoint.AtTime;
-        // Only grant revisions that rest on signatures and were written by a trusted operator decide: a revision anyone else writes
-        // neither grants nor withdraws administer.
-        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == checkpoint.By &&
+        return HumanAdministerAt(checkpoint);
+    }
+
+    /// <summary>
+    /// Whether a record's author is a person who held administer at the record's time, as it stood then (design/signed-history.md § 8):
+    /// through a grant revision dated at or before the record, unexpired then, that no later revision dated at or before it replaces,
+    /// and that no closing closed without witnessing the record. Only grant and principal revisions that rest on signatures and were
+    /// written by a trusted operator decide: a revision anyone else writes neither grants nor withdraws administer, and a later narrowing
+    /// withdraws nothing from an earlier record.
+    /// </summary>
+    private bool HumanAdministerAt(RecordEnvelope record)
+    {
+        if (PrincipalAt(record.By, record.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+        DateTimeOffset at = record.AtTime;
+        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == record.By &&
             grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
             scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) &&
-            !EstateModel.Expired(grant, at) && TrustedRevision(grant) &&
-            !successors[grant.Id].Any(s => s.Type == "authority" && TrustedRevision(s)));
+            string.CompareOrdinal(grant.At, record.At) <= 0 && !EstateModel.Expired(grant, at) && TrustedRevision(grant) &&
+            !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && TrustedRevision(s)) &&
+            !GrantClosedFor(grant, record, anchorsCount: false));
     }
 
     /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>
