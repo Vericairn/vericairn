@@ -23,12 +23,12 @@ public sealed class UpgradeRuntimeJourneyTests
     private const string Product = """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""";
     private const string Pinned = "50.0.0";
 
-    private static string ClientIdentity => typeof(VericairnClient).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+    internal static string ClientIdentity => typeof(VericairnClient).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
 
-    private static string ClientRelease => ClientIdentity.Split('+')[0];
+    internal static string ClientRelease => ClientIdentity.Split('+')[0];
 
     // The source commit the build under test embeds; a build without one is pinned by its version alone.
-    private static string ClientCommit => ClientIdentity.Split('+') is [_, string commit] && commit.Length == 40 ? commit : Commit;
+    internal static string ClientCommit => ClientIdentity.Split('+') is [_, string commit] && commit.Length == 40 ? commit : Commit;
 
     private static string StartWord => OperatingSystem.IsWindows() ? @".\bootstrap.ps1 runtime start" : "./bootstrap runtime start";
 
@@ -341,11 +341,11 @@ public sealed class UpgradeRuntimeJourneyTests
         }
     }
 
-    private static string[] Upgrade(string root, string release, string builder) =>
+    internal static string[] Upgrade(string root, string release, string builder) =>
         ["--estate", root, "estate", "upgrade", "--to", release, .. release.Contains('-', StringComparison.Ordinal) ? new[] { "--channel", "prerelease" } : [], "--by", builder];
 
     /// <summary>An estate with a published release of the version, ready to upgrade to it, as the self-hosting loop records one.</summary>
-    private static (string Operator, string Builder) Publish(string root, string scratch, string version, string commit = Commit)
+    internal static (string Operator, string Builder) Publish(string root, string scratch, string version, string commit = Commit)
     {
         string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Upgrade runtime.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
         string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;

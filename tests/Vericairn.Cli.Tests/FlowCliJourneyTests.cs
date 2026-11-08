@@ -88,6 +88,48 @@ public class FlowCliJourneyTests
         }
     }
 
+    [Fact]
+    public void TheSoftwarePacksReleaseFlowRunsFromTheCommandLineWithoutInstallingIt()
+    {
+        string root = CliHarness.TempDirectory("release-flow-run");
+        string scratch = CliHarness.TempDirectory("release-flow-run-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Releases.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string[] flows = CliHarness.Ok("--estate", root, "--json", "templates", "list").Json.GetProperty("templates").EnumerateArray()
+                .Select(t => t.GetProperty("pin").GetProperty("id").GetString()!).Where(id => id.StartsWith("vericairn.software/", StringComparison.Ordinal) && id != "vericairn.software/commit").Order(StringComparer.Ordinal).ToArray();
+            Assert.Equal(["vericairn.software/release", "vericairn.software/upgrade"], flows);
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", ReleaseLineFixture.ProductBody().ToJsonString())).Id;
+            string carrier = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "carrier.json",
+                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
+            string[] propose = ["goal", "propose", "--by", op, "--title", "Release 1.2.0", "--objective", "Release the product.", "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""",
+                "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2", "--flow", "vericairn.software/release@1.0.0",
+                "--subject", "carrier=" + carrier, "--subject", "product=" + product, "--subject", "version=1.2.0"];
+
+            // The subject binds every field; configuration never turns off a required or reserved step.
+            Refused(root, "'repository' is missing", propose);
+            Refused(root, "Step publish is required", [.. propose, "--subject", "repository=Example/example", "--flow-option", "step.publish=off"]);
+            string goal = CliHarness.Ok(["--estate", root, "--json", .. propose, "--subject", "repository=Example/example"]).Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+
+            string shown = CliHarness.Ok("--estate", root, "goal", "show", goal).Out;
+            Assert.Contains("Flow: vericairn.software/release 1.0.0", shown, StringComparison.Ordinal);
+            JsonElement steps = CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("flow").GetProperty("steps");
+            // No roster names the release manager yet: the first step is a stall its sponsor settles by naming one.
+            Assert.Equal(("placed-work", "stopped", "attention"), (steps[0].GetProperty("key").GetString(), steps[0].GetProperty("state").GetString(), steps[0].GetProperty("stop").GetString()));
+            Assert.Equal(["upgrade-estate", "withdraw", "delete-draft", "observe-withdrawal"], steps.EnumerateArray().Where(s => s.GetProperty("state").GetString() == "off").Select(s => s.GetProperty("key").GetString()!).ToArray());
+            Assert.All(steps.EnumerateArray(), s => Assert.Equal(JsonValueKind.Null, s.GetProperty("command").ValueKind));
+            JsonElement docs = Assert.Single(steps.EnumerateArray(), s => s.GetProperty("key").GetString() == "docs-before-freeze");
+            Assert.Equal(["prior-version-tokens", "preparation-wording"], docs.GetProperty("traps").EnumerateArray().Select(t => t.GetProperty("name").GetString()!).ToArray());
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     /// <summary>The person's attempt and completed result on a step's assignment, naming its output by hash; returns the result's receipt.</summary>
     private static JsonElement Carry(string root, string scratch, string by, string assignment, string output, string? media, char hash)
     {

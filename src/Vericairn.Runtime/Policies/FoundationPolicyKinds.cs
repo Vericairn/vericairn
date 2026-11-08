@@ -123,7 +123,8 @@ internal static partial class FoundationPolicyKinds
         string? product = Text(selection, "kind") == "product" ? LivingDocuments.ProductIdentity(context.Model, String(selection, "product")) : null;
         DateTimeOffset at = context.Basis.Time!.Value;
         List<Vericairn.Records.Templates.TemplateDefinition> retained = Templates(context);
-        foreach (RecordEnvelope goal in context.Model.Records.Where(r => r.Type == "goal" && PolicyWork.CurrentAt(context.Model, r, at) && FlowRuns.Pin(r)?.Id == flow).OrderBy(r => r.Id, StringComparer.Ordinal))
+        // A run of the flow, or of an extension of it: an extension never turns off a step a policy requires of its base.
+        foreach (RecordEnvelope goal in context.Model.Records.Where(r => r.Type == "goal" && PolicyWork.CurrentAt(context.Model, r, at) && FlowRuns.Pin(r) is not null).OrderBy(r => r.Id, StringComparer.Ordinal))
         {
             Vericairn.Records.Templates.FlowDefinition? resolved = null;
             string? unavailable = null;
@@ -136,6 +137,8 @@ internal static partial class FoundationPolicyKinds
             {
                 unavailable = "flow does not resolve from the basis: " + error.Message;
             }
+
+            if (FlowRuns.Pin(goal)!.Id != flow && resolved?.Chain.Any(c => c.Id == flow) != true) continue;
 
             if (resolved is not null && product is not null && FlowRuns.Product(context.Model, goal, resolved) != product) continue;
             FlowRuns.Configuration? configuration = resolved is null ? null : FlowRuns.Configure(context.Model, goal, resolved);
