@@ -60,7 +60,11 @@ public sealed record RecordDeletions(bool Shallow, IReadOnlyList<RecordDeletion>
 /// <summary>The commit that added each record file, as the checked-out commit's history shows it (design/signed-history.md § 10).</summary>
 /// <param name="Shallow">True when the clone is shallow, so its history is incomplete and nothing is listed.</param>
 /// <param name="Added">Each record file's repository-relative path under records/, with the oldest reachable commit that added it.</param>
-public sealed record RecordOrigins(bool Shallow, IReadOnlyDictionary<string, string> Added);
+public sealed record RecordOrigins(bool Shallow, IReadOnlyDictionary<string, string> Added)
+{
+    /// <summary>When each adding commit was committed, by the same path; empty when the adapter does not say.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> AddedAt { get; init; } = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// An estate's main line (design/signed-history.md § 7): the local branch its history is judged through whatever is checked out, and

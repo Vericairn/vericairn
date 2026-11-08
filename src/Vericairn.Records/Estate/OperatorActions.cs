@@ -293,7 +293,7 @@ public static class OperatorActions
         string by = model.RootOperator ?? "<root operator>";
         JsonObject item = Item("history-adoption", source, "Adopt history checkpoints", "not adopted",
             $"The estate is pinned to {version}, which writes history checkpoints, and no adoption checkpoint counts. Adoption witnesses every record present and anchors the unsigned records that count today, so it changes no reading; from then on the runtime writes checkpoints at upgrades, release submissions, charter revisions and intervals.",
-            [$"The root operator reads what adoption would witness and anchor with vericairn estate checkpoint --adopt --check, then signs it once with vericairn estate checkpoint --adopt --by {by}. A person holding administer may sign instead; an agent's adoption counts for nothing."],
+            [$"The root operator reads what adoption would witness and anchor with vericairn estate checkpoint --adopt --check, then signs it once with vericairn estate checkpoint --adopt --expect-plan <the plan hash the check prints> --by {by}. A person holding administer may sign instead; an agent's adoption counts for nothing."],
             [source]);
         item["inspect"] = "vericairn estate checkpoint --adopt --check";
         items.Add(item);

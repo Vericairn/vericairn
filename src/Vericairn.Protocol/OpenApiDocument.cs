@@ -1032,9 +1032,9 @@ public static class OpenApiDocument
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
             ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"))),
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
-            ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean")),
+            ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
-                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object")),
+                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array")),
                 "trigger", "applied", "adopted", "witnessed", "listed", "heads", "anchored", "notCounting", "byRevokedDevices", "deletedInHistory"),
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
         };

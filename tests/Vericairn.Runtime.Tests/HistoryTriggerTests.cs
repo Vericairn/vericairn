@@ -108,7 +108,12 @@ public class HistoryTriggerTests
         Assert.Contains("never an agent", refused!.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(f.Api.Session.Load().Records, r => r.Type == "history-checkpoint");
 
-        (HistoryCheckpointResponse? adopted, Problem? problem) = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true));
+        // An adoption that anchors anything is bound to the check its signer read, by the plan hash the check printed.
+        Assert.Equal(RecordSets.Hash(plan.Anchored.Select(a => (a.Id, before.ById[a.Id].ComputedHash))), plan.PlanHash);
+        Assert.Contains("--expect-plan", f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true)).Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("not the plan you named", f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true, ExpectPlan: "sha256:" + new string('0', 64))).Problem!.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(f.Api.Session.Load().Records, r => r.Type == "history-checkpoint");
+        (HistoryCheckpointResponse? adopted, Problem? problem) = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true, ExpectPlan: plan.PlanHash));
         Assert.Null(problem);
         Assert.True(adopted!.Applied);
         Assert.True(adopted.Adopted);
@@ -293,7 +298,7 @@ public class HistoryTriggerTests
         // Pinned to a release that writes checkpoints, adoption now waits on the operator.
         JsonElement items = f.Api.OperatorActions().Json.GetProperty("items");
         Assert.Contains(items.EnumerateArray(), i => i.GetProperty("kind").GetString() == "history-adoption");
-        Assert.True(f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true)).Checkpoint!.Applied);
+        f.Adopt();
         Assert.DoesNotContain(f.Api.OperatorActions().Json.GetProperty("items").EnumerateArray(), i => i.GetProperty("kind").GetString() == "history-adoption");
     }
 
@@ -334,12 +339,202 @@ public class HistoryTriggerTests
         Assert.Equal(next.Written.Id, f.Memory().Read()!.Checkpoint!.Id);
 
         // An expectation checked against a head known elsewhere replaces what the machine remembers.
-        Assert.Null(HistoryMemory.RememberExpected(root, f.Records.Estate.Estate.Id, "repository-synced", first.Checkpoint.Id, (first.Checkpoint.Id, first.Checkpoint.Hash, first.Checkpoint.Path),
+        Assert.Null(HistoryMemory.RememberExpected(root, f.Records.Estate.Estate.Id, "repository-synced", (first.Checkpoint.Id, first.Checkpoint.Hash, first.Checkpoint.Path),
             new GitCommandAdapter(), DateTimeOffset.UtcNow, f.MemoryHome));
         HistoryMemory.Remembered replaced = f.Memory().Read()!;
         Assert.Equal(first.Checkpoint.Id, replaced.Checkpoint!.Id);
         Assert.Equal(("held", first.Checkpoint.Id), (replaced.Expect!.Outcome, replaced.Expect.Checkpoint));
         Assert.DoesNotContain(f.Api.Check().Findings, x => x.Code == "history.rolled-back");
+    }
+
+    [Fact]
+    public void AdoptionAndTheReleaseGateAreRefusedWhileThisMachineRemembersACheckpointTheCopyLost()
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        var provider = new FakeReleaseProvider();
+        f.Api.Providers = new ProviderRegistry();
+        f.Api.Providers.Register(provider);
+        f.Api.Providers.Register(new GitCommandAdapter());
+        var request = new ReleaseSubmitRequest(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version };
+        string root = f.Records.Estate.Root;
+        Git(root, "init", "-q", "-b", "main");
+        Git(root, "config", "core.autocrlf", "false");
+        Git(root, "add", "-A");
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "Adopted"]);
+        string adopted = Git(root, "rev-parse", "HEAD");
+        Assert.DoesNotContain(f.Api.Check().Findings, x => x.Code == "history.rolled-back");
+        Assert.NotNull(f.Memory().Read()!.Checkpoint);
+        Assert.DoesNotContain(f.Api.ReleaseCheck(request).Check!.Objections, o => o.Code == "history.rolled-back");
+
+        // A rewrite drops every checkpoint and adds an unsigned record dated before them: the copy reads as never adopted.
+        foreach (RecordEnvelope checkpoint in Checkpoints(f)) File.Delete(Path.Combine(root, checkpoint.ExpectedPath));
+        f.Records.Estate.SetClock(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+        RecordEnvelope forged = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("FORGED-1", "Backdated"))!.AsObject(), sign: false);
+        Git(root, "add", "-A");
+        Git(root, [.. GitIdentity, "commit", "-q", "--amend", "-m", "Rewritten"]);
+        Assert.False(SignedHistory.Adopted(f.Api.Session.Load()));
+        Assert.Contains(f.Api.Check().Findings, x => x.Code == "history.rolled-back" && x.Severity == "warning");
+
+        // Neither the adoption nor its check goes ahead, so the forged record is never anchored; nor does a release.
+        (HistoryCheckpointResponse? check, Problem? checkRefused) = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true));
+        Assert.Null(check);
+        Assert.Contains("no longer holds it", checkRefused!.Message, StringComparison.Ordinal);
+        (HistoryCheckpointResponse? readopted, Problem? refused) = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(f.Records.Estate.OperatorId, Adopt: true, ExpectPlan: "sha256:" + new string('0', 64)));
+        Assert.Null(readopted);
+        Assert.Contains("no longer holds it", refused!.Message, StringComparison.Ordinal);
+        Assert.Empty(Checkpoints(f));
+        ReleaseResponse gated = f.Api.ReleaseCheck(request);
+        Assert.Contains(gated.Check!.Objections, o => o.Code == "history.rolled-back");
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(request);
+        Assert.False(submitted.Ok);
+        Assert.Contains(submitted.Problem!.Findings, x => x.Code == "history.rolled-back");
+        Assert.Empty(provider.Dispatches);
+        Assert.Empty(Checkpoints(f));
+
+        // Restoring the history the machine verified settles it: the copy has adopted again.
+        Git(root, "reset", "-q", "--hard", adopted);
+        Assert.True(SignedHistory.Adopted(f.Api.Session.Load()));
+        Assert.DoesNotContain(f.Api.Check().Findings, x => x.Code == "history.rolled-back");
+        Assert.DoesNotContain(f.Api.ReleaseCheck(request).Check!.Objections, o => o.Code == "history.rolled-back");
+        Assert.Contains("adopted history checkpoints already", f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Problem!.Message, StringComparison.Ordinal);
+        Assert.False(f.Api.Session.Load().ById.ContainsKey(forged.Id));
+    }
+
+    [Fact]
+    public void APresignedCharterRevisionSetsOffNoCheckpointAndAPresignedMoveToRequiredIsRefused()
+    {
+        using var f = new Fixture();
+        RecordEnvelope unsigned = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("PRE-1"))!.AsObject(), sign: false);
+        int checkpoints = Checkpoints(f).Count;
+        int objects = f.Api.Session.Objects.List().Count;
+        string publicKey = EstateModel.BodyString(f.Api.Session.Load().ById[f.OperatorDevice], "publicKey")!;
+        WriteOutcome Presigned(JsonObject body)
+        {
+            using EstateService.RequestDeviceScope scope = f.Api.ForDeviceRequest(f.OperatorDevice, publicKey);
+            RecordPrepareResponse prepared = f.Api.PrepareRecord(new("estate", f.Records.Estate.OperatorId, PolicyFixture.Element(body), Supersedes: f.Api.Session.Load().CurrentEstate!.Id));
+            Assert.True(prepared.Ok, prepared.Problem?.Message);
+            string signature = new StoreSigner(new FileKeyStore(VericairnHome.Path()), f.OperatorDevice).Sign(RecordSigning.Digest(prepared.Prepared!.Hash)).Signature;
+            return f.Api.NewSignedRecord(new(prepared.Prepared.Plan, signature));
+        }
+
+        // A revision the device signed elsewhere is written alone: the runtime signs nothing for it.
+        WriteOutcome revised = Presigned(Charter(f, "Exercise the record format, signed on the phone."));
+        Assert.True(revised.Ok, JsonSerializer.Serialize(revised.Problem, ProtocolJson.Options));
+        Assert.Null(revised.Checkpoint);
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+
+        // A presigned move to required would leave the unsigned record counting for nothing, and nothing anchors it, so it is refused.
+        JsonObject required = Charter(f, "Exercise the record format, required from the phone.");
+        required["policies"]!["signatures"] = "required";
+        WriteOutcome moved = Presigned(required);
+        Assert.False(moved.Ok);
+        Assert.Null(moved.Checkpoint);
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+        Assert.Equal(objects, f.Api.Session.Objects.List().Count);
+        Assert.True(f.Api.Session.Load().Counts(f.Api.Session.Load().ById[unsigned.Id]));
+    }
+
+    [Fact]
+    public void WritesSignedWithTheirOwnKeysAndReadOnlyCopiesSetOffNoTrigger()
+    {
+        using var f = new Fixture();
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddDays(-2));
+        f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("OLD-2"))!.AsObject());
+        Assert.True(SignedHistory.IntervalDue(f.Api.Session.Load(), DateTimeOffset.UtcNow));
+        int checkpoints = Checkpoints(f).Count;
+
+        // A device record is signed by its own new key, which this machine never uses for a checkpoint.
+        WriteOutcome device = f.Api.DeviceCreate(new(f.Records.Estate.BuilderId, "Another device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        Assert.Null(device.Checkpoint);
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+        new FileKeyStore(VericairnHome.Path()).Remove(device.Written!.Id);
+
+        // A read-only copy writes nothing, a checkpoint included.
+        int objects = f.Api.Session.Objects.List().Count;
+        using (EstateService reader = EstateService.OpenReadOnly(f.Records.Estate.Root))
+        {
+            WriteOutcome refused = reader.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.BuilderId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("RO-1"))!)));
+            Assert.False(refused.Ok);
+            Assert.Null(refused.Checkpoint);
+        }
+
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+        Assert.Equal(objects, f.Api.Session.Objects.List().Count);
+    }
+
+    [Fact]
+    public void ACharterMoveToRequiredByOneWhoMayNotAnchorAnchorsNothing()
+    {
+        using var f = new Fixture();
+        RecordEnvelope unsigned = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("NA-1"))!.AsObject(), sign: false);
+        // A second operator, a person without administer, with a device this machine holds.
+        string person = f.Records.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second operator", ["roles"] = new JsonArray("operator") }).Id;
+        f.HeldDevice(person);
+        int checkpoints = Checkpoints(f).Count;
+        JsonObject required = Charter(f, "Exercise the record format.");
+        required["policies"]!["signatures"] = "required";
+        WriteOutcome moved = f.Api.NewRecord(new NewRecordRequest("estate", person, PolicyFixture.Element(required), Supersedes: f.Records.Estate.Estate.Id));
+        Assert.False(moved.Ok);
+        EstateModel model = f.Api.Session.Load();
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+        Assert.DoesNotContain(model.Records, r => r.Type == "history-checkpoint" && r.Body.TryGetProperty("anchored", out JsonElement list) && list.EnumerateArray().Any(a => a.GetProperty("id").GetString() == unsigned.Id));
+        Assert.True(model.Counts(model.ById[unsigned.Id]));
+    }
+
+    [Fact]
+    public void ARecordStoredWithoutItsIntervalCheckpointIsCompleteAndARevisionToRequiredWithoutItsAnchorsIsNot()
+    {
+        using var f = new Fixture();
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddDays(-2));
+        f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("OLD-3"))!.AsObject());
+        f.Api.BeforeStoringTogether = record => { if (record.Envelope.Type == "history-checkpoint") throw new IOException("The test stops the batch before its checkpoint."); };
+        int objects = f.Api.Session.Objects.List().Count;
+        WriteOutcome interval = f.Api.NewRecord(new NewRecordRequest("work-order", f.Records.Estate.BuilderId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("CUT-1"))!)));
+        Assert.NotNull(interval.Written);
+        Assert.Equal("interval", interval.Checkpoint!.Trigger);
+        Assert.Null(interval.Checkpoint.Written);
+        Assert.Equal(objects, f.Api.Session.Objects.List().Count);
+        Assert.DoesNotContain(f.Api.Reconcile(), t => t.Code == "batch.incomplete");
+
+        RecordEnvelope unsigned = f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("CUT-2"))!.AsObject(), sign: false);
+        JsonObject required = Charter(f, "Exercise the record format.");
+        required["policies"]!["signatures"] = "required";
+        WriteOutcome moved = f.Api.NewRecord(new NewRecordRequest("estate", f.Records.Estate.OperatorId, PolicyFixture.Element(required), Supersedes: f.Records.Estate.Estate.Id));
+        Assert.NotNull(moved.Written);
+        Assert.Null(moved.Checkpoint!.Written);
+        Assert.Contains(f.Api.Reconcile(), t => t.Code == "batch.incomplete" && t.Message.Contains(moved.Written!.Id, StringComparison.Ordinal));
+        Assert.False(f.Api.Session.Load().Counts(f.Api.Session.Load().ById[unsigned.Id]));
+    }
+
+    [Fact]
+    public void TheMemoryAdvancesOnlyAlongTheHistoryItVerified()
+    {
+        TestPrerequisites.RequireGit();
+        using var f = new Fixture();
+        f.Api.Providers = new ProviderRegistry();
+        f.Api.Providers.Register(new GitCommandAdapter());
+        string root = f.Records.Estate.Root;
+        Git(root, "init", "-q", "-b", "main");
+        Git(root, "config", "core.autocrlf", "false");
+        Git(root, "add", "-A");
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "Adopted"]);
+        f.Api.Check();
+        string remembered = f.Memory().Read()!.Checkpoint!.Id;
+
+        // A checkpoint that follows no remembered one, with a newer id, is a head the memory does not move to.
+        RecordEnvelope adoption = Checkpoints(f).Single();
+        JsonObject stray = HistoryFixture.Body(adoption);
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow);
+        RecordEnvelope other = f.Records.Estate.Add("history-checkpoint", f.Records.Estate.OperatorId, stray.ToJsonString(), signer: f.Records.OperatorSigner);
+        Git(root, "add", "-A");
+        Git(root, [.. GitIdentity, "commit", "-q", "-m", "A stray adoption"]);
+        f.Api.Check();
+        Assert.Equal(remembered, f.Memory().Read()!.Checkpoint!.Id);
+        Assert.True(string.CompareOrdinal(other.Id, remembered) > 0);
     }
 
     [Fact]
@@ -459,7 +654,8 @@ public class HistoryTriggerTests
 
         public void Adopt()
         {
-            (HistoryCheckpointResponse? adopted, Problem? problem) = Api.HistoryCheckpoint(new HistoryCheckpointRequest(Records.Estate.OperatorId, Adopt: true));
+            string plan = Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!.PlanHash!;
+            (HistoryCheckpointResponse? adopted, Problem? problem) = Api.HistoryCheckpoint(new HistoryCheckpointRequest(Records.Estate.OperatorId, Adopt: true, ExpectPlan: plan));
             Assert.True(adopted?.Applied == true, JsonSerializer.Serialize(problem, ProtocolJson.Options));
         }
 
@@ -478,6 +674,9 @@ public class HistoryTriggerTests
             Records.Add("admission", new JsonObject { ["principal"] = principal, ["status"] = "admitted", ["note"] = "A person's device." }, subject: device.Reference);
             return id;
         }
+
+        /// <summary>A device this machine holds for a principal, admitted by the operator's first authority.</summary>
+        public string HeldDevice(string principal) => Held(principal);
 
         /// <summary>Removes the operator's runtime-held key, so no device of the operator signs on this machine.</summary>
         public void ForgetOperatorDevice() => new FileKeyStore(VericairnHome.Path()).Remove(OperatorDevice);

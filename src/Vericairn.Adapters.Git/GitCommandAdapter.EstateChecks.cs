@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Globalization;
 using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 
@@ -72,18 +73,30 @@ public sealed partial class GitCommandAdapter
         if (Observe(root, git, "rev-parse", "--is-shallow-repository") is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } shallow) return null;
         if (shallow.StandardOutput.Trim() == "true") return new RecordOrigins(true, new Dictionary<string, string>(StringComparer.Ordinal));
         // The log runs newest first, so the last commit seen adding a path is the oldest that did.
-        if (Observe(root, git, "-c", "core.quotePath=false", "log", "--no-renames", "--diff-filter=A", "--name-only", "--format=commit %H", "--", EstateLayout.RecordsDirectory + "/")
+        if (Observe(root, git, "-c", "core.quotePath=false", "log", "--no-renames", "--diff-filter=A", "--name-only", "--format=commit %H %cI", "--", EstateLayout.RecordsDirectory + "/")
             is not { Outcome: ProcessOutcome.Exited, ExitCode: 0 } log) return null;
         var added = new Dictionary<string, string>(StringComparer.Ordinal);
+        var addedAt = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
         string? commit = null;
+        DateTimeOffset? committed = null;
         foreach (string line in log.StandardOutput.Split('\n'))
         {
             string text = line.TrimEnd('\r');
-            if (text.StartsWith("commit ", StringComparison.Ordinal)) commit = text["commit ".Length..].Trim();
-            else if (commit is not null && text.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal)) added[text] = commit;
+            if (text.StartsWith("commit ", StringComparison.Ordinal))
+            {
+                string[] parts = text["commit ".Length..].Trim().Split(' ', 2);
+                commit = parts[0];
+                committed = parts.Length == 2 && DateTimeOffset.TryParse(parts[1], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) ? at.ToUniversalTime() : null;
+            }
+            else if (commit is not null && text.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal))
+            {
+                added[text] = commit;
+                if (committed is { } at) addedAt[text] = at;
+                else addedAt.Remove(text);
+            }
         }
 
-        return new RecordOrigins(false, added);
+        return new RecordOrigins(false, added) { AddedAt = addedAt };
     }
 
     /// <inheritdoc />

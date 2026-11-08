@@ -50,8 +50,8 @@ public sealed class HistoryMemory
     public sealed record Verified(string Id, string Hash, string Path, string Branch, string Commit, string VerifiedAt);
 
     /// <summary>The latest <c>estate check --expect</c> on this machine.</summary>
-    /// <param name="Expected">What was expected: an id or a hash.</param>
-    /// <param name="Outcome">held or missing.</param>
+    /// <param name="Expected">The checkpoint the expectation named, by id.</param>
+    /// <param name="Outcome">held: only an expectation the copy passed is remembered.</param>
     /// <param name="CheckedAt">When.</param>
     /// <param name="Checkpoint">The checkpoint the name matched, when held.</param>
     public sealed record Expectation(string Expected, string Outcome, string CheckedAt, string? Checkpoint);
@@ -64,6 +64,15 @@ public sealed class HistoryMemory
 
     /// <summary>Whether an exception means the memory cannot be read or kept here, which a check reports and never fails on.</summary>
     public static bool Unavailable(Exception exception) => exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException or ArgumentException;
+
+    /// <summary>The kind of failure, in words that name no path: what a finding says instead of the exception's own message.</summary>
+    public static string Describe(Exception exception) => exception switch
+    {
+        UnauthorizedAccessException => "access to it was denied",
+        JsonException => "it is malformed or larger than its limit",
+        IOException => "it is not an ordinary file this user can read and write, or it lies inside the estate",
+        _ => "it could not be read",
+    };
 
     /// <summary>What this machine remembers, or null when nothing is.</summary>
     public Remembered? Read()
@@ -87,6 +96,8 @@ public sealed class HistoryMemory
         if (OperatingSystem.IsWindows()) Directory.CreateDirectory(directory);
         else Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         if (new FileInfo(path).LinkTarget is not null) throw new IOException("The machine's memory of history cannot be a link.");
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, Json);
+        if (bytes.LongLength > MaxBytes) throw new JsonException("The machine's memory of history would exceed its size limit.");
         string temporary = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -94,7 +105,7 @@ public sealed class HistoryMemory
             if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             using (var stream = new FileStream(temporary, options))
             {
-                JsonSerializer.Serialize(stream, value, Json);
+                stream.Write(bytes);
                 stream.Flush(flushToDisk: true);
             }
 
@@ -116,27 +127,29 @@ public sealed class HistoryMemory
     }
 
     /// <summary>
-    /// Remembers an <c>estate check --expect</c> (design/signed-history.md § 9): its outcome, and, when the copy holds the expected
-    /// checkpoint and the main line holds it too, that checkpoint as the newest this machine verified, replacing what it remembered, since
-    /// a head known elsewhere is the operator's own reference. Returns a note when the memory could not be kept, else null.
+    /// Remembers an <c>estate check --expect</c> that the copy passed (design/signed-history.md § 9): the checkpoint it named, never the
+    /// text given, so that what is kept stays small and is a checkpoint; and, when the main line holds that checkpoint too, it as the
+    /// newest this machine verified, replacing what it remembered, since a head known elsewhere is the operator's own reference. An
+    /// expectation the copy fails changes nothing. Returns a note when the memory could not be kept, else null.
     /// </summary>
-    public static string? RememberExpected(string root, string estate, string profile, string expected, (string Id, string Hash, string Path)? held, ISourceAdapter? git,
+    public static string? RememberExpected(string root, string estate, string profile, (string Id, string Hash, string Path)? held, ISourceAdapter? git,
         DateTimeOffset now, string? home = null)
     {
+        if (held is not { } match) return null;
         try
         {
             var memory = new HistoryMemory(root, estate, profile, home);
             Remembered current = memory.Read() ?? new Remembered(estate, null, null);
             string at = RecordParser.FormatTimestamp(now);
             Verified? verified = current.Checkpoint;
-            if (held is { } match && profile == "repository-synced" && git?.MainLine(root) is { } main && Holds(git, root, main, match.Path, match.Hash))
+            if (profile == "repository-synced" && git?.MainLine(root) is { } main && Holds(git, root, main, match.Path, match.Hash))
                 verified = new Verified(match.Id, match.Hash, match.Path, main.Branch, main.Commit, at);
-            memory.Write(current with { Estate = estate, Checkpoint = verified, Expect = new Expectation(expected.Trim(), held is null ? "missing" : "held", at, held?.Id) });
+            memory.Write(current with { Estate = estate, Checkpoint = verified, Expect = new Expectation(match.Id, "held", at, match.Id) });
             return null;
         }
         catch (Exception exception) when (Unavailable(exception))
         {
-            return "This machine could not remember the expectation: " + exception.Message;
+            return "This machine could not remember the expectation: " + Describe(exception) + ".";
         }
     }
 }

@@ -612,9 +612,12 @@ From OPS-07 the check also keeps this machine's memory of the estate's history, 
 Vericairn home and never in the estate: the newest checkpoint it verified and the main-line commit that held it. The main
 line is the local branch the origin's `HEAD` names, else `main`, else `master`, whatever is checked out. When the main line
 no longer holds that checkpoint, as after a rewrite that removed the newest checkpoints with the records after them, the
-check warns `history.rolled-back`; a checkout of another branch warns nothing. `--expect` remembers its result too, and a
-checkpoint it finds that the main line holds replaces what the machine remembered, which is how an intended rewrite is
-accepted. `history.remembered`, information, says what the machine remembers. Neither is part of the canonical status.
+check warns `history.rolled-back`; a checkout of another branch warns nothing. The memory advances only to a head that follows
+the checkpoint it remembers. A passed `--expect` is remembered by the checkpoint it named, and a checkpoint it finds that the
+main line holds replaces what the machine remembered, which is how an intended rewrite is accepted. `history.remembered`,
+information, says what the machine remembers; a memory that cannot be read or kept is a warning. Neither is part of the
+canonical status. While the memory holds a checkpoint the main line no longer holds, or the copy has not adopted, `release
+submit` and its check object with `history.rolled-back`.
 
 ## `vericairn estate checkpoint` (0.9.2)
 
@@ -628,17 +631,20 @@ written.
 vericairn estate checkpoint --check
 vericairn estate checkpoint --by <principal id>
 vericairn estate checkpoint --adopt --check
-vericairn estate checkpoint --adopt --by <root operator id>
+vericairn estate checkpoint --adopt --expect-plan <plan> --by <root operator id>
 ```
 
 `--adopt` adopts history checkpoints, once ([signed history](operator-guide.md#history-checkpoints-092)): the estate's first
 checkpoint, with trigger `adoption`, witnesses every record present and anchors the unsigned records that count today, so
 adoption changes no reading and admits nothing new. Only the root operator or a person holding `administer` signs it; any
 other principal, an agent above all, is refused before anything is signed. `--adopt --check` lists what it would witness and
-anchor: the count, each unsigned record it anchors with its type, date, path and the commit that added it, the unsigned
-records that count for nothing today and stay so, records signed by a device revoked now, and record files deleted in the
-repository's history, which no checkpoint can witness; it says what it cannot list in a shallow clone or outside a git
-repository. A new estate needs none of this: it adopts at birth, when the root operator's first device admits itself while
+anchor: the count, each unsigned record it anchors with its type, date, path, the commit that added it and that commit's date,
+the unsigned records that count for nothing today and stay so, records signed by a device revoked now, record files deleted in
+the repository's history, which no checkpoint can witness, and record files no commit holds yet; a `NOTE` points out a record
+dated more than a day before its adding commit, an uncommitted file and an admission the format-2 migration already anchored.
+It says what it cannot list in a shallow clone or outside a git repository, and ends with `plan: sha256:<hash>`, the hash of
+the anchored set. `--adopt --expect-plan <hash>` refuses unless the adoption anchors exactly that set; it is required when the
+adoption anchors anything. Both refuse while this clone's memory holds a checkpoint the copy no longer holds. A new estate needs none of this: it adopts at birth, when the root operator's first device admits itself while
 the estate holds nothing but what `estate init` wrote, and `devices admit` prints the adoption checkpoint after the admission.
 An estate that has adopted refuses `--adopt`; one that has not refuses a checkpoint without it.
 

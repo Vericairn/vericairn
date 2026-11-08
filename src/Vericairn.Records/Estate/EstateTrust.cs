@@ -541,18 +541,26 @@ internal sealed class EstateTrust
     /// devices whose own admissions rest on signatures, none of them a recovery device. The same test tells whether any other record was
     /// signed by one who may anchor.
     /// </summary>
-    internal bool MayAnchor(RecordEnvelope checkpoint)
+    internal bool MayAnchor(RecordEnvelope checkpoint) =>
+        AuthenticBySignatures(checkpoint) && !checkpoint.Signatures.Any(s => Recovers(s.Device)) && AnchorerAt(checkpoint.By, checkpoint.At);
+
+    /// <summary>
+    /// Whether a principal may anchor at a time, the part of <see cref="MayAnchor"/> that does not depend on a signature: the root operator,
+    /// or a human whose principal record rests on signatures holding administer through a grant that rests on signatures, unexpired then,
+    /// that no trusted revision has revised away. What the runtime checks before it signs an adoption.
+    /// </summary>
+    internal bool AnchorerAt(string by, string at)
     {
-        if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
-        if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        if (PrincipalAt(checkpoint.By, checkpoint.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
-        DateTimeOffset at = checkpoint.AtTime;
+        if (by == RootOperator && RootOperator is not null) return true;
+        if (!RecordParser.IsTimestamp(at) || PrincipalAt(by, at) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+        DateTimeOffset time = DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
         // Only grant revisions that rest on signatures and were written by a trusted operator decide: a revision anyone else writes
         // neither grants nor withdraws administer.
-        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == checkpoint.By &&
+        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == by &&
             grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
             scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) &&
-            !EstateModel.Expired(grant, at) && TrustedRevision(grant) &&
+            !EstateModel.Expired(grant, time) && TrustedRevision(grant) &&
             !successors[grant.Id].Any(s => s.Type == "authority" && TrustedRevision(s)));
     }
 

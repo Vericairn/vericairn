@@ -11,7 +11,8 @@ namespace Vericairn.Protocol;
 /// <param name="By">The principal whose admitted device on the runtime's machine signs; required unless <paramref name="Check"/>.</param>
 /// <param name="Adopt">Adopt checkpoints: the estate's first checkpoint, which witnesses every record present and anchors the unsigned records that count today. Only the root operator or a person holding administer adopts, never an agent.</param>
 /// <param name="Check">Show what the checkpoint would witness and, with <paramref name="Adopt"/>, anchor, without signing or writing anything.</param>
-public sealed record HistoryCheckpointRequest(string? By, bool Adopt = false, bool Check = false);
+/// <param name="ExpectPlan">With <paramref name="Adopt"/>, the plan hash the check printed: the adoption is refused unless it anchors exactly that set. Required when the adoption anchors anything.</param>
+public sealed record HistoryCheckpointRequest(string? By, bool Adopt = false, bool Check = false, string? ExpectPlan = null);
 
 /// <summary>A record a checkpoint or its check names.</summary>
 /// <param name="Id">Record id.</param>
@@ -20,7 +21,9 @@ public sealed record HistoryCheckpointRequest(string? By, bool Adopt = false, bo
 /// <param name="Path">Repository-relative path.</param>
 /// <param name="Commit">The commit that added its file, where the git adapter can tell; null otherwise.</param>
 /// <param name="Device">For a record signed by a revoked device, that device.</param>
-public sealed record HistoryRecordItem(string Id, string Type, string At, string Path, string? Commit = null, string? Device = null);
+/// <param name="CommitAt">When the commit that added its file was committed, where the git adapter can tell.</param>
+/// <param name="Note">What the reader should know before signing: a record dated well before the commit that added it, a file no commit holds, or an admission an anchor already lists.</param>
+public sealed record HistoryRecordItem(string Id, string Type, string At, string Path, string? Commit = null, string? Device = null, string? CommitAt = null, string? Note = null);
 
 /// <summary>A record file deleted in the repository's history, which no checkpoint can witness.</summary>
 /// <param name="Path">Repository-relative path under records/.</param>
@@ -42,7 +45,15 @@ public sealed record HistoryDeletedFile(string Path, string Commit);
 /// <param name="Written">The checkpoint written, when applied.</param>
 public sealed record HistoryCheckpointResponse(string Trigger, bool Applied, bool Adopted, int Witnessed, int Listed, IReadOnlyList<HistoryCheckpointPin> Heads,
     IReadOnlyList<HistoryRecordItem> Anchored, IReadOnlyList<HistoryRecordItem> NotCounting, IReadOnlyList<HistoryRecordItem> ByRevokedDevices,
-    IReadOnlyList<HistoryDeletedFile> DeletedInHistory, string? Unavailable, RecordWritten? Written);
+    IReadOnlyList<HistoryDeletedFile> DeletedInHistory, string? Unavailable, RecordWritten? Written)
+{
+    /// <summary>For adoption, the hash of the anchored set, which <c>--adopt --expect-plan</c> names; null otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PlanHash { get; init; }
+
+    /// <summary>For adoption, the record files present that no commit holds yet, which adoption witnesses all the same.</summary>
+    public IReadOnlyList<string> Uncommitted { get; init; } = [];
+}
 
 /// <summary>A history checkpoint named by id and hash.</summary>
 /// <param name="Id">Record id.</param>

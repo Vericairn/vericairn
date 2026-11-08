@@ -87,9 +87,15 @@ public class HistoryCheckpointCommandTests
             Assert.Contains("never an agent", agent.Err, StringComparison.Ordinal);
             Assert.Contains("History: not adopted · no heads", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
 
-            CliHarness.Outcome adopted = CliHarness.Ok("--estate", root, "--json", "estate", "checkpoint", "--adopt", "--by", op);
+            // The adoption is bound to the check its signer read, by the plan hash the check printed.
+            string plan = check.Out.Split('\n').Single(l => l.StartsWith("plan: sha256:", StringComparison.Ordinal))["plan: ".Length..];
+            CliHarness.Outcome unbound = CliHarness.Run("--estate", root, "estate", "checkpoint", "--adopt", "--by", op);
+            Assert.Equal(2, unbound.Code);
+            Assert.Contains("--expect-plan", unbound.Err, StringComparison.Ordinal);
+            CliHarness.Outcome adopted = CliHarness.Ok("--estate", root, "--json", "estate", "checkpoint", "--adopt", "--expect-plan", plan, "--by", op);
             HistoryCheckpointResponse response = adopted.Json.Deserialize<HistoryCheckpointResponse>(ProtocolJson.Options)!;
             Assert.True(response.Applied && response.Adopted);
+            Assert.Equal(plan, response.PlanHash);
             Assert.Equal(3, response.Anchored.Count);
             Assert.Contains(response.Anchored, a => a.Id == order && a.Type == "work-order");
             Assert.Contains("History: adopted · head ", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);

@@ -278,6 +278,8 @@ internal sealed partial class ReleaseCoordinationService(
         // Security reports are read before the gate is taken and only here, before any durable claim: their objections are never
         // retained or written into an intent, so no advisory identity reaches a record through a refused or canceled submission.
         IReadOnlyList<FindingDto> security = securityReports(request.By, !checkOnly, request.SecurityReportsUnread);
+        // A copy this machine saw hold a newer checkpoint than it holds now may have been rewritten: no release goes from it (OPS-07).
+        setup.AddRange(recordAccess.HistoryObjections(prepared));
         List<string> basisEvidence = [];
         List<RecordReference> excluded = [];
         RecordEnvelope claimRevision;

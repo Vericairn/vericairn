@@ -89,7 +89,7 @@ public class HistoryWritingTests
         JsonObject item = Assert.Single(Items(f.Load()), i => i["kind"]!.GetValue<string>() == "history-adoption");
         Assert.Equal("not adopted", item["state"]!.GetValue<string>());
         Assert.Equal("vericairn estate checkpoint --adopt --check", item["inspect"]!.GetValue<string>());
-        Assert.Contains("vericairn estate checkpoint --adopt --by " + f.Estate.OperatorId, item["waitsOn"]![0]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("vericairn estate checkpoint --adopt --expect-plan <the plan hash the check prints> --by " + f.Estate.OperatorId, item["waitsOn"]![0]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Contains("Adopt history checkpoints", OperatorActions.RenderText(OperatorActions.Derive(f.Load())), StringComparison.Ordinal);
 
         // An agent's adoption counts for nothing, so adoption still waits on the operator.

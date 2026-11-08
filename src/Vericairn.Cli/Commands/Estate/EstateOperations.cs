@@ -132,18 +132,23 @@ internal sealed class EstateOperations(CommandContext context)
             : new("error", missing.Code, missing.Location, missing.Message);
         List<FindingDto> added = [finding];
         if (estateRoot is not null && EstateManifest.Load(Path.GetFullPath(estateRoot), new FindingList()) is { } manifest &&
-            HistoryMemory.RememberExpected(estateRoot, manifest.Estate, manifest.Profile, expect, held, CommandProviders.SourceAdapter, DateTimeOffset.UtcNow) is string note)
-            added.Add(new("info", "history.remembered", EstateLayout.RecordsDirectory, note));
-        return findings with { Errors = findings.Errors + (missing is null ? 0 : 1), Findings = [.. findings.Findings, .. added] };
+            HistoryMemory.RememberExpected(estateRoot, manifest.Estate, manifest.Profile, held, CommandProviders.SourceAdapter, DateTimeOffset.UtcNow) is string note)
+            added.Add(new("warning", "history.remembered", EstateLayout.RecordsDirectory, note));
+        return findings with
+        {
+            Errors = findings.Errors + (missing is null ? 0 : 1),
+            Warnings = findings.Warnings + added.Count(f => f.Severity == "warning"),
+            Findings = [.. findings.Findings, .. added],
+        };
     }
 
     /// <summary>Writes or adopts history checkpoints, or shows what that would witness and anchor (design/signed-history.md §§ 9 and 10).</summary>
-    public int Checkpoint(string root, string? by, bool adopt, bool check, bool json)
+    public int Checkpoint(string root, string? by, bool adopt, bool check, bool json, string? expectPlan = null)
     {
         if (!check && by is null) return context.Fail("--by is required unless --check: name the principal whose admitted device on this machine signs" + (adopt ? ", the root operator or a person holding administer." : "."));
         return context.WithApi(root, api =>
         {
-            (HistoryCheckpointResponse? response, Problem? problem) = api.HistoryCheckpoint(new HistoryCheckpointRequest(by, adopt, check));
+            (HistoryCheckpointResponse? response, Problem? problem) = api.HistoryCheckpoint(new HistoryCheckpointRequest(by, adopt, check, expectPlan));
             if (response is null) return context.Fail(problem?.Message ?? "refused");
             if (json)
             {
@@ -155,12 +160,14 @@ internal sealed class EstateOperations(CommandContext context)
             if (response.Trigger == "adoption")
             {
                 context.Output.WriteLine($"{(response.Applied ? "adopted" : "would adopt")}: witnesses {response.Witnessed:N0} records; anchors {response.Anchored.Count:N0} unsigned records that count today");
-                Section("anchors", response.Anchored, r => $"{r.Type}  {r.At}  {r.Path}  added in {r.Commit ?? "an unknown commit"}");
-                Section("unsigned records that count for nothing today and stay so", response.NotCounting, r => $"{r.Type}  {r.At}  {r.Path}");
+                Section("anchors", response.Anchored, r => $"{r.Type}  {r.At}  {r.Path}  added in {(r.Commit is null ? "an unknown commit" : r.Commit + (r.CommitAt is null ? string.Empty : " on " + r.CommitAt))}{(r.Note is null ? string.Empty : "  NOTE: " + r.Note)}");
+                Section("unsigned records that count for nothing today and stay so", response.NotCounting, r => $"{r.Type}  {r.At}  {r.Path}{(r.Note is null ? string.Empty : "  NOTE: " + r.Note)}");
                 Section("records signed by a device revoked now", response.ByRevokedDevices, r => $"{r.Type}  {r.At}  {r.Path}  device {r.Device}");
                 Section("record files deleted in history, which no checkpoint can witness", response.DeletedInHistory, d => $"{d.Path}  deleted in {d.Commit}");
+                Section("record files no commit holds yet, which adoption witnesses all the same", response.Uncommitted, p => p);
+                if (response.PlanHash is { } plan) context.Output.WriteLine("plan: " + plan);
                 if (!response.Applied)
-                    context.Output.WriteLine("Adoption keeps every reading as it is and admits nothing new; from then on the runtime writes checkpoints at upgrades, release submissions, charter revisions and intervals. The root operator signs it with vericairn estate checkpoint --adopt --by <root operator>.");
+                    context.Output.WriteLine("Adoption keeps every reading as it is and admits nothing new; from then on the runtime writes checkpoints at upgrades, release submissions, charter revisions and intervals. The root operator signs it with vericairn estate checkpoint --adopt --expect-plan <plan> --by <root operator>.");
             }
             else
             {

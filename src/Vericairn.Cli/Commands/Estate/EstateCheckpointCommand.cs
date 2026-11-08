@@ -13,11 +13,13 @@ internal sealed class EstateCheckpointCommand : Command
         var operations = new EstateOperations(context);
         var byOption = new Option<string?>("--by") { Description = "Principal id whose admitted device on this machine signs (required unless --check); for --adopt, the root operator or a person holding administer." };
         var adoptOption = new Option<bool>("--adopt") { Description = "Adopt history checkpoints: once, after the upgrade to a release that writes them, as the root operator's step. Lists each unsigned record it would anchor with its type, date and adding commit, records signed by revoked devices and record files deleted in history." };
-        var checkOption = new Option<bool>("--check") { Description = "Show what the checkpoint would witness and, with --adopt, anchor, signing and writing nothing." };
+        var checkOption = new Option<bool>("--check") { Description = "Show what the checkpoint would witness and, with --adopt, anchor, signing and writing nothing; with --adopt it prints the plan hash --expect-plan names." };
+        var planOption = new Option<string?>("--expect-plan") { Description = "With --adopt, the plan hash --adopt --check printed: the adoption is refused unless it anchors exactly the records that check listed. Required when the adoption anchors anything." };
         Options.Add(byOption);
         Options.Add(adoptOption);
         Options.Add(checkOption);
+        Options.Add(planOption);
         SetAction(parseResult => operations.Checkpoint(parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(byOption), parseResult.GetValue(adoptOption),
-            parseResult.GetValue(checkOption), parseResult.GetValue(context.JsonOption)));
+            parseResult.GetValue(checkOption), parseResult.GetValue(context.JsonOption), parseResult.GetValue(planOption)));
     }
 }

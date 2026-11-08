@@ -80,8 +80,16 @@ internal sealed record WitnessedEntry(InventoryEntry Entry, string Checkpoint);
 /// <param name="Anchored">The unsigned records that count today, which the adoption anchors, sorted by id.</param>
 /// <param name="NotCounting">The unsigned records that count for nothing today; adoption witnesses them and they stay so.</param>
 /// <param name="ByRevokedDevices">Records signed by a device revoked now, each with that device, sorted by id; a device's own records are left out.</param>
+/// <param name="AlreadyAnchored">The ids among <paramref name="Anchored"/> that an anchor already lists, the format-2 migration's or a checkpoint's.</param>
 public sealed record AdoptionPlan(bool Adopted, int Witnessed, IReadOnlyList<RecordEnvelope> Anchored, IReadOnlyList<RecordEnvelope> NotCounting,
-    IReadOnlyList<(RecordEnvelope Record, string Device)> ByRevokedDevices);
+    IReadOnlyList<(RecordEnvelope Record, string Device)> ByRevokedDevices, IReadOnlySet<string> AlreadyAnchored)
+{
+    /// <summary>
+    /// The hash of the anchored set, the record set hash of its ids and hashes: what <c>estate checkpoint --adopt --check</c> prints and
+    /// <c>--adopt --expect-plan</c> names, so that the adoption signed anchors exactly what was read.
+    /// </summary>
+    public string AnchoredHash => RecordSets.Hash(Anchored.Select(r => (r.Id, r.ComputedHash)));
+}
 
 /// <summary>A checkpoint prepared for signing: its body and the inventory objects to store before it.</summary>
 /// <param name="Body">The record body.</param>
@@ -563,7 +571,32 @@ public static class SignedHistory
             }
         }
 
-        return new AdoptionPlan(state.Adopted, model.Records.Count, anchored, excluded, revoked);
+        IReadOnlySet<string> anchors = model.Trust.Anchors;
+        return new AdoptionPlan(state.Adopted, model.Records.Count, anchored, excluded, revoked,
+            anchored.Where(r => anchors.Contains(SignatureChecks.AnchorKey(r.Id, r.ComputedHash))).Select(r => r.Id).ToHashSet(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Whether a checkpoint follows another, through the hashes its predecessors name: what lets a machine advance its memory of the newest
+    /// checkpoint it verified only along the history it already verified. A checkpoint follows itself.
+    /// </summary>
+    public static bool Follows(EstateModel model, string checkpoint, string ancestor)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var byId = model.Records.Where(r => r.Type == "history-checkpoint" && r.Format >= 3).ToDictionary(r => r.Id, CheckpointBody.Read, StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>([checkpoint]);
+        while (queue.TryDequeue(out string? id))
+        {
+            if (id == ancestor) return true;
+            if (!seen.Add(id) || !byId.TryGetValue(id, out CheckpointBody? body)) continue;
+            foreach ((string previous, string hash) in body.Previous)
+            {
+                if (byId.TryGetValue(previous, out CheckpointBody? predecessor) && predecessor.Record.ComputedHash == hash) queue.Enqueue(previous);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The estate's history state.</summary>
