@@ -268,7 +268,8 @@ gets `404`, after which a client initializes again. DELETE ends a session. A ses
 device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
 hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
 four sessions, a new one ending its least recently used, and the runtime 64; a device runs at most four
-requests at once and all devices eight, its request counted before its body is read, so network MCP never takes the connections the API and the
+requests at once and all devices eight (notifications, a cancellation above all, and `initialize` are never held back by
+that count), so network MCP never takes the connections the API and the
 event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
 by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
 
@@ -309,12 +310,25 @@ local harness, as `mcp serve` does, and forwards each message to the remote esta
 connection this machine paired (`vericairn connections`), named by its id or its estate's name. Every
 request is signed by the connection's device. Only for the five writes does the bridge first ask the
 runtime to prepare; when a record comes back it checks that the record hashes to the hash it is asked
-to sign, names the device's principal as author, is the record type the tool writes, is about the
-assignment or attempt the call names, and holds every field the call supplies unchanged with nothing
-beyond what the runtime adds, then signs it with the same key and repeats the call, returning only the
-final answer. Any other call is forwarded once as it came, and nothing it returns is signed. A session the runtime ended
-is opened again once; when its input ends, the bridge ends its session. Any other client doing the
-same, with the SDK's `DeviceRequestSigner` and `DeviceSignedRecords` or its own code, is Vericairn-aware.
+to sign, names the device's principal as author, is the record type the tool writes, supersedes no
+record, is dated within a plan's ten minutes of this machine's clock (allowing the five minutes' skew a
+signed request may have), is about the assignment or attempt the call names, and holds every field the
+call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
+repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
+nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
+the bridge ends its session. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
+`DeviceSignedRecords` or its own code, is Vericairn-aware.
+
+**What a device's signature vouches for.** The bridge binds what the call itself supplies: its
+arguments, the author, the subject an assignment or attempt argument names, the record type, its time
+and that it supersedes nothing. A prepared record also holds fields the runtime computes, which the
+bridge cannot check without trusting that same runtime, and the device signs them too: a document
+review's subject (the living-document declaration the runtime finds for `path`, which no argument names
+by id), its independence, checks, content identity, answers and section contents, an attempt's or
+progress phase's time within those bounds, and a result's `progressClaim`, the attempt's last claim the
+runtime retains. Binding a review's subject to `path` would need the declaration from that same runtime,
+so it adds nothing against a runtime that lies. Do not sign through a runtime you do not trust: reach
+only estates whose runtime you rely on to compute those fields honestly.
 
 ```sh
 # On the runtime's machine, as the operator:

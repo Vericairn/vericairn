@@ -372,6 +372,31 @@ public class NetworkMcpThreatTests
     }
 
     [Fact]
+    public async Task ACancellationAndInitializeAreAcceptedWhileTheDevicesCallSlotsAreFull()
+    {
+        (LocalNetworkHarness harness, _) = await NetworkMcp.StartAsync();
+        await using LocalNetworkHarness owned = harness;
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        using McpWire client = NetworkMcp.Wire(harness, paired);
+        await client.InitializeAsync();
+        List<IDisposable> held = [.. Enumerable.Range(0, McpSessions.CallsPerDevice).Select(_ => harness.Host.Mcp.Sessions.TryCall(paired.Device)!)];
+        try
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, (await client.PostAsync(McpWire.Request("ping"))).Status);
+            (HttpStatusCode cancelled, _, _, _) = await client.PostAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/cancelled", ["params"] = new JsonObject { ["requestId"] = 1 } });
+            Assert.Equal(HttpStatusCode.Accepted, cancelled);
+            using McpWire another = NetworkMcp.Wire(harness, paired);
+            await another.InitializeAsync();
+        }
+        finally
+        {
+            held.ForEach(slot => slot.Dispose());
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(McpWire.Request("ping"))).Status);
+    }
+
+    [Fact]
     public void SessionsAndCallsAreBoundedPerDeviceAndPerRuntime()
     {
         var time = new ManualTime(DateTimeOffset.UtcNow);

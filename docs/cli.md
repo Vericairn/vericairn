@@ -484,8 +484,11 @@ On the agent's machine, `vericairn mcp serve --connection <connection>` bridges 
 connection `vericairn connections add` paired, named by its id or its estate's name. It serves standard input and output
 as `mcp serve` does and forwards each message to the runtime's `/mcp`, signing every request with the connection's
 device. Only a write is prepared: its record is checked to be the one the call asks for (the tool's record type, this
-device's principal as author, the assignment or attempt the call names, every field the call supplies unchanged), signed
-with the same key and then written; nothing another call returns is ever signed. The remote runtime judges each call as its API operation for that
+device's principal as author, no supersession, a time within a plan's ten minutes of this machine's clock, the assignment
+or attempt the call names, every field the call supplies unchanged), signed with the same key and then written; nothing
+another call returns is ever signed. The device also signs what the runtime computes and the bridge cannot check, such as a
+document review's subject and checks or a result's retained progress claim, so bridge only to a runtime you trust
+([what a signature vouches for](mcp.md#network-mcp-over-streamable-http-092)). The remote runtime judges each call as its API operation for that
 device, and offers the read tools and the contributor writes only. It does not take `--as`: the paired device's own
 principal acts. Diagnostics go to standard error. Exit 0 when the input ends, 2 when the connection is unknown or its
 key is no longer held here.

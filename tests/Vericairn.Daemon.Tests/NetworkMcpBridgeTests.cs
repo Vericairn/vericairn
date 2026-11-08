@@ -25,16 +25,23 @@ public class NetworkMcpBridgeTests
     private static JsonObject AttemptArguments => new() { ["assignment"] = Assignment, ["workspace"] = "widget repository", ["note"] = "Build it." };
 
     /// <summary>A prepared record as a runtime returns it, honest unless a test changes it.</summary>
-    private static JsonObject Prepared(string type = "attempt", string? by = null, string? subject = null, Action<JsonObject>? body = null, bool wrongHash = false)
+    /// <summary>The time the honest runtime prepares at; the bridge's clock reads it as now.</summary>
+    private static readonly DateTimeOffset Now = new(2026, 11, 7, 12, 0, 0, TimeSpan.Zero);
+
+    private static McpBridge Bridge(HttpClient http, Func<byte[], byte[]> sign) => new(http, Principal, sign) { Clock = new MovableClock(Now.AddSeconds(30)) };
+
+    private static JsonObject Prepared(string type = "attempt", string? by = null, string? subject = null, Action<JsonObject>? body = null, bool wrongHash = false,
+        string? supersedes = null, DateTimeOffset? at = null)
     {
-        DateTimeOffset at = new(2026, 11, 7, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset time = at ?? Now;
+        string stamp = RecordParser.FormatTimestamp(time);
         var content = type == "decision"
-            ? new JsonObject { ["title"] = "hostile", ["statement"] = "hostile", ["summary"] = "hostile", ["effects"] = new JsonArray("x"), ["affects"] = new JsonArray(), ["decidedAt"] = "2026-11-07T12:00:00Z", ["decidedBy"] = Principal }
-            : new JsonObject { ["startedAt"] = "2026-11-07T12:00:00Z", ["workspace"] = "widget repository", ["note"] = "Build it." };
+            ? new JsonObject { ["title"] = "hostile", ["statement"] = "hostile", ["summary"] = "hostile", ["effects"] = new JsonArray("x"), ["affects"] = new JsonArray(), ["decidedAt"] = stamp, ["decidedBy"] = Principal }
+            : new JsonObject { ["startedAt"] = stamp, ["workspace"] = "widget repository", ["note"] = "Build it." };
         body?.Invoke(content);
         using JsonDocument document = JsonDocument.Parse(content.ToJsonString());
         AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by ?? Principal, document.RootElement.Clone(),
-            type == "decision" ? null : new RecordReference("assignment", subject ?? Assignment, "sha256:" + new string('1', 64)), null, at, Ulid.NewUlid(at).Value, 3));
+            type == "decision" ? null : new RecordReference("assignment", subject ?? Assignment, "sha256:" + new string('1', 64)), supersedes, time, Ulid.NewUlid(time).Value, 3));
         return new JsonObject
         {
             ["plan"] = Ulid.NewUlid().Value, ["id"] = record.Envelope.Id, ["at"] = record.Envelope.At, ["expiresAt"] = "2026-11-07T12:10:00Z",
@@ -51,6 +58,9 @@ public class NetworkMcpBridgeTests
         { "subject", "not about the assignment" },
         { "body", "workspace is not the one" },
         { "extra", "holds hidden" },
+        { "supersedes", "supersedes" },
+        { "dated", "is dated 2019-01-01T00:00:00Z, not now" },
+        { "ahead", "not now" },
     };
 
     [Theory]
@@ -58,8 +68,9 @@ public class NetworkMcpBridgeTests
     public void AWriteIsSignedOnlyWhenItsRecordIsTheOneItsCallAsksFor(string defect, string named)
     {
         using var http = new HttpClient();
-        using var bridge = new McpBridge(http, Principal, _ => throw new InvalidOperationException("Never asked to sign."));
+        using McpBridge bridge = Bridge(http, _ => throw new InvalidOperationException("Never asked to sign."));
         Assert.Null(bridge.Unsignable(Prepared(), "work_attempt", AttemptArguments));
+        Assert.Null(bridge.Unsignable(Prepared(at: Now.AddMinutes(-14)), "work_attempt", AttemptArguments));
         JsonObject prepared = defect switch
         {
             "hash" => Prepared(wrongHash: true),
@@ -67,6 +78,9 @@ public class NetworkMcpBridgeTests
             "type" => Prepared(type: "decision"),
             "subject" => Prepared(subject: Ulid.NewUlid().Value),
             "body" => Prepared(body: b => b["workspace"] = "another repository"),
+            "supersedes" => Prepared(supersedes: Ulid.NewUlid().Value),
+            "dated" => Prepared(at: new DateTimeOffset(2019, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+            "ahead" => Prepared(at: Now.AddMinutes(10)),
             _ => Prepared(body: b => b["hidden"] = "a field the call never supplied"),
         };
         Assert.Contains(named, bridge.Unsignable(prepared, "work_attempt", AttemptArguments), StringComparison.Ordinal);
@@ -83,7 +97,7 @@ public class NetworkMcpBridgeTests
         var hostile = new Hostile(() => Prepared(type: type == "decision" ? "decision" : "attempt"));
         using var http = new HttpClient(hostile) { BaseAddress = new Uri("http://hostile/") };
         int signed = 0;
-        using var bridge = new McpBridge(http, Principal, _ => { signed++; return new byte[64]; });
+        using McpBridge bridge = Bridge(http, _ => { signed++; return new byte[64]; });
         await using (var client = new BridgeDriver(bridge))
         {
             await client.RequestAsync(McpWire.Request("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18" }, 1));
@@ -102,7 +116,7 @@ public class NetworkMcpBridgeTests
         var hostile = new Hostile(() => next);
         using var http = new HttpClient(hostile) { BaseAddress = new Uri("http://hostile/") };
         int signed = 0;
-        using var bridge = new McpBridge(http, Principal, _ => { signed++; return new byte[64]; });
+        using McpBridge bridge = Bridge(http, _ => { signed++; return new byte[64]; });
         await using (var client = new BridgeDriver(bridge))
         {
             await client.RequestAsync(McpWire.Request("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18" }, 1));
@@ -125,7 +139,7 @@ public class NetworkMcpBridgeTests
     {
         // A runtime that cannot be reached, or answers initialize without a protocol version as a string, opens nothing.
         using (var http = new HttpClient(new Hostile(() => Prepared()) { Unreachable = true }) { BaseAddress = new Uri("http://hostile/") })
-        using (var bridge = new McpBridge(http, Principal, _ => new byte[64]))
+        using (McpBridge bridge = Bridge(http, _ => new byte[64]))
         await using (var client = new BridgeDriver(bridge))
         {
             JsonObject unreachable = await client.RequestAsync(McpWire.Request("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18" }, 1));
@@ -134,7 +148,7 @@ public class NetworkMcpBridgeTests
         }
 
         using (var http = new HttpClient(new Hostile(() => Prepared()) { Version = 7 }) { BaseAddress = new Uri("http://hostile/") })
-        using (var bridge = new McpBridge(http, Principal, _ => new byte[64]))
+        using (McpBridge bridge = Bridge(http, _ => new byte[64]))
         await using (var client = new BridgeDriver(bridge))
         {
             JsonObject odd = await client.RequestAsync(McpWire.Request("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18" }, 1));
@@ -145,7 +159,7 @@ public class NetworkMcpBridgeTests
         // A key that will not sign leaves the call answered with an error, and nothing signed is sent.
         var hostile = new Hostile(() => Prepared());
         using (var http = new HttpClient(hostile) { BaseAddress = new Uri("http://hostile/") })
-        using (var bridge = new McpBridge(http, Principal, _ => throw new InvalidOperationException("The key store is locked.")))
+        using (McpBridge bridge = Bridge(http, _ => throw new InvalidOperationException("The key store is locked.")))
         await using (var client = new BridgeDriver(bridge))
         {
             await client.RequestAsync(McpWire.Request("initialize", new JsonObject { ["protocolVersion"] = "2025-06-18" }, 1));

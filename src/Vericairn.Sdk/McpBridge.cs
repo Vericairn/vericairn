@@ -72,6 +72,12 @@ internal sealed class McpBridge : IDisposable
         this.log = log;
     }
 
+    /// <summary>How long a runtime keeps a prepared record for its device's signature.</summary>
+    private static readonly TimeSpan PlanLifetime = TimeSpan.FromMinutes(10);
+
+    /// <summary>The clock a prepared record's time is judged by; a test sets it.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
     /// <summary>The session the runtime opened for this bridge, once initialize has run.</summary>
     internal string? Session => session;
 
@@ -280,9 +286,9 @@ internal sealed class McpBridge : IDisposable
 
     /// <summary>
     /// Why this device does not sign a prepared record, or null. The record must be one a write tool authors, of that tool's type, hash
-    /// to the hash the runtime asks to be signed, carry no signature, name this device's principal as author, be about the very
-    /// record the call's arguments name, and hold every field those arguments supply unchanged, with nothing beyond what the
-    /// runtime adds to such a record. Anything else is refused.
+    /// to the hash the runtime asks to be signed, carry no signature, name this device's principal as author, supersede nothing, be
+    /// dated now, be about the very record the call's arguments name, and hold every field those arguments supply unchanged, with
+    /// nothing beyond what the runtime adds to such a record. Anything else is refused.
     /// </summary>
     internal string? Unsignable(JsonObject prepared, string tool, JsonObject arguments)
     {
@@ -321,6 +327,19 @@ internal sealed class McpBridge : IDisposable
         if (envelope.Type != shape.Type)
         {
             return $"{tool} writes a record of type {shape.Type}, and the runtime prepared one of type {envelope.Type}." + Nothing;
+        }
+
+        // An honest runtime prepares a new record, never a revision of another, and dates it now: within a plan's ten minutes of this
+        // machine's clock, allowing the skew a signed request itself may have.
+        if (envelope.Supersedes is not null)
+        {
+            return $"The prepared record supersedes {envelope.Supersedes}; {tool} writes a new record." + Nothing;
+        }
+
+        DateTimeOffset now = Clock.GetUtcNow();
+        if (!RecordParser.IsTimestamp(envelope.At) || envelope.AtTime < now - PlanLifetime - RequestSigning.MaxSkew || envelope.AtTime > now + RequestSigning.MaxSkew)
+        {
+            return $"The prepared record is dated {envelope.At}, not now." + Nothing;
         }
 
         if (envelope.Subject is not { } subject || subject.Type != shape.Subject

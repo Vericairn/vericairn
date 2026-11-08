@@ -330,7 +330,10 @@ a result's `_meta` when it has one; over standard input and output `_meta` is no
 
 The command line adds `runtime configure --mcp on|off` and `--mcp-origin`, whose `--json` output adds `mcp`,
 `allowedOrigins` and `mcpServed`, and keeps the other settings when one changes; `runtime status` adds the `mcp` line and,
-in `--json`, `mcp`; and `mcp serve --connection`. The SDK's additions for the bridge are internal. Record format remains 3;
+in `--json`, `mcp`; and `mcp serve --connection`, whose bridge signs only a write's prepared record and only after binding
+the call's arguments, author, subject, type, time and supersession; fields the runtime computes, such as a document
+review's subject and checks or a result's `progressClaim`, are signed on trust in that runtime. The SDK's additions for
+the bridge are internal. Record format remains 3;
 no record type changes. `AGENTS.md` gains one paragraph on reaching the estate from another machine.
 
 ## Preparing a documentation set (DOCS-11)

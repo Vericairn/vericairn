@@ -182,14 +182,6 @@ internal sealed class McpEndpoint
 
     private async Task PostAsync(HttpContext context, AuthenticatedDevice device, string profile)
     {
-        // The device's call slot is taken before its body is parsed, so parsing too is bounded per device and per runtime.
-        using IDisposable? slot = Sessions.TryCall(device.Identity);
-        if (slot is null)
-        {
-            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device runs at most {McpSessions.CallsPerDevice} MCP requests at once and all devices {McpSessions.CallsPerRuntime}; retry when one finishes.", [])).ConfigureAwait(false);
-            return;
-        }
-
         if (!MediaTypeHeaderValue.TryParse(context.Request.ContentType, out MediaTypeHeaderValue? type)
             || !string.Equals(type.MediaType.Value, "application/json", StringComparison.OrdinalIgnoreCase))
         {
@@ -269,6 +261,15 @@ internal sealed class McpEndpoint
 
             context.Response.StatusCode = StatusCodes.Status202Accepted;
             context.Response.ContentLength = 0;
+            return;
+        }
+
+        // A request takes one of its device's call slots while it runs. Parsing is bounded by the message's 1 MiB, and notifications
+        // (a cancellation above all) and initialize take none, so a client can always cancel and open a session when its slots are full.
+        using IDisposable? slot = Sessions.TryCall(device.Identity);
+        if (slot is null)
+        {
+            await Problem(context, StatusCodes.Status429TooManyRequests, new Problem("refused", $"A device runs at most {McpSessions.CallsPerDevice} MCP requests at once and all devices {McpSessions.CallsPerRuntime}; retry when one finishes.", [])).ConfigureAwait(false);
             return;
         }
 
