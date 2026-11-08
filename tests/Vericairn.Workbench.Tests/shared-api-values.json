@@ -91,6 +91,24 @@
     "stopped",
     "off"
   ],
+  "Vericairn.Records.Estate.FlowStops.Deliveries": [
+    "due",
+    "delivered",
+    "closed",
+    "queued",
+    "outside"
+  ],
+  "Vericairn.Records.Estate.FlowStops.Kinds": [
+    "person",
+    "reserved",
+    "attention",
+    "accept"
+  ],
+  "Vericairn.Records.Estate.FlowStops.RequestStates": [
+    "due",
+    "settled",
+    "withdrawn"
+  ],
   "Vericairn.Records.Estate.GoalPredicates.Verdicts": [
     "met",
     "not-met",
@@ -121,7 +139,8 @@
     "agent",
     "person",
     "reserved",
-    "attention"
+    "attention",
+    "request"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -133,7 +152,11 @@
     "review",
     "asked",
     "answered",
-    "attention"
+    "attention",
+    "request",
+    "requested",
+    "closed",
+    "queued"
   ],
   "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
     "hash",
@@ -389,7 +412,8 @@
     "estate",
     "package",
     "vericairn-release",
-    "operator-request"
+    "operator-request",
+    "security-triage"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",
@@ -484,6 +508,18 @@
     "manage-writing-exceptions",
     "manage-prompts"
   ],
+  "Vericairn.Records.Types.SecurityReportRules.Dispositions": [
+    "security",
+    "duplicate",
+    "no-action"
+  ],
+  "Vericairn.Records.Types.SecurityReportRules.TriageFacts": [
+    "advisory",
+    "repository",
+    "contentHash",
+    "disposition",
+    "reason"
+  ],
   "Vericairn.Records.Types.VerificationType.EvidenceClasses": [
     "observation",
     "report",
@@ -519,6 +555,24 @@
     "implemented",
     "qualified",
     "available"
+  ],
+  "Vericairn.Runtime.Providers.SecurityAdvisory.SettledStates": [
+    "published",
+    "closed",
+    "withdrawn"
+  ],
+  "Vericairn.Runtime.Providers.SecurityAdvisory.Severities": [
+    "critical",
+    "high",
+    "medium",
+    "low"
+  ],
+  "Vericairn.Runtime.Providers.SecurityAdvisory.States": [
+    "triage",
+    "draft",
+    "published",
+    "closed",
+    "withdrawn"
   ],
   "Vericairn.Runtime.Release.ReleaseFlow.Platforms": [
     "linux-x64",

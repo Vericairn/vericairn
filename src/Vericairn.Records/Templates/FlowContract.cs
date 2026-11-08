@@ -244,7 +244,7 @@ public static partial class FlowContract
         string? role = step.Text("role", true, 60, Patterns.Slug, "a role of the flow");
         Marking(step, "step");
 
-        step.Enum("reserved", false, ReservedActs);
+        string? reserved = step.Enum("reserved", false, ReservedActs);
         string? following = step.Text("following", false, 100, Patterns.Slug, "a step key");
         if (following is not null && !extension)
         {
@@ -282,7 +282,7 @@ public static partial class FlowContract
             step.Error("flow.done", "done", $"A {kind} step is done when its done predicates hold; it declares at least one.");
         }
 
-        step.Text("action", false, 4000);
+        string? action = step.Text("action", false, 4000);
         step.Text("recovery", true, 4000);
         var traps = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader trap in step.NestedArray("traps", false, allowEmpty: false) ?? [])
@@ -345,6 +345,36 @@ public static partial class FlowContract
         if (kind == "review" && fromSteps != 1)
         {
             step.Error("flow.review", "inputs", "A review step names exactly one input from a work step's output: the result it reviews.");
+        }
+
+        // A reserved act waits on the operator with its exact command, computed from the records only when the step is next, and is
+        // done when the records of the operator's act hold (design/flow.md § 8; design/release-procedure.md § 6).
+        if (reserved is not null)
+        {
+            if (action is null)
+            {
+                step.Error("flow.reserved", "action", "A reserved step declares its action: the exact command the operator runs, which its operator request shows only when the step is next.");
+            }
+
+            if (done.Count == 0)
+            {
+                step.Error("flow.reserved", "done", "A reserved step declares its done predicates: the records of the operator's act, from which its completion is read.");
+            }
+
+            // A derived state rests on records other than those counted, a work order's status or acceptance, an ask's answers or a
+            // document's clearance, so it cannot show that the operator's own act made it true.
+            if (done.Any(d => d.Has("state")))
+            {
+                step.Error("flow.reserved", "done", "A reserved step's done predicates count the records of the operator's act itself and name no state, which other records decide.");
+            }
+
+            foreach (string placeholder in Placeholders(action))
+            {
+                if (!CommandBinds(placeholder, subject, extension, each is not null, inputs))
+                {
+                    step.Error("flow.binding", "action", $"{{{placeholder}}} is not a binding of the run: a reserved step's command binds {{subject.<record or text field>}}, {{instance}} in an each step, {{goal}}, {{work}}, or {{input.<its input>.id}} and {{input.<its input>.hash}}.");
+                }
+            }
         }
 
         var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -818,6 +848,46 @@ public static partial class FlowContract
         return extension || (subject.TryGetValue(field, out string? type) && (type == "record" || (!record && type == "text")));
     }
 
+    /// <summary>
+    /// Whether a placeholder of a reserved step's command names a binding of the run: a record or text field of the subject, the
+    /// instance in an each step, the goal or the work order, or the id or hash of one of the step's own inputs, as they stand when the
+    /// step is next.
+    /// </summary>
+    private static bool CommandBinds(string name, Dictionary<string, string> subject, bool extension, bool instance, HashSet<string> inputs)
+    {
+        if (name is "goal" or "work")
+        {
+            return true;
+        }
+
+        if (name == "instance")
+        {
+            return instance;
+        }
+
+        if (name.StartsWith("input.", StringComparison.Ordinal))
+        {
+            string[] parts = name.Split('.');
+            return parts.Length == 3 && inputs.Contains(parts[1]) && parts[2] is "id" or "hash";
+        }
+
+        if (name.StartsWith("subject.", StringComparison.Ordinal) && name.IndexOf('.', "subject.".Length) < 0)
+        {
+            string field = name["subject.".Length..];
+            return extension || (subject.TryGetValue(field, out string? type) && type is "record" or "text");
+        }
+
+        return false;
+    }
+
+    /// <summary>The placeholders a reserved step's command names, without their braces: lower-case names in braces; other braces are literal text.</summary>
+    public static IEnumerable<string> Placeholders(string? command) =>
+        command is null ? [] : Placeholder().Matches(command).Select(m => m.Groups["name"].Value);
+
+    /// <summary>A placeholder of a reserved step's command: a lower-case name in braces, such as {subject.product} or {input.candidate.hash}.</summary>
+    [GeneratedRegex(@"\{(?<name>[a-z][a-z0-9]*(?:[.\-][a-z0-9]+)*)\}")]
+    internal static partial Regex Placeholder();
+
     /// <summary>An ISO 8601 duration of days, hours, minutes and seconds, such as P1D or PT6H; null when the text is not one.</summary>
     public static TimeSpan? ParseDuration(string? text)
     {
@@ -841,7 +911,7 @@ public static partial class FlowContract
     }
 
     /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal} or {work}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work)\}$")]
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work)\}\z")]
     internal static partial Regex Binding();
 
     /// <summary>A step key, or a step key and an item name joined by a dot.</summary>

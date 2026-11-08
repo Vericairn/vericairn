@@ -146,6 +146,10 @@ nuget.org availability or account-holder qualification claim.
 - Settlement withdraws the run's still-open or notified process attention asks, including stall and command-audit asks, as no longer needed. Withdrawals pin the exact settlement and preserve the question and observations; already answered asks stay answered. Closed asks no longer produce stale-subject warnings. The new `attempt-missing` and `scope-settlement` asks remain open for review, pinned to the settled operation's exact revision and hash. The settlement, new asks and withdrawals are validated together and journaled; interrupted storage still requires reconciliation. Withdrawal is not an answer by the person asked and accepts no work.
 - Pausing or abandoning a goal prevents new launches; it does not stop runs already in flight. `goal stop` records abandonment; use `worker stop` for each run that must stop and inspect the stop facts. `limits.deadline` is validated and recorded but not yet enforced by the routing or worker code, and so is `limits.consecutiveFailures` for a goal that runs no flow; operators must monitor and act on them. From 0.9.2, `goal next` and `goal step` hold a run of a flow that reaches its `limits.consecutiveFailures` in failed steps in a row until its sponsor answers; a run started directly with `worker start` is not held by it.
 - Resumption and goal revision do not erase run charges: the ledger includes runs naming any revision of that goal. Concurrency defaults to one when not stated; omitted token or currency allowance is not unlimited spending authority.
+- From 0.9.2, a run's reserved step waits on the operator as an operator request, and no grant of a reserved act takes effect before `ID-04`, so no agent carries or completes one. A reserved step's done predicates count only authentic records whose author was a person with the operator role when they were made, and name no derived `state`. An agent's record of the operator's outside act therefore does not complete the step, even a faithful one, such as a publication an agent observes under `local-engineering`; the operator records it, signed even where the charter makes signatures optional, and the step's reasons name each record that does not count.
+- A reserved step's command is bound from the records only when the step is next. A bound value with characters outside letters, digits and `. _ : / @ + = ,` and `-`, or one starting with a dash, is never put in: the step shows `blocked` until the value changes. A text subject field with a space blocks the command in the same way.
+- A request that is no longer due, `withdrawn` or `settled`, is derived when it is read and stays open. No record withdraws it, and only its operator closes it. Live reads derive a run's position when they are read: human status, `goal show`, `goal next`, the request queue, required attention and request events. A due time, backoff or watch limit can therefore change them between two reads of the same records. Canonical status JSON reads no clock: it derives a run, its stops and the delivery of its requests as of its newest record (`asOf`). Until a later record is written, it can show a step as blocked that a live read already shows as due. The progress report, which also fills generated documents, lists no runs or stops.
+- At most three stops of the estate's runs reach one person at a time; `goal step` queues the rest. The asks queue and the operator request queue still each deliver three per principal across every goal, so a person can see up to three asks and three requests at once. Canonical status, and Workbench's home and Remote, which read it, show a reserved stop without its command; a live read shows it. A stop carried outside `goal step`, such as an effect a person carries, a watch past its limit, a step no one is named for, or the goal's acceptance, is shown but nothing is recorded to reach its person.
 
 ## Worker launchers, limits and custody
 
@@ -678,6 +682,36 @@ uncertain effects need observation before retrying. Local checkpoints belong to 
 clone, and independently running services are not coordinated by one service's gate.
 The queue and one-step action are absent from MCP. See [operator actions](operator-actions.md)
 and [checked changes](changes.md).
+
+## Security reports before a release (OPS-11)
+
+From 0.9.2 the `github-security-advisories` reader lists a declared repository's security advisories through the runtime
+user's own `gh` login, read-only, with the same bounded runner as the release provider: one minute per gh command. It reads
+the listing page by page, 100 advisories a page and at most 30 pages, each page's answer at most 16,777,216 characters and all
+of them at most 100,663,296, so a page or listing larger than that is refused rather than truncated. It reads only as an
+administrator of the repository through a token whose `repo` or `repository_advisories:read` scope it can confirm, since GitHub
+hides drafts and private reports from other logins; a fine-grained or app token shows no scopes and is refused. It reads only
+while GitHub's core allowance keeps a fifth of its limit, and at least 100 requests, for the person's own use, and stops
+before a further page once a page leaves no more than that. GitHub keeps repository advisories only for
+public repositories, so a declared private repository's listing is refused and holds releases. It does not use
+conditional requests or webhooks. It follows next pages only on `api.github.com`, so it reads `github.com` and not a GitHub
+Enterprise Server. A repository whose
+listing cannot be completed holds every release until it can; there is no override other than the operator's product
+revision without the declaration.
+
+Observations stay on the machine that read them, in its live store: another machine, or a rebuilt cache, starts with none
+and reads again before a release. An advisory absent from a later complete listing is no longer observed and no longer
+holds. The daemon reads every 5 minutes, and an embedded command only when it polls or checks a release, so attention on a
+machine without a running daemon is as fresh as its last read and says when that was. Each advisory revision is told apart
+by a hash of the whole response, so any edit to a report, its text or credits included, needs a new triage. Reports, in
+`triage` or `draft` state or a state this release does not know, hold a release until triaged at their current revision, and a
+closed or withdrawn advisory until triaged at any revision; a published advisory, or a closed one already triaged, is
+information for a week and holds nothing, whoever changed it. A non-operator learns from a refusal only whether releases are
+held. Triage is the
+operator's alone until a security role exists; agents and other principals cannot record one, see one, or learn from a
+refusal whether a report exists. A triage record names the advisory's identifier and repository, so an estate whose records
+are public should not declare security reports. The estate's GitHub App replaces this reader in a later release, with the
+App's own allowance.
 
 ## Other limitations and artifacts
 

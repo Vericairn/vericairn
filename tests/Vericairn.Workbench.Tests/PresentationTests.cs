@@ -42,6 +42,13 @@ public class PresentationTests
         Assert.Equal(Vericairn.Records.Estate.FlowPosition.States, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-step").States.Select(s => s.Value));
         Assert.True(StateLanguage.NeedsPerson("flow-step", "stopped"));
         Assert.Equal(Vericairn.Records.Estate.FlowPosition.ItemStates, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-item").States.Select(s => s.Value));
+        Assert.Equal(Vericairn.Records.Estate.FlowStops.Kinds, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-stop").States.Select(s => s.Value));
+        Assert.Equal(Vericairn.Records.Estate.FlowStops.Deliveries, StateLanguage.Vocabularies.Single(v => v.Subject == "flow-delivery").States.Select(s => s.Value));
+        Assert.All(Vericairn.Records.Estate.FlowStops.Kinds, kind => Assert.True(StateLanguage.NeedsPerson("flow-stop", kind)));
+        Assert.False(StateLanguage.NeedsPerson("flow-delivery", "closed"));
+        Assert.True(StateLanguage.NeedsPerson("step-route", "request"));
+        Assert.True(StateLanguage.NeedsPerson("step-route", "requested"));
+        Assert.False(StateLanguage.NeedsPerson("step-route", "closed"));
         Assert.True(StateLanguage.NeedsPerson("step-route", "unavailable"));
         Assert.False(StateLanguage.NeedsPerson("step-route", "running"));
         Assert.False(StateLanguage.NeedsPerson("ask", "answered"));

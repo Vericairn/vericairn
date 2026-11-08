@@ -191,13 +191,17 @@ public sealed partial class ToolRegistry
             Read("release_submit_check", "Check every release submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and needs no presence; a passing check grants no authority.", ReleaseCheckArguments(),
                 async (api, a, token) =>
                 {
-                    var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), Arg(a, "by"),
+                    // The check speaks for the acting principal, never for a principal named in the arguments. Security reports are the
+                    // operator's: any other connection learns only whether a declaration holds, and starts no read of them.
+                    bool operatorActs = actingPrincipal is not null && await IsOperatorAsync(token).ConfigureAwait(false);
+                    var request = new ReleaseSubmitRequest(Arg(a, "product"), Arg(a, "version"), OptionalArg(a, "repository"), actingPrincipal ?? Arg(a, "by"),
                         OptionalArg(a, "ref"), OptionalArg(a, "workflow"), OptionalArg(a, "reconciliation"), OptionalArg(a, "provider"),
                         a?["settings"] is JsonObject settings ? settings.Deserialize<Dictionary<string, string>>(ProtocolJson.Options) : null,
                         Arg(a, "commit"), Arg(a, "expected"))
                     {
                         ClientBuild = Arg(a, "clientBuild"), Line = OptionalArg(a, "line"), Channel = OptionalArg(a, "channel"),
                         EndOfSupport = OptionalArg(a, "endOfSupport"), BackportOf = a?["backportOf"]?.Deserialize<ReleaseBackportReference>(ProtocolJson.Options),
+                        SecurityReportsUnread = !operatorActs,
                     };
                     ReleaseResponse result = await api.ReleaseCheckAsync(request, token).ConfigureAwait(false);
                     return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), !result.Ok);
@@ -344,7 +348,7 @@ public sealed partial class ToolRegistry
 
     private static JsonObject ReleaseCheckArguments()
     {
-        JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked."),
+        JsonObject schema = Arguments(("product", "Current product record id."), ("version", "Release version."), ("by", "Principal whose submission is checked; a connection acting as a principal checks that principal's submission instead."),
             ("commit", "Exact lower-case forty-digit commit."), ("expected", "Expected current product hash."), ("clientBuild", "Full informational version of the submitting client, including source commit."),
             ("repository", "Optional repository destination."), ("provider", "Optional release provider."), ("ref", "Optional provider ref setting."),
             ("workflow", "Optional workflow setting."), ("reconciliation", "Optional settlement of the previous attempt."),

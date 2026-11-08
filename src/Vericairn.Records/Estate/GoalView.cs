@@ -98,8 +98,14 @@ public static class GoalView
         return reasons;
     }
 
-    /// <summary>The goal as text, condition by condition.</summary>
-    public static string RenderText(EstateModel model, RecordEnvelope goal)
+    /// <summary>The goal as text, condition by condition, a run's position read now.</summary>
+    public static string RenderText(EstateModel model, RecordEnvelope goal) => RenderText(model, goal, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// The goal as text, a run's position derived at a time: due times, watches and backoffs read it. A record-derived document passes
+    /// <paramref name="commands"/> false, and a reserved step's command is left out.
+    /// </summary>
+    public static string RenderText(EstateModel model, RecordEnvelope goal, DateTimeOffset at, bool commands = true)
     {
         Snapshot view = Take(model, goal);
         var text = new StringBuilder();
@@ -179,7 +185,7 @@ public static class GoalView
         // A run's position, derived from the records (design/flow.md § 6): every step of its flow with its state and why.
         if (FlowRuns.IsRun(goal))
         {
-            text.Append(FlowPosition.RenderText(model, FlowPosition.Derive(model, goal, DateTimeOffset.UtcNow)));
+            text.Append(FlowPosition.RenderText(model, FlowPosition.Derive(model, goal, at), commands));
         }
 
         if (view.Acceptance is not null)
@@ -198,8 +204,14 @@ public static class GoalView
         return text.ToString();
     }
 
-    /// <summary>The goal in canonical pretty JSON, the same bytes on every machine for the same records.</summary>
-    public static string RenderJson(EstateModel model, RecordEnvelope goal)
+    /// <summary>The goal in canonical pretty JSON, a run's position read now.</summary>
+    public static string RenderJson(EstateModel model, RecordEnvelope goal) => RenderJson(model, goal, DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// The goal in canonical pretty JSON, a run's position derived at a time, so the same records and time give the same bytes on every
+    /// machine; derived at <see cref="FlowStops.RecordedTime"/>, the records alone decide it.
+    /// </summary>
+    public static string RenderJson(EstateModel model, RecordEnvelope goal, DateTimeOffset at, bool commands = true)
     {
         Snapshot view = Take(model, goal);
         string sponsor = EstateModel.BodyString(goal, "sponsor") ?? "?";
@@ -262,7 +274,7 @@ public static class GoalView
         };
         if (FlowRuns.IsRun(goal))
         {
-            json["flow"] = FlowPosition.RenderJson(model, FlowPosition.Derive(model, goal, DateTimeOffset.UtcNow));
+            json["flow"] = FlowPosition.RenderJson(model, FlowPosition.Derive(model, goal, at), commands);
         }
 
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());

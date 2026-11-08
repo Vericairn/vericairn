@@ -65,8 +65,45 @@ public sealed class FlowFixture : IDisposable
             ["target"] = new JsonObject { ["repository"] = "Example/song" }, ["status"] = "not-started", ["evidence"] = new JsonArray(),
             ["provenance"] = new JsonObject { ["provider"] = "example-provider", ["settings"] = new JsonObject { ["region"] = "north" } },
         });
+
+        // A reserved step's operator request names the step it waits on and carries its command.
+        string command = $"example-provider accept --recording {run.Work.Id} --goal {run.Goal.Id}";
+        run.Add("operator-request", new JsonObject
+        {
+            ["to"] = run.Estate.OperatorId, ["askedBy"] = run.Estate.OperatorId, ["action"] = "Carry the reserved act accept-release of step accept.", ["why"] = "The step is next.",
+            ["recommendation"] = "Run the command yourself.", ["consequence"] = "The step waits.", ["kind"] = "action", ["destination"] = "the reserved act of step accept",
+            ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
+            ["flowStep"] = new JsonObject { ["goal"] = run.Goal.Id, ["key"] = "accept" },
+        }, subject: run.Work.Reference);
         return run;
     }
+
+    /// <summary>
+    /// A run of the song taken to its acceptance, with the operator's request for it recorded: the builder drafts and masters, the
+    /// operator's review of the master is the listening review, and acceptance waits on the operator with its exact command.
+    /// </summary>
+    public static FlowFixture AtAcceptance()
+    {
+        var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        RecordEnvelope lyrics = run.Result(run.Assign("draft", run.Estate.BuilderId), "completed", ("lyrics", Hash('a'), "text/markdown"));
+        RecordEnvelope master = run.Result(run.Assign("master", run.Estate.BuilderId, inputs: new JsonArray(PinOf(lyrics, "lyrics"))), "completed", ("master", Hash('b'), null));
+        run.Review(master);
+        string command = run.AcceptCommandNow;
+        run.Request = run.Add("operator-request", new JsonObject
+        {
+            ["to"] = run.Estate.OperatorId, ["askedBy"] = run.Estate.OperatorId, ["action"] = "Carry the reserved act accept-release of step accept.", ["why"] = "The step is next.",
+            ["recommendation"] = "Run the command yourself.", ["consequence"] = "The step waits.", ["kind"] = "action", ["destination"] = "the reserved act of step accept",
+            ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
+            ["flowStep"] = new JsonObject { ["goal"] = run.Goal.Id, ["key"] = "accept" },
+        }, subject: run.Work.Reference);
+        return run;
+    }
+
+    /// <summary>The operator's request for acceptance, when <see cref="AtAcceptance"/> recorded one.</summary>
+    public RecordEnvelope? Request { get; private set; }
+
+    /// <summary>The song's acceptance command as the run's records bind it.</summary>
+    public string AcceptCommandNow => $"example-provider accept --recording {Work.Id} --goal {Goal.Id}";
 
     public static JsonObject Role(string role, params string[] principals) => new() { ["role"] = role, ["principals"] = new JsonArray(principals.Select(p => (JsonNode)p).ToArray()) };
 
@@ -94,11 +131,17 @@ public sealed class FlowFixture : IDisposable
             Step("master", "work", "writer", inputs: new JsonArray(Input("lyrics", "draft", "lyrics")), outputs: new JsonArray(FileItem("master"))),
             Step("shorts", "work", "writer", optional: "on", each: "tracks", inputs: new JsonArray(Input("master", "master", "master")), outputs: new JsonArray(FileItem("clip"))),
             Step("listen", "review", "listener", inputs: new JsonArray(Input("master", "master", "master"))),
-            Step("accept", "decision", "decider", reserved: "accept-release", done: new JsonArray(Marker("ACCEPTED"))),
-            Step("publish", "operation", "decider", optional: "on", reserved: "publish", done: new JsonArray(Marker("PUBLISHED")))),
+            Step("accept", "decision", "decider", reserved: "accept-release", done: new JsonArray(Marker("ACCEPTED")), action: AcceptCommand),
+            Step("publish", "operation", "decider", optional: "on", reserved: "publish", done: new JsonArray(Marker("PUBLISHED")), action: PublishCommand)),
     };
 
-    public static JsonObject Step(string key, string kind, string role, string? optional = null, string? reserved = null, string? each = null, JsonArray? inputs = null, JsonArray? outputs = null, JsonArray? done = null)
+    /// <summary>The song's acceptance command, bound to the run's recording and goal when the step is next.</summary>
+    public const string AcceptCommand = "example-provider accept --recording {subject.recording} --goal {goal}";
+
+    /// <summary>The song's publication command, bound to the run's recording and work order when the step is next.</summary>
+    public const string PublishCommand = "example-provider publish --recording {subject.recording} --work {work}";
+
+    public static JsonObject Step(string key, string kind, string role, string? optional = null, string? reserved = null, string? each = null, JsonArray? inputs = null, JsonArray? outputs = null, JsonArray? done = null, string? action = null)
     {
         var step = new JsonObject
         {
@@ -111,6 +154,7 @@ public sealed class FlowFixture : IDisposable
         if (inputs is not null) step["inputs"] = inputs;
         if (outputs is not null) step["outputs"] = outputs;
         if (done is not null) step["done"] = done;
+        if (action is not null) step["action"] = action;
         return step;
     }
 
@@ -203,11 +247,11 @@ public sealed class FlowFixture : IDisposable
     public RecordEnvelope Review(RecordEnvelope result, string outcome = "pass") =>
         Add("review", new JsonObject { ["independence"] = "operator", ["outcome"] = outcome, ["summary"] = "Reviewed the exact result.", ["findings"] = new JsonArray() }, subject: result.Reference);
 
-    public RecordEnvelope Marked(string key) => Add("work-order", new JsonObject
+    public RecordEnvelope Marked(string key, bool builder = false) => Add("work-order", new JsonObject
     {
         ["key"] = key, ["kind"] = "ordinary", ["title"] = "Marker " + key, ["intent"] = "Stand in for an act's record.", ["scope"] = new JsonArray("marker"),
         ["exitQuestion"] = "Recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("marker"),
-    });
+    }, builder: builder);
 
     public static string Hash(char c) => "sha256:" + new string(c, 64);
 

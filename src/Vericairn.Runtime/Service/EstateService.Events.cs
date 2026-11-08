@@ -654,6 +654,12 @@ public sealed partial class EstateService
     private Dictionary<string, EventItem> RequestItems(EstateModel model, EventRelations relations)
     {
         var items = new Dictionary<string, EventItem>(StringComparer.Ordinal);
+
+        // A request's state is its delivery as every surface shows it: open while it waits on its operator, and for a run's reserved
+        // step settled once the step is done or withdrawn once the step no longer waits on it (design/release-procedure.md § 6).
+        global::Vericairn.Records.Estate.OperatorRequests.Waiting queue = global::Vericairn.Records.Estate.OperatorRequests.WaitingOf(model, null, eventClock.GetUtcNow());
+        var delivered = queue.Open.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, string> held = queue.Withdrawn.ToDictionary(h => h.Request.Id, h => h.State, StringComparer.Ordinal);
         foreach (RecordEnvelope request in model.Current("operator-request"))
         {
             var sources = new List<EventReference>();
@@ -662,9 +668,11 @@ public sealed partial class EstateService
                 sources.Add(Reference(model, subject.Type, subject.Id, subject.Hash));
             }
 
-            string state = global::Vericairn.Records.Estate.OperatorRequests.Closures(model, request).Any() ? "closed" : "open";
+            string state = global::Vericairn.Records.Estate.OperatorRequests.Closures(model, request).Any() ? "closed"
+                : held.TryGetValue(request.Id, out string? undelivered) ? undelivered
+                : delivered.Contains(request.Id) ? "open" : "closed";
             items[model.Chain(request)[0]] = new EventItem("request", new EventReference(request.Type, request.Id, request.ComputedHash), sources, state,
-                EstateModel.BodyString(request, "to"), "decision-needed", false, relations.Of(request));
+                EstateModel.BodyString(request, "to"), state == "open" ? "decision-needed" : "information", false, relations.Of(request));
         }
 
         return items;

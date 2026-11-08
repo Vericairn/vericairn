@@ -156,6 +156,8 @@ public static class ApiRoutes
         app.MapPost($"{v}/packages/observe", async (PackagesObserveRequest request, CancellationToken cancellationToken) => Results.Json(await service.PackagesObserveAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
         app.MapPost($"{v}/packages/unlist", (PackagesUnlistRequest request) => Results.Json(service.PackagesUnlist(request), ProtocolJson.Options));
         app.MapPost($"{v}/packages/deprecate", (PackagesDeprecateRequest request) => Results.Json(service.PackagesDeprecate(request), ProtocolJson.Options));
+        app.MapPost($"{v}/security-reports/poll", async (SecurityReportsPollRequest request, CancellationToken cancellationToken) => Results.Json(await service.SecurityReportsPollAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
+        app.MapPost($"{v}/security-reports/triage", (SecurityReportTriageRequest request) => Results.Json(service.SecurityReportsTriage(request), ProtocolJson.Options));
 
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {

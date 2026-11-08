@@ -2,9 +2,11 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text;
+using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 
 namespace Vericairn.Records.Types;
 
@@ -36,6 +38,7 @@ public sealed class OperatorRequestType : IRecordType
         new("content", "object[]", true, "At least one exact item: kind (text|command|file), hash, text for text/command or name for a file. Text hashes cover UTF-8 bytes.", 3),
         new("sourceAsk", "ulid", false, "The exact original ask carried over; the ask remains readable and is not answered by this request.", 3),
         new("sourceAskHash", "hash", false, "The exact carried ask's hash; required with sourceAsk.", 3),
+        new("flowStep", "object", false, "The reserved step of a run the request waits on: goal (the run's first revision), key and, for a step that runs over a list, instance. Its subject is the run's work order and its content one command item; it is delivered only while the step waits on the operator with that exact command, and it grants nothing.", 3),
     ];
 
     /// <inheritdoc />
@@ -65,6 +68,12 @@ public sealed class OperatorRequestType : IRecordType
         }
         string? source = body.Ulid("sourceAsk", false);
         string? sourceHash = body.Hash("sourceAskHash", source is not null);
+        BodyReader? flowStep = body.Nested("flowStep", false);
+        if (flowStep is not null)
+        {
+            ValidateFlowStep(context, flowStep, source);
+        }
+
         body.NoOtherKeys();
         context.RequireReference("to", to, "principal");
         context.RequireReference("askedBy", askedBy, "principal");
@@ -79,8 +88,9 @@ public sealed class OperatorRequestType : IRecordType
         if (previous is { Type: "operator-request" })
         {
             if (previous.By != context.Record.By || previous.Subject != context.Record.Subject ||
-                IdentityFields.Any(f => EstateModel.BodyString(previous, f) != EstateModel.BodyString(context.Record, f)))
-                context.Error("operator-request.revision", "A revision keeps its author, original requester, operator, source ask and subject.");
+                IdentityFields.Any(f => EstateModel.BodyString(previous, f) != EstateModel.BodyString(context.Record, f)) ||
+                Raw(previous, "flowStep") != Raw(context.Record, "flowStep"))
+                context.Error("operator-request.revision", "A revision keeps its author, original requester, operator, source ask, subject and step.");
             if (OperatorRequests.Closures(context.Model, previous).Any())
                 context.Error("operator-request.closed", "A closed request cannot be revised; a new action needs a new request.");
         }
@@ -107,4 +117,57 @@ public sealed class OperatorRequestType : IRecordType
             context.Find(EstateModel.BodyString(r, "sourceAsk")) is { Type: "ask" } other && context.Model.Chain(other)[0] == root))
             context.Error("operator-request.duplicate", "This ask already has a carried request.");
     }
+
+    /// <summary>
+    /// A request for a reserved step of a run (the estate's design/flow.md §§ 8 and 12; design/release-procedure.md § 9): it names the
+    /// run by its goal's first revision and a reserved step of its flow, pins the run's work order as its subject, carries one command
+    /// and no carried ask. Whether it is due, its command the records' now, is derived when it is read, never here.
+    /// </summary>
+    private static void ValidateFlowStep(ValidationContext context, BodyReader step, string? source)
+    {
+        string? goal = step.Ulid("goal", true);
+        string? key = step.Text("key", true, 100, Patterns.Slug, "a step key");
+        string? instance = step.Text("instance", false, 100, Patterns.Slug, "an instance name");
+        step.NoOtherKeys();
+        if (source is not null)
+            context.Error("operator-request.flow-step", "A step's request is its own; it carries no ask over.");
+        List<JsonElement> content = TJson.Array(context.Record.Body, "content").ToList();
+        if (content.Count != 1 || TJson.Text(content[0], "kind") != "command")
+            context.Error("operator-request.flow-step", "A step's request carries one content item, of kind command: the step's exact command.");
+        RecordEnvelope? run = context.RequireReference("flowStep.goal", goal, "goal");
+        if (run is null || key is null)
+            return;
+        if (context.Model.Chain(run)[0] != run.Id)
+            context.Error("operator-request.flow-step", "A step's request names the run by its goal's first revision.");
+        // The run as it stood when the request was written: a later revision of the goal changes no earlier request's validity.
+        RecordEnvelope current = context.Model.Chain(context.Model.Latest(run)).Select(id => context.Model.ById[id])
+            .LastOrDefault(r => GoalRules.Before(r, context.Record)) ?? run;
+        if (!FlowRuns.IsRun(current))
+        {
+            context.Error("operator-request.flow-step", $"Goal {run.Id} is not a run of a flow.");
+            return;
+        }
+
+        RecordEnvelope? order = FlowRuns.Work(context.Model, current);
+        RecordEnvelope? subject = context.Find(context.Record.Subject?.Id);
+        if (order is null || subject is not { Type: "work-order" } || context.Model.Chain(subject)[0] != context.Model.Chain(order)[0])
+            context.Error("operator-request.flow-step", "A step's request pins the run's work order as its subject.");
+        (FlowDefinition? flow, string? unavailable) = FlowRuns.Resolve(context.Model, current);
+        if (flow is null)
+        {
+            context.Warning("flow.unavailable", $"The run's {unavailable}; the step this request names cannot be checked here.");
+            return;
+        }
+
+        FlowStep? declared = flow.Step(key);
+        if (declared?.Reserved is null)
+            context.Error("operator-request.flow-step", declared is null ? $"Flow {flow.Pin.Id} has no step '{key}'." : $"Step {key} is not a reserved act; only a reserved step waits on the operator as a request.");
+        else if (declared.Each is not null && (instance is null || !FlowRuns.Items(current, declared.Each).Contains(instance, StringComparer.Ordinal)))
+            context.Error("operator-request.flow-step", $"Step {key} runs once for each of the run's {declared.Each}; the request names one of them as its instance.");
+        else if (declared.Each is null && instance is not null)
+            context.Error("operator-request.flow-step", $"Step {key} runs once; its request names no instance.");
+    }
+
+    private static string? Raw(RecordEnvelope record, string name) =>
+        record.Body.ValueKind == JsonValueKind.Object && record.Body.TryGetProperty(name, out JsonElement value) ? value.GetRawText() : null;
 }
