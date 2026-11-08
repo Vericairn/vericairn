@@ -248,7 +248,8 @@ public sealed partial class EstateService
     /// </summary>
     internal TriggeredCheckpoint? WriteCheckpointLocked(string trigger, string by)
     {
-        if (!SignedHistory.Adopted(session.Load())) return null;
+        // Read from the canonical files, as the release gates do, so that an estate that has not adopted leaves the live cache untouched.
+        if (!SignedHistory.Adopted(session.Read())) return null;
         return UnderWriteLock(() =>
         {
             (AuthoredRecord? checkpoint, string? skipped) = CheckpointLocked(LoadWith([]), trigger, by);

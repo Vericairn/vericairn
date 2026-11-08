@@ -231,6 +231,12 @@ per register. Records and authored files are never rewritten. A member edited by
 `document.generated-edited` in `estate check`; inspect it, then run `vericairn docs regenerate <path>`.
 See [upgrading an estate](operator-guide.md#9-upgrading-an-estate).
 
+From 0.9.2, after the upgrade, adopting history checkpoints is the operator's step, once: run
+`vericairn estate checkpoint --adopt --check`, read what adoption would witness and anchor, then
+`vericairn estate checkpoint --adopt --by <operator-id>`. `operator list` shows it as waiting until then, and every
+later upgrade writes a checkpoint with the migration. A fresh estate adopts at birth, when its operator's first device
+admits itself ([adopting after the upgrade](operator-guide.md#adopting-history-checkpoints-after-the-upgrade-092)).
+
 For a fresh estate, run the published build with `--release`:
 
 ```sh

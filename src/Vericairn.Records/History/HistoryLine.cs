@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
 using Vericairn.Records.Hashing;
@@ -15,7 +16,7 @@ namespace Vericairn.Records.History;
 public static class HistoryLine
 {
     /// <summary>The state language's history vocabulary: whether an estate has adopted history checkpoints.</summary>
-    public static readonly IReadOnlyList<string> States = ["not adopted", "adopted"];
+    public static IReadOnlyList<string> States { get; } = new ReadOnlyCollection<string>(["not adopted", "adopted"]);
 
     /// <summary>How many hexadecimal digits of a head's hash the line shows: enough to name it to <c>estate check --expect</c>.</summary>
     public const int ShortDigits = SignedHistory.MinimumExpectedDigits;

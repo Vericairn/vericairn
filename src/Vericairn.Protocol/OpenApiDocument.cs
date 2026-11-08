@@ -156,6 +156,7 @@ public static class OpenApiDocument
         ("POST", "/v1/security-reports/triage"),
 
         ("POST", "/v1/estate/upgrade"),
+        ("POST", "/v1/history/checkpoints"),
         ("POST", "/v1/estate/export"),
         ("GET", "/v1/reconcile"),
         ("GET", "/v1/recover/inspect"),
@@ -647,6 +648,14 @@ public static class OpenApiDocument
             responses["200"] = new JsonObject { ["description"] = path == "/v1/work/takeover" ? "TakeoverResponse: the hand-over recorded and the stops asked; a problem inside when nothing was recorded." : "GoalStepResponse: what was recorded and started; a problem inside when nothing was dispatched." };
             responses.Remove("404");
         }
+        else if (method == "POST" && path == "/v1/history/checkpoints")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "HistoryCheckpointResponse: what the checkpoint witnesses and, for adoption, anchors, with the checkpoint written unless check was asked, which signs and writes nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/HistoryCheckpointResponse" } } },
+            };
+        }
         else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
         {
             responses["200"] = new JsonObject
@@ -658,7 +667,7 @@ public static class OpenApiDocument
             responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with written null and a problem; a rejection carries findings). A reconcile-required problem without written holds further writes until recovery." };
         }
 
-        if (path is "/v1/estate/upgrade" or "/v1/estate/export")
+        if (path is "/v1/estate/upgrade" or "/v1/estate/export" or "/v1/history/checkpoints")
         {
             responses["409"] = new JsonObject { ["description"] = "Not carried out (Problem)." };
         }
@@ -780,7 +789,8 @@ public static class OpenApiDocument
         workNewRequest["properties"]!["inputs"]!["description"] = "Input references as type:id; omitted means an empty list.";
         workNewRequest["properties"]!["after"]!["description"] = "Work-order record ids this work starts after; omitted means no dependencies.";
 
-        JsonObject releaseResponse = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object"), ("policies", "object"), ("basisEvidence", "array"), ("check", "object"));
+        JsonObject releaseResponse = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object"), ("policies", "object"), ("basisEvidence", "array"), ("check", "object"), ("checkpoint", "object"));
+        releaseResponse["properties"]!["checkpoint"] = new JsonObject { ["$ref"] = "#/components/schemas/TriggeredCheckpoint" };
         releaseResponse["properties"]!["check"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseCheckDetails" };
         JsonObject releaseCheck = Object(("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("runtimeBuild", "string"), ("basisBytes", "integer"), ("objections", "array"));
         releaseCheck["properties"]!["objections"]!["items"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseObjection" };
@@ -1020,12 +1030,24 @@ public static class OpenApiDocument
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string"), ("presenceDevice", "object"), ("presenceSignature", "string")),
             ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
-            ["WriteOutcome"] = Object(("written", "object"), ("problem", "object")),
+            ["WriteOutcome"] = WithCheckpoint(Object(("written", "object"), ("problem", "object"), ("checkpoint", "object"))),
+            ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
+            ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean")),
+            ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
+                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object")),
+                "trigger", "applied", "adopted", "witnessed", "listed", "heads", "anchored", "notCounting", "byRevokedDevices", "deletedInHistory"),
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
         };
     }
 
     private static JsonObject SchemaReference(string schema) => new() { ["$ref"] = "#/components/schemas/" + schema };
+
+    // The history checkpoint a trigger wrote with the act, or why none was (0.9.2): a member named checkpoint, omitted when no trigger applied.
+    private static JsonObject WithCheckpoint(JsonObject schema)
+    {
+        schema["properties"]!["checkpoint"] = new JsonObject { ["$ref"] = "#/components/schemas/TriggeredCheckpoint" };
+        return schema;
+    }
 
     private static string RequestSchema(string path) => path switch
     {
@@ -1111,6 +1133,7 @@ public static class OpenApiDocument
         "/v1/security-reports/triage" => "SecurityReportTriageRequest",
 
         "/v1/estate/upgrade" => "UpgradeRequest",
+        "/v1/history/checkpoints" => "HistoryCheckpointRequest",
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
         "/v1/pairings" => "PairingIssueRequest",

@@ -391,13 +391,22 @@ internal sealed class HistoryAnalysis
             }
         }
 
-        int tail = 0;
+        // Without the inventories nothing is known to be witnessed, and the records are not walked: a projection that reads none of them
+        // stays as cheap as before. With them, the tail and the time its oldest record states, which the interval trigger reads.
+        int tail = read ? 0 : model.Records.Count;
         string? oldest = null;
-        foreach (RecordEnvelope record in model.Records)
+        if (read && counting.Count > 0)
         {
-            if (read && entries.ContainsKey(record.Id)) continue;
-            tail++;
-            if (RecordParser.IsTimestamp(record.At) && (oldest is null || string.CompareOrdinal(record.At, oldest) < 0)) oldest = record.At;
+            foreach (RecordEnvelope record in model.Records)
+            {
+                if (entries.ContainsKey(record.Id)) continue;
+                tail++;
+                if (RecordParser.IsTimestamp(record.At) && (oldest is null || string.CompareOrdinal(record.At, oldest) < 0)) oldest = record.At;
+            }
+        }
+        else if (read)
+        {
+            tail = model.Records.Count;
         }
 
         return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,

@@ -45,7 +45,8 @@ public class PortabilityJourneyTests
             // Export, then restore on "another machine" (a different per-user state directory).
             string zip = Path.Combine(scratch, "estate-export.zip");
             CliHarness.Outcome export = CliHarness.Ok("--estate", a, "--json", "estate", "export", "--out", zip, "--by", op);
-            Assert.Equal(1, export.Json.GetProperty("Objects").GetInt32());
+            // The widget and the inventory of the adoption checkpoint the estate wrote at birth, with its first device.
+            Assert.Equal(2, export.Json.GetProperty("Objects").GetInt32());
             Assert.True(export.Json.GetProperty("Records").GetInt32() >= 8);
             Assert.NotEqual(0, CliHarness.Run("--estate", a, "--json", "estate", "export", "--out", zip).Code);
 

@@ -97,7 +97,9 @@ public class HistoryTriggerTests
         Assert.Equal(before.Records.Where(r => r.Signatures.Count == 0).Select(r => r.Id).Order(StringComparer.Ordinal), plan.Anchored.Select(a => a.Id));
         Assert.All(plan.Anchored, a => Assert.Equal(before.ById[a.Id].ExpectedPath, a.Path));
         Assert.Empty(plan.ByRevokedDevices);
-        Assert.Contains("git adapter", plan.Unavailable, StringComparison.Ordinal);
+        // The fixture is not a git repository, so the commits that added records cannot be listed, and the check says so.
+        Assert.NotNull(plan.Unavailable);
+        Assert.All(plan.Anchored, a => Assert.Null(a.Commit));
         Assert.Equal(before.Records.Count, f.Api.Session.Load().Records.Count);
 
         // An agent is refused before anything is signed, and nothing is written.
