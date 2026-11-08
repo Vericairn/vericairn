@@ -68,7 +68,14 @@ public class FlowContractTests
         { "command-binds-an-instance-outside-each", "flow.binding" },
         { "command-binds-an-undeclared-input", "flow.binding" },
         { "command-binds-an-input-part-it-lacks", "flow.binding" },
+        { "request-outside-a-reserved-step", "flow.binding" },
+        { "request-in-a-reserved-steps-precondition", "flow.binding" },
+        { "request-as-a-field", "flow.binding" },
+        { "predicate-binds-an-undeclared-input", "flow.binding" },
+        { "trap-without-holds-or-check", "body.missing" },
+        { "trap-check-not-a-name", "body.pattern" },
         { "reserved-done-names-a-state", "flow.reserved" },
+        { "request-close-after-an-untimed-step", FlowContract.UnclosableCode },
     };
 
     [Theory]
@@ -114,7 +121,18 @@ public class FlowContractTests
             case "command-binds-an-instance-outside-each": Step("publish")["action"] = "example-provider publish --track {instance}"; break;
             case "command-binds-an-undeclared-input": Step("publish")["action"] = "example-provider publish --master {input.master.hash}"; break;
             case "command-binds-an-input-part-it-lacks": Step("accept")["inputs"] = new JsonArray(FlowFixture.Input("master", "master", "master")); Step("accept")["action"] = "example-provider accept --size {input.master.size}"; break;
+            case "request-outside-a-reserved-step": Step("master")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-in-a-reserved-steps-precondition": Step("accept")["requires"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}" }); break;
+            case "request-as-a-field": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["fields"] = new JsonObject { ["outcome"] = "{request}" } }); break;
+            case "predicate-binds-an-undeclared-input": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "acceptance", ["subject"] = "{input.master.id}" }); break;
+            case "trap-without-holds-or-check": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "nothing", ["summary"] = "Checks nothing." }); break;
+            case "trap-check-not-a-name": Step("publish")["traps"] = new JsonArray(new JsonObject { ["name"] = "odd", ["summary"] = "An odd check.", ["check"] = "Release Client Build" }); break;
             case "reserved-done-names-a-state": Step("accept")["done"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SONG-1" }, ["state"] = "accepted" }); break;
+            case "request-close-after-an-untimed-step":
+                // Publication, done by the operator's close of its request, waits on a step done when no open order is left: never dated.
+                steps.Insert(steps.Count - 1, FlowFixture.Step("settled", "operation", "decider", done: new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "OPEN-1" }, ["max"] = 0 })));
+                Step("publish")["done"] = new JsonArray(new JsonObject { ["type"] = "operator-request-close", ["subject"] = "{request}", ["fields"] = new JsonObject { ["outcome"] = "done" } });
+                break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 

@@ -1,0 +1,102 @@
+{
+  "format": "vericairn.template/1",
+  "kind": "flow",
+  "id": "vericairn.first-party/release",
+  "version": "1.0.0",
+  "domain": "software",
+  "purpose": "Vericairn's own releases: the software pack's release flow with the first-party estate's steps added, the NuGet packages observed, the MCP Registry listing and the release's announcement on GitHub Discussions and the operator's X account as reserved publication steps after publication, and the profile repository's documents cleared after the documentation pass. It names Vericairn's own destinations, so it is the first-party estate's content and never part of the software pack.",
+  "extends": { "id": "vericairn.software/release", "version": "1.0.0", "hash": "sha256:6d5fb7691da21ffb0362821619f5b591f76b6e5b77dcbe9589cd6cb82978baba" },
+  "never": [
+    "Never post, list or announce for the operator: the operator posts each announcement and confirms the listing, and closes its request with the observed link."
+  ],
+  "steps": [
+    {
+      "key": "nuget",
+      "title": "NuGet packages observed",
+      "kind": "operation",
+      "role": "release-manager",
+      "required": true,
+      "following": "observe",
+      "action": "The publication starts the NuGet workflow, which pushes the eight packages from the published release's own assets. Observe each once indexed: vericairn packages observe for every package of the product at the published version.",
+      "done": [
+        { "type": "observation", "fields": { "kind": "package", "facts.version": "{subject.version}" }, "min": 8 }
+      ],
+      "recovery": "A package still indexing is observed again later; a failed push is retried by the workflow with --skip-duplicate, and nothing replaces a version already present."
+    },
+    {
+      "key": "draft-announcement",
+      "title": "Announcement drafted",
+      "kind": "work",
+      "role": "release-manager",
+      "required": true,
+      "after": ["accept"],
+      "action": "Draft the release's announcement for the Announcements category of GitHub Discussions and its summary for the operator's X account, at most 280 characters with a link counting 23, from the accepted release's notes; hand both on by hash for an independent review.",
+      "outputs": [
+        { "name": "discussion", "kind": "file", "mediaType": "text/markdown", "required": true },
+        { "name": "x-post", "kind": "file", "mediaType": "text/plain", "required": true }
+      ],
+      "recovery": "A review's findings send the draft back; the operator posts only the reviewed text, by its hash."
+    },
+    {
+      "key": "mcp-registry",
+      "title": "MCP Registry listing confirmed",
+      "kind": "operation",
+      "role": "publisher",
+      "required": true,
+      "reserved": "publish",
+      "after": ["publish"],
+      "action": "gh run list -R {subject.repository} --workflow mcp-registry.yml --event release --limit 1",
+      "done": [
+        { "type": "operator-request-close", "subject": "{request}", "fields": { "outcome": "done" } }
+      ],
+      "recovery": "The publication starts the mcp-registry workflow, which lists the published dotnet-vc package as io.github.Vericairn/vericairn through GitHub's identity. If its run did not finish, the operator dispatches it again for the published release, as the operator actions guide describes; close this request with the listing's link once the registry shows the version."
+    },
+    {
+      "key": "announce-discussions",
+      "title": "Announcement posted on GitHub Discussions",
+      "kind": "operation",
+      "role": "publisher",
+      "required": true,
+      "reserved": "publish",
+      "after": ["publish", "draft-announcement"],
+      "action": "Post the reviewed announcement {input.discussion.hash} of Vericairn {subject.version} in the Announcements category of github.com/orgs/Vericairn/discussions",
+      "inputs": [
+        { "name": "discussion", "from": "step", "step": "draft-announcement", "output": "discussion" }
+      ],
+      "done": [
+        { "type": "operator-request-close", "subject": "{request}", "fields": { "outcome": "done" } }
+      ],
+      "recovery": "The operator posts exactly the reviewed text and closes this request with the discussion's link; a changed draft is reviewed again before it is posted."
+    },
+    {
+      "key": "announce-x",
+      "title": "Summary posted on the operator's X account",
+      "kind": "operation",
+      "role": "publisher",
+      "required": true,
+      "reserved": "publish",
+      "after": ["publish", "draft-announcement"],
+      "action": "Post the reviewed summary {input.x-post.hash} of Vericairn {subject.version} on the operator's X account",
+      "inputs": [
+        { "name": "x-post", "from": "step", "step": "draft-announcement", "output": "x-post" }
+      ],
+      "done": [
+        { "type": "operator-request-close", "subject": "{request}", "fields": { "outcome": "done" } }
+      ],
+      "recovery": "The operator posts exactly the reviewed text and closes this request with the post's link; a changed draft is reviewed again before it is posted."
+    },
+    {
+      "key": "profile-docs",
+      "title": "Profile repository's documents cleared",
+      "kind": "operation",
+      "role": "release-manager",
+      "required": true,
+      "following": "docs-after",
+      "action": "Revise the profile repository's documents for the published version: its README's current release, install commands and links at the new tag. The operator merges the profile's change, its public front door, and each document is reviewed at that commit.",
+      "done": [
+        { "type": "living-document", "fields": { "repository": "01M502AV38MKHGCQF00VC8VJTR" }, "state": "due", "max": 0 }
+      ],
+      "recovery": "A profile document that needs change stays due until it is revised, merged by the operator and reviewed."
+    }
+  ]
+}

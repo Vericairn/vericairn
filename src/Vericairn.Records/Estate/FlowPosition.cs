@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
 using Vericairn.Records.Types;
@@ -186,6 +187,12 @@ public static partial class FlowPosition
         /// before the step is next (design/release-procedure.md § 6); null for every other step.
         /// </summary>
         public string? Command { get; init; }
+
+        /// <summary>
+        /// For a reserved step, when it was asked: the current goal revision, or the latest time a step it waits on was done, whichever is
+        /// later; a close of its request made earlier never answers this ask. Null for every other step.
+        /// </summary>
+        public DateTimeOffset? AskedSince { get; init; }
     }
 
     /// <summary>A run's position.</summary>
@@ -311,6 +318,7 @@ public static partial class FlowPosition
         private readonly FlowDefinition flow;
         private readonly FlowRuns.Configuration configuration;
         private readonly DateTimeOffset at;
+        private DateTimeOffset? shapedAt;
         private readonly Dictionary<FlowRuns.StepRef, StepInstance> derived = [];
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> held;
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> reviewing;
@@ -482,7 +490,15 @@ public static partial class FlowPosition
                 return Off(step, item, off);
             }
 
-            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, item);
+            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
+            DateTimeOffset? asked = step.Reserved is null ? null : AskedSince(step, item);
+            if (asked is DateTimeOffset askedAt && FlowStops.ClosesByRequest(step) && CommandOf(step, bindings, EarlyInputs(step, item)).Command is string now
+                && FlowStops.ClosedRequest(model, goal, new FlowRuns.StepRef(step.Key, item), now, askedAt, at, done: true, closesOnly: true) is RecordEnvelope closed)
+            {
+                // {request}: the request the operator closed as done for this ask, with the step's current command, after it was asked.
+                bindings = new Dictionary<string, string>(bindings, StringComparer.Ordinal) { ["request"] = model.Chain(closed)[0] };
+            }
+
             if (flow.BranchOf(step.Key) is FlowBranch branch && !entered.Contains(branch.Name) && Failing(branch.When, bindings) is { Count: > 0 } entering)
             {
                 return Off(step, item, $"its branch {branch.Name} is not entered: {entering[0]}");
@@ -512,7 +528,7 @@ public static partial class FlowPosition
             List<AttemptState> attempts = AttemptsOf(assignments);
             List<AgentRuns.Run> carried = RunsOf(assignments);
             int used = carried.Count(r => r.Charged);
-            StepInstance Shaped(StepInstance instance) => instance with { Attempts = attempts, AttemptsUsed = used, AttemptsAllowed = ledger.AttemptsPerStep };
+            StepInstance Shaped(StepInstance instance) => instance with { Attempts = attempts, AttemptsUsed = used, AttemptsAllowed = ledger.AttemptsPerStep, AskedSince = asked };
 
             // A review step's own review names the exact result it judged, so a review of the current result is never stale.
             bool stale = inputs.Any(i => i.Change is not null) && (complete || holder is not null) && !(step.Kind == "review" && complete);
@@ -544,7 +560,7 @@ public static partial class FlowPosition
             {
                 if (Failing(trap.Holds, bindings) is { Count: > 0 } sprung)
                 {
-                    blocked.Add($"trap {trap.Name}: {trap.Summary} ({sprung[0]})");
+                    blocked.Add($"trap {trap.Name}: {trap.Summary} ({sprung[0]}){Sprung(trap, bindings)}");
                 }
             }
 
@@ -886,7 +902,7 @@ public static partial class FlowPosition
             IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
             Func<RecordEnvelope, bool> judges = Judges(step, item);
             var subjects = new List<IReadOnlyList<string>> { model.Chain(model.Latest(result)) };
-            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, item);
+            IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             List<Check> done = step.Done.Select(p => FlowRuns.Bind(p, bindings)).Select(p => new Check(p, GoalPredicates.EvaluatePredicate(model, p))).ToList();
             foreach (FlowOutput output in step.Outputs.Where(o => o.Kind != "file"))
             {
@@ -1578,6 +1594,80 @@ public static partial class FlowPosition
         /// <summary>The instance of an input's producing step: the same item for a step that runs over the same list, or its one instance.</summary>
         private StepInstance? Producer(FlowInput input, string? item) => input.Step is null ? null : InstanceOf(input.Step, item);
 
+        /// <summary>
+        /// When a reserved step was asked: the time the run took its current shape (<see cref="ShapedAt"/>), or the latest time a step it
+        /// waits on was done, whichever is later; the latest time there is when one of them is not done or off, or is done at no time the
+        /// records give, so that no close answers an ask not yet made.
+        /// </summary>
+        private DateTimeOffset AskedSince(FlowStep step, string? item)
+        {
+            DateTimeOffset since = shapedAt ??= ShapedAt();
+            foreach (StepInstance wait in Dependencies(step, item))
+            {
+                if (wait.State == "off")
+                {
+                    continue;
+                }
+
+                if (wait.State != "done" || wait.DoneAt is not DateTimeOffset done)
+                {
+                    return DateTimeOffset.MaxValue;
+                }
+
+                if (done > since)
+                {
+                    since = done;
+                }
+            }
+
+            return since;
+        }
+
+        /// <summary>
+        /// The time of the oldest goal revision since which the run's flow pin, subject and options are unchanged: a revision that only
+        /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
+        /// </summary>
+        private DateTimeOffset ShapedAt()
+        {
+            string shape = Shape(goal);
+            RecordEnvelope since = goal;
+            IReadOnlyList<string> chain = model.Chain(goal);
+            for (int i = chain.Count - 2; i >= 0 && model.ById.TryGetValue(chain[i], out RecordEnvelope? earlier) && earlier.Type == goal.Type && Shape(earlier) == shape; i--)
+            {
+                since = earlier;
+            }
+
+            return since.AtTime;
+        }
+
+        private static readonly string[] ShapeMembers = ["pin", "subject", "options"];
+
+        /// <summary>A goal revision's flow pin, subject and options, each as canonical JSON.</summary>
+        private static string Shape(RecordEnvelope revision)
+        {
+            JsonElement plan = FlowRuns.Plan(revision);
+            return string.Join('\n', ShapeMembers.Select(name =>
+                TJson.Object(plan, name) is { ValueKind: JsonValueKind.Object } value ? CanonicalJson.Serialize(value) : "-"));
+        }
+
+        /// <summary>A step's inputs as they are handed on now, by the records that carry them and their exact hashes, for its command before the step is derived.</summary>
+        private List<Input> EarlyInputs(FlowStep step, string? item) => step.Inputs.Select(input =>
+        {
+            if (input.From == "subject")
+            {
+                RecordEnvelope? record = Carrier(input, item);
+                return new Input(input.Name, "subject", "subject " + input.Field, record, record?.ComputedHash, null, null);
+            }
+
+            Output? now = Producer(input, item)?.Outputs.FirstOrDefault(o => o.Name == input.Output);
+            return new Input(input.Name, "step", input.Step + " output " + input.Output, now?.Carrier, now?.Hash, null, null);
+        }).ToList();
+
+        /// <summary>The record that carries an input now: the subject field's record, or the producing step instance's output.</summary>
+        private RecordEnvelope? Carrier(FlowInput input, string? item) => input.From == "subject"
+            ? TJson.Text(TJson.Object(TJson.Object(FlowRuns.Plan(goal), "subject"), input.Field!), "id") is string id && model.ById.TryGetValue(id, out RecordEnvelope? record) ? record : null
+            : Producer(input, item)?.Outputs.FirstOrDefault(o => o.Name == input.Output)?.Carrier;
+
         private StepInstance? InstanceOf(string key, string? item) =>
             derived.GetValueOrDefault(new FlowRuns.StepRef(key, flow.Step(key)?.Each is null ? null : item));
 
@@ -1613,17 +1703,17 @@ public static partial class FlowPosition
                     string? before = now.Kind == "file" && model.ById.TryGetValue(pinned.Id, out RecordEnvelope? carrier)
                         ? TJson.Text(TJson.Array(carrier.Body, "outputs").FirstOrDefault(o => TJson.Text(o, "name") == input.Output), "hash")
                         : pinned.Hash;
-                    if (now.Kind == "file" ? before != now.Hash : (pinned.Id != now.Carrier.Id || pinned.Hash != now.Hash))
+                    if (now.Kind == "file" ? before != now.Hash : (pinned.Id != now.Carrier.Id || pinned.Hash != now.Hash) && Published(now.Carrier)?.Id != pinned.Id)
                     {
                         change = $"its input {input.Name} changed after use: its brief pinned {pinned.Type} {pinned.Id}{(before is null ? string.Empty : " at " + before)}, and {source} is now {now.Hash} in {now.Carrier.Type} {now.Carrier.Id}";
                     }
                 }
-                else if (now is not null && pinned is null && holder is not null && now.Carrier.AtTime > holder.AtTime)
+                else if (now is not null && pinned is null && holder is not null && now.Carrier.AtTime > holder.AtTime && !(Published(now.Carrier)?.AtTime <= holder.AtTime))
                 {
                     // An assignment made without a pin of the input cannot have used an output recorded after it.
                     change = $"its input {input.Name} changed after use: {source} is now {now.Carrier.Type} {now.Carrier.Id} of {now.Carrier.At}, after assignment {holder.Id}, which pins no input {input.Name}, was made";
                 }
-                else if (now is not null && usedAt is DateTimeOffset used && now.Carrier.AtTime > used)
+                else if (now is not null && usedAt is DateTimeOffset used && now.Carrier.AtTime > used && !(Published(now.Carrier)?.AtTime <= used))
                 {
                     change = $"its input {input.Name} changed after use: {source} is now {now.Carrier.Type} {now.Carrier.Id} of {now.Carrier.At}, after the step was done at {Time(used)}";
                 }
@@ -1633,6 +1723,15 @@ public static partial class FlowPosition
 
             return inputs;
         }
+
+        /// <summary>
+        /// The candidate a release record publishes, when it is the publication of its direct predecessor (ReleaseType.IsPublicationOf):
+        /// it differs from the candidate only in its status, publication time and address, and an acceptance of the candidate applies to it
+        /// by design, so it is no change of an input a step used as the candidate. Null for any other record.
+        /// </summary>
+        private RecordEnvelope? Published(RecordEnvelope carrier) =>
+            carrier.Type == "release" && carrier.Supersedes is string previous && model.ById.TryGetValue(previous, out RecordEnvelope? candidate) && ReleaseType.IsPublicationOf(candidate, carrier)
+                ? candidate : null;
 
         /// <summary>The review an item takes, as <see cref="FlowRuns.ReviewRequirement"/> derives it for this run's configuration.</summary>
         private FlowReview ReviewOf(FlowStep step, FlowOutput? output) => FlowRuns.ReviewRequirement(flow, configuration, step, output);
@@ -1680,6 +1779,46 @@ public static partial class FlowPosition
 
         private List<string> Failing(IEnumerable<JsonElement> predicates, IReadOnlyDictionary<string, string> bindings) =>
             predicates.Select(p => GoalPredicates.EvaluatePredicate(model, FlowRuns.Bind(p, bindings))).Where(v => v.Value != "met").Select(v => $"{v.Value}: {v.Reason}").ToList();
+
+        /// <summary>
+        /// What sprang a trap, in its own words: the summary of the newest record a bounded predicate of it counts beyond its bound, such as a
+        /// failed check that lists each location it found, when a principal who takes the run's steps recorded it, shown as plain text on one
+        /// line; empty when the records say nothing more, or say it through anyone else.
+        /// </summary>
+        private string Sprung(FlowTrap trap, IReadOnlyDictionary<string, string> bindings)
+        {
+            foreach (JsonElement predicate in trap.Holds.Where(p => p.TryGetProperty("max", out _)))
+            {
+                JsonElement bound = FlowRuns.Bind(predicate, bindings);
+                IReadOnlyList<RecordEnvelope> matching = GoalPredicates.Matching(model, bound);
+                if (GoalPredicates.EvaluatePredicate(model, bound).Value != "met" && matching.Count > 0 && Routing.MayTakeStep(model, goal, matching[^1].By, matching[^1].AtTime)
+                    && EstateModel.BodyString(matching[^1], "summary") is string summary)
+                {
+                    RecordEnvelope found = matching[^1];
+                    return $": {found.Type} {found.Id} says: {SafeText(summary, 1000)}";
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>A record's text as plain text on one line: control and format characters, such as line breaks and direction overrides, become spaces; clipped to a length.</summary>
+        private static string SafeText(string text, int length)
+        {
+            var plain = new StringBuilder(Math.Min(text.Length, length + 3));
+            foreach (char c in text)
+            {
+                if (plain.Length >= length)
+                {
+                    plain.Append("...");
+                    break;
+                }
+
+                plain.Append(char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator ? ' ' : c);
+            }
+
+            return plain.ToString();
+        }
 
         private static string? Who(RecordEnvelope? holder) => holder is null ? null : EstateModel.BodyString(holder, "contributor");
 
@@ -1867,6 +2006,13 @@ public static partial class FlowPosition
             ["done"] = new JsonArray(s.Done.Select(d => (JsonNode)new JsonObject { ["description"] = GoalPredicates.DescribePredicate(d.Predicate), ["verdict"] = d.Verdict.Value, ["reason"] = d.Verdict.Reason }).ToArray()),
             ["doneAt"] = s.DoneAt is DateTimeOffset doneAt ? Time(doneAt) : null,
             ["recovery"] = s.Step.Recovery,
+            ["traps"] = new JsonArray(s.Step.Traps.Select(t => (JsonNode)new JsonObject
+            {
+                ["name"] = t.Name,
+                ["summary"] = t.Summary,
+                ["check"] = t.Check,
+                ["records"] = t.Holds.Count > 0,
+            }).ToArray()),
             ["failure"] = s.Step.Kind == "work" ? s.Step.FailureRoute.Route : null,
             ["rerun"] = s.Rerun,
             ["attemptsUsed"] = s.AttemptsUsed,

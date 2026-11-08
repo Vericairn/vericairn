@@ -163,6 +163,7 @@ public static partial class FlowContract
         }
 
         var branches = new HashSet<string>(StringComparer.Ordinal);
+        var branched = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader branch in body.NestedArray("branches", false, allowEmpty: false) ?? [])
         {
             if (branch.Text("name", true, 100, Patterns.Slug, "a branch name") is string name)
@@ -175,7 +176,7 @@ public static partial class FlowContract
                 Predicate(predicate, subject, extension, instance: false);
             }
 
-            branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key");
+            branched.UnionWith(branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key") ?? []);
             branch.Text("returnTo", false, 100, Patterns.Slug, "a step key");
             branch.NoOtherKeys();
         }
@@ -188,9 +189,121 @@ public static partial class FlowContract
             {
                 step.Body.Error("flow.failure", "failure", $"The step's failure route enters branch '{step.FailureBranch}', which the flow does not declare.");
             }
+
+            // A reserved step done by the operator's close of its request never waits on a step done at no time the records give; an
+            // extension's steps, placed among its base's, are checked when the flow is resolved.
+            var closing = new List<ClosingShape>();
+            for (int i = 0; i < declared.Count; i++)
+            {
+                if (declared[i].Key is not null)
+                {
+                    closing.Add(Closing(declared[i].Body.Element, i == 0 ? null : declared[i - 1].Key, branched));
+                }
+            }
+
+            foreach ((string reserved, string waited) in Unclosable(closing))
+            {
+                declared.First(s => s.Key == reserved).Body.Error(UnclosableCode, "done", UnclosableMessage(reserved, waited));
+            }
         }
 
         body.NoOtherKeys();
+    }
+
+    /// <summary>The refusal of a reserved step that could never close: it waits on a step done at no time the records give.</summary>
+    public const string UnclosableCode = "flow.reserved-unclosable";
+
+    /// <summary>
+    /// A step as the closing check reads it: the steps it waits on by <c>after</c> (or the step before it) and by its due time or inputs,
+    /// whether it may be off, so that a step waiting on it waits on what it waits on, whether it is done at no time the records give, and
+    /// whether it is a reserved step done by the operator's close of its request.
+    /// </summary>
+    internal sealed record ClosingShape(string Key, IReadOnlyList<string> After, IReadOnlyList<string> Also, bool MayBeOff, bool Untimed, bool ClosesByRequest);
+
+    /// <summary>
+    /// The reserved steps that could never close, each with the step that keeps it from closing. A reserved step done by the operator's
+    /// close of its request, <c>{request}</c>, counts a close only after every step it waits on was done, at the time the records give for
+    /// it. A step that is done by its done predicates alone, each saying <c>max: 0</c>, with no result, review or item to date it, has no
+    /// such time, so a reserved step waiting on it, directly or through steps that may be off, could never close. Only that can deadlock:
+    /// a step with a predicate that counts records, an item, or a work or review step's result is always dated.
+    /// </summary>
+    internal static List<(string Step, string Waited)> Unclosable(IReadOnlyList<ClosingShape> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        var byKey = new Dictionary<string, ClosingShape>(StringComparer.Ordinal);
+        foreach (ClosingShape step in steps)
+        {
+            byKey.TryAdd(step.Key, step);
+        }
+
+        var found = new List<(string Step, string Waited)>();
+        foreach (ClosingShape step in steps.Where(s => s.ClosesByRequest))
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var pending = new Stack<string>(step.After.Concat(step.Also).Reverse());
+            while (pending.Count > 0)
+            {
+                string key = pending.Pop();
+                if (!byKey.TryGetValue(key, out ClosingShape? waited) || !seen.Add(key))
+                {
+                    continue;
+                }
+
+                if (waited.Untimed)
+                {
+                    found.Add((step.Key, key));
+                }
+
+                // A step that is off hands its waiting on to the steps it waits on.
+                if (waited.MayBeOff)
+                {
+                    foreach (string earlier in waited.After.Reverse())
+                    {
+                        pending.Push(earlier);
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The refusal's words, naming both steps.</summary>
+    internal static string UnclosableMessage(string reserved, string waited) =>
+        $"Reserved step '{reserved}' is done by the operator's close of its request and waits on '{waited}', whose done predicates all say max 0, " +
+        $"so '{waited}' is done at no time the records give and no close of '{reserved}' could ever count; have '{waited}' count a record it " +
+        $"leaves, or place '{reserved}' after a step that does.";
+
+    /// <summary>True for a step done at no time the records give: one done by its predicates alone, each saying max 0, with no work or review result and no item.</summary>
+    internal static bool Untimed(string? kind, int outputs, IEnumerable<JsonElement> done)
+    {
+        ArgumentNullException.ThrowIfNull(done);
+        List<JsonElement> predicates = done.ToList();
+        return kind is not null && Routed.IndexOf(kind) < 0 && outputs == 0 && predicates.Count > 0 && predicates.All(p => p.ValueKind == JsonValueKind.Object
+            && p.TryGetProperty("max", out JsonElement max) && max.ValueKind == JsonValueKind.Number && max.TryGetInt64(out long value) && value == 0);
+    }
+
+    /// <summary>True for a reserved step whose done predicates name its operator request, {request}.</summary>
+    internal static bool ClosesByRequest(string? reserved, IEnumerable<JsonElement> done) =>
+        reserved is not null && done.Any(p => TJson.Text(p, "subject") == "{request}");
+
+    /// <summary>One declared step of a flow's own content, as the closing check reads it.</summary>
+    private static ClosingShape Closing(JsonElement step, string? previous, HashSet<string> branched)
+    {
+        string key = TJson.Text(step, "key")!;
+        List<string> after = step.TryGetProperty("after", out JsonElement named) && named.ValueKind == JsonValueKind.Array
+            ? TJson.Strings(step, "after").ToList()
+            : previous is null ? [] : [previous];
+        List<string> also = TJson.Array(step, "inputs").Select(i => TJson.Text(i, "step")).OfType<string>().ToList();
+        if (TJson.Text(TJson.Object(TJson.Object(step, "when"), "due"), "from") is string from)
+        {
+            also.Add(from);
+        }
+
+        bool required = step.TryGetProperty("required", out JsonElement marking) && marking.ValueKind == JsonValueKind.True;
+        List<JsonElement> done = TJson.Array(step, "done").ToList();
+        return new ClosingShape(key, after, also, !required || branched.Contains(key), Untimed(TJson.Text(step, "kind"), TJson.Array(step, "outputs").Count(), done),
+            ClosesByRequest(TJson.Text(step, "reserved"), done));
     }
 
     /// <summary>A flow's subject: what a run is about, and the fields a run's plan binds, by name and type.</summary>
@@ -266,15 +379,18 @@ public static partial class FlowContract
             }
         }
 
+        // A predicate may name the record that carries one of the step's own inputs, {input.<name>.id}; a reserved step's done predicates
+        // may also name its operator request, {request}, whose close by the operator is the record of an act that leaves no other.
+        HashSet<string> declaredInputs = TJson.Array(step.Element, "inputs").Select(i => TJson.Text(i, "name")).OfType<string>().ToHashSet(StringComparer.Ordinal);
         foreach (BodyReader predicate in step.NestedArray("requires", false, allowEmpty: false) ?? [])
         {
-            Predicate(predicate, subject, extension, each is not null);
+            Predicate(predicate, subject, extension, each is not null, declaredInputs);
         }
 
         IReadOnlyList<BodyReader> done = step.NestedArray("done", false, allowEmpty: false) ?? [];
         foreach (BodyReader predicate in done)
         {
-            Predicate(predicate, subject, extension, each is not null);
+            Predicate(predicate, subject, extension, each is not null, declaredInputs, request: reserved is not null);
         }
 
         if (kind is not null && Routed.IndexOf(kind) < 0 && done.Count == 0)
@@ -289,9 +405,12 @@ public static partial class FlowContract
         {
             string? name = trap.Text("name", true, 100, Patterns.Slug, "a trap name");
             trap.Text("summary", true, 2000);
-            foreach (BodyReader predicate in trap.NestedArray("holds", true, allowEmpty: false) ?? [])
+            // A trap is record predicates the position reads, or a named check the step's action runs on its machine before it acts and
+            // refuses on, such as release submit's release.client-build objection, or both; a check alone is never evaluated from records.
+            string? check = trap.Text("check", false, 200, CheckPattern(), "a check or objection name, such as release.client-build");
+            foreach (BodyReader predicate in trap.NestedArray("holds", check is null, allowEmpty: false) ?? [])
             {
-                Predicate(predicate, subject, extension, each is not null);
+                Predicate(predicate, subject, extension, each is not null, declaredInputs);
             }
 
             trap.NoOtherKeys();
@@ -757,9 +876,12 @@ public static partial class FlowContract
 
     /// <summary>
     /// A record predicate over the run (the goal completion language of design/goals.md § 5), whose string values may name the run's
-    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {instance} in an each step, {goal} and {work}.
+    /// bindings: {subject.&lt;field&gt;} (a record field's id or a text field's value), {instance} in an each step, {goal}, {work},
+    /// {input.&lt;name&gt;.id} for one of the step's own inputs (the id of the record that carries it), and, as a reserved step's done
+    /// predicate's subject only, {request}: the step's operator request.
     /// </summary>
-    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool instance)
+    internal static void Predicate(BodyReader predicate, IReadOnlyDictionary<string, string> subject, bool extension, bool instance,
+        IReadOnlySet<string>? inputs = null, bool request = false)
     {
         string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
         if (type is not null && RecordTypeRegistry.Find(type) is null)
@@ -768,13 +890,13 @@ public static partial class FlowContract
         }
 
         string? named = predicate.Text("subject", false, 100);
-        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, instance, record: true))
+        if (named is not null && !Identity.Ulid.IsValid(named) && !Binds(named, subject, extension, instance, record: true, inputs, request))
         {
-            predicate.Error("flow.binding", "subject", "A predicate's subject is a record id or a record binding of the run: {subject.<record field>}, {goal} or {work}.");
+            predicate.Error("flow.binding", "subject", "A predicate's subject is a record id or a record binding of the run: {subject.<record field>}, {goal}, {work}, {input.<its input>.id}, or {request} in a reserved step's done predicate.");
         }
 
         string? product = predicate.Text("product", false, 100);
-        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, instance, record: true))
+        if (product is not null && !Identity.Ulid.IsValid(product) && !Binds(product, subject, extension, instance, record: true, inputs))
         {
             predicate.Error("flow.binding", "product", "A predicate's product is a product id or a record binding of the run.");
         }
@@ -794,9 +916,9 @@ public static partial class FlowContract
                 {
                     fields.Error("body.type", field.Name, "A predicate compares a body field with a string value.");
                 }
-                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, instance, record: false))
+                else if (Binding().IsMatch(field.Value.GetString()!) && !Binds(field.Value.GetString()!, subject, extension, instance, record: false, inputs))
                 {
-                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {instance} in an each step, {goal} or {work}.");
+                    fields.Error("flow.binding", field.Name, "A binding names a record or text field of the subject, {instance} in an each step, {goal}, {work} or {input.<its input>.id}.");
                 }
             }
         }
@@ -824,7 +946,8 @@ public static partial class FlowContract
         predicate.NoOtherKeys();
     }
 
-    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool instance, bool record)
+    private static bool Binds(string value, IReadOnlyDictionary<string, string> subject, bool extension, bool instance, bool record,
+        IReadOnlySet<string>? inputs = null, bool request = false)
     {
         Match match = Binding().Match(value);
         if (!match.Success)
@@ -836,6 +959,21 @@ public static partial class FlowContract
         if (name is "goal" or "work")
         {
             return true;
+        }
+
+        if (name == "request")
+        {
+            return request && record;
+        }
+
+        if (name == "previous")
+        {
+            return !record && (extension || BindsPrevious(subject));
+        }
+
+        if (name.StartsWith("input.", StringComparison.Ordinal))
+        {
+            return inputs is not null && inputs.Contains(name["input.".Length..^".id".Length]);
         }
 
         if (name == "instance")
@@ -910,9 +1048,23 @@ public static partial class FlowContract
         }
     }
 
-    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal} or {work}.</summary>
-    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work)\}\z")]
+    /// <summary>
+    /// True for a flow whose subject names a product (a record field) and a version (a text field), whose predicates may bind {previous}:
+    /// the earlier releases of the product before the version that its version-tracking guides must not name as current.
+    /// </summary>
+    public static bool BindsPrevious(IReadOnlyDictionary<string, string> subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        return subject.GetValueOrDefault("product") == "record" && subject.GetValueOrDefault("version") == "text";
+    }
+
+    /// <summary>The binding a predicate value names: {subject.&lt;field&gt;}, {instance}, {goal}, {work}, {input.&lt;name&gt;.id}, {request} or {previous}.</summary>
+    [GeneratedRegex(@"^\{(?<name>subject\.[a-z0-9]+(?:-[a-z0-9]+)*|instance|goal|work|request|previous|input\.[a-z0-9]+(?:-[a-z0-9]+)*\.id)\}\z")]
     internal static partial Regex Binding();
+
+    /// <summary>A check or objection a step's action runs: lower-case words joined by dots, hyphens or a slash, such as release.client-build.</summary>
+    [GeneratedRegex(@"^[a-z0-9]+([.\-/][a-z0-9]+)*$")]
+    private static partial Regex CheckPattern();
 
     /// <summary>A step key, or a step key and an item name joined by a dot.</summary>
     [GeneratedRegex(@"^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)?$")]

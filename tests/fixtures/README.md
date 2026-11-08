@@ -31,3 +31,8 @@ objects are under `objects/`. Its devices were made in a disposable key store; o
 retained. `inventory.sha256` pins every byte. `HistoryGoldenFixtureTests` validates it, requires every field of the
 type and round-trips every record; setting `VERICAIRN_WRITE_HISTORY_FIXTURE` to a new directory regenerates it there
 with fresh keys.
+
+`flows/vericairn-first-party-release-1.0.0.json` is a copy of Vericairn's first-party extension of the software pack's
+release flow, the flow file the first-party estate keeps under its own `docs/templates`; it is never part of the software
+pack. Records tests install it byte for byte into a test estate, check that it pins the shipped release flow by hash and run
+its steps. A change to the shipped release flow changes that hash, so the copy and the estate's file are updated together.
