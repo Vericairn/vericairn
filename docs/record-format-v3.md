@@ -531,7 +531,7 @@ reports a malformed inventory, a checkpoint that lists itself, and a head whose
 **Anchoring.** Only the root operator, or a human principal holding `administer`
 through a signed grant from the root operator or an operator whose role rests on
 signatures, whose own principal record rests on signatures and was written by such
-an operator, and whose grant stood at the checkpoint's time (read as [below](#closings-and-authority-at-a-records-time-092)), anchors or acknowledges, never an agent, and only with devices whose
+an operator, whose grant stood at the checkpoint's time, and whose grant no such operator has since revised away and no closing that does not witness the checkpoint has closed ([below](#closings-and-authority-at-a-records-time-092)), anchors or acknowledges, never an agent, and only with devices whose
 own admissions rest on signed admissions; another author's lists are
 `history.anchor-author` and count for nothing, while its checkpoint still witnesses.
 An estate's first checkpoint, its adoption, counts only when one who may anchor signs
@@ -568,15 +568,18 @@ before the act it closes:
 
 | `closes.kind` | `closes.id` names | The act it precedes | Who signs it |
 | --- | --- | --- | --- |
-| `device` | Any device record of the device's line | Its revocation | The operator, a person holding `administer`, or the operator's recovery device |
+| `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
-| `grant` | The authority revision being narrowed | A revision dropping a scope or shortening an expiry | An operator, who may revise the grant |
+| `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision dropping a scope or shortening an expiry | An operator, who may revise the grant |
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
 names, reach an adoption checkpoint by one who may anchor; when its signatures verify
-against the closings before it in that order; and when its author may perform the act, as
-it stood at the closing's time. The checkpoints between it and the adoption need not count,
+against the closings before it in that order; and when its author may perform the act. For a
+device or a grant that power reads as before signed history: the signer's operator role or
+`administer` grant stood at the closing's time and still stands, no trusted revision having
+since narrowed, revoked or removed it and no closing before this one having closed that
+grant's line, and a recovery device signs only for an operator. The checkpoints between it and the adoption need not count,
 since a closing acts by itself. One whose author may not perform the act is
 `history.closing-author`, as is one that verifies only without the closings before it,
 because one of them closed its signer's device or key or refused that device's admission; it
@@ -596,17 +599,20 @@ whatever date they state:
 - for a key: every record with a signature that verifies with the closed key, except the
   lowest-id revision of the device that replaces that key with another, the rotation it
   precedes;
-- for a grant: every record by the revision's grantee, other than admissions, devices,
-  grants and checkpoints, dated while that revision was in force: at or after it, before
-  the first revision replacing it that counts, and before it expires.
+- for a grant: every record by the grantee of a closed revision, other than admissions,
+  devices, grants and checkpoints, dated while one of the closed revisions was in force: at or
+  after it, before the first revision replacing it that counts, and before it expires. Since
+  the closed revisions run from the line's first to the one named, the window starts at the
+  line's first revision. The rule fails closed: it refuses every such record of the grantee,
+  not only those that needed the grant.
 
 Any other such record is `history.after-closing`, an error that leads status and holds
 release submission. It is kept and counts for nothing until an anchoring checkpoint of the
 root operator or a person holding `administer` lists its exact id and hash, which, from
 0.9.2, it may do for a signed record a closing refuses as well as for an unsigned one. Such
 an admission or revocation admits or revokes nothing until anchored. A device revision a
-closing refuses changes no key or name, and an anchor does not restore it; the device's line
-skips it. A checkpoint a closing refuses witnesses nothing until anchored, nor do those
+closing refuses changes no key or name, and an anchor does not restore it, so an anchoring
+checkpoint naming one is refused; the device's line skips it. A checkpoint a closing refuses witnesses nothing until anchored, nor do those
 following it. Deleting the revocation, rotation or narrowing after a closing reopens
 nothing. A closing that acts while no revocation of its device that counts, no rotation
 replacing its key or no revision of its grant follows it is the warning
@@ -620,11 +626,16 @@ counts dated at or before that time, and none before its first record. A scope c
 each authority line's latest revision that counts dated at or before that time, unexpired at
 the record's own `at`, and not closed by a closing that does not witness the record, unless
 the record is anchored. A later grant authorizes nothing earlier, and a later narrowing withdraws nothing
-already written. The same reading decides who may anchor and who may close: a person's
-`administer` grant as it stood at the checkpoint's time, so a later narrowing no longer
-takes anchoring away from earlier checkpoints. Validators read roles and scopes this way,
-as do the acceptance, review, clearance and declaration rules that judge one record's
-author. Policy authority already read its grants at the action's time.
+already written. Validators read roles and scopes this way, as do the acceptance, review,
+clearance, declaration, hand-over and step rules that judge one record's author, and the
+rules for who cleared a flow step's review, each at that review's place. Policy authority
+already read its grants at the action's time. The strongest acts read more strictly, as
+before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
+device's or a grant's closing need the signer's operator role or `administer` grant to stand
+at the checkpoint's time and still stand, so a later narrowing, revocation or closing
+withdraws those powers for every checkpoint. A role has no closing: a former operator's
+records dated into the time the role stood read as it stood, so close and revoke a person's
+devices when removing their role.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The

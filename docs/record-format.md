@@ -201,15 +201,18 @@ are read as they stood at a record's time
 A closing is a history checkpoint with `closes`, written just before the act it closes:
 `{kind: device, id}` before a device's revocation, `{kind: key, id}` naming the device
 revision whose key a rotation replaces, or `{kind: grant, id}` naming the authority revision
-that a revision dropping a scope or shortening an expiry narrows. Only someone who may
-perform the act signs it: the operator, a person holding `administer` or the operator's
-recovery device for a device, the device itself for its own key, and an operator for a
-grant. Another author's closing is `history.closing-author` and closes nothing, though it
-still witnesses what it lists.
+that a revision dropping a scope or shortening an expiry narrows; a grant closing closes that
+revision and every revision of its line dated at or before it. Only someone who may perform
+the act signs it: an operator, a person holding `administer` or an operator's recovery device
+for a device, the device itself for its own key, and an operator for a grant. For a device
+or a grant, the signer's role or `administer` grant must stand at the closing's time and
+still stand, closed by no closing before it. Another author's closing is
+`history.closing-author` and closes nothing, though it still witnesses what it lists.
 
 From a closing on, a record signed by that device or with that key, or written by the
-grantee while that grant revision was in force, counts only when the closing or a
-checkpoint it follows witnesses it, whatever date the record states. Any other such record
+grantee while a closed grant revision was in force, counts only when the closing or a
+checkpoint it follows witnesses it, whatever date the record states. The grant rule fails
+closed: it refuses every such record of the grantee, not only those that needed the grant. Any other such record
 is `history.after-closing`, an error that leads `status`, and counts for nothing until the
 root operator or a person holding `administer` anchors it after reading it. That includes
 a record from another clone written before the closing and merged after it. Such an
@@ -222,7 +225,11 @@ Roles and grants are read as they stood at a record's time: from each line, the 
 revision that counts dated at or before the record, unexpired when it was authored and
 not closed by a closing that does not witness it. A later grant authorizes nothing earlier,
 and a later narrowing withdraws nothing already written. A record the adoption checkpoint
-witnesses keeps the reading it had then, read at the adoption's time. Status and policy
+witnesses keeps the reading it had then, read at the adoption's time. Anchoring, acknowledging
+a removal, rooting an adoption and signing a device's or a grant's closing read more
+strictly, as before: the role or grant must still stand, so a later narrowing withdraws those
+powers for every checkpoint. A role has no closing, so close and revoke a person's devices
+when removing their operator role or `administer` grant. Status and policy
 evaluation take their recorded time from the records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the

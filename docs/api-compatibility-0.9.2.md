@@ -536,12 +536,13 @@ adapter; existing implementations compile unchanged and report the warning unava
 No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In an estate
 that has adopted history checkpoints, a `history-checkpoint`'s `closes` now acts
 ([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)): from a closing that acts on, a record
-signed by the closed device or with the closed key, or written by the grantee while the closed grant revision was in force,
-counts only when the closing or a checkpoint it follows witnesses it. Such an admission or revocation admits or revokes
+signed by the closed device or with the closed key, or written by the grantee while a closed grant revision was in force,
+counts only when the closing or a checkpoint it follows witnesses it. A grant closing closes the revision it names and every
+revision of its line dated at or before it. Such an admission or revocation admits or revokes
 nothing, such a device revision changes no key or name and leaves the device's line, and such a checkpoint witnesses nothing,
 until anchored; an anchoring checkpoint may now list a signed record a closing refuses, and `SignedHistory.AuthoringRefusal`
-refuses only an anchor of a signed record no closing refuses. A recovery device may sign a device closing; any other
-checkpoint it signs is still `signature.recovery-scope`. The checkpoint type's descriptions of `closes` and `anchored`
+refuses an anchor of a signed record no closing refuses and of a device revision a closing refused. An operator's recovery
+device may sign a device closing; any other checkpoint it signs is still `signature.recovery-scope`. The checkpoint type's descriptions of `closes` and `anchored`
 change within `vericairn.records/readers/8`, which has not shipped.
 
 New findings: `history.after-closing` and `history.closing-author`, errors that status lists first and that hold release
@@ -552,9 +553,12 @@ In an adopted estate, roles and grants are read at a record's authority time: it
 record the adoption witnesses. `ValidationContext.HasRole` and `HasScope` read this way, so every validator does, and so do the
 operator-acceptance checks of `AcceptanceType`, `ReleaseType`, the operator queue and the progress report, the recovery-use
 review, generated-document retirement and migration reviews, living-document clearance, the security-reports declaration and
-the goal rules that judge a status, revision, acceptance or custody exception. A person's `administer` grant decides anchoring
-and closing as it stood at the checkpoint's time, so a later narrowing no longer takes anchoring away from earlier checkpoints.
-`FlowStops.RecordedTime` takes the greatest `at` among records that count. In an estate that has not adopted, every one of these
+the goal rules that judge a status, revision, acceptance or custody exception, a hand-over (`Routing.MayHandOver`,
+`DecidesForStep`), a flow review assignment (`FlowRuns.ReviewerRefusals`), an operator request's step (`Routing.MayTakeStep`)
+and who cleared a flow step's review. Anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's
+closing keep the stricter reading of before: the signer's operator role or `administer` grant stands at the checkpoint's time
+and still stands, closed by no closing that does not witness the checkpoint, so a later narrowing withdraws those powers for
+every checkpoint. `FlowStops.RecordedTime` takes the greatest `at` among records that count. In an estate that has not adopted, every one of these
 reads as before.
 
 `NewRecord` (`POST /v1/records`, `records new --at`) and `Attempt` (`POST /v1/work/attempt`, `work attempt --at`) refuse, in every
@@ -563,8 +567,9 @@ estate, a stated time more than five minutes past the runtime's clock, before an
 `Vericairn.Records` adds, each additively: `EstateModel.PrincipalAt`, `RolesAt`, `HasRoleAt` and `HasScopeAt`, which read a
 principal, its roles and its scopes as they stood at a record's place, and read them as `CurrentPrincipal`, `RolesOf` and
 `HasScope` at the record's time in an estate that has not adopted; and overloads taking the record judged of
-`GoalRules.HoldsSpending`, `ActivationRefusals`, `MayRevise`, `RevisionRefusals`, `MayEnd`, `Accepter.Decides` and
-`Accepter.Allows`, whose existing signatures keep reading authority as it is now.
+`GoalRules.HoldsSpending`, `ActivationRefusals`, `MayRevise`, `RevisionRefusals`, `MayEnd`, `Accepter.Decides`,
+`Accepter.Allows`, `Routing.MayTakeStep` and `FlowRuns.ReviewerRefusals`, whose existing signatures keep reading authority as it
+is now. `Routing.MayHandOver` and `DecidesForStep` read authority at the record they are given as `before`.
 
 ## Keyword search and search-selected context (CONTEXT-02)
 
