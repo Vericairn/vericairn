@@ -29,6 +29,7 @@ internal sealed class McpSession
     {
         Id = id;
         Device = device.Identity;
+        PublicKey = device.PublicKey;
         Principal = device.Principal;
         Profile = profile;
         ProtocolVersion = protocolVersion;
@@ -52,6 +53,9 @@ internal sealed class McpSession
 
     /// <summary>The identity of the device that opened it.</summary>
     internal string Device { get; }
+
+    /// <summary>The key that device was admitted with when it opened the session.</summary>
+    internal string PublicKey { get; }
 
     /// <summary>That device's principal.</summary>
     internal string Principal { get; }

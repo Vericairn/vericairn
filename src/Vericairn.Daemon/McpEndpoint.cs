@@ -437,7 +437,9 @@ internal sealed class McpEndpoint
 
                 // The session's own messages, for its device alone, sent only while the device still stands: a revocation, a rotated
                 // key or a withdrawn profile ends the stream before any of them, including a notification that waited for its interval.
-                if (session.Outbox.Reader.Count > 0 && subscription.Refusal() is string withdrawn)
+                // Its standing is read afresh from the records as the runtime holds them now, not from what the last derivation pass
+                // published, so a revocation written since that pass already counts.
+                if (session.Outbox.Reader.Count > 0 && (subscription.Refusal() ?? StandingRefusal(session)) is string withdrawn)
                 {
                     host.Log($"closed an MCP server stream of device {session.Device}: {withdrawn}");
                     Sessions.End(session);
@@ -491,6 +493,30 @@ internal sealed class McpEndpoint
         {
             // The client left, the session ended, the hour passed or the daemon is stopping: the stream ends.
         }
+    }
+
+    /// <summary>
+    /// Why a session's device no longer stands, read afresh from the runtime's current records: not admitted with the key that opened
+    /// the session, no longer permitted its profile, or acting for another principal; null while it stands. A reading that fails is a
+    /// refusal too, so nothing is sent on a standing the runtime cannot confirm.
+    /// </summary>
+    private string? StandingRefusal(McpSession session)
+    {
+        DeviceStanding? standing;
+        try
+        {
+            standing = host.Service.ReadStandings([session.Device]).Devices.GetValueOrDefault(session.Device);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            return $"the standing of device {session.Device} cannot be read now: {exception.Message}";
+        }
+
+        return standing is null || standing.Admission != "admitted" ? $"Device {session.Device} is not admitted now."
+            : !string.Equals(standing.PublicKey, session.PublicKey, StringComparison.Ordinal) ? $"Device {session.Device} no longer holds the key that opened its session."
+            : !string.Equals(standing.Principal, session.Principal, StringComparison.Ordinal) ? $"Device {session.Device} no longer acts for {session.Principal}."
+            : !standing.Profiles.Contains(session.Profile, StringComparer.Ordinal) ? $"Device {session.Device} is no longer permitted the {session.Profile} profile."
+            : null;
     }
 
     /// <summary>Queues notifications for the session's stream, which sends them once it has checked the device still stands.</summary>
