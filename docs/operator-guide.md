@@ -1040,6 +1040,37 @@ and server stream. A request whose `Host` does not name the runtime's own addres
 not allow with `--mcp-origin`, is refused before it is authenticated; no origin is allowed by default. Token mode for
 OAuth-only clients and MCP over the relay come in 0.9.3. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
 
+### Agents hear what changed: MCP subscriptions (0.9.2)
+
+From 0.9.2 (`MCP-05`) an agent session subscribes to what it follows and is told when it changes, instead of
+reading it again and again. It needs the running daemon (`vericairn runtime start`), which keeps the event journal
+(section 11, Events); over the embedded runtime the server declares no subscriptions.
+
+- **What it may subscribe to.** A record, a work or assignment brief, a pinned document, a goal's progress
+  (`vericairn://<estate>/goal/<goal id>`) or the asks put to its own principal
+  (`vericairn://<estate>/asks/<principal id>`), each a resource it may read. Context packages, operator requests and
+  another principal's asks are not subscribable.
+- **What it is told.** `notifications/resources/updated` for a subscribed resource, at most once a second per
+  resource, and `notifications/resources/list_changed` for writes, at most every five seconds. A notification carries
+  no content; the agent reads the resource again. With `mcp serve --as` the notifications are lines on standard
+  output between answers, and the server follows the journal only while the session holds a subscription. Over
+  network MCP they ride the session's server stream, and the bridge (`mcp serve --connection`) writes them to its
+  harness as lines too.
+- **What it is never told.** Nothing its principal may not read, nothing of another principal's attention, and no
+  operator-request event: the operator queue stays off MCP. Revoking an agent's device ends its session and stream
+  before any further notification.
+- **Harnesses that hide notifications.** `events_read` returns the same events after a cursor, for the agent to call
+  when it would otherwise poll: each event names only identities, hashes, kinds, states and categories, and a cursor
+  from another principal, another epoch or more than a week ago answers `reset`.
+
+Stdio sessions read the journal through their own four slots of the local socket, never the command line's, so
+`vericairn events watch` is never locked out by them; beyond four sessions following at once they take turns of five
+seconds, and one waiting its turn hears up to a turn later. Which harness versions
+show notifications and which need `events_read` is recorded per harness version as a `qualification` with the
+profile `<harness> <version> over MCP notifications` or `<harness> <version> over MCP events_read`, which the
+orientation file's agent matrix shows; this release qualifies no harness. See
+[The MCP server](mcp.md#subscriptions-and-notifications-092).
+
 ## 15. Documentation sets
 
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:

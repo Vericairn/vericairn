@@ -96,11 +96,12 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
 
-Initialization declares `resources: { subscribe: false, listChanged: false }`,
-`prompts: { listChanged: false }` and `tools: { listChanged: false }`. There are
-no subscriptions or list-change notifications. Listings return their complete
+Initialization declares `prompts: { listChanged: false }` and `tools: { listChanged: false }`, and
+`resources: { subscribe: true, listChanged: true }` (0.9.2) when the estate's runtime is running and keeps the
+event journal, or `resources: { subscribe: false, listChanged: false }` on the embedded runtime, which keeps
+none; there `resources/subscribe` answers "method not found". Listings return their complete
 current result without a continuation cursor; an unknown cursor is refused.
 Clients refresh a listing when needed. Reads and listings support request
 cancellation through the existing transport.
@@ -125,6 +126,8 @@ An assignment brief adds its exact `assignment` query parameter.
 | `vericairn://{estate}/record/{key}` | `record_get`: its complete envelope, rendered as canonical pretty UTF-8 JSON, identical to `records show <id>`. The tool's response wrapper is excluded. |
 | `vericairn://{estate}/document/{key}` | `context_read`: the original bytes at that pin, identical to `context read <pin> --original --out <new-file>`. |
 | `vericairn://{estate}/context/{key}{?maxBytes,form}` | `context_prepare`: by default, the exact canonical pretty UTF-8 package payload whose hash and size the API and CLI report. `form=text` returns the tool and CLI human rendering; `form=json` returns the complete `context prepare --json` response, including its sidecar. |
+| `vericairn://{estate}/goal/{key}` (0.9.2) | `goal_progress`: the goal's progress condition by condition, as UTF-8 text; `key` is the id of any of its revisions. `resources/list` lists each current goal's. |
+| `vericairn://{estate}/asks/{key}` (0.9.2) | `asks_list` with `form` `json` for the session's own principal: `key` is that principal's id, and another principal's asks, or any on a connection acting for none, are unavailable. `resources/list` lists it when the session acts for a principal. |
 
 For example, `resources/read` takes
 `{"uri":"vericairn://<estate-id>/context/<work-order-id>"}` after replacing the
@@ -157,7 +160,101 @@ changed; each hash identifies the exact bytes of that particular response.
 The MCP adapter uses the API's additive `GET /v1/resources` and
 `POST /v1/resources/read` operations. Both are reads, including the POST; they
 require no signing device, presence or write ledger. An older API implementation
-can return `unsupported`; no alternate read path circumvents that refusal.
+can return `unsupported`; no alternate read path circumvents that refusal. The
+goal and asks resources (0.9.2) read through the goal and asks operations the
+tools use, and their `_meta` carries the hash, length and trust label without a
+`sourceHash`.
+
+## Subscriptions and notifications (0.9.2)
+
+From 0.9.2 (`MCP-05`) an agent session hears what changed in what it subscribed to, without polling. The
+server declares `resources.subscribe` and `resources.listChanged` when the estate's runtime is running
+(`vericairn runtime start`), which keeps the [event journal](api-v1.md#the-event-stream-092); the embedded
+runtime keeps none, so a server over it declares neither and serves no subscription. Every notification is
+derived from that journal, followed from a cursor of the session's own; the server never reads records to
+find a change.
+
+`resources/subscribe` takes `{"uri": ...}`: a record, brief, document, goal-progress or asks URI the session
+may read. The server reads the resource once through its matching read first, so a URI the session may not
+read, or one that names nothing, is refused as `resources/read` refuses it; a context package, an operator
+request or its closing, and another principal's asks are not subscribable (`invalid params`). A session holds
+at most 32 subscriptions; subscribing again to one it holds changes nothing; `resources/unsubscribe` ends one,
+and nothing more is told of it. What counts as a change of each:
+
+| Resource | Changes with |
+| --- | --- |
+| A record | a record event about it: a revision of it, or a record that rests on it, directly or through what it rests on (for a work order, its assignments, attempts and results; for a goal, its work orders) |
+| A brief (with or without `assignment`) | a record event about its work order, in the same sense |
+| A document pin | a record event about the pinned revision: chiefly a later revision of the document, which supersedes it, though the pinned bytes never change |
+| Goal progress | a record event about the goal, or a change of one of its flow steps |
+| The session's asks | a change of an ask put to the session's principal: raised, changed or cleared |
+
+A subscribed resource yields `notifications/resources/updated` with the URI exactly as subscribed, at most once
+a second per URI, and any write the session may read yields `notifications/resources/list_changed` at most every
+five seconds, since it changes what `resources/list` returns; a change inside either interval is told once, when
+it ends. Only changes observed after the subscription count. A notification is a hint, never authority, and
+carries no content: read the resource again to see what changed. After a gap the journal cannot honor (more
+than seven days, a lost journal), every subscribed resource and the listing are told once.
+
+**Over standard input and output** the notifications are lines between responses, never inside one. The server
+follows the journal with one selecting long poll, `POST /v1/events/select` on the local socket for the acting
+principal (or for the operator when the session acts for none), only while the session holds a subscription: the
+runtime says for each event which of the session's subscriptions it concerns, so a round costs one read however
+many there are. These reads take the MCP servers' own four slots of the local socket, never the command line's,
+so `vericairn events watch` and the command line's other reads are never locked out by MCP sessions. Beyond four
+following sessions they take turns: a session waiting for a slot asks the one that has held its slot longest, once
+it has held it five seconds, to answer at once with what it has, and takes its place; nothing is lost, since each
+reads on from its own cursor, but a notification can come up to a turn later. A read that does not wait, as the
+check behind initialization and each subscription's start, takes no slot, so a session declares subscriptions and
+subscribes even while every slot is held; a busy runtime is retried, never taken for one without a journal.
+
+**Over Streamable HTTP** they ride the session's server stream, the one GET opens, bound to the session's device
+and profile (see [the server stream](#network-mcp-over-streamable-http-092)). The stream reads from where the
+session stands: from its first subscription, and after a stream ends, from where it ended, so a client that
+opens it again within the journal's seven days misses nothing. The bridge, `vericairn mcp serve --connection`,
+holds that stream for its client while the client holds a subscription the runtime accepted, and lets it go when
+the last one ends, so a session that subscribes to nothing holds none of its device's stream slots. It writes
+each resource notification to standard output as a line between responses, passes on nothing else the stream
+carries, discards a message over 64 KiB unread, and signs nothing a notification says; when the runtime ends a
+session and the bridge opens another, it subscribes the new one to the same resources.
+
+**The audience check.** Every notification passes the same check at delivery as `GET /v1/events`: the
+session's principal must be able to read the event's subject and every source under the matching read's rule,
+and per-principal state, such as attention, reaches only its own principal. A withheld change yields nothing,
+and no notification, interval, count or timing tells it from none. On the network, before any notification
+is sent, including one that waited for its interval, the device must still be admitted with the key that
+opened the session and still permitted its profile, read afresh from the records as the runtime holds them then,
+not from the last derivation pass: a revocation, a rotated key or a withdrawn profile ends the session and its
+stream first. Operator-request events never reach MCP on any path: a request event, an
+operator request's record, its closing and the attention it raises yield no notification, list change or
+`events_read` envelope, since the operator queue stays off MCP.
+
+**`events_read`**, a read tool for harnesses that hide notifications, reads the same envelopes
+(`vericairn.event/1`, identities, hashes, kinds, states and categories only) after a cursor:
+
+| Argument | Meaning |
+| --- | --- |
+| `after` | The cursor to continue from: the `cursor` an earlier `events_read` returned, or a state read's `eventsCursor`; omitted, the journal's head |
+| `kinds`, `types`, `subjects`, `to`, `categories` | Filters, as `GET /v1/events` takes them; `kinds` defaults to every kind but `request`, which is refused, as an operator-request record type is in `types` |
+| `limit` | The most envelopes returned, 1 to 256; 100 when omitted. When more remain, the returned `cursor` is the last envelope's, and the next read continues there |
+| `wait` | Seconds to wait for an event when none is there yet, 0 to 25; 0 when omitted |
+
+It returns `EventsResponse` as JSON (`events`, `cursor`, `reset`, `problem`). Its cursors are the runtime's,
+sealed for the reading principal: another principal's cursor, a malformed one, one from another epoch or one
+older than the journal keeps answers `reset` with no events, and the reader reads the state again before
+continuing. A session acting for no principal reads no attention. It reads with `POST /v1/events/select`, which
+never streams: over standard input and output a read that waits takes one of the MCP servers' slots in turn, and
+over the network, where it is offered at any scope as the network design allows, one of the device's four stream
+slots while it waits. A wait ends when its seconds do, to the millisecond, however the runtime's own waits
+divide it. On the embedded runtime it answers that the daemon keeps the journal.
+
+**Qualification per harness version.** Whether a harness shows notifications or needs `events_read` differs by
+harness and version, and nothing here claims either for any harness. An estate records what it observed as a
+`qualification` whose profile is `<harness> <version> over MCP notifications` or
+`<harness> <version> over MCP events_read` (for example `Claude Code 2.1.296 over MCP notifications`), with the
+recorded observation as evidence; the orientation file's agent matrix shows each in its own column, naming the
+version, and every harness stays a non-claim until then. This build's tests exercise both paths with the
+in-process clients and the bridge, not with any agent harness.
 
 ## Tools
 
@@ -201,7 +298,7 @@ writing anything. Only worker dispatch retains a copy, in the run's local
 directory under the Vericairn home. Unavailable required
 material refuses the brief and sets the MCP error flag.
 
-Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, from 0.9.2 with a run's position in its flow, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps, a run's position, and what still stands between the goal and its acceptance) and, from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON).
+Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, from 0.9.2 with a run's position in its flow, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps, a run's position, and what still stands between the goal and its acceptance), from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON) and, from 0.9.2, `events_read` (the events after a cursor that the connected principal may read, for a harness that hides notifications; see [Subscriptions and notifications](#subscriptions-and-notifications-092)).
 Status and progress include repository checks, documents read local covered files and installed contributions, and device availability depends on keys held here. Those portions are observations from this runtime, not solely from the shared records.
 
 From 0.7.3, `estate_status` and the JSON form of `estate_progress` include
@@ -255,7 +352,7 @@ Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp s
 
 ## Qualification
 
-The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) has two test paths: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing in the three-platform workflow, and a different peer, `tests/mcp-peer/mcp_peer.py`, a Python script driving the built binary end to end over the real stream framing (`python3 -I tests/mcp-peer/mcp_peer.py artifacts/bin/Vericairn.Cli/release/vericairn.dll <estate root>`; the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, otherwise the first work order the estate's status lists, and is skipped in an estate without work orders, the output saying which; the command line's tests run the peer against fresh estates wherever Python 3 is on the path). Every agent harness is a non-claim in the orientation file's matrix until the estate qualifies it: a `qualification` record (available from record format 2) about the release the session used, whose profile is `<harness> over MCP` with the harness named as the matrix names it (for example `Claude Code over MCP`) and whose evidence is the recorded observation of the session. The harness's row then shows the outcome of its latest current qualification and the version of the release it is for, and a harness the matrix does not list by default gets a row of its own. Regenerate the files after a qualification is recorded; `--check` names the copies it leaves out of date. An estate at record format 1 holds no qualification records, so its matrix stays all non-claims.
+The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) has two test paths: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing in the three-platform workflow, and a different peer, `tests/mcp-peer/mcp_peer.py`, a Python script driving the built binary end to end over the real stream framing (`python3 -I tests/mcp-peer/mcp_peer.py artifacts/bin/Vericairn.Cli/release/vericairn.dll <estate root>`; the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, otherwise the first work order the estate's status lists, and is skipped in an estate without work orders, the output saying which; the command line's tests run the peer against fresh estates wherever Python 3 is on the path). Every agent harness is a non-claim in the orientation file's matrix until the estate qualifies it: a `qualification` record (available from record format 2) about the release the session used, whose profile is `<harness> over MCP` with the harness named as the matrix names it (for example `Claude Code over MCP`) and whose evidence is the recorded observation of the session. The harness's row then shows the outcome of its latest current qualification and the version of the release it is for, and a harness the matrix does not list by default gets a row of its own. Regenerate the files after a qualification is recorded; `--check` names the copies it leaves out of date. An estate at record format 1 holds no qualification records, so its matrix stays all non-claims. From 0.9.2 the matrix has two more columns, for the profiles `<harness> over MCP notifications` and `<harness> over MCP events_read`, where the harness's version may follow its name ([Subscriptions and notifications](#subscriptions-and-notifications-092)).
 
 ## Limitations
 
@@ -327,8 +424,8 @@ per session, bound to the session's device: it shares the event streams' slots (
 per principal, sixteen per runtime), closes before the next message once the device is no longer
 admitted with its key and profile, and lasts at most an hour before the client opens another with a
 fresh signature. It carries the session's own messages to that device alone, with keep-alive comments
-between. In 0.9.2 the server still declares `resources.subscribe` and `listChanged` false: `MCP-05`
-sends resource notifications on this stream.
+between. From 0.9.2 (`MCP-05`) it carries the session's resource notifications, derived from the event
+journal read for that device; see [Subscriptions and notifications](#subscriptions-and-notifications-092).
 
 **The bridge.** `vericairn mcp serve --connection <connection>` serves standard input and output to a
 local harness, as `mcp serve` does, and forwards each message to the remote estate's `/mcp` over a
@@ -341,7 +438,9 @@ signed request may have), is about the assignment or attempt the call names, and
 call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
 repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
 nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
-the bridge ends its session. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
+the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
+holds the session's server stream and writes each resource notification on it to its client as a line, opening the
+stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
 `DeviceSignedRecords` or its own code, is Vericairn-aware.
 
 **What a device's signature vouches for.** The bridge binds what the call itself supplies: its

@@ -208,7 +208,11 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(147, synchronous.Length);
+        Assert.Equal(148, synchronous.Length);
+        // From 0.9.2 (MCP-05) the selecting long poll, with its default and its cancellable counterpart.
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.EventsSelect));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.EventsSelect))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.EventsSelectAsync))!.IsAbstract);
         foreach (string name in new[] { nameof(IEstateApi.Search), nameof(IEstateApi.SearchIndex), nameof(IEstateApi.SearchReplay), nameof(IEstateApi.SecurityReportsPoll), nameof(IEstateApi.SecurityReportsTriage) })
         {
             Assert.Single(synchronous, method => method.Name == name);

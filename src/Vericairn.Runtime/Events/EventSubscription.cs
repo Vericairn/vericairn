@@ -13,7 +13,36 @@ namespace Vericairn.Runtime.Events;
 /// <param name="Refusal">Why the reader may no longer read events; the stream closes and nothing is delivered.</param>
 /// <param name="Reset">True when the reader fell behind what the journal keeps and must re-read state before continuing.</param>
 /// <param name="Closed">True when the journal closed: the runtime is stopping, and the reader ends and reconnects later.</param>
-public sealed record EventBatch(IReadOnlyList<EventEnvelope> Events, string? Refusal = null, bool Reset = false, bool Closed = false);
+public sealed record EventBatch(IReadOnlyList<EventEnvelope> Events, string? Refusal = null, bool Reset = false, bool Closed = false)
+{
+    /// <summary>
+    /// From 0.9.2 (MCP-05): for each delivered event, in order, the indices of the selectors it passes among those the read was given;
+    /// empty when the read was given none. A selector is judged only on events the audience check already admitted.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<int>> Selected { get; init; } = [];
+
+    /// <summary>From 0.9.2: one entry per delivered event, as <see cref="Selected"/> has it, or empty entries when no selector was named.</summary>
+    public IReadOnlyList<IReadOnlyList<int>> SelectedPerEvent => Selected.Count == Events.Count ? Selected : [.. Events.Select(_ => (IReadOnlyList<int>)[])];
+}
+
+/// <summary>
+/// From 0.9.2 (MCP-05): a filter validated and rooted once, which a subscription's reads judge each delivered event by, so one reader
+/// learns which of several narrower interests (an MCP session's subscribed resources) each of its events also concerns. It passes
+/// only events appended after it was opened, and only through ids its reader may read, as a subscription's own filter does.
+/// </summary>
+public sealed class EventSelector
+{
+    internal EventSelector(EventMatcher matcher, long since)
+    {
+        Matcher = matcher;
+        Since = since;
+    }
+
+    internal EventMatcher Matcher { get; }
+
+    /// <summary>The journal's head when it was opened: it passes later events only.</summary>
+    internal long Since { get; }
+}
 
 /// <summary>
 /// One reader's position in the journal, for a stream or a long poll. Each read passes every entry through the audience check and
@@ -69,8 +98,16 @@ public sealed class EventSubscription
     /// Reads at most <paramref name="max"/> entries after this position. The reader is judged after the entries are read, so no entry a
     /// pass appended after it published a revocation can pass. A reader that fell behind the bound gets reset, at the head.
     /// </summary>
-    public EventBatch Read(int max = 256)
+    public EventBatch Read(int max = 256) => Read(max, []);
+
+    /// <summary>
+    /// Reads as <see cref="Read(int)"/> does and says, for each event delivered, which of <paramref name="selectors"/> it passes
+    /// (<see cref="EventBatch.Selected"/>). Selectors only narrow what this subscription delivers: an event its audience check or its
+    /// own filter withholds passes none, and nothing tells it from no event.
+    /// </summary>
+    public EventBatch Read(int max, IReadOnlyList<EventSelector> selectors)
     {
+        ArgumentNullException.ThrowIfNull(selectors);
         if (journal.Closed)
         {
             return new EventBatch([], Closed: true);
@@ -90,16 +127,30 @@ public sealed class EventSubscription
         }
 
         var delivered = new List<EventEnvelope>();
+        var selected = new List<IReadOnlyList<int>>();
         foreach (JournalEntry entry in entries)
         {
             Interlocked.Exchange(ref position, entry.Position);
             if (service.EventReadable(Principal, entry) && matcher.Matches(entry, Principal, service))
             {
                 delivered.Add(EstateService.Envelope(journal, entry, Principal));
+                if (selectors.Count > 0)
+                {
+                    var passed = new List<int>();
+                    for (int i = 0; i < selectors.Count; i++)
+                    {
+                        if (entry.Position > selectors[i].Since && selectors[i].Matcher.Matches(entry, Principal, service))
+                        {
+                            passed.Add(i);
+                        }
+                    }
+
+                    selected.Add(passed);
+                }
             }
         }
 
-        return new EventBatch(delivered);
+        return new EventBatch(delivered) { Selected = selectors.Count > 0 ? selected : [] };
     }
 }
 

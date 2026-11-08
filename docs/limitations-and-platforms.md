@@ -444,7 +444,7 @@ First-screen API reads no longer grow with unshown record history, but opening s
 record once. Large estates can still take time. Wait for loading before treating an absent page as empty;
 headless tests establish no fixed native startup-time bound or desktop responsiveness qualification.
 
-MCP supports protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05 over stdio, with `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`. Resources and prompts are read-only. Sampling and HTTP transport are not implemented. The contributor writes are `work_attempt`, `work_progress`, `work_result`, `work_amend` and `document_review`. From 0.8.0 it also exposes bounded policy and writing-exception writes after authority checks, and `work_review` only to an admitted operator connection. The runtime checks current authority and exact bounds again at each call. Communication and context tools read; they do not change preferences or grant authority. Goal and ask tools do not activate, fund, accept, step or answer. There is no harness-qualification or worker-launch MCP tool. The orientation's observed MCP harness matrix is distinct from RUN-03's native worker qualification.
+MCP supports protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05 over stdio, with `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, with a running daemon, `resources/subscribe` and `resources/unsubscribe` ([MCP subscription limits](#mcp-subscription-limits-092)). Resources and prompts are read-only. Sampling is not implemented; from 0.9.2 the daemon also serves Streamable HTTP ([Network MCP limits](#network-mcp-limits-092)). The contributor writes are `work_attempt`, `work_progress`, `work_result`, `work_amend` and `document_review`. From 0.8.0 it also exposes bounded policy and writing-exception writes after authority checks, and `work_review` only to an admitted operator connection. The runtime checks current authority and exact bounds again at each call. Communication and context tools read; they do not change preferences or grant authority. Goal and ask tools do not activate, fund, accept, step or answer. There is no harness-qualification or worker-launch MCP tool. The orientation's observed MCP harness matrix is distinct from RUN-03's native worker qualification.
 
 Workbench adds local communication and hand-over/resume views. It has no context-allocation editor, pinned-original retrieval control or harness-qualification form. The communication qualification report covers headless fixture behavior, not native desktop, screen-reader, live harness, Remote or compaction qualification. Optional progress frequency changes presentation, while required attention remains visible; an external agent's compliance with the brief's wording and refresh instruction is not enforced.
 
@@ -784,11 +784,33 @@ is reached on loopback and on the local network only, and a device on the local 
 A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
 connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
 the daemon's memory and end when it restarts; the bridge opens a new one once, and other clients initialize
-again after a `404`. A session has one server stream, and in 0.9.2 nothing is sent on it but keep-alive
-comments: resource notifications are `MCP-05`'s, and the bridge does not yet forward the stream to its
-client. Requests are answered with one JSON body, never a stream; long outputs are returned whole. A
-device holds four sessions and runs four requests at once, all devices eight, and server streams share
-the event streams' slots. Every `<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
+again after a `404`. A session has one server stream, which carries its resource notifications
+(`MCP-05`) and keep-alive comments, and the bridge holds it for its client. Requests are answered with one
+JSON body, never a stream; long outputs are returned whole. A device holds four sessions and runs four
+requests at once, all devices eight, and server streams share the event streams' slots. Every
+`<harness> over MCP HTTP` row is a non-claim until an estate qualifies it.
+
+## MCP subscription limits (0.9.2)
+
+Resource subscriptions and `events_read` (`MCP-05`) need the estate's running daemon, which keeps the event
+journal; a server over the embedded runtime declares no subscriptions, and `events_read` answers that the
+daemon keeps the journal. A notification is a hint: it says a subscribed resource or the listing may have
+changed, carries no content, and comes at most once a second per URI and once every five seconds for the
+listing, so several changes inside an interval are told once. Over standard input and output a session
+follows the journal only while it holds a subscription, with one selecting long poll a round. Those polls, and
+`events_read`'s waits, take the MCP servers' own four slots of the local socket, never the command line's; beyond
+four sessions waiting at once they take turns of five seconds, so a notification can come up to a turn later, and
+the runtime holds up to four more long connections than before, of the 32 it admits. A session holds at most 32 subscriptions, and a subscription lives
+with its session: a network session's ends on DELETE, an idle hour, its device's revocation or the daemon's
+restart, and a stdio session's when its input ends. Only changes the runtime observes after a subscription
+count, and after a gap the journal cannot honor every subscribed resource and the listing are told once.
+Context packages, operator requests and their closings, and another principal's asks are not subscribable;
+operator-request events reach no notification and no `events_read` answer. What counts as a change follows the
+journal's relations: a record or brief is told of records that rest on it up to eight steps away, and a document
+pin of a later revision although its pinned bytes never change. Whether a harness shows notifications or needs
+`events_read` is qualified per harness version by an estate's own observations; this build qualifies no
+harness, and every `<harness> over MCP notifications` and `<harness> over MCP events_read` row is a non-claim
+until an estate records one.
 
 ## Context and hand-over limits
 

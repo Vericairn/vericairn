@@ -164,7 +164,22 @@ The SDK adds `Events(after, filter, principal, wait)` and `EventGet(key, princip
 with its asynchronous counterpart and a default implementation, and `VericairnClient.StreamEventsAsync`,
 one stream's events, resets and cursors, and `WatchEventsAsync`, which reconnects from the newest cursor
 when a stream ends or drops and stops at a refusal. [vericairn events watch](cli.md#vericairn-events-watch-092)
-follows the stream on the command line. MCP subscriptions and notifications (`MCP-05`) follow separately.
+follows the stream on the command line. From 0.9.2 MCP sessions subscribe to resources and read `events_read` over
+this journal (`MCP-05`, [The MCP server](mcp.md#subscriptions-and-notifications-092)).
+
+`POST /v1/events/select` (0.9.2) is the same read as a long poll, for a follower with many interests: its body,
+`EventSelectRequest`, names `after`, `filter`, `principal` and `wait` as the query does, and up to 32 `selections`,
+each a filter with an optional `since` cursor below which it passes nothing (a cursor that cannot be honored bounds
+nothing). `EventSelectResponse` is `EventsResponse` with `selected`, for each event the indices of the selections
+it passes. A selection only narrows: an event the audience check or the read's own filter withholds passes none,
+and nothing tells it from none. It never streams. A device's read holds one of its own slots while it runs, as a long
+poll does, with `429` when they are taken. On the local socket a read that waits holds one of four slots kept for MCP
+servers, beside the command line's slots and reserve, and one that does not wait holds none. When those four are held,
+a read waits until the one held longest has held its slot five seconds, which then answers at once with what it has,
+and takes its place: one that waits out its own `wait` first answers with no event. An unknown kind or category, a
+malformed filter, more than 32 selections or a `wait` outside 0 to 25 answers 400, a device naming another
+principal 401, a runtime that keeps no journal 501 with the problem `no-journal`, and one briefly unable to read its
+journal, or stopping, 503 with `unavailable`, which a follower retries.
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists
 the additions.
 
@@ -182,7 +197,8 @@ Each tool call runs as its API operation for the requesting device. The daemon r
 process, with that route's binding and request scope and the service call behind it, as a request of that device; so a
 call is refused exactly as the API refuses the same request from that device, a write rechecks the device's standing, key
 and profile under the write lock, and on loopback as on the local network it is kept in `local-network-writes.jsonl`. A network tool
-reaches only the operations its tools use: reads by GET (never the event stream), the POST reads `resources/read`,
+reaches only the operations its tools use: reads by GET (never the event routes), the POST reads `resources/read`,
+`events/select` (from 0.9.2, for `events_read`; it never streams),
 `releases/check` and `templates/render`, and the contributor writes `POST /v1/work/attempt`, `POST /v1/work/progress`,
 `POST /v1/work/result`, `POST /v1/work/amend` and `POST /v1/documents/{id}/reviews`; never a machine-local one.
 
@@ -191,7 +207,8 @@ operation authors, by the same path `POST /v1/records/prepare` uses, and writes 
 with the plan and the device's signature, and the runtime re-authors the record from the request with the plan's id and
 time, writes it only when it is the exact record the device signed, and writes nothing else. A plan is the device's own,
 used once and good for ten minutes. From 0.9.2 a device holds at most 32 prepared records at once, through `/mcp` and
-`POST /v1/records/prepare` alike. The published endpoint (`DaemonEndpoint`) gains `mcp`, the path served, when it is on;
+`POST /v1/records/prepare` alike. From 0.9.2 (`MCP-05`) the session's server stream carries its resource
+notifications, derived from the event journal read for its device with the audience check above. The published endpoint (`DaemonEndpoint`) gains `mcp`, the path served, when it is on;
 `vericairn runtime status` shows it. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092) and
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#network-mcp-over-streamable-http-mcp-03).
 
