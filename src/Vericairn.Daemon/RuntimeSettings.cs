@@ -20,6 +20,18 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
     /// <summary>File name beside the live store.</summary>
     public const string FileName = "runtime.json";
 
+    /// <summary>
+    /// From 0.9.2 (MCP-03): whether the daemon serves network MCP at /mcp on its loopback and local-network listeners, from its next
+    /// start. Off unless the operator turned it on with 'vericairn runtime configure --mcp on'.
+    /// </summary>
+    public bool Mcp { get; init; }
+
+    /// <summary>
+    /// From 0.9.2 (MCP-03): the origins a request to /mcp may come from when it names one, as scheme://host[:port]; empty by default,
+    /// so a request naming any origin is refused before authentication.
+    /// </summary>
+    public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
+
     private const string Format = "vericairn.runtime-settings/1";
 
     /// <summary>The settings kept in a directory; the defaults, with the local network off, when there are none.</summary>
@@ -37,7 +49,17 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
             JsonNode? node = JsonNode.Parse(File.ReadAllText(path));
             string? address = node?["localNetwork"]?.GetValue<string>();
             bool allowPublic = node?["allowPublic"]?.GetValue<bool>() ?? false;
-            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic);
+            bool mcp = node?["mcp"]?.GetValue<bool>() ?? false;
+            string[] origins = node?["allowedOrigins"] is JsonArray listed ? [.. listed.Select(o => o!.GetValue<string>())] : [];
+            foreach (string origin in origins)
+            {
+                if (!TryNormalizeOrigin(origin, out _, out string? problem))
+                {
+                    throw new InvalidOperationException(problem);
+                }
+            }
+
+            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic) { Mcp = mcp, AllowedOrigins = origins };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
@@ -51,7 +73,11 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, FileName);
-        var node = new JsonObject { ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic };
+        var node = new JsonObject
+        {
+            ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic, ["mcp"] = Mcp,
+            ["allowedOrigins"] = new JsonArray([.. AllowedOrigins.Select(o => (JsonNode)JsonValue.Create(o))]),
+        };
         string temporary = path + ".tmp";
         File.WriteAllText(temporary, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
         if (!OperatingSystem.IsWindows())
@@ -122,6 +148,26 @@ public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPubl
         }
 
         return "an address other networks may reach";
+    }
+
+    /// <summary>
+    /// Reads an origin a request to /mcp may name, from 0.9.2: an http or https scheme and a host, with a port when it is not the
+    /// scheme's default, and nothing else; normalized to lower case without a default port, as a browser sends it.
+    /// </summary>
+    public static bool TryNormalizeOrigin(string? text, out string? origin, out string? problem)
+    {
+        origin = null;
+        problem = $"'{text}' is not an origin: give a scheme and host, with a port when it is not the default, for example https://agent.example or http://127.0.0.1:8080.";
+        if (string.IsNullOrWhiteSpace(text) || !Uri.TryCreate(text.Trim(), UriKind.Absolute, out Uri? uri)
+            || uri.Scheme is not ("http" or "https") || uri.PathAndQuery != "/" || uri.Fragment.Length > 0 || uri.UserInfo.Length > 0)
+        {
+            return false;
+        }
+
+        // Uri.Host keeps an IPv6 address's brackets, as an Origin header spells it.
+        origin = (uri.IsDefaultPort ? $"{uri.Scheme}://{uri.Host}" : $"{uri.Scheme}://{uri.Host}:{uri.Port.ToString(CultureInfo.InvariantCulture)}").ToLowerInvariant();
+        problem = null;
+        return true;
     }
 
     /// <summary>Reads an address the local-network profile can listen on: an IP address and a port, 192.168.1.20:7443 or [fe80::1]:7443; port 0 asks for any free port.</summary>

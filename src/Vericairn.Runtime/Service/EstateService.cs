@@ -472,6 +472,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return NotFound($"No assignment has id {request.Assignment}.");
             }
 
+            // Under device signing both steps state the plan's time, so the record signed is the one written (MCP-03).
+            at ??= DeviceSigningTime();
             var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(at ?? DateTimeOffset.UtcNow), ["workspace"] = request.Workspace, ["note"] = request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             return WriteLocked(new RecordDraft("attempt", request.By, document.RootElement, assignment.Reference, At: at), model);
@@ -2244,6 +2246,25 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
+        if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
+        {
+            return signers is null
+                ? DeviceSignedWriteLocked(draft, current, device, signing)
+                : Refuse("A device-signed request is signed by its own device only; this write signs on the runtime's machine, and nothing was written.");
+        }
+
+        return WriteAuthoredLocked(draft, current, signers);
+    }
+
+    /// <summary>Authors with the signers given, or this machine's for the author, then judges and stores. Caller holds the gate.</summary>
+    private WriteOutcome WriteAuthoredLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    {
+        if (RequestDeviceRefusal(current) is Problem denied)
+        {
+            return WriteOutcome.Fail(denied);
+        }
+
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
         if (record is null)
         {
@@ -2330,6 +2351,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        // From 0.9.2 (MCP-03): under device signing nothing on this machine signs. A record authored without signers is a candidate
+        // only, which the store refuses; the one signer allowed is the requesting device's verified signature over its plan.
+        if (requestDevice.Value is { Closed: false, Signing: { } signing } requesting)
+        {
+            if (signers is null)
+            {
+                signers = [];
+            }
+            else if (signers.Any(s => s is not PresignedSigner presigned || presigned.DeviceId != requesting.Device || presigned.Hash != signing.Authorized))
+            {
+                return (null, "A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
+            }
+        }
+
         if (PromptWriteRefusal(draft, current) is string promptRefusal) return (null, promptRefusal);
         if (global::Vericairn.Records.Templates.TemplateRecords.AuthoringRefusal(current, draft.Type, draft.Body, draft.Subject, draft.By, draft.Supersedes) is { } templateRefusal)
             return (null, templateRefusal);
@@ -2578,6 +2613,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private Problem? JudgeProposedLocked(IReadOnlyList<AuthoredRecord> records)
     {
+        // Every store judges its records here first: under device signing only the requesting device's signed record passes.
+        if (DeviceSignedStoreRefusal(records) is Problem unsigned)
+        {
+            return unsigned;
+        }
+
         BatchJournal.ReadResult batches = BatchJournal.All(session);
         FindingList unreadable = UnreadableBatches(batches);
         if (unreadable.Count > 0)
@@ -2783,10 +2824,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>Authors a record with no signature, for a device to sign or as a candidate the store refuses. Caller holds the gate.</summary>
+    private (AuthoredRecord? Record, string? Refusal) AuthorUnsignedLocked(RecordDraft draft, EstateModel current) => AuthorLocked(draft, current, []);
+
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
     private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner
     {
         public string DeviceId => deviceId;
+
+        /// <summary>The content hash the signature is over.</summary>
+        public string Hash => hash;
 
         public RecordSignature Sign(ReadOnlySpan<byte> digest) =>
             digest.SequenceEqual(RecordSigning.Digest(hash))

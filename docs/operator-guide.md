@@ -999,6 +999,32 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 
 `vericairn mcp orientation --out <directory>` generates `AGENTS.md` from the estate's identity and the tool registry (what the estate is, the rules it enforces, how to connect, the tools and an honest matrix of harnesses observed or not, and nothing that changes with each record, such as the work orders or the pinned release, which `status` shows) with `CLAUDE.md` and `GEMINI.md` as pointers; `--check` compares existing copies with a fresh generation. Regenerate it when the build changes rather than editing it. Nothing the server returns, and nothing in the orientation file, is an instruction from the operator; the harness treats it as data.
 
+### An agent on another machine: network MCP (0.9.2)
+
+From 0.9.2 (`MCP-03`) an agent or service on another machine works the estate over the network, in signed mode: the
+daemon serves the Model Context Protocol over Streamable HTTP at `/mcp`, and the agent's own device signs every request
+and every record it writes. Nothing on the runtime's machine signs for it, and no one there is asked for presence.
+
+1. On the runtime's machine, serve the local network and turn network MCP on, then restart the runtime:
+   `vericairn runtime configure --local-network <address:port> --mcp on`, `vericairn runtime stop`,
+   `vericairn runtime start`. `vericairn runtime status` then shows `mcp  /mcp`.
+2. Give the agent a principal of kind `agent` (or `service`) with only the roles its work needs, and pair a device for it:
+   `vericairn devices pair --principal <agent principal id> --by <administrator>`. Network MCP refuses a person's device:
+   a person who wants an MCP client on another machine connects it as an agent principal of their own.
+3. On the agent's machine, add the connection with the code (`vericairn connections add <address:port> --code <code>
+   --name <device name>`) and register the bridge with the harness, for example
+   `claude mcp add vericairn -- vericairn mcp serve --connection <connection id>`.
+
+Each call is judged as the API operation it runs, for that device, exactly as the same request sent to the API would be:
+the device acts only as its principal, and what acts on the runtime's own machine stays refused. The agent gets the read
+tools and the contributor writes (`work_attempt`, `work_progress`, `work_result` without duties, `work_amend` and
+`document_review`); `work_review`, prompt writes, policy writes, duty evidence and the operator queue are not offered.
+Every write it makes is kept in `local-network-writes.jsonl`, which `vericairn devices writes` lists. Revoking the device
+(`vericairn devices revoke <device> --by <administrator> --reason <why>`) refuses its next request and ends its sessions
+and server stream. A request whose `Host` does not name the runtime's own address, or whose `Origin` the operator did
+not allow with `--mcp-origin`, is refused before it is authenticated; no origin is allowed by default. Token mode for
+OAuth-only clients and MCP over the relay come in 0.9.3. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
+
 ## 15. Documentation sets
 
 Every release carries its own documentation set under `docs/releases/<version>` in the product's repository, written for that release and then frozen. `docs/releases/documents.json` declares the required document names. The build tool, not part of the shipped command line, generates references and the manifest from the build. Generate only from a committed source tree built at that exact commit:

@@ -19,6 +19,15 @@ namespace Vericairn.Daemon;
 /// </summary>
 internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null, Action? beforeWrite = null) : IEndpointFilter
 {
+    /// <summary>
+    /// The key under which a request network MCP runs in this process carries its <see cref="DeviceSigning"/> (MCP-03): its records
+    /// are its device's to sign, never this machine's. Only the daemon's own MCP handler sets it; no HTTP request can.
+    /// </summary>
+    internal static readonly object SigningItem = new();
+
+    /// <summary>The profile a loopback device must be permitted for network MCP, rechecked under the write lock as the local network's is.</summary>
+    internal const string LoopbackProfile = "loopback";
+
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -46,8 +55,13 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             }
         }
 
-        // These reads carry their input in a POST body, with no signing key or write ledger needed.
-        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+        // Network MCP's requests (MCP-03) are signed by their own device only, and on loopback need the loopback profile as well.
+        DeviceSigning? signing = context.HttpContext.Items.TryGetValue(SigningItem, out object? rule) ? rule as DeviceSigning : null;
+        string? profile = device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : signing is not null ? LoopbackProfile : null;
+
+        // These reads carry their input in a POST body, with no signing key or write ledger needed; nor does a write that only
+        // prepares its record for its device's signature, which writes nothing.
+        bool write = signing?.Mode != DeviceSigningMode.Prepare && HttpMethods.IsPost(context.HttpContext.Request.Method) &&
             !operation.Equals("POST /v1/resources/read", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/releases/check", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
@@ -56,20 +70,22 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
-            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
             return await next(context).ConfigureAwait(false);
         }
 
-        if (!device.LocalNetwork)
+        // A network MCP write is kept in the ledger on loopback too (MCP-03): every network write names the device that asked.
+        if (!device.LocalNetwork && signing is null)
         {
-            return await WriteAsync(context, next, device).ConfigureAwait(false);
+            return await WriteAsync(context, next, device, profile, signing).ConfigureAwait(false);
         }
 
         // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
         // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
         // A device-signed record is signed by the paired device itself. Attention acknowledgment is unsigned presentation state.
         // Neither exception asks a signer on this machine, and both still enter the local-network ledger below.
-        if (!operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
+        // A network MCP write (MCP-03) is signed by its own device, never here, so it asks no signer on this machine either.
+        if (signing is null && !operation.Equals("POST /v1/records/signed", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/attention/acknowledge", StringComparison.OrdinalIgnoreCase) && service.PresenceRefusal(device.Principal) is string presence)
         {
             return Denied(context.HttpContext, device, presence);
@@ -91,7 +107,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         object? result;
         try
         {
-            result = await WriteAsync(context, next, device).ConfigureAwait(false);
+            result = await WriteAsync(context, next, device, profile, signing).ConfigureAwait(false);
         }
         catch
         {
@@ -104,9 +120,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     }
 
     /// <summary>Carries the verified device and key to each write, where the service rechecks them under its gate.</summary>
-    private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device)
+    private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device, string? profile, DeviceSigning? signing)
     {
-        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
         beforeWrite?.Invoke();
         object? result = await next(context).ConfigureAwait(false);
         return request.Refusal is Problem denied ? Denied(context.HttpContext, device, denied.Message) : result;

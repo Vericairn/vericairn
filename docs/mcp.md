@@ -71,7 +71,7 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 ## Protocol subset
 
-`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
 
 Initialization declares `resources: { subscribe: false, listChanged: false }`,
 `prompts: { listChanged: false }` and `tools: { listChanged: false }`. There are
@@ -235,8 +235,115 @@ The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authen
 ## Limitations
 
 - The five write tools are limited to attempts, progress claims, results, amendments and reviews of the estate's own living documents. Goals and asks are read views here; their lifecycle and decisions use the CLI or API under its authority rules.
-- The server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one.
+- The stdio server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one. Network MCP is the daemon's own `/mcp` (0.9.2), which authenticates every request as a device instead.
 - Long outputs (a large status document, a long brief) are returned whole; no paging.
+
+## Network MCP over Streamable HTTP (0.9.2)
+
+From 0.9.2 (`MCP-03`) an agent or service on another machine works an estate's MCP tools over the
+network. The daemon serves the Streamable HTTP transport at `/mcp` on its loopback and local-network
+listeners once the operator turns it on with `vericairn runtime configure --mcp on` and the runtime
+starts again. It is off by default and never served on the local socket, where the operating-system
+user acts for any principal. `vericairn runtime status` shows `/mcp` while a daemon serves it.
+
+**Who may connect.** Every request on `/mcp` is signed by one device, as the API's requests are: the
+loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `vericairn-request/2`,
+with the same freshness and replay rules; a message holds at most 1 MiB, refused before it is authenticated. The device must be admitted now, permitted the
+profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
+person connects an MCP client as an agent principal of their own, so its writes are never attributed
+to them. On loopback the device needs the `loopback` profile (`vericairn devices create --profile embedded
+--profile loopback`), which the API's own loopback requests do not ask for. A revoked device is refused at its next request, its sessions end and its server stream
+closes. Before anything is authenticated, the request's `Host` must name the listener it reached, its
+IP address and port (or `localhost` on loopback), and an `Origin` it names must be one the operator
+allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
+runtime therefore reaches nothing.
+
+**The transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
+request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
+and the older HTTP transport are not served: `initialize` negotiates 2025-06-18 or 2025-03-26.
+`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
+names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
+without a session gets `400`, and one naming a session its device does not hold, or one that ended,
+gets `404`, after which a client initializes again. DELETE ends a session. A session is bound to the
+device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
+hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
+four sessions, a new one ending its least recently used, and the runtime 64; a device runs at most four
+requests at once and all devices eight (notifications, a cancellation above all, and `initialize` are never held back by
+that count), so network MCP never takes the connections the API and the
+event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
+by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
+
+**One authorization model.** Each tool call runs as its API operation for the requesting device: the
+daemon runs the very route the API maps, in its own process, with that route's request scope, so a
+call is judged exactly as the same request sent to the API by that device, and machine-local
+operations stay refused. The tools act only as the device's principal. Over the network the server
+offers every read tool, the resources, `prompts/list`, and the contributor writes `work_attempt`, `work_progress`,
+`work_result` without duties, `work_amend` and `document_review`. The operator's judgments
+(`work_review`, the prompt writes and `prompts/get`), policy and writing-exception writes and duty
+evidence are absent from `tools/list` and answered as unknown, naming no hidden tool; the operator
+queue, publication, spending, credentials, admissions, runs, goals and answering asks have no tool.
+`requests_list` and `asks_list` stay reads.
+
+**Signed mode: two calls per write.** No key on the runtime's machine signs a network write and
+nothing is written unsigned. The client calls the write with `_meta` `{"vericairn/prepare": true}`;
+the runtime runs the operation's authoring checks and returns the prepared record
+(`RecordPrepareResponse`, as the API's prepared records have it) in the result's `_meta["vericairn/plan"]`,
+writing nothing. The client checks that record, signs the record-signing digest of its `hash` with its
+device key, and repeats the call with the same arguments and `_meta` `{"vericairn/plan": <plan>,
+"vericairn/signature": <signature>}`. The runtime checks that the plan is this device's, unused and
+under ten minutes old, that the arguments yield the same record and that the signature verifies, then
+writes it with that signature alone; each write is kept in `local-network-writes.jsonl`, on loopback
+as on the local network. A write in one call is a tool error. An active progress note keeps live state and no
+record, so it needs no plan. A device holds at most 32 prepared records at once. Tools that write
+carry `_meta["vericairn/prepared"]: true` in `tools/list`.
+
+**The server stream.** A GET with `Accept: text/event-stream` opens the session's server stream, one
+per session, bound to the session's device: it shares the event streams' slots (four per device, eight
+per principal, sixteen per runtime), closes before the next message once the device is no longer
+admitted with its key and profile, and lasts at most an hour before the client opens another with a
+fresh signature. It carries the session's own messages to that device alone, with keep-alive comments
+between. In 0.9.2 the server still declares `resources.subscribe` and `listChanged` false: `MCP-05`
+sends resource notifications on this stream.
+
+**The bridge.** `vericairn mcp serve --connection <connection>` serves standard input and output to a
+local harness, as `mcp serve` does, and forwards each message to the remote estate's `/mcp` over a
+connection this machine paired (`vericairn connections`), named by its id or its estate's name. Every
+request is signed by the connection's device. Only for the five writes does the bridge first ask the
+runtime to prepare; when a record comes back it checks that the record hashes to the hash it is asked
+to sign, names the device's principal as author, is the record type the tool writes, supersedes no
+record, is dated within a plan's ten minutes of this machine's clock (allowing the five minutes' skew a
+signed request may have), is about the assignment or attempt the call names, and holds every field the
+call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
+repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
+nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
+the bridge ends its session. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
+`DeviceSignedRecords` or its own code, is Vericairn-aware.
+
+**What a device's signature vouches for.** The bridge binds what the call itself supplies: its
+arguments, the author, the subject an assignment or attempt argument names, the record type, its time
+and that it supersedes nothing. A prepared record also holds fields the runtime computes, which the
+bridge cannot check without trusting that same runtime, and the device signs them too: a document
+review's subject (the living-document declaration the runtime finds for `path`, which no argument names
+by id), its independence, checks, content identity, answers and section contents, an attempt's or
+progress phase's time within those bounds, and a result's `progressClaim`, the attempt's last claim the
+runtime retains. Binding a review's subject to `path` would need the declaration from that same runtime,
+so it adds nothing against a runtime that lies. Do not sign through a runtime you do not trust: reach
+only estates whose runtime you rely on to compute those fields honestly.
+
+```sh
+# On the runtime's machine, as the operator:
+vericairn runtime configure --local-network 192.168.1.20:7443 --mcp on
+vericairn runtime stop && vericairn runtime start
+vericairn devices pair --principal <agent principal id> --by <operator id>
+# On the agent's machine:
+vericairn connections add 192.168.1.20:7443 --code <code> --name "Agent laptop"
+claude mcp add vericairn -- vericairn mcp serve --connection <connection id>
+```
+
+Token mode for OAuth-only clients, the public endpoint and MCP over the relay are `MCP-04`, `REMOTE-10`
+and the relay's work in 0.9.3; `<harness> over MCP HTTP` rows stay non-claims until qualified. See
+[limitations](limitations-and-platforms.md#network-mcp-limits-092) and
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md#network-mcp-over-streamable-http-mcp-03).
 
 ## Agent progress claims (0.7.0)
 

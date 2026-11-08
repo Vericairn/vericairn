@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Vericairn.Mcp/Vericairn.Mcp.csproj" />
     <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
     <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
