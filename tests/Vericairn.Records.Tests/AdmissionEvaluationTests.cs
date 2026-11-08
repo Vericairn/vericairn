@@ -7,6 +7,7 @@ using Vericairn.Records.Authoring;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Tests;
 
@@ -77,5 +78,132 @@ public class AdmissionEvaluationTests
         Assert.True(SignatureChecks.IsAdmitted(reversed, laptop));
         Assert.True(SignatureChecks.IsAuthentic(reversed, later));
         Assert.Equal(model.Records.Select(r => model.Counts(r)), model.Records.Select(r => reversed.Counts(r)));
+    }
+
+    [Fact]
+    public void AnAdmissionSignedWithAKeyItDoesNotNameAdmitsNothing()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope x = f.Device(f.Estate.BuilderId, "Device X");
+        // An admission by the operator that names the operator's device but carries the builder's signature.
+        JsonElement body = JsonDocument.Parse(HistoryFixture.Admission(f.Estate.BuilderId, "Named for the operator's device.")).RootElement;
+        AuthoredRecord authored = RecordAuthor.Create(new RecordDraft("admission", f.Estate.OperatorId, body, x.Reference, null, f.Estate.Clock.AddSeconds(5), null, 3), [f.BuilderSigner]);
+        JsonObject json = JsonNode.Parse(System.Text.Encoding.UTF8.GetString(authored.Bytes))!.AsObject();
+        json["signatures"]![0]!["device"] = f.OperatorDevice.Id;
+        File.WriteAllText(Path.Combine(f.Root, authored.Envelope.ExpectedPath), json.ToJsonString());
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("ADM-4"), signer: f.Signer(x));
+        EstateModel model = f.Load();
+        Assert.Contains(model.Findings, x => x.Code == "signature.invalid");
+        Assert.Equal(SignatureChecks.AdmissionState.Unadmitted, SignatureChecks.AdmissionStateAt(model, x, order.At));
+        Assert.False(SignatureChecks.IsAuthentic(model, order));
+        Assert.False(model.Counts(order));
+    }
+
+    [Fact]
+    public void AnAdmissionByAnAuthorWhoMayNotAdmitAdmitsNothing()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        // The agent signs, with its own admitted device, an admission of a new device for the operator, and one for itself.
+        RecordEnvelope x = f.Device(f.Estate.OperatorId, "Device X");
+        RecordEnvelope forOperator = f.Estate.Add("admission", f.Estate.BuilderId, HistoryFixture.Admission(f.Estate.OperatorId, "By the agent."), x.Reference, signer: f.BuilderSigner);
+        RecordEnvelope y = f.Device(f.Estate.BuilderId, "Device Y");
+        RecordEnvelope forItself = f.Estate.Add("admission", f.Estate.BuilderId, HistoryFixture.Admission(f.Estate.BuilderId, "By the agent."), y.Reference, signer: f.BuilderSigner);
+        RecordEnvelope asOperator = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("ADM-5"), signer: f.Signer(x));
+        RecordEnvelope asAgent = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("ADM-6"), signer: f.Signer(y));
+        EstateModel model = f.Load();
+        Assert.Contains(model.Findings, x => x.Code == "admission.author");
+        Assert.True(SignatureChecks.IsAuthentic(model, model.ById[forOperator.Id]));
+        Assert.False(model.Counts(model.ById[forOperator.Id]));
+        Assert.False(model.Counts(model.ById[forItself.Id]));
+        Assert.Equal(SignatureChecks.AdmissionState.Unadmitted, SignatureChecks.AdmissionStateAt(model, x, asOperator.At));
+        Assert.Equal(SignatureChecks.AdmissionState.Unadmitted, SignatureChecks.AdmissionStateAt(model, y, asAgent.At));
+        Assert.False(SignatureChecks.IsAuthentic(model, asOperator));
+        Assert.False(model.Counts(asOperator));
+        Assert.False(model.Counts(asAgent));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
+    }
+
+    [Fact]
+    public void AnotherOperatorAndAnAdministratorMayAdmit()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Estate.Add("decision", f.Estate.OperatorId, $$"""{"title":"Basis","statement":"Grant authority.","summary":"A basis.","synthesis":"For tests.","effects":["grant"],"affects":[],"decidedBy":"{{f.Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":["publication"]}""", signer: f.OperatorSigner);
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second Operator","roles":["operator"]}""", signer: f.OperatorSigner);
+        RecordEnvelope secondDevice = f.Device(second.Id, "Second operator's device");
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(second.Id, "Second operator."), secondDevice.Reference, signer: f.OperatorSigner);
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        RecordEnvelope adminDevice = f.Device(admin.Id, "Admin device");
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(admin.Id, "Admin device."), adminDevice.Reference, signer: f.OperatorSigner);
+        f.Estate.Add("authority", f.Estate.OperatorId, $$"""{"grantee":"{{admin.Id}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}"}""", signer: f.OperatorSigner);
+        // A reviewer whose administer grant the agent wrote holds nothing.
+        RecordEnvelope other = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Other","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        RecordEnvelope otherDevice = f.Device(other.Id, "Other's device");
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(other.Id, "Other's device."), otherDevice.Reference, signer: f.OperatorSigner);
+        f.Estate.Add("authority", f.Estate.BuilderId, $$"""{"grantee":"{{other.Id}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}"}""", signer: f.BuilderSigner);
+        f.Require();
+
+        RecordEnvelope bySecond = f.Device(f.Estate.BuilderId, "Admitted by the second operator");
+        f.Estate.Add("admission", second.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By the second operator."), bySecond.Reference, signer: f.Signer(secondDevice));
+        RecordEnvelope byAdmin = f.Device(f.Estate.BuilderId, "Admitted by the administrator");
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By the administrator."), byAdmin.Reference, signer: f.Signer(adminDevice));
+        RecordEnvelope byOther = f.Device(f.Estate.BuilderId, "Admitted by the reviewer");
+        f.Estate.Add("admission", other.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By the reviewer."), byOther.Reference, signer: f.Signer(otherDevice));
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("ADM-7"), signer: f.Signer(byAdmin));
+        EstateModel model = f.Load();
+        Assert.True(SignatureChecks.IsAdmitted(model, bySecond));
+        Assert.True(SignatureChecks.IsAdmitted(model, byAdmin));
+        Assert.False(SignatureChecks.IsAdmitted(model, byOther));
+        Assert.True(model.Counts(order));
+    }
+
+    [Fact]
+    public void AnAdministratorsPowerToAdmitIsReadAsItStoodAtTheAdmission()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin device");
+        f.Require();
+        // Admitted before any grant, under the grant, and after a narrowing that takes administer away.
+        RecordEnvelope early = f.Device(f.Estate.BuilderId, "Admitted before the grant");
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Before the grant."), early.Reference, signer: f.Signer(adminDevice));
+        RecordEnvelope grant = f.Grant(admin.Id, decision, [Scopes.Administer, Scopes.LocalEngineering]);
+        RecordEnvelope granted = f.Device(f.Estate.BuilderId, "Admitted under the grant");
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Under the grant."), granted.Reference, signer: f.Signer(adminDevice));
+        f.Grant(admin.Id, decision, [Scopes.LocalEngineering], supersedes: grant.Id);
+        RecordEnvelope late = f.Device(f.Estate.BuilderId, "Admitted after the narrowing");
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "After the narrowing."), late.Reference, signer: f.Signer(adminDevice));
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("ADM-8"), signer: f.Signer(granted));
+        EstateModel model = f.Load();
+        Assert.False(SignatureChecks.IsAdmitted(model, early));
+        Assert.True(SignatureChecks.IsAdmitted(model, granted));
+        Assert.False(SignatureChecks.IsAdmitted(model, late));
+        Assert.True(model.Counts(model.ById[order.Id]));
+    }
+
+    [Fact]
+    public void AnAdmissionDatedBackIntoAClosedGrantAdmitsNothing()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin device");
+        RecordEnvelope grant = f.Grant(admin.Id, decision, [Scopes.Administer, Scopes.LocalEngineering]);
+        f.Require();
+        f.Adopt();
+        RecordEnvelope written = f.Device(f.Estate.BuilderId, "Admitted before the closing");
+        RecordEnvelope admitted = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Before the closing."), written.Reference, signer: f.Signer(adminDevice));
+        f.Close("grant", grant.Id);
+        f.Grant(admin.Id, decision, [Scopes.LocalEngineering], supersedes: grant.Id);
+        // After the closing, an admission dated back into the grant's time relies on the closed revision, which the closing does not witness.
+        RecordEnvelope backdated = f.Device(f.Estate.BuilderId, "Admitted with an earlier date");
+        f.Estate.SetClock(admitted.AtTime);
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Dated back."), backdated.Reference, signer: f.Signer(adminDevice));
+        EstateModel model = f.Load();
+        Assert.True(SignatureChecks.IsAdmitted(model, written));
+        Assert.False(SignatureChecks.IsAdmitted(model, backdated));
     }
 }
