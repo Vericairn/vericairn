@@ -150,6 +150,30 @@ public sealed class EstateSession : IDisposable
     /// <summary>Loads and validates a given set of this estate's record files, with its objects.</summary>
     internal EstateModel LoadFiles(IReadOnlyList<RecordFile> files) => EstateLoader.Load(Root, files, ObjectReader);
 
+    /// <summary>
+    /// The estate's records as identities only, with the exact record files they were parsed from, from one snapshot: ids, hashes,
+    /// bodies, supersession and the manifest, never a judgment (no validation finding, authority, signature or admission). Parsing
+    /// reuses the session's parse cache; nothing judged is kept between calls. The files are not copied and must not be changed.
+    /// </summary>
+    internal (EstateModel Model, IReadOnlyDictionary<string, RecordFile> Files) LoadIdentities()
+    {
+        if (readOnly)
+        {
+            IReadOnlyList<RecordFile> files = ReadFiles();
+            return (EstateLoader.LoadIdentities(Root, files, null), files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+        }
+
+        if (Profile == "repository-synced") Live.SyncFromDirectory(Root);
+        LiveStore.FileSnapshot snapshot = Live.Snapshot();
+        if (!ReferenceEquals(snapshot, loadedFiles))
+        {
+            parseCache.Retain(snapshot.ByPath);
+            loadedFiles = snapshot;
+        }
+
+        return (EstateLoader.LoadIdentities(Root, snapshot.Files, parseCache), snapshot.ByPath);
+    }
+
     /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
     {

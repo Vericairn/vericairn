@@ -67,7 +67,13 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/templates/render", StringComparison.OrdinalIgnoreCase) &&
             !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase) &&
-            !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase);
+            !operation.Equals("POST /v1/records/prepare", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/context/prepare", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/context/brief", StringComparison.OrdinalIgnoreCase) &&
+            // The index is derived machine-local state, never a record: updating it is part of reading.
+            !operation.Equals("POST /v1/search", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/search/index", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/search/replay", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
             using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, profile, signing);
@@ -212,6 +218,11 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/context/work/{key}"] = null,
         ["GET /v1/context/work/{key}/brief"] = null,
         ["GET /v1/context/original/{pin}"] = null,
+        ["POST /v1/context/prepare"] = typeof(ContextRequest),
+        ["POST /v1/context/brief"] = typeof(BriefContextRequest),
+        ["POST /v1/search"] = typeof(SearchRequest),
+        ["POST /v1/search/index"] = typeof(SearchIndexRequest),
+        ["POST /v1/search/replay"] = typeof(SearchReplayRequest),
         ["GET /v1/context/{manifest}/sources/{source}"] = null,
         ["GET /v1/validate"] = null,
         ["GET /v1/check"] = null,
@@ -360,6 +371,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(PromptUseRequest)] = (_, r, d) => Acting(((PromptUseRequest)r).By, d),
         [typeof(PromptQuery)] = (_, _, _) => null,
         [typeof(ResourceRequest)] = (_, _, _) => null,
+        // A search, or a package, may be asked for a principal only to narrow what it reads: a device's request names its own or none.
+        [typeof(SearchRequest)] = (_, r, d) => Optional(((SearchRequest)r).Principal, d),
+        [typeof(ContextRequest)] = (_, r, d) => Optional(((ContextRequest)r).Principal, d),
+        [typeof(BriefContextRequest)] = (_, r, d) => Optional(((BriefContextRequest)r).Principal, d),
+        [typeof(SearchIndexRequest)] = (_, _, _) => null,
+        [typeof(SearchReplayRequest)] = (_, _, _) => null,
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),

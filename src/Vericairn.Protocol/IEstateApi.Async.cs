@@ -109,11 +109,11 @@ public partial interface IEstateApi
     Task<ResumeResponse> ResumeHandoffAsync(HandoffPackage package, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(ResumeHandoff), () => ResumeHandoff(package), false, this as IClientOperationLifetime, cancellationToken);
 
-    /// <summary>The cancellable counterpart of <see cref="BriefContext"/>; a stopped observation does not undo an effect.</summary>
+    /// <summary>The cancellable counterpart of <see cref="BriefContext(string, long?, string?, string?, CommunicationValues?)"/>; a stopped observation does not undo an effect.</summary>
     Task<BriefResponse?> BriefContextAsync(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(BriefContext), () => BriefContext(workOrder, maxBytes, recipient, assignment, view), false, this as IClientOperationLifetime, cancellationToken);
 
-    /// <summary>The cancellable counterpart of <see cref="Context"/>; a stopped observation does not undo an effect.</summary>
+    /// <summary>The cancellable counterpart of <see cref="Context(string, long?)"/>; a stopped observation does not undo an effect.</summary>
     Task<ContextResponse> ContextAsync(string workOrder, long? maxBytes = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Context), () => Context(workOrder, maxBytes), false, this as IClientOperationLifetime, cancellationToken);
 

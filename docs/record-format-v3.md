@@ -564,3 +564,33 @@ does not count reports `record.subject-not-counting` or
 `record.reference-not-counting`. A device revision changes its key or name only when its device
 signed it.
 
+## Search selections in agent runs (0.9.2)
+
+CONTEXT-02 adds two optional fields to `agent-run` operations within format 3, and no record type. A run without them is
+unchanged; an older release refuses a record that has them, and the manifest's pin keeps an estate on one release.
+
+| Field | Contract |
+| --- | --- |
+| `execution.contextSelections` | Fixed at intent with the run's `execution`: each dispatch-time search of the run's package, at most five, each of at most 50 candidates. It requires the exact `contextPackage`. |
+| `searchesObserved` | Recorded at settlement only, on an `observed-success` or `known-failure` revision, and kept by every later revision: the searches as logged by the run's MCP server, which is not tamper-evident under a harness that does not sandbox the agent (the run does not record whether it was sandboxed). `selections` (at most 100), `complete` (whether every search the log holds is kept; false, with no selections, when the log the worker created at the run's start is missing or cannot be read) and `digest`, SHA-256 of the canonical JSON array of every observed selection's hash in order, which a complete list's selections must equal. A run whose log is empty records no `searchesObserved`. |
+
+Each selection is a `vericairn.search-selection/1` object with its own `hash`, SHA-256 of its canonical JSON without the
+`hash` member: `method` (`keyword`, version `vericairn.search.keyword/1`, analyzer and engine), `query` (the exact `text`,
+parsed `terms`, `phrases` and `filters`), `limit` and `selectLimit`, `reader` (`principal` or null, and the `audiences`
+searched), `index` (`revision`, each segment's `audience` with its `records` and `documents` basis hashes, `current`, `commit`
+or `uncommitted`, and `asOf`, the latest recorded time among the indexed records), the ranked `candidates` and `more`. The
+analyzer string names the Unicode version of the tables it normalizes and folds with (`nfkc-casefold unicode-16.0.0; ...`). A
+candidate holds its `rank`, integer `score`, `kind`, `audience`, `source` identity, `pin`, matched `fields`, `extent` and
+`state` (`selected`, `duplicate`, `below-limit`, `excluded` or `index-fault`), with a `reason` for the last two; an index
+fault's source names only what the index held. A record carries only candidates whose audience is Internal or Public, and a
+selection that omits others says so in `limited`, and ranks the candidates it keeps again 1, 2, 3 in their order, so no gap
+counts the omitted ones. One count remains: when `more` is true, `limit` minus the number of candidates kept is the number
+omitted. Its `reader.audiences` and `index.segments` likewise name only Internal and Public, with one opaque entry,
+`Restricted`, standing for every other segment searched: in the segments it is `{"audience": "Restricted"}`, with no basis
+hashes, and its `index.revision` is recomputed over the method and the segments it names, so it confirms no restricted label
+and does not change when only restricted content does. Validation refuses a hash that does not match, a value canonical JSON
+cannot hold (a fraction or a duplicate member, reported as a finding), a candidate, audience or segment of another audience in
+a record, more than one `Restricted` segment, more candidates or selections than these limits, an out-of-order rank and any
+field not listed here.
+The context manifest that holds a package's selections is `vericairn.context-manifest/2`; it is a derived artifact, not a
+record. The operation's field descriptions change within `vericairn.records/readers/8`, which has not shipped.

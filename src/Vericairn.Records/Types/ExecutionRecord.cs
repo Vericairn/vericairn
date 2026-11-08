@@ -6,6 +6,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Representation;
+using Vericairn.Records.Search;
 
 namespace Vericairn.Records.Types;
 
@@ -38,6 +39,16 @@ internal static class ExecutionRecord
             if (package is not null and not "unknown" && !Hashing.ContentHash.IsValid(package))
             {
                 context.Error("operation.execution", "A context package is its exact content hash or unknown.");
+            }
+
+            // Dispatch-time searches, fixed at intent with the package they selected for (format 3, additive).
+            if (execution.Since(3, "contextSelections") && execution.Has("contextSelections"))
+            {
+                IReadOnlyList<BodyReader> selections = execution.NestedArray("contextSelections", true, allowEmpty: false) ?? [];
+                if (selections.Count > SearchSelections.MaxContextSelections)
+                    execution.Error("search.selections", "contextSelections", $"A run's intent records at most {SearchSelections.MaxContextSelections} context selections.");
+                foreach (BodyReader selection in selections) SearchSelections.Validate(selection, recordReaders: true);
+                if (package is null or "unknown") context.Error("operation.execution", "Context selections pin the exact package they selected for.");
             }
 
             if (execution.Nested("requested", true) is BodyReader requested)
@@ -176,6 +187,22 @@ internal static class ExecutionRecord
                 context.Error("operation.execution-kept", "Execution is fixed in the intent; a different selection needs a new admitted run.");
             }
         }
+    }
+
+    /// <summary>
+    /// A settled agent run's observed searches: those its agent made through the run's MCP server, recorded once at settlement
+    /// (format 3, additive) and kept by every later revision.
+    /// </summary>
+    public static void ReadObservedSearches(ValidationContext context, string? status)
+    {
+        BodyReader body = context.Body;
+        if (!body.Since(3, "searchesObserved") || body.Nested("searchesObserved", false) is not BodyReader observed) return;
+        SearchSelections.ValidateObserved(observed);
+        if (EstateModel.BodyString(context.Record, "action") != OperationType.AgentRun || status is not ("known-failure" or "observed-success"))
+            context.Error("operation.searches-observed", "Observed searches belong to a settled agent run.");
+        if (context.Find(context.Record.Supersedes) is RecordEnvelope previous && EstateModel.BodyString(previous, "status") is "known-failure" or "observed-success"
+            && !previous.Body.TryGetProperty("searchesObserved", out _))
+            context.Error("operation.searches-observed", "Observed searches are recorded at settlement, never added afterwards.");
     }
 
     private static void Identity(BodyReader reader, string field, bool required = true)

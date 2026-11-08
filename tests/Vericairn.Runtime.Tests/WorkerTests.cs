@@ -746,7 +746,7 @@ public class WorkerTests
         Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
         JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();
         Assert.Equal("vericairn-under-test", server["command"]!.GetValue<string>());
-        Assert.Equal(["--estate", run.Service.Root, "mcp", "serve", "--as", run.Estate.BuilderId], server["args"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.Equal(["--estate", run.Service.Root, "mcp", "serve", "--as", run.Estate.BuilderId, "--run", started.Run], server["args"]!.AsArray().Select(a => a!.GetValue<string>()));
         Assert.False(mcp.StartsWith(workspace, StringComparison.Ordinal));
 
         // Its environment came from the allowlist: no ambient credential, the harness's own configuration, and the run's files.

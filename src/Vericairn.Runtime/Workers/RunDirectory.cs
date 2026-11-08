@@ -186,6 +186,9 @@ public sealed class RunDirectory
     /// <summary>The MCP configuration the harness was given.</summary>
     public string McpConfiguration => System.IO.Path.Combine(Path, "mcp.json");
 
+    /// <summary>The searches the run's MCP server served its agent, one selection per line, which settlement records.</summary>
+    public string SearchesFile => System.IO.Path.Combine(Path, "searches.jsonl");
+
     /// <summary>The exact dispatched machine brief, containing its context package and originals.</summary>
     public string ContextFile => System.IO.Path.Combine(Path, "context.json");
 

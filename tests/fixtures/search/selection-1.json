@@ -1,0 +1,228 @@
+{
+  "candidates": [
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 648,
+        "start": 0
+      },
+      "fields": [
+        "body.intent",
+        "body.title"
+      ],
+      "kind": "record",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjoxMWZmNjdjMDRjNjY5NDEyODA1MjlkODM0NzRlZjE3ZjU4MTZmODQ4YTQxOTEwZDY4ZTc5ODdkMGViZGQyYmMwIiwiYnl0ZXMiOjY0OCwiaGFzaCI6InNoYTI1NjoyNTBlODc5Y2U3ZGI4MGRmNWQyMzcwOWFkZTZmYmRkNjU2NTM0Y2M4YmM1ZTMwODNiODVkMDRiZjJjMWIyYjY4IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMiIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy93b3JrLW9yZGVyLzIwMjYtMTEvMDFNNlMwMDAwMDAwMDAwMDAwMDAwMDAwMTIuanNvbiIsInR5cGUiOiJ3b3JrLW9yZGVyIn19",
+      "rank": 1,
+      "score": 58225,
+      "source": {
+        "byteHash": "sha256:11ff67c04c66941280529d83474ef17f5816f848a41910d68e7987d0ebdd2bc0",
+        "bytes": 648,
+        "hash": "sha256:250e879ce7db80df5d23709ade6fbdd656534cc8bc5e3083b85d04bf2c1b2b68",
+        "id": "01M6S000000000000000000012",
+        "kind": "record",
+        "path": "records/work-order/2026-11/01M6S000000000000000000012.json",
+        "type": "work-order"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 903,
+        "start": 0
+      },
+      "fields": [
+        "body.effects",
+        "body.statement",
+        "body.summary",
+        "body.synthesis",
+        "body.title"
+      ],
+      "kind": "record",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1Njo4ZGQ4MTljMzFmZDkxYTE5MjRhMTk0YTdlY2IxYjYyZjJlZDBhM2IyZjZmYjgxNWE5NWRhYTEyMDU5MGMyM2RjIiwiYnl0ZXMiOjkwMywiaGFzaCI6InNoYTI1Njo0YzkyNzdlZDk2MWUyMGQ0ZjdmNWEyMjgwNzE3ODU3YWRkYjFlMjk2MzhjMGI0YzU0M2YxNzQ3ZGI4YzJkMzUwIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMSIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kZWNpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDExLmpzb24iLCJ0eXBlIjoiZGVjaXNpb24ifX0",
+      "rank": 2,
+      "score": 56193,
+      "source": {
+        "byteHash": "sha256:8dd819c31fd91a1924a194a7ecb1b62f2ed0a3b2f6fb815a95daa120590c23dc",
+        "bytes": 903,
+        "hash": "sha256:4c9277ed961e20d4f7f5a2280717857addb1e29638c0b4c543f1747db8c2d350",
+        "id": "01M6S000000000000000000011",
+        "kind": "record",
+        "path": "records/decision/2026-11/01M6S000000000000000000011.json",
+        "type": "decision"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 870,
+        "start": 0
+      },
+      "fields": [
+        "body.effects",
+        "body.title"
+      ],
+      "kind": "record",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowODJkNDBkMDJlMDI4MjU4YzFkZjlhNDQxNDhkZjJiY2M4MDg0NjRlYTM3YTVhY2Y0OTk1MGM3ZDU3ODM1Mjk5IiwiYnl0ZXMiOjg3MCwiaGFzaCI6InNoYTI1Njo1MGQ5NWQwNjZmNzA2NWRlYzZmNzhiN2VkODEwYmFhNmJiMTdhZjI0ZjgxZjRiNDFiZjkzYTg3NTE1NmY1N2M2IiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAxMCIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9kZWNpc2lvbi8yMDI2LTExLzAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDEwLmpzb24iLCJ0eXBlIjoiZGVjaXNpb24ifX0",
+      "rank": 3,
+      "score": 34931,
+      "source": {
+        "byteHash": "sha256:082d40d02e028258c1df9a44148df2bcc808464ea37a5acf49950c7d57835299",
+        "bytes": 870,
+        "hash": "sha256:50d95d066f7065dec6f78b7ed810baa6bb17af24f81f4b41bf93a875156f57c6",
+        "id": "01M6S000000000000000000010",
+        "kind": "record",
+        "path": "records/decision/2026-11/01M6S000000000000000000010.json",
+        "type": "decision"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 162,
+        "start": 214
+      },
+      "fields": [
+        "heading"
+      ],
+      "kind": "document",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+      "rank": 4,
+      "score": 29162,
+      "source": {
+        "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+        "bytes": 449,
+        "kind": "document",
+        "path": "design/search-notes.md",
+        "revision": "01M6S000000000000000000014",
+        "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 57,
+        "start": 262
+      },
+      "fields": [
+        "row.Holds"
+      ],
+      "kind": "document",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+      "rank": 5,
+      "score": 28352,
+      "source": {
+        "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+        "bytes": 449,
+        "kind": "document",
+        "path": "design/search-notes.md",
+        "revision": "01M6S000000000000000000014",
+        "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 54,
+        "start": 320
+      },
+      "fields": [],
+      "kind": "document",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjowYzBjMmU5YTRlMGM1NDRmYmNkNDhkNTJmMzdhMGRkMjc4NzFlZjllNGRhMjFkM2NkNWZhZjAyZThiM2FhY2FjIiwiYnl0ZXMiOjQ0OSwia2luZCI6ImRvY3VtZW50IiwicGF0aCI6ImRlc2lnbi9zZWFyY2gtbm90ZXMubWQiLCJyZXZpc2lvbiI6IjAxTTZTMDAwMDAwMDAwMDAwMDAwMDAwMDE0IiwicmV2aXNpb25IYXNoIjoic2hhMjU2OjJhZWVjMmE2Zjc0MGViNmUwZjA2OTMxN2Q5YjQ3NWM3YTBjMTk5MGFjMjE1NTljNmI2N2UwZmU3NmM3NzJiMGQifX0",
+      "rank": 6,
+      "score": 27434,
+      "source": {
+        "byteHash": "sha256:0c0c2e9a4e0c544fbcd48d52f37a0dd27871ef9e4da21d3cd5faf02e8b3aacac",
+        "bytes": 449,
+        "kind": "document",
+        "path": "design/search-notes.md",
+        "revision": "01M6S000000000000000000014",
+        "revisionHash": "sha256:2aeec2a6f740eb6e0f069317d9b475c7a0c1990ac21559c6b67e0fe76c772b0d"
+      },
+      "state": "selected"
+    },
+    {
+      "audience": "Internal",
+      "extent": {
+        "length": 549,
+        "start": 0
+      },
+      "fields": [
+        "body.purpose"
+      ],
+      "kind": "record",
+      "pin": "vc1_eyJlc3RhdGUiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsInNvdXJjZSI6eyJieXRlSGFzaCI6InNoYTI1NjozNjM2OGRiYmNlNmQ4ZDBkMzFkYWEyM2E3OWM1OTgzNzg0Y2NiMmM4MmEyNGM3OGMwMWNhMmE0MDhlYjNkZWY4IiwiYnl0ZXMiOjU0OSwiaGFzaCI6InNoYTI1NjpiOTllODMxYmJkNzQwZDIwMWQwZTM3ODdhMDI5YjQ0ZTcwNmMyNzkxY2IzMjFhZDg4NTdhMjNlMzUwMDZiM2JlIiwiaWQiOiIwMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsImtpbmQiOiJyZWNvcmQiLCJwYXRoIjoicmVjb3Jkcy9lc3RhdGUvMjAyNi0xMS8wMU02UzAwMDAwMDAwMDAwMDAwMDAwMDAwMS5qc29uIiwidHlwZSI6ImVzdGF0ZSJ9fQ",
+      "rank": 7,
+      "score": 18464,
+      "source": {
+        "byteHash": "sha256:36368dbbce6d8d0d31daa23a79c5983784ccb2c82a24c78c01ca2a408eb3def8",
+        "bytes": 549,
+        "hash": "sha256:b99e831bbd740d201d0e3787a029b44e706c2791cb321ad8857a23e35006b3be",
+        "id": "01M6S000000000000000000001",
+        "kind": "record",
+        "path": "records/estate/2026-11/01M6S000000000000000000001.json",
+        "type": "estate"
+      },
+      "state": "selected"
+    }
+  ],
+  "format": "vericairn.search-selection/1",
+  "hash": "sha256:2b638c4eaad088962041013b5520f4cd458cf3424eec18776d45a07c5498e68a",
+  "index": {
+    "asOf": "2026-11-01T12:00:10Z",
+    "commit": "uncommitted",
+    "current": true,
+    "revision": "sha256:83dceb5afaabdc6fc1924c6c142ef15f53c8048f573f5333a51bac82275237ad",
+    "segments": [
+      {
+        "audience": "Internal",
+        "documents": "sha256:6c74059736976b232e457af184f191e0b5a8f17bd95b318190e48d19991de4b0",
+        "records": "sha256:c7def37c36b2a42c8e43e28d2d4e0807b02b90e29ed978fb1bbbb843a8b87296"
+      },
+      {
+        "audience": "Members only",
+        "documents": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "audience": "Public",
+        "documents": "sha256:d5ce289fa154cfc3bf906d7dd572b869d4e3ba9d781980ca34ef801db3b1f7a0",
+        "records": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    ]
+  },
+  "limit": 10,
+  "method": {
+    "analyzer": "nfkc-casefold unicode-16.0.0; letter-digit runs; connected identifiers also whole; no stemming",
+    "engine": "sqlite fts5 bm25 (k1 1.2, b 0.75); weights body 1, title 4, ident 10; scores x10000 rounded half away from zero",
+    "name": "keyword",
+    "version": "vericairn.search.keyword/1"
+  },
+  "more": false,
+  "query": {
+    "filters": {
+      "history": false
+    },
+    "phrases": [],
+    "terms": [
+      "keyword",
+      "index",
+      "originals",
+      "catalog"
+    ],
+    "text": "keyword index originals catalog"
+  },
+  "reader": {
+    "audiences": [
+      "Internal",
+      "Members only",
+      "Public"
+    ],
+    "principal": null
+  },
+  "selectLimit": 10
+}

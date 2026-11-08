@@ -384,7 +384,11 @@ public sealed record NextResponse(string Text, JsonElement Json);
 /// <param name="Execution">Explicit run choices.</param>
 /// <param name="Allocation">Input and output token reservations, and optional maxBytes for the context payload, measured separately.</param>
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; a mismatch refuses dispatch.</param>
-public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
+public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null)
+{
+    /// <summary>For an agent's step, up to five search queries whose top three new candidates each join the run's package as optional sources.</summary>
+    public IReadOnlyList<string>? Search { get; init; }
+}
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
 /// <param name="Goal">The goal's current revision.</param>
@@ -640,6 +644,9 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; the intent always pins the actual package.</param>
 public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null)
 {
+    /// <summary>Up to five search queries whose top three new candidates each join the run's package as optional sources; the intent records each selection.</summary>
+    public IReadOnlyList<string>? Search { get; init; }
+
     /// <summary>An optional exact saved prompt, recorded with the admitted intent and included in its measured brief.</summary>
     public PromptSelection? Prompt { get; init; }
 }
