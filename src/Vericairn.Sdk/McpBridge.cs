@@ -18,9 +18,9 @@ namespace Vericairn.Sdk;
 /// of a write itself. Every HTTP request is signed by this machine's device key, as the connection's requests are; a write is first
 /// prepared, the prepared record is checked to be the one its tool names for this device's principal, and only then is its hash
 /// signed with the same key and the call repeated with the plan and the signature. The bridge decides nothing: the runtime judges
-/// every call as its API operation for this device. From 0.9.2 (MCP-05), when the runtime declares resource subscriptions, the
-/// bridge also holds the session's server stream, signed as every request is, and writes each notification it carries to the
-/// client as a line between responses; it signs nothing a notification says.
+/// every call as its API operation for this device. From 0.9.2 (MCP-05), while the client holds a resource subscription the runtime
+/// accepted, the bridge also holds the session's server stream, signed as every request is, and writes each resource notification
+/// it carries to the client as a line between responses; it signs nothing a notification says.
 /// </summary>
 internal sealed class McpBridge : IDisposable
 {
@@ -56,6 +56,12 @@ internal sealed class McpBridge : IDisposable
     private readonly Func<byte[], byte[]> sign;
     private readonly TextWriter? log;
     private readonly SemaphoreSlim opening = new(1, 1);
+    private readonly object subscribing = new();
+    private readonly HashSet<string> subscribed = new(StringComparer.Ordinal);
+    private Func<JsonObject, Task>? writer;
+    private CancellationToken running;
+    private CancellationTokenSource? streaming;
+    private Task stream = Task.CompletedTask;
     private string? session;
     private string? version;
     private JsonNode? initialize;
@@ -95,9 +101,7 @@ internal sealed class McpBridge : IDisposable
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(output);
         using var writing = new SemaphoreSlim(1, 1);
-        using var streaming = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var pending = new List<Task>();
-        Task? stream = null;
 
         async Task WriteAsync(JsonObject message)
         {
@@ -113,6 +117,8 @@ internal sealed class McpBridge : IDisposable
             }
         }
 
+        writer = WriteAsync;
+        running = cancellationToken;
         try
         {
             while (await Task.Run(() => input.ReadLineAsync(cancellationToken).AsTask(), cancellationToken).ConfigureAwait(false) is string line)
@@ -158,14 +164,7 @@ internal sealed class McpBridge : IDisposable
                 {
                     await Task.WhenAll(pending).ConfigureAwait(false);
                     pending.Clear();
-                    JsonObject initialized = await InitializeAsync(message, cancellationToken).ConfigureAwait(false);
-                    await WriteAsync(initialized).ConfigureAwait(false);
-                    if (stream is null && initialized["result"]?["capabilities"]?["resources"]?["subscribe"] is JsonValue subscribe && subscribe.TryGetValue(out bool subscribing) && subscribing)
-                    {
-                        // The runtime sends the session's notifications on its server stream, which the bridge holds from now on.
-                        stream = Task.Run(() => StreamAsync(WriteAsync, streaming.Token), CancellationToken.None);
-                    }
-
+                    await WriteAsync(await InitializeAsync(message, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
                     continue;
                 }
 
@@ -180,14 +179,72 @@ internal sealed class McpBridge : IDisposable
         finally
         {
             await Task.WhenAll(pending).ConfigureAwait(false);
-            await streaming.CancelAsync().ConfigureAwait(false);
-            if (stream is not null)
-            {
-                await stream.ConfigureAwait(false);
-            }
-
+            await StopStreamAsync().ConfigureAwait(false);
             await EndAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Keeps what the client subscribed to after the runtime accepted it, holding the session's server stream while anything is
+    /// subscribed and letting it go when nothing is, so a session that subscribes to nothing holds none of its device's stream slots.
+    /// </summary>
+    private void Track(string method, string uri)
+    {
+        lock (subscribing)
+        {
+            if (method == "resources/subscribe")
+            {
+                subscribed.Add(uri);
+            }
+            else
+            {
+                subscribed.Remove(uri);
+            }
+
+            if (subscribed.Count > 0 && streaming is null && writer is { } write)
+            {
+                // The previous stream, if one is still letting go, ends first: a session holds one server stream.
+                var source = CancellationTokenSource.CreateLinkedTokenSource(running);
+                streaming = source;
+                Task previous = stream;
+                stream = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await previous.ConfigureAwait(false);
+                        await StreamAsync(write, source.Token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        source.Dispose();
+                    }
+                }, CancellationToken.None);
+            }
+            else if (subscribed.Count == 0 && streaming is not null)
+            {
+                streaming.Cancel();
+                streaming = null;
+            }
+        }
+    }
+
+    /// <summary>Lets the server stream go and waits until it has.</summary>
+    private async Task StopStreamAsync()
+    {
+        Task held;
+        lock (subscribing)
+        {
+            subscribed.Clear();
+            if (streaming is not null)
+            {
+                streaming.Cancel();
+                streaming = null;
+            }
+
+            held = stream;
+        }
+
+        await held.ConfigureAwait(false);
     }
 
     /// <summary>
@@ -229,7 +286,16 @@ internal sealed class McpBridge : IDisposable
         }
     }
 
-    /// <summary>Reads one server stream to its end; false when the runtime refused to open it.</summary>
+    /// <summary>The largest data block of one message on the server stream that the bridge reads; a larger one is discarded unread.</summary>
+    internal const int MaxStreamBlock = 64 * 1024;
+
+    /// <summary>The notifications the bridge writes to its client: the server stream carries nothing else it would pass on.</summary>
+    private static readonly HashSet<string> Forwarded = new(StringComparer.Ordinal) { "notifications/resources/updated", "notifications/resources/list_changed" };
+
+    /// <summary>
+    /// Reads one server stream to its end; false when the runtime refused to open it. Each message's data is held to
+    /// <see cref="MaxStreamBlock"/> characters, a line included, and only a resource notification is written to the client.
+    /// </summary>
     private async Task<bool> FollowAsync(string open, Func<JsonObject, Task> write, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(Endpoint, UriKind.Relative));
@@ -250,15 +316,30 @@ internal sealed class McpBridge : IDisposable
         await using (body.ConfigureAwait(false))
         {
             using var reader = new StreamReader(body, new UTF8Encoding(false));
+            var lines = new BoundedLines(reader, MaxStreamBlock);
             var data = new StringBuilder();
             string kind = "message";
-            while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+            bool oversized = false;
+            while (await lines.NextAsync(cancellationToken).ConfigureAwait(false) is { } next)
             {
-                if (line.Length > 0)
+                (string line, bool overflowed) = next;
+                if (overflowed || line.Length > 0)
                 {
-                    if (line.StartsWith("data:", StringComparison.Ordinal))
+                    if (overflowed)
                     {
-                        data.Append(line.AsSpan(5).TrimStart(' ')).Append('\n');
+                        oversized = true;
+                    }
+                    else if (line.StartsWith("data:", StringComparison.Ordinal))
+                    {
+                        ReadOnlySpan<char> value = line.AsSpan(5).TrimStart(' ');
+                        if (data.Length + value.Length + 1 > MaxStreamBlock)
+                        {
+                            oversized = true;
+                        }
+                        else if (!oversized)
+                        {
+                            data.Append(value).Append('\n');
+                        }
                     }
                     else if (line.StartsWith("event:", StringComparison.Ordinal))
                     {
@@ -268,18 +349,78 @@ internal sealed class McpBridge : IDisposable
                     continue;
                 }
 
-                // Only a JSON-RPC notification goes on: the stream carries no request this bridge would answer for the client.
-                if (kind == "message" && data.Length > 0 && TryParse(data.ToString()) is JsonObject message && Text(message["method"]) is not null && message["id"] is null)
+                if (oversized)
+                {
+                    log?.WriteLine($"vericairn mcp: a message on the server stream exceeded {MaxStreamBlock} characters and was discarded");
+                }
+                else if (kind == "message" && data.Length > 0 && TryParse(data.ToString()) is JsonObject message && message["id"] is null
+                    && Text(message["method"]) is string method && Forwarded.Contains(method))
                 {
                     await write(message).ConfigureAwait(false);
                 }
 
                 data.Clear();
                 kind = "message";
+                oversized = false;
             }
         }
 
         return true;
+    }
+
+    /// <summary>Lines of a text stream, each held to a bound: a longer line is consumed to its end and reported as overflowed.</summary>
+    private sealed class BoundedLines(TextReader reader, int bound)
+    {
+        private readonly char[] buffer = new char[4096];
+        private readonly StringBuilder line = new();
+        private int position;
+        private int length;
+
+        /// <summary>The next line and whether it overflowed the bound; null at the stream's end.</summary>
+        public async Task<(string Line, bool Overflowed)?> NextAsync(CancellationToken cancellationToken)
+        {
+            line.Clear();
+            bool overflowed = false;
+            while (true)
+            {
+                if (position == length)
+                {
+                    length = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                    position = 0;
+                    if (length == 0)
+                    {
+                        return line.Length > 0 || overflowed ? (line.ToString(), overflowed) : null;
+                    }
+                }
+
+                int end = Array.IndexOf(buffer, '\n', position, length - position);
+                int take = (end < 0 ? length : end) - position;
+                if (!overflowed)
+                {
+                    if (line.Length + take > bound)
+                    {
+                        overflowed = true;
+                        line.Clear();
+                    }
+                    else
+                    {
+                        line.Append(buffer, position, take);
+                    }
+                }
+
+                position += take;
+                if (end >= 0)
+                {
+                    position++;
+                    if (line.Length > 0 && line[^1] == '\r')
+                    {
+                        line.Length--;
+                    }
+
+                    return (line.ToString(), overflowed);
+                }
+            }
+        }
     }
 
     private static JsonObject? TryParse(string text)
@@ -335,6 +476,17 @@ internal sealed class McpBridge : IDisposable
             if (method == "tools/call")
             {
                 return await CallAsync(message, id, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (method is "resources/subscribe" or "resources/unsubscribe")
+            {
+                JsonObject answer = await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
+                if (answer["result"] is not null && Text(message["params"]?["uri"]) is string uri)
+                {
+                    Track(method, uri);
+                }
+
+                return answer;
             }
 
             return await ForwardAsync(message, id, cancellationToken).ConfigureAwait(false);
@@ -591,11 +743,40 @@ internal sealed class McpBridge : IDisposable
             version = Text(body["result"]?["protocolVersion"]);
             log?.WriteLine("vericairn mcp: the runtime ended the session; a new one is open");
             await PostAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/initialized" }, cancellationToken).ConfigureAwait(false);
+            await ResubscribeAsync(cancellationToken).ConfigureAwait(false);
             return session is not null;
         }
         finally
         {
             opening.Release();
+        }
+    }
+
+    /// <summary>
+    /// Subscribes the new session to what the client had subscribed to, since the runtime's subscriptions ended with the old one; a
+    /// resource the runtime no longer accepts is dropped, and the client hears nothing more of it.
+    /// </summary>
+    private async Task ResubscribeAsync(CancellationToken cancellationToken)
+    {
+        string[] uris;
+        lock (subscribing)
+        {
+            uris = [.. subscribed];
+        }
+
+        foreach (string uri in uris)
+        {
+            var subscribe = new JsonObject
+            {
+                ["jsonrpc"] = "2.0", ["id"] = "vericairn-bridge-" + Interlocked.Increment(ref reopened).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["method"] = "resources/subscribe", ["params"] = new JsonObject { ["uri"] = uri },
+            };
+            (HttpStatusCode status, JsonObject? body, string? problem, _) = await PostAsync(subscribe, cancellationToken).ConfigureAwait(false);
+            if (status != HttpStatusCode.OK || body?["result"] is null)
+            {
+                log?.WriteLine($"vericairn mcp: the new session did not take the subscription to {uri}: {Refused(status, problem ?? Text(body?["error"]?["message"]))}");
+                Track("resources/unsubscribe", uri);
+            }
         }
     }
 
