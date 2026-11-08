@@ -170,6 +170,133 @@ public class LocalStateModeTests
         }
     }
 
+    [Fact]
+    public void AStoreInADirectoryThatBelongsToAnotherUserIsRefused()
+    {
+        if (OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Needs a Unix directory that another user owns: /tmp is root's, unless the tests run as root.");
+            return;
+        }
+
+        // /tmp belongs to root on Linux and macOS; a live store kept directly in it would be readable by root's choosing.
+        string database = Path.Combine("/tmp", "vericairn-other-owner-" + Ulid.NewUlid().Value + ".db");
+        IOException refused = Assert.Throws<IOException>(() => new LiveStore(database));
+        Assert.Contains("belongs to another user of this machine", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(database));
+        Assert.Throws<IOException>(() => new Vericairn.Runtime.Objects.SqliteObjectStore(database));
+        Assert.False(File.Exists(database));
+    }
+
+    [Theory]
+    [InlineData("refused")]
+    [InlineData("unsupported")]
+    [InlineData("ignored")]
+    public void StateOnAFilesystemThatKeepsNoUnixModesOpensAndIsReportedOnce(string filesystem)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows keeps per-user state under the profile's own permissions.");
+            return;
+        }
+
+        string scratch = Scratch();
+        Action<string>? report = OwnerOnlyState.Report;
+        var told = new List<string>();
+        try
+        {
+            (string root, _) = Estate(scratch, "repository-synced");
+            string home = Path.Combine(scratch, "home");
+            Directory.CreateDirectory(home);
+            File.SetUnixFileMode(home, WideDirectory);
+            OwnerOnlyState.Report = told.Add;
+            // As vfat refuses a mode change (EPERM), as some FUSE and network filesystems do not support one, and as exFAT on macOS or
+            // WSL's /mnt accept one that does not hold.
+            OwnerOnlyState.ModeSetter = filesystem switch
+            {
+                "refused" => (_, _) => throw new UnauthorizedAccessException("Operation not permitted"),
+                "unsupported" => (_, _) => throw new IOException("Operation not supported", 45),
+                _ => (_, _) => { },
+            };
+
+            string database;
+            using (EstateSession session = EstateSession.Open(root, false, home))
+            {
+                Assert.False(session.Load().Findings.HasErrors);
+                database = session.Live.Path;
+            }
+
+            Assert.Equal([home], told);
+            Assert.Contains(home, OwnerOnlyState.Unrestricted);
+            Assert.Equal(WideDirectory, File.GetUnixFileMode(home));
+
+            // A store an earlier build left wider is used as it is too, and nothing more is said: it is on the same filesystem.
+            File.SetUnixFileMode(Path.GetDirectoryName(database)!, WideDirectory);
+            File.SetUnixFileMode(database, WideFile);
+            using (EstateSession reopened = EstateSession.Open(root, false, home))
+            {
+                Assert.False(reopened.Load().Findings.HasErrors);
+            }
+
+            Assert.Equal([home], told);
+            Assert.Equal(WideFile, File.GetUnixFileMode(database));
+            Assert.Equal((home, OwnerOnlyState.Warning(home)), OwnerOnlyState.Restriction(home));
+        }
+        finally
+        {
+            OwnerOnlyState.ModeSetter = null;
+            OwnerOnlyState.Report = report;
+            Delete(scratch);
+        }
+    }
+
+    [Fact]
+    public void StoreFilesWhoseModesDoNotHoldAreReportedOnceByTheirDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Windows keeps per-user state under the profile's own permissions.");
+            return;
+        }
+
+        string scratch = Scratch();
+        Action<string>? report = OwnerOnlyState.Report;
+        var told = new List<string>();
+        try
+        {
+            (string root, _) = Estate(scratch, "local-only");
+            string home = Path.Combine(scratch, "home");
+            string database;
+            using (EstateSession first = EstateSession.Open(root, false, home))
+            {
+                database = first.Live.Path;
+            }
+
+            // As FAT32 mounted on macOS shows it: directories 0700 and every file 0700, whatever a mode change asks.
+            string live = Path.GetDirectoryName(database)!;
+            foreach (string file in new[] { database, Path.Combine(live, "objects.db") }) File.SetUnixFileMode(file, OwnerDirectory);
+            OwnerOnlyState.Report = told.Add;
+            OwnerOnlyState.ModeSetter = (path, mode) =>
+            {
+                if (mode == OwnerDirectory && !OperatingSystem.IsWindows()) File.SetUnixFileMode(path, mode);
+            };
+
+            using (EstateSession reopened = EstateSession.Open(root, false, home))
+            {
+                Assert.Equal("local-only", reopened.Profile);
+            }
+
+            Assert.Equal([live], told);
+            Assert.Equal((live, OwnerOnlyState.Warning(live)), OwnerOnlyState.Restriction(database));
+        }
+        finally
+        {
+            OwnerOnlyState.ModeSetter = null;
+            OwnerOnlyState.Report = report;
+            Delete(scratch);
+        }
+    }
+
     private static string Scratch()
     {
         string scratch = Path.Combine(Path.GetTempPath(), "vericairn-mode-" + Ulid.NewUlid().Value);

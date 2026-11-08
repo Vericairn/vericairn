@@ -37,6 +37,11 @@ internal sealed class MachineDiagnostics(CommandContext context)
         context.Output.WriteLine(searchProblem is null
             ? $"search    keyword index {Records.Search.SearchSelections.KeywordMethod} on SQLite {sqlite} with FTS5"
             : $"search    keyword index unavailable: {searchProblem}");
+        foreach (string problem in StateProblems(root))
+        {
+            context.Output.WriteLine($"state     {problem}");
+        }
+
         if (IsEstate(root))
         {
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
@@ -46,6 +51,32 @@ internal sealed class MachineDiagnostics(CommandContext context)
         }
 
         return Clean;
+    }
+
+    // The per-user state, the estate's live store directory and its database, when they exist: one that cannot be made owner-only is
+    // named, once for its filesystem. Nothing is said when they are owner-only.
+    private static IEnumerable<string> StateProblems(string root)
+    {
+        var paths = new List<string> { VericairnHome.Path() };
+        if (IsEstate(root) && EstateManifest.Load(root, new FindingList()) is { } manifest)
+        {
+            string database = EstateLocations.LiveStorePath(Path.GetFullPath(root), manifest.Estate, manifest.Profile);
+            paths.Add(Path.GetDirectoryName(database)!);
+            paths.Add(database);
+        }
+
+        var named = new List<string>();
+        foreach (string path in paths.Where(p => Directory.Exists(p) || File.Exists(p)))
+        {
+            if (OwnerOnlyState.Restriction(path) is not (string subject, string problem)
+                || named.Any(known => subject == known || subject.StartsWith(known + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            named.Add(subject);
+            yield return problem;
+        }
     }
 
     private static string? Probe(string tool, string argument)

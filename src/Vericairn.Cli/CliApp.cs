@@ -15,6 +15,9 @@ internal static class CliApp
     public static RootCommand Build(ReleaseUpdates? updates = null, IEstateApi? borrowedApi = null, CancellationToken cancellationToken = default)
     {
         updates ??= new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default);
+        // Per-user state on a filesystem that cannot restrict its permissions is used as it is and said once per process, on standard
+        // error, which a detached daemon writes to its log; never in a command's output.
+        Vericairn.Records.Signing.OwnerOnlyState.Report = path => Console.Error.WriteLine("warning: " + Vericairn.Records.Signing.OwnerOnlyState.Warning(path));
         if (borrowedApi is null) Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
         var context = new CommandContext(cancellationToken: cancellationToken) { BorrowedApi = borrowedApi };
         var root = new VericairnCommand(context);
