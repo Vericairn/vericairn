@@ -96,6 +96,15 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+          # A change's run restores the NuGet global packages folder only on an exact match of the runner's operating system and
+          # the hash of the SDK pin and every portable and distributable lock file, and saves it only after the job succeeds.
+          # The locked restores still compare every package's SHA-512 with its lock file. A release caches nothing: it
+          # downloads every package afresh, so the graph it ships is hashed from the bytes nuget.org serves to that run.
+          cache: ${{ !inputs.release }}
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+            **/packages.distributable.lock.json
       - name: Check the version
         id: version
         shell: bash

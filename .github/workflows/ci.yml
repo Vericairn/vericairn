@@ -40,7 +40,11 @@ jobs:
 
   # Remote's heads build only where their platform's workload is installed, so they are in src/Vericairn.Mobile.slnx, not the
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
-  # developer builds: neither job signs, installs on or qualifies a real device.
+  # developer builds: neither job signs, installs on or qualifies a real device. The workloads are installed afresh on every
+  # run, uncached: an install takes 15 to 30 seconds, and a cache would have to restore packs and installation records into
+  # the SDK's own directory, where the SDK trusts whatever it finds. Each head's NuGet packages are cached on the SDK pin,
+  # every lock file and this workflow, which pins the workload set whose runtime packs a restore downloads beside the locked
+  # graph.
   remote-ios:
     # iOS alone is pinned to workload set 10.0.401 (iOS 26.5, Xcode 26.6): Avalonia.iOS does not build against the iOS 27.1
     # bindings of the band's later sets yet. The phone head is a developer build, not a release artifact: that set's Mono
@@ -55,6 +59,11 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+            .github/workflows/ci.yml
       - name: Install the iOS workload
         timeout-minutes: 10
         run: dotnet workload install ios --version 10.0.401
@@ -84,6 +93,11 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+            .github/workflows/ci.yml
       - name: Install the Android workload
         timeout-minutes: 10
         run: dotnet workload install android --version 10.0.404
@@ -112,6 +126,15 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+          # The NuGet global packages folder is restored only on an exact match of this key, the runner's operating system and
+          # the hash of the SDK pin and every lock file, and saved only after the job succeeds; there are no partial matches.
+          # The locked restore still compares every package's SHA-512 with its lock file, a cached package's being the hash
+          # NuGet recorded when a successful run downloaded it. Build output is never cached, and the local feed check below
+          # keeps an empty source list and a fresh cache of its own.
+          cache: true
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
       - name: Restore (locked)
         timeout-minutes: 10
         run: dotnet restore --locked-mode

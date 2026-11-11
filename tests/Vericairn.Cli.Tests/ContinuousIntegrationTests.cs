@@ -653,6 +653,49 @@ public class ContinuousIntegrationTests
         }
     }
 
+    [Fact]
+    public void NuGetCachesMatchTheirLockFilesExactlyAndNeverReachAReleaseOrTheLocalFeedCheck()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // Only setup-dotnet's own cache: it restores on an exact key and saves only after the job succeeds. No other cache action
+        // and no partial key can bring in a package graph another lock file resolved, and nothing caches build output.
+        foreach (string file in WorkflowFiles())
+        {
+            string text = Read(file);
+            Assert.DoesNotContain("actions/cache", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("restore-keys", text, StringComparison.Ordinal);
+        }
+
+        const string portable = "\n          cache-dependency-path: |\n            global.json\n            **/packages.lock.json";
+        string ci = Read(Path.Combine(workflows, "ci.yml"));
+        string build = Block(ci, "build-test:", 2);
+        Assert.EndsWith("\n          cache: true" + portable, Assert.Single(Steps(build), IsSetupDotnet), StringComparison.Ordinal);
+        // The phone heads' restores also download the runtime packs of the workload set this workflow pins.
+        foreach (string job in new[] { "remote-ios:", "remote-android:" })
+            Assert.EndsWith("\n          cache: true" + portable + "\n            .github/workflows/ci.yml",
+                Assert.Single(Steps(Block(ci, job, 2)), IsSetupDotnet), StringComparison.Ordinal);
+        // A change's packaging run caches its portable and distributable graphs; a release downloads every package afresh.
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        Assert.EndsWith("\n          cache: ${{ !inputs.release }}" + portable + "\n            **/packages.distributable.lock.json",
+            Assert.Single(Steps(package), IsSetupDotnet), StringComparison.Ordinal);
+        Assert.Equal(4, WorkflowFiles().Sum(file => Read(file).Split('\n').Count(line => line.TrimStart().StartsWith("cache:", StringComparison.Ordinal))));
+        Assert.DoesNotContain("cache", Read(Path.Combine(workflows, "release.yml")), StringComparison.Ordinal);
+
+        // Every restore stays locked, so NuGet compares each package's SHA-512 with its lock file, cached or downloaded.
+        foreach (string file in WorkflowFiles())
+            foreach (string line in Read(file).Split('\n').Where(line => line.Contains("dotnet restore", StringComparison.Ordinal)))
+                Assert.Contains("--locked-mode", line, StringComparison.Ordinal);
+        Assert.Contains("<RestoreLockedMode Condition=\"'$(CI)' == 'true'\">true</RestoreLockedMode>", Read(Path.Combine(RepositoryRoot(), "Directory.Build.props")), StringComparison.Ordinal);
+
+        // The local feed check reads no cache: an empty source list and a fresh package folder make the local packages its only source.
+        string feed = Block(build, "- name: Install the tool and SDK from the local feed", 6);
+        Assert.Contains("with tempfile.TemporaryDirectory(dir=os.environ[\"RUNNER_TEMP\"]) as temporary:\n", feed, StringComparison.Ordinal);
+        Assert.Contains("config.write_text('<configuration><packageSources><clear /></packageSources></configuration>')\n", feed, StringComparison.Ordinal);
+        Assert.Contains("os.environ[\"NUGET_PACKAGES\"] = str(scratch / \"cache\")\n", feed, StringComparison.Ordinal);
+
+        static bool IsSetupDotnet(string step) => step.Contains("- uses: actions/setup-dotnet@", StringComparison.Ordinal);
+    }
+
     private static string[] WorkflowFiles()
     {
         string[] files = Directory.GetFiles(Path.Combine(RepositoryRoot(), ".github", "workflows"))
