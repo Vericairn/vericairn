@@ -410,72 +410,155 @@ public class PolicyAuthorityTimeTests
         Assert.DoesNotContain(model.Current("prompt-preference"), p => p.Id == preference.Id);
     }
 
-    /// <summary>
-    /// The root operator removes a second operator's role through the runtime after that operator recorded policy records. In an estate
-    /// that has adopted history checkpoints the runtime writes a checkpoint first, so those records keep counting; in one that has not, the
-    /// removal is written, the outcome says what it ends, and each record ended is a warning, so the estate stays valid and writable.
-    /// </summary>
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void TheRuntimeRemovesAnOperatorsRoleAndKeepsTheEstateValid(bool adopted)
+    /// <summary>A device for the root operator whose key the runtime holds, admitted by the root operator, so the runtime signs for it.</summary>
+    private static void RuntimeHeldRootDevice(PolicyFixture f, EstateService api)
     {
-        using var f = new PolicyFixture();
-        Require(f);
-        using EstateService api = EstateService.Open(f.Estate.Root);
         WriteOutcome device = api.DeviceCreate(new(f.Estate.OperatorId, "The root operator's runtime-held device", "file"));
         Assert.True(device.Ok, device.Problem?.Message);
         RecordEnvelope held = api.Session.Load().ById[device.Written!.Id];
         f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
         f.Add("admission", new JsonObject { ["principal"] = f.Estate.OperatorId, ["status"] = "admitted", ["note"] = "Runtime-held device." }, subject: held.Reference);
+    }
+
+    private static string Outcome(WriteOutcome outcome) => outcome.Problem?.Message + " " + string.Join('\n', outcome.Problem?.Findings ?? []);
+
+    /// <summary>
+    /// The root operator removes a second operator's role through the runtime after that operator recorded policy records and, in some
+    /// cases, a decision approving a policy and the policy. In an estate that has adopted history checkpoints the runtime writes a
+    /// checkpoint first, so all of them keep counting. In one that has not, nothing places them before the removal: the runtime refuses
+    /// it, naming each record that would fail and saying that adopting checkpoints first keeps them, and writes nothing, whether the
+    /// records would fail with errors, as the decision does, or count for nothing, as policy records do; once the root operator adopts,
+    /// the same removal is written after a checkpoint and every record keeps counting. A removal that would make no record fail is
+    /// written either way.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public void TheRuntimeRemovesAnOperatorsRoleOnlyWhereWhatTheyWroteKeepsCounting(bool adopted, bool decided)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        RuntimeHeldRootDevice(f, api);
         RecordEnvelope o = f.Add("principal", Person("O", "operator"));
         StoreSigner os = f.AdmitSigner(o.Id);
+        RecordEnvelope idle = f.Add("principal", Person("Idle", "operator"));
         if (adopted) Checkpoint(f, "adoption");
         f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
         RecordEnvelope grant = f.Estate.Add("authority", o.Id, PolicyGrant(f.Estate.BuilderId, f, Scopes.ManageWritingExceptions, PolicyFixture.WritingBounds()).ToJsonString(), signer: os);
         RecordEnvelope builderWriting = f.Add("writing-exception", PolicyFixture.WritingBody(grant), builder: true);
         RecordEnvelope writing = f.Estate.Add("writing-exception", o.Id, new JsonObject { ["token"] = "Open511", ["code"] = "writing.spacing", ["reason"] = "An intentional service name.", ["state"] = "active", ["basis"] = new JsonObject { ["kind"] = "operator" } }.ToJsonString(), signer: os);
         RecordEnvelope preference = f.Estate.Add("prompt-preference", o.Id, new JsonObject { ["prompt"] = "estate:review", ["scope"] = "estate", ["disabled"] = true }.ToJsonString(), signer: os);
-        RecordEnvelope? policy = adopted ? Declare(f, o.Id, os, "o-policy") : null;
+        RecordEnvelope? policy = decided ? Declare(f, o.Id, os, "o-policy") : null;
+        RecordEnvelope? decision = decided ? f.Estate.Load().OfType("decision").Single(d => d.By == o.Id) : null;
         f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
         Assert.Equal(0, api.Check().Errors);
+        RecordEnvelope[] written = [grant, builderWriting, writing, preference, .. decided ? new[] { policy!, decision! } : []];
+        var request = new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("O", "contributor")), Supersedes: o.Id);
 
-        WriteOutcome removal = api.NewRecord(new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("O", "contributor")), Supersedes: o.Id));
-        Assert.True(removal.Ok, removal.Problem?.Message + " " + string.Join('\n', removal.Problem?.Findings ?? []));
+        WriteOutcome removal = api.NewRecord(request);
+        if (!adopted)
+        {
+            // Refused, naming every record that would fail, the decision and the policy it approves among them; nothing is written.
+            Assert.False(removal.Ok);
+            Assert.Equal("refused", removal.Problem!.Code);
+            Assert.Contains("has not adopted history checkpoints", removal.Problem.Message, StringComparison.Ordinal);
+            Assert.Contains("Adopt history checkpoints first", removal.Problem.Message, StringComparison.Ordinal);
+            foreach (RecordEnvelope ended in written) Assert.Contains(ended.Id, removal.Problem.Message, StringComparison.Ordinal);
+            Assert.Contains(removal.Problem.Findings, x => x.Code == "policy.operator-removed" && x.Location == writing.ExpectedPath);
+            if (decided)
+            {
+                Assert.Contains(removal.Problem.Findings, x => x.Code == "decision.operator" && x.Severity == "error" && x.Location.StartsWith(decision!.ExpectedPath, StringComparison.Ordinal));
+                Assert.Contains(removal.Problem.Findings, x => x.Code == "policy.operator-removed" && x.Location == policy!.ExpectedPath);
+            }
+
+            EstateModel unchanged = api.Session.Load();
+            Assert.True(unchanged.HasRole(o.Id, Roles.Operator));
+            Assert.DoesNotContain(unchanged.OfType("principal"), p => p.Supersedes == o.Id);
+            foreach (RecordEnvelope kept in written) Assert.True(unchanged.Counts(unchanged.ById[kept.Id]), kept.Type);
+            Assert.Equal(0, api.Check().Errors);
+        }
+
+        // A removal that would make no record fail is written in either estate.
+        WriteOutcome idleRemoval = api.NewRecord(new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("Idle", "contributor")), Supersedes: idle.Id));
+        Assert.True(idleRemoval.Ok, Outcome(idleRemoval));
+        Assert.False(api.Session.Load().HasRole(idle.Id, Roles.Operator));
+
+        if (!adopted)
+        {
+            // Adopting checkpoints first keeps them: the root operator adopts, and the same removal is written after a checkpoint.
+            Checkpoint(f, "adoption");
+            f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+            removal = api.NewRecord(request);
+        }
+
+        Assert.True(removal.Ok, Outcome(removal));
         EstateModel model = api.Session.Load();
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(e => e.Severity == Severity.Error)));
         Assert.Equal(0, api.Check().Errors);
         Assert.False(model.HasRole(o.Id, Roles.Operator));
         Assert.False(PolicyAuthority.OperatorAt(model, o.Id, Now(f)));
-        RecordEnvelope[] ended = [grant, builderWriting, writing, preference];
-        if (adopted)
-        {
-            // The checkpoint the runtime wrote first lists what O wrote and precedes the removal, so all of it keeps counting.
-            Assert.NotNull(removal.Checkpoint?.Written);
-            RecordEnvelope checkpoint = model.ById[removal.Checkpoint!.Written!.Id];
-            RecordEnvelope revision = model.ById[removal.Written!.Id];
-            Assert.Equal("history-checkpoint", checkpoint.Type);
-            Assert.True(string.CompareOrdinal(checkpoint.At, revision.At) <= 0);
-            foreach (RecordEnvelope kept in ended.Append(policy!))
-            {
-                Assert.True(model.Counts(model.ById[kept.Id]), kept.Type);
-                Assert.True(model.Trust.WitnessedBefore(model.ById[kept.Id], revision), kept.Type);
-            }
 
-            Assert.Contains(model.Current("estate-policy"), p => EstateModel.BodyString(p, "key") == "o-policy");
-        }
-        else
+        // The checkpoint the runtime wrote first precedes the removal, and with the adoption lists what O wrote, so all of it keeps counting.
+        Assert.NotNull(removal.Checkpoint?.Written);
+        RecordEnvelope checkpoint = model.ById[removal.Checkpoint!.Written!.Id];
+        RecordEnvelope revision = model.ById[removal.Written!.Id];
+        Assert.Equal("history-checkpoint", checkpoint.Type);
+        Assert.True(string.CompareOrdinal(checkpoint.At, revision.At) <= 0);
+        foreach (RecordEnvelope kept in written)
         {
-            Assert.Null(removal.Checkpoint?.Written);
-            Assert.Contains("policy.operator-removed", removal.Checkpoint?.Skipped ?? "", StringComparison.Ordinal);
-            foreach (RecordEnvelope gone in ended)
-            {
-                Assert.True(Warned(model, gone), gone.Type);
-                Assert.False(model.Counts(model.ById[gone.Id]), gone.Type);
-            }
+            Assert.True(model.Counts(model.ById[kept.Id]), kept.Type);
+            Assert.True(model.Trust.WitnessedBefore(model.ById[kept.Id], revision), kept.Type);
+            Assert.False(Warned(model, kept), kept.Type);
         }
+
+        if (decided) Assert.Contains(model.Current("estate-policy"), p => EstateModel.BodyString(p, "key") == "o-policy");
 
         // The estate stays writable: the root operator admits a new contributor through the runtime.
         Assert.True(api.NewRecord(new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("New person", "contributor")))).Ok);
+    }
+
+    /// <summary>
+    /// Taking administer away is judged the same way: in an estate that has not adopted history checkpoints the runtime refuses a grant
+    /// revision that would leave a principal record the administrator wrote failing, naming it, and writes nothing; once the root operator
+    /// adopts, it writes the revision after a checkpoint and the record stays valid.
+    /// </summary>
+    [Fact]
+    public void TheRuntimeTakesAdministerAwayOnlyWhereWhatTheAdministratorWroteKeepsCounting()
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        RuntimeHeldRootDevice(f, api);
+        RecordEnvelope a = f.Add("principal", Person("A", "reviewer"));
+        StoreSigner signer = f.AdmitSigner(a.Id);
+        JsonObject body = new() { ["grantee"] = a.Id, ["scope"] = new JsonArray(Scopes.Administer), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = f.Decision.Id };
+        RecordEnvelope grant = f.Add("authority", body);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope admitted = f.Estate.Add("principal", a.Id, Person("X", "contributor").ToJsonString(), signer: signer);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        Assert.Equal(0, api.Check().Errors);
+        body["scope"] = new JsonArray(Scopes.LocalEngineering);
+        var request = new NewRecordRequest("authority", f.Estate.OperatorId, PolicyFixture.Element(body), Supersedes: grant.Id);
+
+        WriteOutcome removal = api.NewRecord(request);
+        Assert.False(removal.Ok);
+        Assert.Equal("refused", removal.Problem!.Code);
+        Assert.Contains(admitted.Id, removal.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains(removal.Problem.Findings, x => x.Code == "principal.author" && x.Location.StartsWith(admitted.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(api.Session.Load().HasScope(a.Id, Scopes.Administer));
+
+        Checkpoint(f, "adoption");
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        removal = api.NewRecord(request);
+        Assert.True(removal.Ok, Outcome(removal));
+        Assert.NotNull(removal.Checkpoint?.Written);
+        EstateModel model = api.Session.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(e => e.Severity == Severity.Error)));
+        Assert.False(model.HasScope(a.Id, Scopes.Administer));
+        Assert.True(model.Counts(model.ById[admitted.Id]));
+        Assert.Equal(admitted.Id, model.CurrentPrincipal(admitted.Id)!.Id);
     }
 }

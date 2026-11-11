@@ -2423,11 +2423,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
-        // A revision taking a role away is stored after a history checkpoint, or says what it ends (design/signed-history.md § 8). A grant
-        // revision that needs a closing is stored after its closing instead, which is such a checkpoint (OPS-07).
-        if (signers is null && !session.IsReadOnly && TakesRoleAway(draft, current) && ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is null)
+        // A revision taking a role away is stored after a history checkpoint, or refused where it would make records fail
+        // (design/signed-history.md § 8). A grant revision that needs a closing is stored after its closing instead, which is such a
+        // checkpoint (OPS-07).
+        if (!session.IsReadOnly && TakesRoleAway(draft, current) && ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is null)
         {
-            return UnderWriteLock(() => StoreRemovalLocked(draft), WriteOutcome.Fail);
+            return UnderWriteLock(() => StoreRemovalLocked(draft, signers), WriteOutcome.Fail);
         }
 
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);

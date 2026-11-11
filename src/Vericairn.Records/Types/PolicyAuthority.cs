@@ -102,7 +102,9 @@ internal static class PolicyAuthority
     /// could place them earlier, each with the revisions that took it away: in an estate that has not adopted checkpoints, or for a record
     /// its adoption witnessed, a record whose own validation finds errors and finds none once such removals are set aside. Each counts for
     /// nothing and is reported as one warning, policy.operator-removed, rather than as errors, so the removal leaves the estate valid;
-    /// a record written after adoption that no checkpoint places before the removal stays an error.
+    /// a record written after adoption that no checkpoint places before the removal stays an error. The runtime refuses to write such a
+    /// removal in an estate that has not adopted; the warning keeps valid an estate holding one written otherwise, or a removal after an
+    /// adoption whose author is neither the root operator nor a standing operator.
     /// </summary>
     internal static IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> RemovedBeforeHistory(EstateModel model)
     {
@@ -138,8 +140,8 @@ internal static class PolicyAuthority
         string removals = string.Join("; ", losses.Select(l => $"{model.Chain(l)[0]} lost it by revision {l.Id}"));
         return new Finding(Severity.Warning, "policy.operator-removed", record.ExpectedPath,
             $"This {record.Type} record rests on an operator role that was taken away ({removals}) before any history checkpoint the root operator or a " +
-            "standing operator signed placed the record earlier, so it counts for nothing. A history checkpoint written before a removal keeps such records: " +
-            "adopt history checkpoints before removing a role, and the runtime writes one with each removal; the operator may write the change again.");
+            "standing operator signed placed the record earlier, so it counts for nothing. Such a checkpoint written before a removal keeps such records: " +
+            "adopt history checkpoints as the root operator before removing a role, and the runtime writes one with each removal; the operator may write the change again.");
     }
 
     internal static void ValidateGrant(ValidationContext context)

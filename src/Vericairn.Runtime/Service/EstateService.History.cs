@@ -588,19 +588,21 @@ public sealed partial class EstateService
     /// Stores a revision that takes a role away (<see cref="TakesRoleAway"/>). In an estate that has adopted history checkpoints, a
     /// checkpoint signed by the acting principal's device is written first, in the same batch, over the copy as it is, so what the person
     /// wrote before the removal stays witnessed before it and keeps its reading (design/signed-history.md § 8); the revision is authored
-    /// after it. In an estate that has not, the revision is written alone, and its outcome says first which policy records resting on the
-    /// role now count for nothing. Caller holds the gate and the write lock.
+    /// after it; a grant revision that needs a closing is stored after its closing instead (<see cref="StoreWithClosingLocked"/>), which
+    /// is such a checkpoint, and does not come here. A revision signed elsewhere is stored alone, since this machine signs nothing for it,
+    /// and the next checkpoint witnesses it. In an estate that has not adopted, nothing places what the person wrote before the removal, so a revision that would make any
+    /// record fail is refused, naming those records (<see cref="RemovalRefusal"/>); one that would make none fail is written alone.
+    /// Caller holds the gate and the write lock.
     /// </summary>
-    private WriteOutcome StoreRemovalLocked(RecordDraft draft)
+    private WriteOutcome StoreRemovalLocked(RecordDraft draft, IReadOnlyList<IRecordSigner>? signers)
     {
         EstateModel current = LoadWith([]);
-        if (!SignedHistory.Adopted(current))
+        if (!SignedHistory.Adopted(current) || signers is not null)
         {
-            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current);
+            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current, signers);
             if (alone is null) return EstateServiceValues.Refuse(refusal!);
-            string? ended = EndedByRemoval(current, alone);
-            WriteOutcome outcome = StoreAuthoredLocked(alone, current);
-            return ended is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, ended) };
+            if (!SignedHistory.Adopted(current) && RemovalRefusal(current, alone) is { } refused) return WriteOutcome.Fail(refused);
+            return StoreAuthoredLocked(alone, current);
         }
 
         (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, "manual", draft.By);
@@ -629,17 +631,32 @@ public sealed partial class EstateService
     }
 
     /// <summary>
-    /// What a removal ends in an estate that has not adopted history checkpoints: the policy records it would leave counting for nothing,
-    /// each reported as policy.operator-removed; null when none.
+    /// Why a removal is refused in an estate that has not adopted history checkpoints (FIX-111): the records other than the removal that
+    /// would fail with it and do not fail now, each with the findings that say so: an error, such as a decision by the person whose role
+    /// is read as it is now, or policy.operator-removed, a policy record or approval that would count for nothing. Null when none would,
+    /// or when the removal fails on its own, which the write's own judgment reports.
     /// </summary>
-    private string? EndedByRemoval(EstateModel current, AuthoredRecord removal)
+    private Problem? RemovalRefusal(EstateModel current, AuthoredRecord removal)
     {
-        var before = current.Findings.Where(f => f.Code == "policy.operator-removed").Select(f => f.Location).ToHashSet(StringComparer.Ordinal);
-        List<string> ended = [.. LoadWith([removal]).Findings.Where(f => f.Code == "policy.operator-removed" && !before.Contains(f.Location)).Select(f => f.Location).Distinct(StringComparer.Ordinal)];
-        return ended.Count == 0 ? null
-            : $"This estate has not adopted history checkpoints, so none was written before this removal, and nothing places what was written under the role before it: " +
-              $"{ended.Count} policy {(ended.Count == 1 ? "record" : "records")} resting on it now {(ended.Count == 1 ? "counts" : "count")} for nothing, each reported as policy.operator-removed ({string.Join(", ", ended)}). " +
-              "Adopting history checkpoints before removing a role keeps such records.";
+        static bool Fails(Finding finding) => finding.Severity == Severity.Error || finding.Code == "policy.operator-removed";
+        static string RecordPath(Finding finding) => finding.Location.Split('#')[0];
+        var failing = current.Findings.Where(Fails).Select(RecordPath).ToHashSet(StringComparer.Ordinal);
+        EstateModel proposed = LoadWith([removal]);
+        if (proposed.Findings.Any(f => f.Severity == Severity.Error && RecordPath(f) == removal.RelativePath)) return null;
+        List<Finding> ended = [.. proposed.Findings.Where(f => Fails(f) && RecordPath(f) != removal.RelativePath && !failing.Contains(RecordPath(f)))
+            .OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)];
+        if (ended.Count == 0) return null;
+        var byPath = proposed.Records.ToDictionary(r => r.ExpectedPath, StringComparer.Ordinal);
+        List<string> named = [.. ended.GroupBy(RecordPath, StringComparer.Ordinal).Select(g =>
+            (byPath.TryGetValue(g.Key, out RecordEnvelope? record) ? $"{record.Type} {record.Id}" : g.Key) +
+            $" ({string.Join(", ", g.Select(f => f.Code).Distinct(StringComparer.Ordinal))})")];
+        const int Shown = 20;
+        string list = string.Join("; ", named.Take(Shown)) + (named.Count > Shown ? $"; and {named.Count - Shown} more, each in the findings" : "");
+        return new Problem("refused",
+            $"Not written: this estate has not adopted history checkpoints, so nothing places what was written under the role before this removal, " +
+            $"and {named.Count} {(named.Count == 1 ? "record" : "records")} would fail with it: {list}. Adopt history checkpoints first, as the root operator: " +
+            $"the runtime then writes a checkpoint before the removal, and {(named.Count == 1 ? "this record keeps its" : "these records keep their")} reading.",
+            [.. ended.Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message))]);
     }
 
     /// <summary>
