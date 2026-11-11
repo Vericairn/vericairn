@@ -228,6 +228,60 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         }
     }
 
+    /// <summary>
+    /// The cost of judging a chain of device closings by operators other than the root operator (FIX-108): 300 operators, each with a
+    /// device, and 180 closings, each following the one before it and signed by a different operator, so that each is judged against the
+    /// closings before it and reads principal lines as the strongest acts do. The load stays within twice the load of the same chain of
+    /// closings by the root operator, whose closings need no such reading, plus 50 ms.
+    /// </summary>
+    [Fact]
+    public void ChainedClosingsByOperatorsStayWithinTwiceTheRootOperatorsChain()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The chained closings cost test runs when {EnvironmentVariable} is 1.");
+        const int Operators = 300;
+        const int Closings = 180;
+        TimeSpan byRoot = ChainedClosings(Operators, Closings, byRoot: true);
+        TimeSpan byOperators = ChainedClosings(Operators, Closings, byRoot: false);
+        output.WriteLine($"chained closings, {Closings:N0} over {Operators:N0} operators: {byOperators.TotalMilliseconds:N0} ms when each is by another operator; {byRoot.TotalMilliseconds:N0} ms when the root operator wrote them");
+        Assert.True(byOperators <= 2 * byRoot + TimeSpan.FromMilliseconds(50), $"Closings by operators: {byOperators.TotalMilliseconds:N0} ms against {byRoot.TotalMilliseconds:N0} ms.");
+    }
+
+    /// <summary>
+    /// Loads an adopted estate with operators, each holding a device, in which a chain of closings of the builder's device is written, each
+    /// by the next operator or, when <paramref name="byRoot"/>, by the root operator; returns the faster of two loads.
+    /// </summary>
+    private static TimeSpan ChainedClosings(int operators, int closings, bool byRoot)
+    {
+        using var f = new HistoryFixture();
+        var signers = new List<(RecordEnvelope Person, RecordEnvelope Device)>();
+        for (int i = 0; i < operators; i++)
+        {
+            string name = "Operator " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["operator"]}""", signer: f.OperatorSigner);
+            (RecordEnvelope device, _) = f.Admitted(person.Id, name + "'s device");
+            signers.Add((person, device));
+        }
+
+        f.Require();
+        f.Adopt();
+        var made = new List<RecordEnvelope>();
+        for (int k = 0; k < closings; k++)
+            made.Add(byRoot ? f.Close("device", f.BuilderDevice.Id) : f.Close("device", f.BuilderDevice.Id, signers[k].Person.Id, f.Signer(signers[k].Device)));
+
+        TimeSpan best = TimeSpan.MaxValue;
+        for (int run = 0; run < 2; run++)
+        {
+            var watch = Stopwatch.StartNew();
+            EstateModel model = f.Load();
+            watch.Stop();
+            var acting = model.Trust.Closings.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+            Assert.All(made, closing => Assert.Contains(closing.Id, acting));
+            if (watch.Elapsed < best) best = watch.Elapsed;
+        }
+
+        return best;
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(keyHome)) Directory.Delete(keyHome, recursive: true);
