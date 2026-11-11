@@ -677,7 +677,16 @@ closings of each other's devices included, until the root operator settles it. S
 closing is never read against itself, an operator's closing of another's device does not
 settle a removal of its author answered after it; a closing by the root operator refuses
 such an answer for the closings that follow it, the adoption and anchoring, and a closing
-before it is judged without it. Removing an operator's role takes, for these acts, what that
+before it is judged without it. So a person whose role the root operator removed, and whose
+device it closed and revoked, can still write, at any time and repeatedly, a removal of an
+operator other than the root operator or a narrowing of an administrator's grant, dated any
+time from their appointment until that device's revocation; every closing that operator or
+administrator wrote that does not follow the root operator's closing then closes nothing, and
+records it alone refused count again. A new closing does not undo it, since it witnesses those
+records, nor does writing the operator's role again. Removing those records does, with an
+anchoring checkpoint that acknowledges their removal when a checkpoint witnesses them, until
+more are written; the root operator's own closings cannot be reopened this way, and role
+closings are planned. Removing an operator's role takes, for these acts, what that
 person appointed, granted and closed; those the person appointed keep the role in ordinary
 reads, and a removal they write still counts for these acts, until the root operator writes
 their appointments again or closes their devices, after which what they sign with a closed
