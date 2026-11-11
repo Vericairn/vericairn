@@ -49,7 +49,8 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
     private readonly List<RecordEnvelope> principalRecords;
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
-    private (IReadOnlySet<string> Accepted, IReadOnlySet<string> Now)? standing;
+    private StrictReading? strict;
+    private readonly Dictionary<string, StrictClass> grantClasses = new(StringComparer.Ordinal);
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -580,44 +581,41 @@ internal sealed partial class EstateTrust
         return StandingAdministrator(checkpoint, Acting);
     }
 
-    /// <summary>The time after every record: what a role or grant reads as at it is what stands now.</summary>
-    private const string Now = "9999-12-31T23:59:59Z";
-
     /// <summary>
-    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing and writing the grants
-    /// and principal revisions they rest on: the root operator always; otherwise a person whose role, through accepted revisions, stood at
-    /// the record's time and still stands now (<see cref="Standing"/>), so a later revision taking it away withdraws the power for every
-    /// checkpoint.
+    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
+    /// always; otherwise a person who stands now and whose line, as those acts read it, gives the role at the record's time
+    /// (<see cref="ReadStrictly"/>), so a later revision taking it away withdraws the power for every checkpoint.
     /// </summary>
     private bool StandingOperator(string principal, string at) =>
-        principal == RootOperator && RootOperator is not null || TrustedOperator(principal, at) && Standing().Now.Contains(principal);
+        principal == RootOperator && RootOperator is not null || ReadStrictly().Standing.Contains(principal) && StrictHead(principal, at) is { Operator: true };
 
     /// <summary>
     /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
-    /// adoption and signing a device's closing. A grant revision that rests on signatures and was written by a trusted operator stood at
-    /// the record's time, dated at or before it, unexpired then and replaced by no such revision by then; every such revision that has
-    /// replaced it since, whatever its date, still gives the author administer, unexpired at the record's time; and no closing among those
-    /// given closed a revision of that grant's line without witnessing the record. So a later narrowing, revocation or closing withdraws
-    /// these powers for every checkpoint, as before signed history; only other records read a grant purely as it stood.
+    /// adoption and signing a device's closing. The author's line, as those acts read it, describes a person at the record's time; a grant
+    /// revision they read as written (<see cref="GrantClass"/>) stood at the record's time, dated at or before it, unexpired then and
+    /// followed by no revision they read by then; every revision they read that has followed it since, whatever its date, still gives the
+    /// author administer as written, unexpired at the record's time; and no closing among those given closed a revision of that grant's
+    /// line without witnessing the record. So a later narrowing, revocation or closing withdraws these powers for every checkpoint, as
+    /// before signed history, and so does a revision read as a removal; only other records read a grant purely as it stood.
     /// </summary>
     private bool StandingAdministrator(RecordEnvelope record, IReadOnlyList<Closing> bound)
     {
-        if (PrincipalAt(record.By, record.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+        if (StrictHead(record.By, record.At) is not { Human: true }) return false;
         DateTimeOffset at = record.AtTime;
-        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && TrustedRevision(grant) &&
-            !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && TrustedRevision(s)) &&
+        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && GrantClass(grant) == StrictClass.Written &&
+            !StrictSuccessors(grant).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) &&
             Still(grant) && !bound.Any(c => c.Kind == "grant" && c.Line == LineOf(grant) && !Witnesses(c, record)));
 
-        // Every trusted revision replacing the grant since still gives administer, unexpired at the record's time.
+        // Every revision read that has followed the grant since still gives administer as written, unexpired at the record's time.
         bool Still(RecordEnvelope grant)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
             var queue = new Queue<RecordEnvelope>([grant]);
             while (queue.TryDequeue(out RecordEnvelope? current))
             {
-                foreach (RecordEnvelope next in successors[current.Id].Where(s => s.Type == "authority" && seen.Add(s.Id) && TrustedRevision(s)))
+                foreach (RecordEnvelope next in StrictSuccessors(current).Where(s => seen.Add(s.Id)))
                 {
-                    if (!Administers(next, record.By, at)) return false;
+                    if (GrantClass(next) != StrictClass.Written || !Administers(next, record.By, at)) return false;
                     queue.Enqueue(next);
                 }
             }
@@ -628,8 +626,12 @@ internal sealed partial class EstateTrust
 
     /// <summary>Whether a grant revision gives a principal administer, unexpired at a time.</summary>
     private static bool Administers(RecordEnvelope grant, string principal, DateTimeOffset at) =>
-        EstateModel.BodyString(grant, "grantee") == principal && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
-        scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) && !EstateModel.Expired(grant, at);
+        EstateModel.BodyString(grant, "grantee") == principal && GivesAdminister(grant) && !EstateModel.Expired(grant, at);
+
+    /// <summary>Whether a grant revision's scope includes administer, whoever it names and whenever it expires.</summary>
+    private static bool GivesAdminister(RecordEnvelope grant) =>
+        grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
+        scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer);
 
     /// <summary>The line of an authority revision: the id of its first record.</summary>
     internal string LineOf(RecordEnvelope grant)
@@ -717,65 +719,238 @@ internal sealed partial class EstateTrust
         return StandingAdministrator(probe, Acting);
     }
 
-    /// <summary>
-    /// Whether a grant revision counts for the strongest acts: it rests on signatures, is not refused as an authority revision, and its
-    /// author is the root operator or an operator whose role stood at its time and still stands (<see cref="StandingOperator"/>). A
-    /// principal revision counts when it is among <see cref="Standing"/>'s accepted revisions.
-    /// </summary>
-    private bool TrustedRevision(RecordEnvelope revision) =>
-        revision.Type == "principal"
-            ? Standing().Accepted.Contains(revision.Id)
-            : !RefusedAuthorityRevision(revision) && AuthenticBySignatures(revision) && StandingOperator(revision.By, revision.At);
+    /// <summary>How the strongest acts read a principal or authority revision, by its author at the revision's time.</summary>
+    private enum StrictClass
+    {
+        /// <summary>
+        /// Not read, and the line stays as it was: not authentic by signatures, dated before the record it attaches to, or written by a
+        /// person who had never been given the operator role by then.
+        /// </summary>
+        Unread,
+
+        /// <summary>Read as written: by the root operator, or by a person who held the operator role at its time and stands now.</summary>
+        Written,
+
+        /// <summary>
+        /// Read as a removal whatever it says: by a person given the operator role by then who had lost it by then or does not stand now.
+        /// From it on the line gives no operator role or administer until a revision read as written follows it.
+        /// </summary>
+        Removal,
+    }
+
+    /// <summary>The principal revisions the strongest acts consider, how they read each, and who stands now (<see cref="ReadStrictly"/>).</summary>
+    private sealed class StrictReading
+    {
+        /// <summary>Principal revisions authentic by signatures and not refused, and the root operator's first record, in time order, ids breaking ties.</summary>
+        public required List<RecordEnvelope> Revisions { get; init; }
+
+        /// <summary>Each revision's place in <see cref="Revisions"/>.</summary>
+        public required Dictionary<string, int> Index { get; init; }
+
+        /// <summary>For each revision read, the place of the nearest revision read below it in its line, or -1.</summary>
+        public required int[] Below { get; init; }
+
+        /// <summary>How each revision is read.</summary>
+        public required StrictClass[] Classes { get; init; }
+
+        /// <summary>Each person's revisions read, by place, in order.</summary>
+        public required Dictionary<string, List<int>> Lines { get; init; }
+
+        /// <summary>The time each person was first given the operator role, the root operator aside.</summary>
+        public required Dictionary<string, string> GivenAt { get; init; }
+
+        /// <summary>Who stands now: the root operator and every person whose line gives the operator role at the end.</summary>
+        public required HashSet<string> Standing { get; init; }
+    }
 
     /// <summary>
-    /// The principal record that describes a principal at a time, for the strongest acts: among its accepted revisions dated at or before
-    /// the time, the single one no other of them supersedes.
+    /// How the strongest acts read principal lines. The revisions considered are authentic by signatures and not refused for their date,
+    /// with the root operator's first record. A person has been given the operator role by a time when a revision considered of their line
+    /// dated by then gives it and was written by the root operator or by a person given the role by an earlier revision, taken in time
+    /// order, ids breaking ties, removals aside; so the role reaches a person only from the root operator, through earlier revisions, and a
+    /// circle of appointments gives nothing. Walking every line in that order, a revision is read as written when its author is the root
+    /// operator, or stands now and held the role as their line stood before this revision; read as a removal, whatever it says, when its
+    /// author had been given the role but had lost it by then or does not stand now; and not read at all, leaving the line as it was, when
+    /// its author had never been given the role. Who stands now is the least set holding the root operator and every person whose line
+    /// gives the role at the end when only members of the set give: built up from the root operator alone, one pass per level of
+    /// appointment, until nothing is added. Grants do not count towards it. So a removal keeps counting after its author is removed, a
+    /// revision by one never given the role changes nothing, and two operators other than the root operator who remove each other both
+    /// lose these acts, closings included, until the root operator settles it.
     /// </summary>
-    private RecordEnvelope? PrincipalAt(string principal, string at) => HeadAt(Standing().Accepted, principal, at);
-
-    /// <summary>Whether a principal is the root operator, or held the operator role at a time through accepted revisions.</summary>
-    private bool TrustedOperator(string principal, string at) =>
-        principal == RootOperator && RootOperator is not null || IsOperator(PrincipalAt(principal, at));
-
-    /// <summary>
-    /// The principal revisions the strongest acts read, and who stands as an operator now. Every revision that rests on signatures and is
-    /// not refused as an authority revision starts accepted, as does the root operator's own first record. Then, until nothing changes,
-    /// a revision is dropped when its author, other than the root operator, did not hold the operator role at its time or does not hold it
-    /// now, both read from the revisions still accepted. Revisions are only ever dropped, so the result is reached and does not depend on
-    /// the order revisions are read in. A revision by an operator who has since lost the role counts for nothing here, and with it every
-    /// revision resting on it, so a backdated record gives an operator whose role was removed none of these acts.
-    /// </summary>
-    private (IReadOnlySet<string> Accepted, IReadOnlySet<string> Now) Standing()
+    private StrictReading ReadStrictly()
     {
         lock (gate)
         {
-            if (standing is { } known) return known;
-            List<RecordEnvelope> principals = principalRecords;
-            var accepted = new HashSet<string>(principals.Where(p => p.Id == RootOperator && p.By == RootOperator && p.Supersedes is null ||
-                !RefusedAuthorityRevision(p) && AuthenticBySignatures(p)).Select(p => p.Id), StringComparer.Ordinal);
-            HashSet<string> standingNow;
-            while (true)
+            if (strict is { } known) return known;
+            string? root = RootOperator;
+            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => p.Id == root && p.By == root && p.Supersedes is null || !RefusedAuthorityRevision(p) && AuthenticBySignatures(p))
+                .OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
+            int count = revisions.Count;
+            var index = new Dictionary<string, int>(count, StringComparer.Ordinal);
+            for (int i = 0; i < count; i++) index[revisions[i].Id] = i;
+            var persons = new Dictionary<string, int>(StringComparer.Ordinal);
+            int[] line = new int[count];
+            int[] author = new int[count];
+            bool[] gives = new bool[count];
+            for (int i = 0; i < count; i++)
             {
-                standingNow = new HashSet<string>(principals.Where(p => accepted.Contains(p.Id)).Select(PrincipalIdentity).Distinct(StringComparer.Ordinal)
-                    .Where(p => p == RootOperator || IsOperator(HeadAt(accepted, p, Now))), StringComparer.Ordinal);
-                List<string> dropped = [.. principals.Where(p => accepted.Contains(p.Id) && p.By != RootOperator &&
-                    !(p.Id == RootOperator && p.By == RootOperator && p.Supersedes is null) &&
-                    (!standingNow.Contains(p.By) || !IsOperator(HeadAt(accepted, p.By, p.At)))).Select(p => p.Id)];
-                if (dropped.Count == 0) break;
-                accepted.ExceptWith(dropped);
+                line[i] = Person(PrincipalIdentity(revisions[i]));
+                gives[i] = IsOperator(revisions[i]);
             }
 
-            standing = (accepted, standingNow);
-            return standing.Value;
+            for (int i = 0; i < count; i++) author[i] = persons.TryGetValue(revisions[i].By, out int a) ? a : -1;
+
+            // Given by then, in time order: a revision gives the role only when its author was given it by an earlier one.
+            var classes = new StrictClass[count];
+            var givenAt = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (int i = 0; i < count; i++)
+            {
+                if (revisions[i].By != root && !givenAt.ContainsKey(revisions[i].By)) continue;
+                classes[i] = StrictClass.Removal;
+                if (gives[i]) givenAt.TryAdd(PrincipalIdentity(revisions[i]), revisions[i].At);
+            }
+
+            // Each revision read follows the nearest revision read below it in its line; one not read leaves the line as it was.
+            int[] below = new int[count];
+            for (int i = 0; i < count; i++) below[i] = classes[i] == StrictClass.Unread ? -1 : NearestRead(revisions[i]);
+
+            var standing = new bool[persons.Count];
+            if (root is not null && persons.TryGetValue(root, out int rootPerson)) standing[rootPerson] = true;
+            var heads = new List<int>[persons.Count];
+            for (int p = 0; p < heads.Length; p++) heads[p] = [];
+            bool[] followed = new bool[count];
+            while (true)
+            {
+                foreach (List<int> h in heads) h.Clear();
+                Array.Clear(followed);
+                for (int i = 0; i < count; i++)
+                {
+                    if (classes[i] == StrictClass.Unread) continue;
+                    // The author is read as their line stands before this revision in time order.
+                    classes[i] = revisions[i].By == root || author[i] >= 0 && standing[author[i]] && Gives(author[i]) ? StrictClass.Written : StrictClass.Removal;
+                    if (below[i] >= 0)
+                    {
+                        followed[below[i]] = true;
+                        heads[line[i]].Remove(below[i]);
+                    }
+
+                    if (!followed[i]) heads[line[i]].Add(i);
+                }
+
+                bool added = false;
+                for (int p = 0; p < standing.Length; p++)
+                {
+                    if (standing[p] || !Gives(p)) continue;
+                    standing[p] = true;
+                    added = true;
+                }
+
+                if (!added) break;
+            }
+
+            var lines = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            for (int i = 0; i < count; i++)
+            {
+                if (classes[i] == StrictClass.Unread) continue;
+                string person = PrincipalIdentity(revisions[i]);
+                if (!lines.TryGetValue(person, out List<int>? read)) lines[person] = read = [];
+                read.Add(i);
+            }
+
+            var now = new HashSet<string>(persons.Where(p => standing[p.Value]).Select(p => p.Key), StringComparer.Ordinal);
+            if (root is not null) now.Add(root);
+            strict = new StrictReading { Revisions = revisions, Index = index, Below = below, Classes = classes, Lines = lines, GivenAt = givenAt, Standing = now };
+            return strict;
+
+            int Person(string id)
+            {
+                if (!persons.TryGetValue(id, out int p)) persons[id] = p = persons.Count;
+                return p;
+            }
+
+            bool Gives(int person) => heads[person].Count == 1 && classes[heads[person][0]] == StrictClass.Written && gives[heads[person][0]];
+
+            int NearestRead(RecordEnvelope revision)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+                RecordEnvelope current = revision;
+                while (current.Supersedes is not null && model.ById.TryGetValue(current.Supersedes, out RecordEnvelope? previous) && previous.Type == "principal" && seen.Add(previous.Id))
+                {
+                    if (index.TryGetValue(previous.Id, out int k) && classes[k] != StrictClass.Unread) return k;
+                    current = previous;
+                }
+
+                return -1;
+            }
         }
     }
 
-    /// <summary>The single head, among the given revisions of a principal's line dated at or before a time, that no other of them supersedes.</summary>
-    private RecordEnvelope? HeadAt(IReadOnlySet<string> accepted, string principal, string at)
+    /// <summary>
+    /// The principal record describing a person at a time as the strongest acts read it: among the revisions of its line they read dated
+    /// at or before the time, the single one no other of them follows; null when there is none or more than one. It describes a human as
+    /// written, or, read as a removal, as the revision read below it did; and it gives the operator role only as written.
+    /// </summary>
+    private (bool Human, bool Operator)? StrictHead(string principal, string at)
     {
-        List<RecordEnvelope> revisions = [.. principalRecords.Where(p => accepted.Contains(p.Id) && PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0)];
-        List<RecordEnvelope> heads = [.. revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id))];
-        return heads.Count == 1 ? heads[0] : null;
+        StrictReading reading = ReadStrictly();
+        if (!reading.Lines.TryGetValue(principal, out List<int>? line)) return null;
+        var followed = new HashSet<int>();
+        int last = -1;
+        foreach (int k in line)
+        {
+            if (string.CompareOrdinal(reading.Revisions[k].At, at) > 0) break;
+            last++;
+            if (reading.Below[k] >= 0) followed.Add(reading.Below[k]);
+        }
+
+        List<int> heads = [.. line.Take(last + 1).Where(k => !followed.Contains(k))];
+        if (heads.Count != 1) return null;
+        int head = heads[0];
+        bool written = reading.Classes[head] == StrictClass.Written;
+        int describing = head;
+        while (reading.Classes[describing] == StrictClass.Removal && reading.Below[describing] >= 0) describing = reading.Below[describing];
+        bool human = reading.Classes[describing] == StrictClass.Written && EstateModel.BodyString(reading.Revisions[describing], "kind") == "human";
+        return (human, written && IsOperator(reading.Revisions[head]));
+    }
+
+    /// <summary>
+    /// How the strongest acts read a grant revision, by its author at its time (<see cref="StrictClass"/>): not read unless authentic by
+    /// signatures and not refused for its date; as written by the root operator, or by a person who stands now and held the operator role
+    /// at its time as those acts read it; as a removal by a person given the role by then who had lost it or does not stand now.
+    /// </summary>
+    private StrictClass GrantClass(RecordEnvelope grant)
+    {
+        lock (gate)
+        {
+            if (grantClasses.TryGetValue(grant.Id, out StrictClass known)) return known;
+            StrictClass value = Judge();
+            grantClasses[grant.Id] = value;
+            return value;
+        }
+
+        StrictClass Judge()
+        {
+            if (RefusedAuthorityRevision(grant) || !AuthenticBySignatures(grant)) return StrictClass.Unread;
+            if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
+            StrictReading reading = ReadStrictly();
+            if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At) is { Operator: true }) return StrictClass.Written;
+            return reading.GivenAt.TryGetValue(grant.By, out string? given) && string.CompareOrdinal(given, grant.At) <= 0 ? StrictClass.Removal : StrictClass.Unread;
+        }
+    }
+
+    /// <summary>The grant revisions the strongest acts read that follow a grant revision: its successors, through any they do not read.</summary>
+    private IEnumerable<RecordEnvelope> StrictSuccessors(RecordEnvelope grant)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
+        var queue = new Queue<string>([grant.Id]);
+        while (queue.TryDequeue(out string? id))
+        {
+            foreach (RecordEnvelope next in successors[id].Where(s => s.Type == "authority" && seen.Add(s.Id)))
+            {
+                if (GrantClass(next) == StrictClass.Unread) queue.Enqueue(next.Id);
+                else yield return next;
+            }
+        }
     }
 
     /// <summary>Whether a principal record describes a person holding the operator role.</summary>

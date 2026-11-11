@@ -141,7 +141,8 @@ internal sealed partial class EstateTrust
         proofs.Clear();
         verified.Clear();
         counts.Clear();
-        standing = null;
+        strict = null;
+        grantClasses.Clear();
         anchors = NoAnchors;
         anchorsKnown = false;
 
