@@ -90,6 +90,7 @@ internal sealed partial class EstateTrust
         Required = Charter is not null && RequiresSignatures(Charter);
         History = analysis.Complete(objects, files);
         closingFindings.AddRange(Unfollowed());
+        closingFindings.AddRange(Unclosed());
         closingFindings.AddRange(RevisionsReadAsRemovals());
     }
 

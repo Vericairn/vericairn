@@ -345,7 +345,9 @@ public class GoalStepTests
         Assert.False(stopped.Ok, stopped.Message);
         Assert.DoesNotContain("Routing assigned", stopped.Message, StringComparison.Ordinal);
         string stranded = stopped.Assignment!.Id;
-        Assert.Contains($"Not written: The disk is full. Routing's assignment {stranded} was stored and the run's intent was not, so nothing was launched", stopped.Message, StringComparison.Ordinal);
+        // The failure is described by its kind, never by its message, which may name a path on this machine.
+        Assert.Contains($"could not be stored (the file system refused the write, IOException). Routing's assignment {stranded} was stored and the run's intent was not, so nothing was launched", stopped.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("The disk is full", stopped.Message, StringComparison.Ordinal);
         Assert.Equal("run", EstateModel.BodyString(run.Estate.Load().ById[stranded], "routedWith"));
         Assert.Empty(run.Service.Records("operation"));
         Assert.False(File.Exists(run.Report("stopped")));

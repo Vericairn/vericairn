@@ -271,17 +271,22 @@ public class SigningJourneyTests
             Assert.Contains("does not open", wrong.Err, StringComparison.Ordinal);
             CliHarness.Outcome admitted = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "admit", replacement, "--by", op, "--note", "Replaces the lost laptop.", "--recovery", keyFile, "--passphrase-stdin");
             RecordWritten revoked = CliHarness.RevokeAfterRecords(a, new RevokeRequest(laptop, op, "Laptop lost.", keyFile, Passphrase));
+            // The estate adopted history checkpoints at birth, so the recovery key also signed the closing written before the revocation.
+            Vericairn.Records.Model.RecordEnvelope closing;
+            using (Vericairn.Runtime.Service.EstateService service = Vericairn.Runtime.Service.EstateService.Open(a))
+                closing = service.Session.Load().OfType("history-checkpoint").Single(r => r.Body.TryGetProperty("closes", out _));
+            Assert.Equal(recovery, Assert.Single(closing.Signatures).Device);
 
-            // The replacement signs as the operator again, and both uses stay in view until the operator reviews them.
+            // The replacement signs as the operator again, and every use stays in view until the operator reviews it.
             CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-1"));
             check = CliHarness.Run("--estate", a, "estate", "check");
             Assert.True(check.Code == 0, check.Out + check.Err);
-            Assert.Equal(2, check.Out.Split("recovery.unreviewed").Length - 1);
+            Assert.Equal(3, check.Out.Split("recovery.unreviewed").Length - 1);
             Assert.Contains("recovery.unreviewed", CliHarness.Ok("--estate", a, "status").Out, StringComparison.Ordinal);
             string review = CliHarness.WriteJson(scratch, "review.json", """{"independence":"self","outcome":"pass","summary":"My own recovery after the laptop was lost.","findings":[]}""");
-            foreach ((string id, string hash) in new[] { (admitted.Id, admitted.Hash), (revoked.Id, revoked.Hash) })
+            foreach ((string type, string id, string hash) in new[] { ("admission", admitted.Id, admitted.Hash), ("admission", revoked.Id, revoked.Hash), ("history-checkpoint", closing.Id, closing.ComputedHash) })
             {
-                CliHarness.Ok("--estate", a, "--json", "records", "new", "review", "--by", op, "--subject", $"admission:{id}:{hash}", "--body", review);
+                CliHarness.Ok("--estate", a, "--json", "records", "new", "review", "--by", op, "--subject", $"{type}:{id}:{hash}", "--body", review);
             }
 
             check = CliHarness.Run("--estate", a, "estate", "check");

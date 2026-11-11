@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "domain": "software",
   "purpose": "Vericairn's own releases: the software pack's release flow with the first-party estate's steps added, the NuGet packages observed, the MCP Registry listing and the release's announcement on GitHub Discussions and the operator's X account as reserved publication steps after publication, and the profile repository's documents cleared after the documentation pass. It names Vericairn's own destinations, so it is the first-party estate's content and never part of the software pack.",
-  "extends": { "id": "vericairn.software/release", "version": "1.0.0", "hash": "sha256:6413f3058409a0b1161785b2c3f35cebf5625f09acaae6e57c248a42588f4eec" },
+  "extends": { "id": "vericairn.software/release", "version": "1.0.0", "hash": "sha256:cbfa443ffc197d9112f4249d0ac20adceb76a2da2746f3d2b1c9a410d10e8390" },
   "never": [
     "Never post, list or announce for the operator: the operator posts each announcement and confirms the listing, and closes its request with the observed link."
   ],

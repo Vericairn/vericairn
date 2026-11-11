@@ -223,6 +223,13 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         }
 
         Problem problem = outcome.Problem ?? new Problem("refused", "refused", []);
+        // A closing stored without its act (OPS-07) is a record written all the same: it is shown before the failure.
+        if (outcome.Checkpoint is { Written: not null } stored)
+        {
+            if (json) Output.WriteLine(JsonSerializer.Serialize(new { code = problem.Code, checkpoint = stored }, ProtocolJson.Options));
+            else ReportCheckpoint(stored);
+        }
+
         if (problem.Code == "rejected")
         {
             Error.WriteLine(problem.Message);

@@ -87,8 +87,17 @@ public static class EstateLoader
     /// </summary>
     internal static EstateModel LoadIdentities(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache) => Load(root, files, cache, judge: false);
 
+    /// <summary>
+    /// The records of a file set judged with every record's roles and grants read at the record's own time, as an estate that has adopted
+    /// history checkpoints reads the records its adoption does not witness: what adoption's check compares with the reading of today
+    /// (design/signed-history.md § 10). Such a model serves that comparison alone.
+    /// </summary>
+    internal static EstateModel LoadAtRecordTime(string root, IReadOnlyList<RecordFile> files, Func<string, byte[]?>? objects) =>
+        Load(root, files, null, null, objects, authorityAtRecordTime: true);
+
     // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
-    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null, bool judge = true)
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache, byte[]? manifestBytes = null, Func<string, byte[]?>? objects = null, bool judge = true,
+        bool authorityAtRecordTime = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -143,6 +152,7 @@ public static class EstateLoader
         {
             ObjectReader = objects ?? FileObjects(root),
             FilePaths = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal),
+            AuthorityAtRecordTime = authorityAtRecordTime,
         };
         if (!judge)
         {
