@@ -94,6 +94,7 @@ public class ContinuousIntegrationTests
         // A job skipped on every pull request is a check that never passes, which a checked merge refuses.
         string triggers = Block(workflow, "on:", 0);
         Assert.DoesNotContain("pull_request", triggers, StringComparison.Ordinal);
+        Assert.DoesNotContain("merge_group", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  release:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.DoesNotContain("id-token", Block(workflow, "permissions:", 0), StringComparison.Ordinal);
@@ -121,10 +122,12 @@ public class ContinuousIntegrationTests
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
         string workflow = Read(Path.Combine(workflows, "secret-scan.yml"));
 
-        // Every branch push, pull request and manual run, in a workflow of its own; the build stays in ci.yml, without the scan.
+        // Every branch push, pull request, merge queue group and manual run, in a workflow of its own; the build stays in ci.yml,
+        // without the scan. The merge queue's temporary branches are scanned by their merge_group run, not again as pushes.
         string triggers = Block(workflow, "on:", 0);
-        Assert.Contains("\n  push:\n    branches: ['**']\n", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  push:\n    branches: ['**', '!gh-readonly-queue/**']\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  pull_request:\n", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  merge_group:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);
         // ci.yml installs the same pinned gitleaks for the secret scan's own tests, and scans nothing with it.
@@ -170,10 +173,13 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n          persist-credentials: false\n", scan, StringComparison.Ordinal);
         Assert.Contains("PR_BASE: ${{ github.event.pull_request.base.sha }}", scan, StringComparison.Ordinal);
         Assert.Contains("PR_HEAD: ${{ github.event.pull_request.head.sha }}", scan, StringComparison.Ordinal);
+        Assert.Contains("GROUP_BASE: ${{ github.event.merge_group.base_sha }}", scan, StringComparison.Ordinal);
+        Assert.Contains("GROUP_HEAD: ${{ github.event.merge_group.head_sha }}", scan, StringComparison.Ordinal);
         Assert.Contains("PUSH_BEFORE: ${{ github.event.before }}", scan, StringComparison.Ordinal);
         Assert.Contains("PUSH_AFTER: ${{ github.event.after }}", scan, StringComparison.Ordinal);
         Assert.Contains("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", scan, StringComparison.Ordinal);
         Assert.Contains("pull_request) range=\"$PR_BASE..$PR_HEAD\" ;;", scan, StringComparison.Ordinal);
+        Assert.Contains("merge_group) range=\"$GROUP_BASE..$GROUP_HEAD\" ;;", scan, StringComparison.Ordinal);
         Assert.Contains("if git cat-file -e \"$PUSH_BEFORE^{commit}\" 2> /dev/null; then range=\"$PUSH_BEFORE..$PUSH_AFTER\"\n", scan, StringComparison.Ordinal);
         Assert.Contains("elif [ \"$GITHUB_REF\" = \"refs/heads/$DEFAULT_BRANCH\" ]; then range=--all\n", scan, StringComparison.Ordinal);
         Assert.Contains("else range=\"origin/$DEFAULT_BRANCH..$PUSH_AFTER\"\n", scan, StringComparison.Ordinal);
@@ -594,6 +600,100 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n    needs: [enclave-helper]\n", package, StringComparison.Ordinal);
         Assert.DoesNotContain("always()", package, StringComparison.Ordinal);
         Assert.Contains("built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform.", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryRequiredWorkflowRunsTheSameJobsForAMergeQueueGroup()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // A required check that a queued group never reports would hold the queue for good, so both workflows whose jobs the
+        // default branch requires run on merge_group as on a pull request.
+        foreach (string file in new[] { "ci.yml", "secret-scan.yml" })
+        {
+            string triggers = Block(Read(Path.Combine(workflows, file)), "on:", 0);
+            Assert.Contains("\n  pull_request:\n", triggers, StringComparison.Ordinal);
+            Assert.Contains("\n  merge_group:\n", triggers, StringComparison.Ordinal);
+        }
+
+        // The same jobs run for every event: no job of ci.yml, or of the packaging path it calls, depends on the event, and
+        // secret-scan's one job skips only a push that deletes a branch.
+        foreach (string file in new[] { "ci.yml", "package.yml" })
+            foreach (string job in Jobs(Read(Path.Combine(workflows, file))))
+                Assert.DoesNotContain(job.Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
+        Assert.Single(Read(Path.Combine(workflows, "secret-scan.yml")).Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
+
+        // Releases and publications run only when a person starts them or publishes a release, never for the queue.
+        foreach (string file in new[] { "release.yml", "nuget.yml", "mcp-registry.yml" })
+            Assert.DoesNotContain("merge_group", Block(Read(Path.Combine(workflows, file)), "on:", 0), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnlyAPullRequestRunThatANewerCommitSupersedesIsCancelled()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // A newer commit cancels its pull request's run in progress; a push, a queued group and a manual run each have a group
+        // of their own, so none is cancelled or held back.
+        const string concurrency = "\nconcurrency:\n"
+            + "  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}\n"
+            + "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n";
+        foreach (string file in new[] { "ci.yml", "secret-scan.yml" })
+        {
+            string workflow = Read(Path.Combine(workflows, file));
+            Assert.Contains(concurrency, workflow, StringComparison.Ordinal);
+            Assert.Single(workflow.Split('\n'), line => line.Contains("concurrency:", StringComparison.Ordinal));
+            Assert.Single(workflow.Split('\n'), line => line.Contains("cancel-in-progress", StringComparison.Ordinal));
+        }
+
+        // A release run, a publication and the packaging path a release shares hold no concurrency group, so none is ever cancelled.
+        foreach (string file in new[] { "release.yml", "package.yml", "nuget.yml", "mcp-registry.yml" })
+        {
+            string workflow = Read(Path.Combine(workflows, file));
+            Assert.DoesNotContain(workflow.Split('\n'), line => line.TrimStart().StartsWith("concurrency:", StringComparison.Ordinal));
+            Assert.DoesNotContain("cancel-in-progress", workflow, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void NuGetCachesMatchTheirLockFilesExactlyAndNeverReachAReleaseOrTheLocalFeedCheck()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // Only setup-dotnet's own cache: it restores on an exact key and saves only after the job succeeds. No other cache action
+        // and no partial key can bring in a package graph another lock file resolved, and nothing caches build output.
+        foreach (string file in WorkflowFiles())
+        {
+            string text = Read(file);
+            Assert.DoesNotContain("actions/cache", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("restore-keys", text, StringComparison.Ordinal);
+        }
+
+        const string portable = "\n          cache-dependency-path: |\n            global.json\n            **/packages.lock.json";
+        string ci = Read(Path.Combine(workflows, "ci.yml"));
+        string build = Block(ci, "build-test:", 2);
+        Assert.EndsWith("\n          cache: true" + portable, Assert.Single(Steps(build), IsSetupDotnet), StringComparison.Ordinal);
+        // The phone heads' restores also download the runtime packs of the workload set this workflow pins.
+        foreach (string job in new[] { "remote-ios:", "remote-android:" })
+            Assert.EndsWith("\n          cache: true" + portable + "\n            .github/workflows/ci.yml",
+                Assert.Single(Steps(Block(ci, job, 2)), IsSetupDotnet), StringComparison.Ordinal);
+        // A change's packaging run caches its portable and distributable graphs; a release downloads every package afresh.
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        Assert.EndsWith("\n          cache: ${{ !inputs.release }}" + portable + "\n            **/packages.distributable.lock.json",
+            Assert.Single(Steps(package), IsSetupDotnet), StringComparison.Ordinal);
+        Assert.Equal(4, WorkflowFiles().Sum(file => Read(file).Split('\n').Count(line => line.TrimStart().StartsWith("cache:", StringComparison.Ordinal))));
+        Assert.DoesNotContain("cache", Read(Path.Combine(workflows, "release.yml")), StringComparison.Ordinal);
+
+        // Every restore stays locked, so NuGet compares each package's SHA-512 with its lock file, cached or downloaded.
+        foreach (string file in WorkflowFiles())
+            foreach (string line in Read(file).Split('\n').Where(line => line.Contains("dotnet restore", StringComparison.Ordinal)))
+                Assert.Contains("--locked-mode", line, StringComparison.Ordinal);
+        Assert.Contains("<RestoreLockedMode Condition=\"'$(CI)' == 'true'\">true</RestoreLockedMode>", Read(Path.Combine(RepositoryRoot(), "Directory.Build.props")), StringComparison.Ordinal);
+
+        // The local feed check reads no cache: an empty source list and a fresh package folder make the local packages its only source.
+        string feed = Block(build, "- name: Install the tool and SDK from the local feed", 6);
+        Assert.Contains("with tempfile.TemporaryDirectory(dir=os.environ[\"RUNNER_TEMP\"]) as temporary:\n", feed, StringComparison.Ordinal);
+        Assert.Contains("config.write_text('<configuration><packageSources><clear /></packageSources></configuration>')\n", feed, StringComparison.Ordinal);
+        Assert.Contains("os.environ[\"NUGET_PACKAGES\"] = str(scratch / \"cache\")\n", feed, StringComparison.Ordinal);
+
+        static bool IsSetupDotnet(string step) => step.Contains("- uses: actions/setup-dotnet@", StringComparison.Ordinal);
     }
 
     private static string[] WorkflowFiles()

@@ -3,6 +3,9 @@ name: package
 # The release's packaging path, shared by release.yml and by every change's ci.yml so that no release-only step can first fail
 # during a release. It builds every asset a release attaches, verifies the packages and checksums, and uploads them as this run's
 # artifact. It creates no tag, release or upload and holds only the read token: release.yml's draft job alone writes.
+#
+# It runs for whatever event its caller runs for, a merge queue group included, and has no concurrency group of its own: it
+# stops only with a pull request's ci.yml run that a newer commit cancels, and release.yml, which cancels nothing, never stops it.
 
 on:
   workflow_call:
@@ -93,6 +96,15 @@ jobs:
         timeout-minutes: 10
         with:
           global-json-file: global.json
+          # A change's run restores the NuGet global packages folder only on an exact match of the runner's operating system and
+          # the hash of the SDK pin and every portable and distributable lock file, and saves it only after the job succeeds.
+          # The locked restores still compare every package's SHA-512 with its lock file. A release caches nothing: it
+          # downloads every package afresh, so the graph it ships is hashed from the bytes nuget.org serves to that run.
+          cache: ${{ !inputs.release }}
+          cache-dependency-path: |
+            global.json
+            **/packages.lock.json
+            **/packages.distributable.lock.json
       - name: Check the version
         id: version
         shell: bash

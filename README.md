@@ -243,10 +243,14 @@ The following capabilities are in 0.9.1.
 Development is supported on all three. Requires the .NET SDK pinned in `global.json` and git on the PATH.
 Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
 every platform. Continuous integration builds, tests, packs and checks local tool and SDK installation on all three
-operating systems for main, pull requests and manual runs. In CI and in the release workflow, a job retries up to five
-failed tests once each; every retried test is named in the run's summary, and a second failure fails the job. A
-separate workflow scans the commits of every pushed branch and pull request for secrets with a pinned,
-checksum-verified gitleaks.
+operating systems for main, pull requests, merge queue groups and manual runs. In CI and in the release workflow, a job
+retries up to five failed tests once each; every retried test is named in the run's summary, and a second failure fails
+the job. A separate workflow scans the commits of every pushed branch, pull request and merge queue group for secrets
+with a pinned, checksum-verified gitleaks. When the default branch requires the merge queue, a pull request reaches main
+through it: the queue runs every required check on main merged with the pull request, and main moves only to that
+tested commit. A newer commit cancels a pull request's run still in progress, and never a push, queued group or release
+run. CI caches NuGet packages on exact lock-file keys and nothing it builds; a release caches nothing. See
+[.github/workflows/README.md](.github/workflows/README.md).
 The release workflow builds the Secure Enclave helper on macOS. Remote, the iOS and Android companion, is in
 `src/Vericairn.Mobile.slnx`: continuous integration builds its iOS head for the simulator on macOS and its Android head on Linux,
 as developer builds. Neither build qualifies a real device; see [Remote](docs/remote.md).
