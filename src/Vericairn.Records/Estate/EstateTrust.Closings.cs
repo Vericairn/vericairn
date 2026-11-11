@@ -53,7 +53,7 @@ internal sealed partial class EstateTrust
     /// <summary>The closings that act, in checkpoint order.</summary>
     internal IReadOnlyList<Closing> Closings => closings;
 
-    /// <summary>The findings of judging closings: closings that close nothing, and closings that no act follows yet.</summary>
+    /// <summary>The findings of judging closings: closings that close nothing, closings that no act follows yet, and acts that no closing names.</summary>
     internal IReadOnlyList<Finding> ClosingFindings => closingFindings;
 
     /// <summary>The closings every judgment reads: none while closings are being judged, then those that act.</summary>
@@ -351,7 +351,7 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// A warning for each closing that acts while no act follows it: no revocation of its device that counts, no rotation replacing its
-    /// key, no revision of its grant. A closing closes all the same.
+    /// key and no revocation or device closing of that key's device, no revision of its grant. A closing closes all the same.
     /// </summary>
     private IEnumerable<Finding> Unfollowed()
     {
@@ -368,15 +368,69 @@ internal sealed partial class EstateTrust
 
         foreach (Closing closing in closings)
         {
-            (bool followed, string act) = closing.Kind switch
-            {
-                "device" => (AdmissionsAbout(closing.Target).Any(a => EstateModel.BodyString(a, "status") == "revoked" && AdmissionCounts(a, Mode.Anchors)), "revocation of the device"),
-                "key" => (closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing), "rotation to another key"),
-                _ => (successors[closing.Target].Any(s => s.Type == "authority" && Counts(s)), "revision of the grant"),
-            };
-            if (followed) continue;
+            if (Followed(closing)) continue;
+            string act = closing.Kind switch { "device" => "revocation of the device", "key" => "rotation to another key, revocation of its device or closing of its device", _ => "revision of the grant" };
             yield return new Finding(Severity.Warning, "history.closing-unfollowed", closing.Record.ExpectedPath + "#body.closes",
                 string.Create(CultureInfo.InvariantCulture, $"This checkpoint closes {closing.Kind} {closing.Target} as of {closing.Record.At}, and no {act} follows it yet. It closes all the same: from it on, only what it witnesses counts for that {closing.Kind}."));
         }
+    }
+
+    /// <summary>
+    /// Whether the act a closing that acts precedes follows it: a revocation of its device that counts, the rotation replacing its key
+    /// that counts, or a revision of its grant that counts. A key closing is followed as well when its device is revoked instead, by a
+    /// revocation that counts, or closed by a device closing that acts: the device is retired with its key, and no rotation of that key
+    /// can be written any more.
+    /// </summary>
+    internal bool Followed(Closing closing)
+    {
+        ArgumentNullException.ThrowIfNull(closing);
+        return closing.Kind switch
+        {
+            "device" => Revoked(closing.Target),
+            "key" => closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing) ||
+                Revoked(closing.Target) || closings.Any(c => c.Kind == "device" && c.Identity == closing.Identity),
+            _ => successors[closing.Target].Any(s => s.Type == "authority" && Counts(s)),
+        };
+    }
+
+    /// <summary>Whether a revocation that counts names a record of a device's line.</summary>
+    private bool Revoked(string device) =>
+        AdmissionsAbout(device).Any(a => EstateModel.BodyString(a, "status") == "revoked" && AdmissionCounts(a, Mode.Anchors));
+
+    /// <summary>
+    /// A warning for each act a closing precedes that counts in an estate that has adopted, that its adoption does not witness, and
+    /// whose target no closing that acts names (OPS-07): a revocation, a key rotation or a narrowing grant revision merged from a copy
+    /// that had not adopted yet, or added as a file, takes effect, and what the device, the key or the grantee signs with an earlier
+    /// date still counts. A closing written after the act names its target too, and from it on bounds what that target accounts for.
+    /// An act the adoption witnesses keeps the reading it had then, and an estate that has not adopted warns of none.
+    /// </summary>
+    private IEnumerable<Finding> Unclosed()
+    {
+        if (!History.Adopted) yield break;
+        foreach (RecordEnvelope act in ClosingActs.Types.SelectMany(model.OfType).Where(r => r.Supersedes is not null).OrderBy(r => r.Id, StringComparer.Ordinal))
+        {
+            if (History.AdoptedAt(act) is not null || ClosingActs.For(model, act) is not { } closes || !Counts(act) || Named(closes)) continue;
+            string message = closes.Kind switch
+            {
+                "device" => $"This revocation of device {closes.Id} counts, and no closing names the device, so a record the device signs with an earlier date still counts.",
+                "key" => $"This rotation replaces the key of device revision {closes.Id}, and no closing names that key, so a record signed with it with an earlier date still counts.",
+                _ => $"This revision narrows grant revision {closes.Id}, and no closing names the grant, so a record its grantee writes with a date while that revision was in force still counts.",
+            };
+            yield return new Finding(Severity.Warning, "history.closing-missing", act.ExpectedPath,
+                $"{message} Write the closing with vericairn records new history-checkpoint, its closes naming {closes.Kind} {closes.Id}, signed by one who may perform the act.");
+        }
+    }
+
+    /// <summary>
+    /// Whether a closing that acts names what an act closes: a device closing of its device's line; for a key, a closing of that key of
+    /// the device or of the device itself; for a grant, a closing that closes the revision.
+    /// </summary>
+    private bool Named((string Kind, string Id) closes)
+    {
+        if (!model.ById.TryGetValue(closes.Id, out RecordEnvelope? target)) return false;
+        if (closes.Kind == "grant") return closings.Any(c => c.Closes(target));
+        string identity = IdentityOf(target);
+        string? key = closes.Kind == "key" ? EstateModel.BodyString(target, "publicKey") : null;
+        return closings.Any(c => c.Identity == identity && (c.Kind == "device" || key is not null && c.Kind == "key" && c.Key == key));
     }
 }

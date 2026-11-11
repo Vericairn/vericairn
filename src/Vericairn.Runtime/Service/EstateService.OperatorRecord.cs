@@ -83,6 +83,10 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("The subject must be type:id or type:id:hash.");
                 if (request.Supersedes is not null && !Ulid.IsValid(request.Supersedes))
                     throw new ProviderRefusedException("The superseded record id must be a ULID.");
+                // In an estate that has adopted history checkpoints, a revocation, a key rotation or a narrowing grant revision is written
+                // with its closing in the same batch, which this path, one signed record carried through a checked merge, cannot carry (OPS-07).
+                if (ClosingRequired(session.Load(), request.Type, request.Body, subject, request.Supersedes) is { } closes)
+                    return new(identity, "refused", OperatorRecordClosingRefusal(closes), false, ClosingCommand(closes, request.By));
                 configuration = OperatorConfiguration(request.Product);
                 if (configuration.Required.Count == 0) throw new ProviderRefusedException("The estate product declares no required checks; declare them before recording an action.");
                 if (Providers.PushAdapter is null || Providers.SecretScanner is null)

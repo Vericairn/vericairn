@@ -549,10 +549,11 @@ an unsigned record dated at or before the current required revision counts.
 **Who writes them (OPS-07).** `vericairn estate checkpoint` writes one with trigger `manual` and, with `--adopt`, the
 adoption checkpoint, anchoring the unsigned records that count; a new estate's root operator's first device writes the
 adoption when it admits itself. In an estate that has adopted, the runtime writes one in the same batch as the act, signed by
-the device then writing: `upgrade` at an estate upgrade, `release` at a release submission before its check, `charter` after
-a charter revision, anchoring the unsigned records that count before a revision to required signatures by one who may
-anchor, and `interval` once the unwitnessed tail holds 500 records or its oldest record is 24 hours old. `closing` is ID-06's.
-No field changes; a reader judges every checkpoint the same way, whatever its trigger.
+the device then writing: `upgrade` at an estate upgrade, `release` at a release submission before its own admission check
+(a submission's check writes none), `charter` after a charter revision, anchoring the unsigned records that count before a
+revision to required signatures by one who may anchor, and `interval` once the unwitnessed tail holds 500 records or its
+oldest record is 24 hours old. It writes `closing` before a revocation, a key rotation or a narrowing grant revision, in the
+same batch (below). No field changes; a reader judges every checkpoint the same way, whatever its trigger.
 
 **Records that do not count.** A record that does not count is reported and kept:
 an unsigned record the rule above refuses, an unsigned policy record, checkpoint or
@@ -572,13 +573,17 @@ estate that has not adopted reads exactly as before, except that the runtime ref
 stated time more than five minutes past its clock in every estate (below).
 
 **Closings.** A closing is a checkpoint with `trigger` `closing` and `closes`, written just
-before the act it closes:
+before the act it closes. In an estate that has adopted, the runtime writes it in the same batch as the act, dated no later
+than the act and signed by the key that performs it, and refuses an act whose closing it cannot write or that comes without
+one, such as a record signed elsewhere, and an act stated more than five minutes before what its closing would witness. An act
+written again after a batch stopped between the two is stored alone after the closing its author stored then, which counts,
+acts and no act follows yet:
 
 | `closes.kind` | `closes.id` names | The act it precedes | Who signs it |
 | --- | --- | --- | --- |
 | `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
-| `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision dropping a scope or shortening an expiry | An operator, who may revise the grant |
+| `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision naming another grantee, dropping a scope, reserving another action, adding a condition, adding or shortening an expiry, or changing a policy scope's bounds | An operator, who may revise the grant |
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
@@ -624,7 +629,12 @@ checkpoint naming one is refused; the device's line skips it. A checkpoint a clo
 following it. Deleting the revocation, rotation or narrowing after a closing reopens
 nothing. A closing that acts while no revocation of its device that counts, no rotation
 replacing its key or no revision of its grant follows it is the warning
-`history.closing-unfollowed`; it closes all the same.
+`history.closing-unfollowed`; it closes all the same. A key's closing is followed as well by a
+revocation of its device that counts or a closing of its device that acts. A revocation, a rotation to another key or
+a narrowing grant revision that counts, that the adoption checkpoint does not witness, and whose
+device, key or grant revision no closing that acts names, is the warning `history.closing-missing`:
+it arrived without its closing, so what its target signs with an earlier date still counts. A
+closing that names the target, written later, ends it.
 
 **Authority as it stood.** In an adopted estate, the roles and grants a record's rules read
 are read at its authority time: its own `at`, or, for a record the adoption checkpoint

@@ -2339,6 +2339,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // From 0.9.2 (MCP-03): a request whose records only its device signs prepares or writes its one record with that device.
         if (requestDevice.Value is { Closed: false, Signing: { } signing } device)
         {
+            // An act a closing precedes, in an estate that has adopted, needs a closing the request's device cannot sign with it (OPS-07).
+            if (ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is { } closes) return Refuse(SignedElsewhereRefusal(closes));
             return signers is null
                 ? DeviceSignedWriteLocked(draft, current, device, signing)
                 : Refuse("A device-signed request is signed by its own device only; this write signs on the runtime's machine, and nothing was written.");
@@ -2359,6 +2361,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (record is null)
         {
             return Refuse(refusal!);
+        }
+
+        // In an estate that has adopted, a revocation, key rotation or narrowing grant revision is stored after its closing, in the same
+        // batch, signed on this machine by one who may perform the act; a record signed elsewhere cannot carry one (design/signed-history.md § 8; OPS-07).
+        if (ClosingRequired(current, record.Envelope.Type, record.Envelope.Body, record.Envelope.Subject, record.Envelope.Supersedes) is { } closes)
+        {
+            return signers is not null && signers.Any(s => s is PresignedSigner)
+                ? Refuse(SignedElsewhereRefusal(closes))
+                : UnderWriteLock(() => StoreWithClosingLocked(record, current, signers), WriteOutcome.Fail);
         }
 
         // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
@@ -2497,14 +2508,55 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
+        // A signing failure is described by its kind and type, never by its message, which may name a path on this machine and reaches
+        // refusals and a checkpoint's skip reason. The record's own refusals name its fields and values, and keep their message, as does
+        // a presigned signature's, which is fixed text.
+        List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s))];
         try
         {
             if (signers.Count > 0) BeforeSigningRecord?.Invoke();
-            return (RecordAuthor.Create(draft, signers), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, exception.Message);
+            return (null, SigningFailure(exception));
+        }
+
+        try
+        {
+            return (RecordAuthor.Create(draft, watched), null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return (null, watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
+        }
+    }
+
+    /// <summary>A signing failure by its kind and exception type, without its message, which may name a path on this machine.</summary>
+    private static string SigningFailure(Exception exception) => "The record could not be signed on this machine (" + (exception switch
+    {
+        UnauthorizedAccessException => "access to the signing key was denied",
+        IOException => "the signing key could not be read",
+        _ => "the device's key store refused to sign",
+    }) + ", " + exception.GetType().Name + ").";
+
+    /// <summary>A signer that notes whether its signature failed, so the failure is told from the record's own refusals.</summary>
+    private sealed class WatchedSigner(IRecordSigner inner) : IRecordSigner
+    {
+        public bool Failed { get; private set; }
+
+        public string DeviceId => inner.DeviceId;
+
+        public RecordSignature Sign(ReadOnlySpan<byte> digest)
+        {
+            try
+            {
+                return inner.Sign(digest);
+            }
+            catch
+            {
+                Failed = true;
+                throw;
+            }
         }
     }
 
@@ -2580,7 +2632,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({exception.Message}).", []));
+            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({FailureKind(exception)}).", []));
         }
 
         var written = new List<RecordWritten>();
@@ -2599,7 +2651,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     journal.Close();
                 }
 
-                return (written, new Problem("refused", $"Not written: {exception.Message}", []));
+                // Described by its kind and type, never by its message, which may name a path on this machine and reaches skip reasons.
+                return (written, new Problem("refused", $"Not written: {record.Envelope.Type} record {record.Envelope.Id} could not be stored ({FailureKind(exception)}).", []));
             }
 
             written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
@@ -2616,6 +2669,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         journal.Close();
         return (written, null);
     }
+
+    /// <summary>A storage failure by its kind and exception type, without its message, which may name a path on this machine.</summary>
+    private static string FailureKind(Exception exception) => (exception switch
+    {
+        UnauthorizedAccessException => "access to the file was denied",
+        IOException => "the file system refused the write",
+        _ => "the estate's store refused the write",
+    }) + ", " + exception.GetType().Name;
 
     /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
     private void JudgeInterruptedBatches()
@@ -2674,10 +2735,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // A run's work order holds its steps one by one: the batch is moot once its own step is held again.
             FlowRuns.StepRef? flowStep = stored.Where(r => r.Type == "assignment").Select(r => FlowRuns.StepOf(model.ById[r.Id])).FirstOrDefault(s => s is not null);
             // A record stored without the history checkpoint its trigger wrote with it needs nothing more: the next checkpoint witnesses it.
-            // Not so a charter revision or an admission, whose checkpoint anchors or adopts: without it unsigned records may stop counting
-            // or the estate is left unadopted, so the task stays.
-            bool moot = stored.Count == 0 || missing.Count == 0 ||
-                missing.All(r => r.Type == "history-checkpoint") && stored.All(r => r.Type is not ("estate" or "admission")) || (routing &&
+            // Two such checkpoints carry more, and keep the task only until what they carried holds another way, since the journal keeps
+            // ids alone and the checkpoint cannot be stored again: a birth adoption, until the estate has adopted, and the checkpoint of a
+            // charter revision anchoring the unsigned records that counted before it, until none is left unanchored. A closing stored
+            // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
+            // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
+            // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
+            bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
+            bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
+            bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
+            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
+            global::Vericairn.Records.Estate.Closing? unfollowed = closingAlone
+                ? model.Trust.Closings.FirstOrDefault(c => stored.Any(s => s.Id == c.Record.Id) && model.Counts(c.Record) && !model.Trust.Followed(c)) : null;
+            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)
@@ -2689,6 +2759,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
             string consequence = routing
                 ? $"The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned."
+                : adoptionMissing
+                ? "The estate's adoption at birth was not stored, so it has not adopted history checkpoints: the root operator reads vericairn estate checkpoint --adopt --check and adopts with vericairn estate checkpoint --adopt --expect-plan <plan> --by <root operator>. This task ends once the estate has adopted."
+                : anchorsMissing
+                ? "The checkpoint anchoring the unsigned records that counted before the charter revision was not stored, so they count for nothing (history.unanchored): the root operator or a person holding administer anchors each, after reading it, in a checkpoint's anchored list (records new history-checkpoint). This task ends once no unsigned record is left unanchored."
+                : unfollowed is not null
+                ? Unfollowed(unfollowed)
                 : "Reconcile the missing records from the stored evidence; nothing stored is removed, and the task remains until the batch is complete.";
             findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. {consequence}");
         }
@@ -2696,6 +2772,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return findings;
 
         static string Listed(List<BatchJournal.Entry> entries) => string.Join(", ", entries.Select(e => $"{e.Type} {e.Id}"));
+
+        // How a closing stored without its act is settled: the act written again by its author, or, for a key, its device revoked instead.
+        static string Unfollowed(global::Vericairn.Records.Estate.Closing closing)
+        {
+            string again = $"Closing {closing.Record.Id} closes {closing.Kind} {closing.Target} all the same, and the {Act(closing.Kind)} it precedes was not stored (history.closing-unfollowed). Write the {Act(closing.Kind)} again as {closing.Record.By}, with the same command: it uses the stored closing and is written after it, alone, with no new closing.";
+            return closing.Kind == "key"
+                ? $"{again} Or revoke device {closing.Identity} instead, with vericairn devices revoke, as an operator or a person holding administer: the revocation retires the closed key with its device. This task ends once the rotation follows the closing, or the device's revocation or closing does."
+                : $"{again} This task ends once an act follows the closing.";
+        }
     }
 
     private static FindingList UnreadableBatches(BatchJournal.ReadResult read)
@@ -2735,6 +2820,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
+            if (UnclosedActRefusal(proposed, records, () => LoadWith([])) is Problem unclosed) return unclosed;
             FindingList relevant = Invalid(proposed, records);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)

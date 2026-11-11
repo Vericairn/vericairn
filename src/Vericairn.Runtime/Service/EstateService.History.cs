@@ -13,6 +13,7 @@ using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Store;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 
@@ -24,6 +25,7 @@ public sealed partial class EstateService
 {
     private const string Adoption = "adoption";
     private const string Interval = "interval";
+    private const string ClosingTrigger = "closing";
 
     /// <summary>How long before the commit that added it a record's stated time may be before adoption's check points it out.</summary>
     private static readonly TimeSpan BackdatingNotice = TimeSpan.FromDays(1);
@@ -81,6 +83,8 @@ public sealed partial class EstateService
                     anchored = plan.Anchored;
                 }
 
+                // The files the adoption judged, so that its response lists what the at-time reading changes in the copy it signed.
+                IReadOnlyList<RecordFile>? judged = request.Adopt ? session.Files() : null;
                 (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, trigger, request.By!, anchored);
                 if (checkpoint is null) return (null, new Problem("refused", skipped ?? "No history checkpoint could be written.", []));
                 (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record], request.Adopt ? "Adopt history checkpoints." : "Write a history checkpoint.", null, null, null);
@@ -91,7 +95,7 @@ public sealed partial class EstateService
                 }
 
                 EstateModel after = LoadWith([]);
-                return (Plan(current, trigger, request.Adopt, written[0]) with { Adopted = SignedHistory.Adopted(after) }, problem);
+                return (Plan(current, trigger, request.Adopt, written[0], judged) with { Adopted = SignedHistory.Adopted(after) }, problem);
             }, problem => (null, problem));
         }
     }
@@ -120,8 +124,11 @@ public sealed partial class EstateService
         model.Trust.AnchorerAt(by, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)) ? null
             : $"Adopting history checkpoints anchors the unsigned records that count today and changes what counts in the whole estate, so it is signed by the root operator or a person holding administer through a grant that rests on signatures, never an agent; principal {by} is neither. Nothing was written.";
 
-    /// <summary>What a checkpoint witnesses and anchors, or would, with the commits that added the anchored records and the deletions in history.</summary>
-    private HistoryCheckpointResponse Plan(EstateModel model, string trigger, bool adopt, RecordWritten? written)
+    /// <summary>
+    /// What a checkpoint witnesses and anchors, or would, with the commits that added the anchored records and the deletions in history;
+    /// for adoption also the records that read otherwise at their own time, judged from the files given or the copy's files now.
+    /// </summary>
+    private HistoryCheckpointResponse Plan(EstateModel model, string trigger, bool adopt, RecordWritten? written, IReadOnlyList<RecordFile>? files = null)
     {
         HistoryState state = SignedHistory.Of(model);
         IReadOnlyList<RecordEnvelope> tail = SignedHistory.TailRecords(model);
@@ -161,9 +168,13 @@ public sealed partial class EstateService
         }
 
         List<string> uncommitted = complete ? [.. model.Records.Select(r => r.ExpectedPath).Where(p => !origins!.Added.ContainsKey(p)).Order(StringComparer.Ordinal)] : [];
+        // What the at-time reading changes (design/signed-history.md § 10): the same files judged with every record's roles and grants
+        // read at its own time, as the records no adoption witnesses are read once the estate adopts.
+        EstateModel atTime = session.LoadFilesAtRecordTime(files ?? session.Files());
+        List<HistoryRecordItem> changes = [.. AtTimeReading.Changes(model, atTime).Select(c => Item(c.Record) with { Note = c.Note })];
         return new HistoryCheckpointResponse(trigger, written is not null, state.Adopted, plan.Witnessed, tail.Count, heads,
             [.. plan.Anchored.Select(r => Item(r))], [.. plan.NotCounting.Select(r => Item(r))], [.. plan.ByRevokedDevices.Select(r => Item(r.Record, r.Device))],
-            deleted, unavailable.Count == 0 ? null : string.Join(" ", unavailable), written) { PlanHash = plan.AnchoredHash, Uncommitted = uncommitted };
+            deleted, unavailable.Count == 0 ? null : string.Join(" ", unavailable), written) { PlanHash = plan.AnchoredHash, Uncommitted = uncommitted, AuthorityChanges = changes };
     }
 
     private static bool IsRepository(string root) => Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
@@ -177,13 +188,14 @@ public sealed partial class EstateService
     /// checkpoint is not stored, so a refused checkpoint leaves none behind.
     /// </summary>
     /// <remarks>
-    /// The hook for closings (design/signed-history.md § 8, ID-06): a revocation, key rotation or narrowing grant revision stores, in one
-    /// batch and before its own record, the checkpoint this prepares over the copy as it is, with trigger closing, <paramref name="closes"/>
-    /// naming what it closes and <paramref name="signer"/> the key that performs the act, since only someone who could perform the act signs
-    /// its closing; StoreTogetherUnderLock then stores [closing, act].
+    /// Closings (design/signed-history.md § 8, ID-06) use it through <see cref="StoreWithClosingLocked"/>: a revocation, key rotation or
+    /// narrowing grant revision stores, in one batch and before its own record, the checkpoint this prepares over the copy as it is, with
+    /// trigger closing, <paramref name="closes"/> naming what it closes, <paramref name="signer"/> the key that performs the act, since only
+    /// someone who could perform the act signs its closing, and <paramref name="at"/> the act's own time, so that the closing is dated no
+    /// later than the act it precedes.
     /// </remarks>
     private (PreparedCheckpoint? Checkpoint, string? Skipped) CheckpointLocked(EstateModel model, string trigger, string by, IEnumerable<RecordEnvelope>? anchored = null,
-        (string Kind, string Id)? closes = null, IRecordSigner? signer = null)
+        (string Kind, string Id)? closes = null, IRecordSigner? signer = null, DateTimeOffset? at = null)
     {
         if (requestDevice.Value is { Closed: false, Signing: not null })
             return (null, trigger == Interval ? null : "A device-signed request signs only its own record, so no history checkpoint was written with it; the next checkpoint witnesses it.");
@@ -199,6 +211,19 @@ public sealed partial class EstateService
         try
         {
             draft = SignedHistory.Prepare(model, trigger, anchored, closes: closes);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // The history's own refusals, which name records and checkpoints and no path.
+            return (null, $"No history checkpoint with trigger {trigger} was written: {exception.Message}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return (null, $"No history checkpoint with trigger {trigger} was written: the heads' inventory objects could not be read.");
+        }
+
+        try
+        {
             foreach (byte[] bytes in draft.Objects)
             {
                 string hash = ContentHash.Sha256(bytes);
@@ -209,11 +234,12 @@ public sealed partial class EstateService
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException or ArgumentException)
         {
+            // Described by its kind: an object store's own message may name a path on this machine.
             RemoveObjects(stored);
-            return (null, $"No history checkpoint with trigger {trigger} was written: {exception.Message}");
+            return (null, $"No history checkpoint with trigger {trigger} was written: its inventory could not be stored in the estate's objects ({(exception is UnauthorizedAccessException ? "access was denied" : "the store refused it")}).");
         }
 
-        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body), model, [signer]);
+        (AuthoredRecord? checkpoint, string? refusal) = AuthorLocked(new RecordDraft("history-checkpoint", by, draft.Body, At: at), model, [signer]);
         if (checkpoint is null || checkpoint.Envelope.Signatures.Count == 0)
         {
             RemoveObjects(stored);
@@ -279,6 +305,14 @@ public sealed partial class EstateService
     /// </summary>
     private WriteOutcome StoreWithCheckpointLocked(AuthoredRecord record, EstateModel current, string trigger, string by)
     {
+        // A copy whose newest verified checkpoint is gone may have been rewritten back to its birth: adopting it would witness and
+        // anchor what the rewrite left, so the first authority is written alone and says why (design/signed-history.md § 7).
+        if (trigger == Adoption && RolledBackRefusal(current, "The admission was written without the adoption checkpoint.") is string rolledBack)
+        {
+            WriteOutcome first = StoreAuthoredLocked(record, current);
+            return first.Written is null ? first : first with { Checkpoint = new TriggeredCheckpoint(trigger, null, rolledBack) };
+        }
+
         EstateModel withRecord = LoadWith([record]);
         IReadOnlyList<RecordEnvelope>? anchored = trigger switch
         {
@@ -307,6 +341,224 @@ public sealed partial class EstateService
         if (stored is null) RemoveObjects(checkpoint);
         return new WriteOutcome(written[0], stored is null ? null : problem) { Checkpoint = new TriggeredCheckpoint(trigger, stored, stored is null ? "The history checkpoint was not stored: " + Describe(problem) : null) };
     }
+
+    /// <summary>
+    /// What the closing before an act names, when the act needs one (design/signed-history.md § 8; OPS-07): in an estate that has adopted
+    /// history checkpoints, a revocation, a key rotation or a grant revision that narrows the grant; null otherwise, and always null in an
+    /// estate that has not adopted, which writes these acts as before.
+    /// </summary>
+    private static (string Kind, string Id)? ClosingRequired(EstateModel current, string type, JsonElement body, RecordReference? subject, string? supersedes) =>
+        type is "admission" or "device" or "authority" && supersedes is not null && SignedHistory.Adopted(current)
+            ? ClosingActs.For(current, type, body, subject, supersedes) : null;
+
+    /// <summary>
+    /// Stores an act with the closing before it (design/signed-history.md § 8; OPS-07): over the copy as it is under the write lock, a
+    /// checkpoint with trigger closing naming what the act closes, signed by the key that performs the act (the revoking device or the
+    /// operator's recovery device for a revocation, the device's current key for a rotation, the operator's device for a grant revision),
+    /// dated no later than the act, then the act, in one batch. The judgment of the batch decides whether that signer may close: a
+    /// closing it would not let act refuses both. In an estate that has adopted, an act whose closing cannot be written is refused, and
+    /// nothing is written; one that has not adopted stores the act alone, as before. An act stated more than five minutes before what
+    /// its closing would follow or witness is refused, since its closing would be dated before what it lists. When a batch stopped
+    /// between a closing and its act, the closing is removed again where that can be done cleanly; one that stays, as after a process
+    /// stopped between the two, is used by the act written again, which is then stored alone after it. Caller holds the gate and the
+    /// write lock.
+    /// </summary>
+    private WriteOutcome StoreWithClosingLocked(AuthoredRecord record, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
+    {
+        EstateModel copy = LoadWith([]);
+        if (!SignedHistory.Adopted(copy) || ClosingActs.For(copy, record.Envelope) is not { } closes) return StoreAuthoredLocked(record, current);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (StatedEarlyRefusal(copy, record.Envelope, closes, now) is string early) return Refuse(early);
+
+        // A closing stored earlier without its act, by the act's author, is the act's closing: the act follows it alone, since a closed
+        // key or device could not sign another, and no new checkpoint witnesses what was written since (OPS-07).
+        if (ClosingActs.Stored(copy, closes, record.Envelope.By) is { } stored)
+        {
+            if (SelfRevocationRefusal(copy, record.Envelope, closes, stored.Record.AtTime) is string late) return Refuse(late);
+            WriteOutcome alone = StoreAuthoredLocked(record, current);
+            return alone.Written is null ? alone : alone with
+            {
+                Checkpoint = new TriggeredCheckpoint(ClosingTrigger, null,
+                    $"No closing was written with this {Act(closes.Kind)}: it follows closing {stored.Record.Id} ({stored.Record.ExpectedPath}), which an earlier attempt stored without its act."),
+            };
+        }
+
+        IRecordSigner? closer = null;
+        if (closes.Kind == "key")
+        {
+            // A key's closing is signed by its own device, with the key the rotation replaces.
+            string identity = copy.Chain(copy.ById[closes.Id])[0];
+            closer = signers?.FirstOrDefault(s => s.DeviceId == identity);
+            if (closer is null && DeviceKeyStores.All().FirstOrDefault(s => s.Has(identity)) is { } store) closer = new StoreSigner(store, identity);
+            if (closer is null) return Refuse(Unclosed(closes, $"a key's closing is signed by its own device, and this machine holds no key of device {identity}."));
+        }
+        else if (signers is { Count: > 0 })
+        {
+            closer = signers[0];
+        }
+
+        DateTimeOffset at = record.Envelope.AtTime < now ? record.Envelope.AtTime : now;
+        if (SelfRevocationRefusal(copy, record.Envelope, closes, at) is string self) return Refuse(self);
+        (PreparedCheckpoint? closing, string? skipped) = CheckpointLocked(copy, ClosingTrigger, record.Envelope.By, closes: closes, signer: closer, at: at);
+        if (closing is null) return Refuse(Unclosed(closes, skipped ?? "no checkpoint could be prepared."));
+        (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([closing.Record, record], $"Store the closing and the {Act(closes.Kind)} it precedes.", null, null, null);
+        if (written.Count == 0)
+        {
+            RemoveObjects(closing);
+            Problem refused = problem ?? new Problem("refused", "Nothing was written.", []);
+            return WriteOutcome.Fail(refused with { Message = $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written." });
+        }
+
+        var checkpoint = new TriggeredCheckpoint(ClosingTrigger, written[0], null);
+        if (written.Count > 1) return new WriteOutcome(written[1], problem) { Checkpoint = checkpoint };
+
+        // The batch stopped between the closing and its act. The closing is removed again when that can be done cleanly; otherwise it
+        // stays and closes all the same (design/signed-history.md § 8), and the act written again follows it alone.
+        string reason = Reason(problem);
+        if (UndoStoredClosing(closing.Record, record))
+        {
+            RemoveObjects(closing);
+            return Refuse($"The {Act(closes.Kind)} was not written: {reason} Its closing, stored just before it in the same batch, was removed again, so nothing was written: write the {Act(closes.Kind)} again.");
+        }
+
+        return new WriteOutcome(null, new Problem(ClosingStoredCode,
+            $"The {Act(closes.Kind)} was not written: {reason} Closing {written[0].Id}, stored just before it in the same batch, was kept and closes {closes.Kind} {closes.Id} all the same, warned as history.closing-unfollowed until an act follows it. Writing the {Act(closes.Kind)} again as {record.Envelope.By} uses the stored closing: the {Act(closes.Kind)} is written after it, alone, with no new closing. Until then this machine reports the batch as a reconcile task (batch.incomplete).", []))
+        { Checkpoint = checkpoint };
+    }
+
+    /// <summary>The outcome's code when a closing was stored and the act after it was not (OPS-07).</summary>
+    internal const string ClosingStoredCode = "closing-stored";
+
+    /// <summary>A test's hook, called before a closing whose act was not stored is removed again: a test throws from it to keep the closing.</summary>
+    internal Action<AuthoredRecord>? BeforeUndoingClosing { get; set; }
+
+    /// <summary>
+    /// Removes again a closing whose act was not stored (OPS-07), when that can be done cleanly: the act is surely absent, the closing's
+    /// file is removed and is gone, and the batch's journal is closed. False, with the closing kept, when any of that fails; a journal
+    /// that cannot be closed names nothing stored and is forgotten at the next judgment of interrupted batches. Caller holds the gate
+    /// and the write lock.
+    /// </summary>
+    private bool UndoStoredClosing(AuthoredRecord closing, AuthoredRecord act)
+    {
+        try
+        {
+            if (session.Holds(act)) return false;
+            BeforeUndoingClosing?.Invoke(closing);
+            session.Discard(closing);
+            if (session.Holds(closing)) return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
+
+        try
+        {
+            foreach (BatchJournal journal in BatchJournal.All(session).Journals.Where(j => j.Records.Any(r => r.Id == closing.Envelope.Id))) journal.Close();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // Nothing the journal names is stored now, so the next judgment of interrupted batches forgets it.
+        }
+
+        return true;
+    }
+
+    /// <summary>A store's refusal without its leading "Not written: ", to follow another sentence.</summary>
+    private static string Reason(Problem? problem)
+    {
+        const string Prefix = "Not written: ";
+        string message = problem?.Message.Trim() ?? "the batch stopped.";
+        return message.StartsWith(Prefix, StringComparison.Ordinal) ? message[Prefix.Length..] : message;
+    }
+
+    /// <summary>
+    /// Why an act a closing precedes is refused for the time it states (OPS-07): in an estate that has adopted, its closing is dated no
+    /// later than the act, so an act stated more than five minutes before the newest record its closing would witness, or before the
+    /// head checkpoint, would date that closing before what it lists and leave history.dated-after-witness on those records for good.
+    /// A record or checkpoint dated past the runtime's clock is read at that clock. Null when the act's time stands.
+    /// </summary>
+    private static string? StatedEarlyRefusal(EstateModel copy, RecordEnvelope act, (string Kind, string Id) closes, DateTimeOffset now)
+    {
+        HistoryState state = SignedHistory.Of(copy);
+        RecordEnvelope? newest = SignedHistory.TailRecords(copy)
+            .Concat(state.Heads.Select(h => copy.ById.GetValueOrDefault(h.Id)).OfType<RecordEnvelope>())
+            .OrderByDescending(r => r.AtTime).ThenByDescending(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (newest is null) return null;
+        DateTimeOffset limit = newest.AtTime < now ? newest.AtTime : now;
+        if (act.AtTime + SignedHistory.ClockTolerance >= limit) return null;
+        string what = state.Heads.Any(h => h.Id == newest.Id) ? $"head checkpoint {newest.Id}" : $"{newest.Type} {newest.Id}";
+        return $"This {Act(closes.Kind)} states {act.At}, more than five minutes before {what}, dated {newest.At}: in an estate that has adopted history checkpoints, the closing before such an act is dated no later than the act and follows or witnesses what this copy holds, so it cannot be dated before them. Write the {Act(closes.Kind)} again at the present time, without an earlier stated time. Nothing was written.";
+    }
+
+    /// <summary>
+    /// Why a device's revocation of itself is refused for its revokedAt (OPS-07): from its closing on, a closed device's signature counts
+    /// only on its own revocation from that closing's time on, so a revocation the device signs states revokedAt at or after the closing,
+    /// here <paramref name="closingAt"/>, and after every other closing of the device. Null for any other act, or when it does.
+    /// </summary>
+    private static string? SelfRevocationRefusal(EstateModel copy, RecordEnvelope act, (string Kind, string Id) closes, DateTimeOffset closingAt)
+    {
+        if (closes.Kind != "device" || EstateModel.BodyString(act, "revokedAt") is not { } revokedAt || !copy.ById.TryGetValue(closes.Id, out RecordEnvelope? device)) return null;
+        string identity = copy.Chain(device)[0];
+        if (!act.Signatures.Any(s => copy.ById.TryGetValue(s.Device, out RecordEnvelope? signer) && signer.Type == "device" && copy.Chain(signer)[0] == identity)) return null;
+        string closed = RecordParser.FormatTimestamp(closingAt);
+        foreach (string other in copy.Trust.Closings.Where(c => c.Kind == "device" && c.Identity == identity).Select(c => c.Record.At))
+        {
+            if (string.CompareOrdinal(other, closed) > 0) closed = other;
+        }
+
+        return string.CompareOrdinal(revokedAt, closed) >= 0 ? null
+            : $"Device {identity} signs its own revocation with revokedAt {revokedAt}, before its closing, dated {closed}: from its closing on, a closed device's signature counts only on its own revocation from the closing's time on, so the revocation would revoke nothing. Write the revocation with revokedAt at the present time, or have another operator's device, a device of a person holding administer, or the operator's recovery key revoke the device as of the earlier time. Nothing was written.";
+    }
+
+    /// <summary>
+    /// The batch's refusal of an act without its closing (OPS-07): in an estate that has adopted, each such act follows, in its own batch,
+    /// a closing naming what it closes, or, written again after a batch stopped between them, the closing its author stored then, which
+    /// counts, acts and no act follows yet, read in <paramref name="current"/>, the copy without the batch.
+    /// </summary>
+    private static Problem? UnclosedActRefusal(EstateModel proposed, IReadOnlyList<AuthoredRecord> records, Func<EstateModel> current)
+    {
+        if (!records.Any(r => r.Envelope.Type is "admission" or "device" or "authority" && r.Envelope.Supersedes is not null) || !SignedHistory.Adopted(proposed)) return null;
+        EstateModel? before = null;
+        for (int i = 0; i < records.Count; i++)
+        {
+            if (ClosingActs.For(proposed, records[i].Envelope) is not { } closes) continue;
+            if (records.Take(i).Any(r => r.Envelope.Type == "history-checkpoint" && CheckpointBody.ReadCloses(r.Envelope.Body) is { } named && named == closes)) continue;
+            before ??= current();
+            if (ClosingActs.Stored(before, closes, records[i].Envelope.By) is not null) continue;
+            return new Problem("refused", $"{Needs(closes)} Record {records[i].Envelope.Id} comes without it, so nothing was written.", []);
+        }
+
+        return null;
+    }
+
+    /// <summary>What an act needs in an estate that has adopted (design/signed-history.md § 8).</summary>
+    private static string Needs((string Kind, string Id) closes) =>
+        $"In an estate that has adopted history checkpoints, {Article(closes.Kind)} is written after its closing, in the same batch: a checkpoint closing {closes.Kind} {closes.Id}, signed on the runtime's machine by one who may perform the act.";
+
+    /// <summary>Why an act is refused when its closing cannot be written.</summary>
+    private static string Unclosed((string Kind, string Id) closes, string why) =>
+        $"{Needs(closes)} The closing could not be written: {why.TrimEnd()} Nothing was written.";
+
+    /// <summary>Why an act signed elsewhere is refused in an estate that has adopted: it cannot carry its closing.</summary>
+    private static string SignedElsewhereRefusal((string Kind, string Id) closes) =>
+        $"{Needs(closes)} A record signed elsewhere, presigned or by a device-signed request, carries no closing: write it on a machine that holds a device of one who may perform it{(closes.Kind == "device" ? ", or with the operator's recovery key" : string.Empty)}. Nothing was written.";
+
+    /// <summary>Why operator record refuses an act a closing precedes in an estate that has adopted: it carries one signed record, never its closing.</summary>
+    private static string OperatorRecordClosingRefusal((string Kind, string Id) closes) =>
+        $"{Needs(closes)} An operator record carries one signed record through a checked merge and cannot carry the closing, so this {Act(closes.Kind)} is not recorded through it: write it with {ClosingCommand(closes, "<operator id>")}, which writes the closing and the act together. Nothing was written.";
+
+    /// <summary>The command that writes an act with its closing (OPS-07).</summary>
+    private static string ClosingCommand((string Kind, string Id) closes, string by) => closes.Kind switch
+    {
+        "device" => $"vericairn devices revoke {closes.Id} --by {by} --reason \"<why>\"",
+        "key" => $"vericairn devices rotate {closes.Id}",
+        _ => $"vericairn records new authority --by {by} --supersedes {closes.Id} --body <file>",
+    };
+
+    private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", _ => "grant revision" };
+
+    private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };
 
     /// <summary>
     /// What a charter revision's checkpoint anchors (design/signed-history.md § 6): a revision moving the charter to required signatures,
@@ -366,9 +618,9 @@ public sealed partial class EstateService
     }
 
     /// <summary>Why adoption, and its check, do not go ahead on this clone: its memory holds a verified checkpoint the copy no longer holds.</summary>
-    private string? RolledBackRefusal(EstateModel model) =>
+    private string? RolledBackRefusal(EstateModel model, string outcome = "Nothing was signed.") =>
         Standing(model) is { CopyHolds: false } standing
-            ? $"This machine verified history checkpoint {standing.Verified.Id} ({HistoryLine.ShortHash(standing.Verified.Hash)}) on {standing.Verified.VerifiedAt}, and this copy no longer holds it: its history may have been rewritten to remove the checkpoints together with the records after them, and adopting now would witness and anchor what the rewrite left. Restore that history from a clone or remote that holds it, or check this copy against a head the main line holds with vericairn estate check --expect <checkpoint>, which this machine then remembers instead. Nothing was signed."
+            ? $"This machine verified history checkpoint {standing.Verified.Id} ({HistoryLine.ShortHash(standing.Verified.Hash)}) on {standing.Verified.VerifiedAt}, and this copy no longer holds it: its history may have been rewritten to remove the checkpoints together with the records after them, and adopting now would witness and anchor what the rewrite left. Restore that history from a clone or remote that holds it, or check this copy against a head the main line holds with vericairn estate check --expect <checkpoint>, which this machine then remembers instead. {outcome}"
             : null;
 
     /// <summary>What this clone's memory says of the copy, or null when it remembers no checkpoint or cannot be read.</summary>

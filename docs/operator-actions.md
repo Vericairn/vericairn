@@ -60,7 +60,11 @@ body still passes all existing authoring, authority and signing checks.
 Inspect before acting. The commands record judgments, starts, results, discharges or observed
 publication; they do not carry out the underlying reserved work. They operate in the selected estate.
 The queue itself signs nothing and holds no key. Each authoring command also offers
-`operator record` with the same type, author, subject, superseded record and JSON input. Neither
+`operator record` with the same type, author, subject, superseded record and JSON input, with one
+exception from 0.9.2: in an estate that has adopted history checkpoints, a device's revocation, a
+key rotation and a grant revision that narrows the grant are written with their closing in the same
+batch, which `operator record` cannot carry, so it refuses them before anything is signed and names
+`devices revoke`, `devices rotate` or `records new authority --supersedes` as the next step. Neither
 operator command is offered through MCP.
 
 ## Package publication, unlisting and deprecation

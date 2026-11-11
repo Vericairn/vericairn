@@ -68,6 +68,13 @@ public sealed class EstateModel
     internal IReadOnlySet<string>? FilePaths { get; set; }
 
     /// <summary>
+    /// Whether an estate that has not adopted history checkpoints reads every record's roles and grants at the record's own time, as an
+    /// adopted estate reads the records no adoption witnesses: what adoption's check compares with the reading of today to list what the
+    /// at-time reading changes (design/signed-history.md § 10). Never set on a model a rule or a write reads.
+    /// </summary>
+    internal bool AuthorityAtRecordTime { get; init; }
+
+    /// <summary>
     /// Whether a record counts: a record that does not, such as an unanchored unsigned record under required signatures in an estate
     /// that has adopted history checkpoints, a record whose signature does not verify, or a witnessed record present with another hash,
     /// is reported and kept, and grants nothing.
@@ -230,7 +237,7 @@ public sealed class EstateModel
     internal DateTimeOffset? AuthorityTime(RecordEnvelope record)
     {
         EstateTrust trust = Trust;
-        return trust.Adopted ? trust.History.AdoptedAt(record) ?? record.AtTime : null;
+        return trust.Adopted ? trust.History.AdoptedAt(record) ?? record.AtTime : AuthorityAtRecordTime ? record.AtTime : null;
     }
 
     /// <summary>
