@@ -783,10 +783,11 @@ The self-contained publishes restore locked from committed runtime-specific lock
 Workbench ship, for the six platforms. Ordinary builds and the NuGet packages keep the portable graph. After a
 dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
 `-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
-stale ones. The SDK `global.json` pins builds the path's packages and distributables, 10.0.403 for 0.9.1; each
-self-contained distributable embeds that SDK's .NET and ASP.NET Core runtimes, 10.0.14 (FIX-91), while the NuGet
-tool stays framework-dependent. The distributable lock files also pin the SDK's implicit `Microsoft.NET.ILLink.Tasks`
-at that version, so moving the SDK regenerates them too. The bill of materials is generated from those restores
+stale ones. The SDK `global.json` pins builds the path's packages and distributables, 10.0.403 for 0.9.1 and
+10.0.404 from 0.9.2; each self-contained distributable embeds that SDK's .NET and ASP.NET Core runtimes, 10.0.14
+in 0.9.1 (FIX-91) and 10.0.15 from 0.9.2, while the NuGet tool stays framework-dependent. The distributable lock
+files also pin the SDK's implicit `Microsoft.NET.ILLink.Tasks` at that version, so moving the SDK regenerates them
+too. The bill of materials is generated from those restores
 without restoring again, so it describes the packages and every platform graph of the distributables. Its
 metadata component names Vericairn and the packaged release's version (FIX-90). Verification refuses a different
 name or version and confirms it names every package their lock files hold and, from the publish evidence, the

@@ -63,6 +63,7 @@ jobs:
         run: dotnet build src/Vericairn.Remote.iOS/Vericairn.Remote.iOS.csproj --no-restore --configuration Release
 
   remote-android:
+    # Android follows the SDK's patch: workload set 10.0.404 carries the Mono runtime 10.0.15 that the phone head embeds.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -75,7 +76,7 @@ jobs:
           global-json-file: global.json
       - name: Install the Android workload
         timeout-minutes: 10
-        run: dotnet workload install android --version 10.0.403
+        run: dotnet workload install android --version 10.0.404
       - name: Restore (locked)
         timeout-minutes: 10
         run: dotnet restore src/Vericairn.Remote.Android/Vericairn.Remote.Android.csproj --locked-mode
