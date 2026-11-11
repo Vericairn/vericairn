@@ -232,7 +232,8 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// The cost of judging a chain of device closings by operators other than the root operator (FIX-108): 300 operators, each with a
     /// device, and 180 closings, each following the one before it and signed by a different operator, so that each is judged against the
     /// closings before it and reads principal lines as the strongest acts do. The load stays within twice the load of the same chain of
-    /// closings by the root operator, whose closings need no such reading, plus 50 ms.
+    /// closings by the root operator, whose closings need no such reading, plus 50 ms. The two estates are loaded in turn, three times
+    /// each, and the fastest load of each is compared, so that a pause on the machine does not weigh on one of them alone.
     /// </summary>
     [Fact]
     public void ChainedClosingsByOperatorsStayWithinTwiceTheRootOperatorsChain()
@@ -240,19 +241,39 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The chained closings cost test runs when {EnvironmentVariable} is 1.");
         const int Operators = 300;
         const int Closings = 180;
-        TimeSpan byRoot = ChainedClosings(Operators, Closings, byRoot: true);
-        TimeSpan byOperators = ChainedClosings(Operators, Closings, byRoot: false);
+        using HistoryFixture rootChain = new(), operatorChain = new();
+        IReadOnlyList<RecordEnvelope> rootClosings = WriteChainedClosings(rootChain, Operators, Closings, byRoot: true);
+        IReadOnlyList<RecordEnvelope> operatorClosings = WriteChainedClosings(operatorChain, Operators, Closings, byRoot: false);
+        TimeSpan byRoot = TimeSpan.MaxValue, byOperators = TimeSpan.MaxValue;
+        for (int run = 0; run < 3; run++)
+        {
+            TimeSpan root = TimedLoad(rootChain, rootClosings);
+            if (root < byRoot) byRoot = root;
+            TimeSpan operators = TimedLoad(operatorChain, operatorClosings);
+            if (operators < byOperators) byOperators = operators;
+        }
+
         output.WriteLine($"chained closings, {Closings:N0} over {Operators:N0} operators: {byOperators.TotalMilliseconds:N0} ms when each is by another operator; {byRoot.TotalMilliseconds:N0} ms when the root operator wrote them");
         Assert.True(byOperators <= 2 * byRoot + TimeSpan.FromMilliseconds(50), $"Closings by operators: {byOperators.TotalMilliseconds:N0} ms against {byRoot.TotalMilliseconds:N0} ms.");
+
+        // One load, checking that every closing written acts.
+        static TimeSpan TimedLoad(HistoryFixture f, IReadOnlyList<RecordEnvelope> closings)
+        {
+            var watch = Stopwatch.StartNew();
+            EstateModel model = f.Load();
+            watch.Stop();
+            var acting = model.Trust.Closings.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+            Assert.All(closings, closing => Assert.Contains(closing.Id, acting));
+            return watch.Elapsed;
+        }
     }
 
     /// <summary>
-    /// Loads an adopted estate with operators, each holding a device, in which a chain of closings of the builder's device is written, each
-    /// by the next operator or, when <paramref name="byRoot"/>, by the root operator; returns the faster of two loads.
+    /// Writes, in an adopted estate, operators each holding a device and a chain of closings of the builder's device, each by the next
+    /// operator or, when <paramref name="byRoot"/>, by the root operator; returns the closings.
     /// </summary>
-    private static TimeSpan ChainedClosings(int operators, int closings, bool byRoot)
+    private static List<RecordEnvelope> WriteChainedClosings(HistoryFixture f, int operators, int closings, bool byRoot)
     {
-        using var f = new HistoryFixture();
         var signers = new List<(RecordEnvelope Person, RecordEnvelope Device)>();
         for (int i = 0; i < operators; i++)
         {
@@ -268,18 +289,7 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         for (int k = 0; k < closings; k++)
             made.Add(byRoot ? f.Close("device", f.BuilderDevice.Id) : f.Close("device", f.BuilderDevice.Id, signers[k].Person.Id, f.Signer(signers[k].Device)));
 
-        TimeSpan best = TimeSpan.MaxValue;
-        for (int run = 0; run < 2; run++)
-        {
-            var watch = Stopwatch.StartNew();
-            EstateModel model = f.Load();
-            watch.Stop();
-            var acting = model.Trust.Closings.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
-            Assert.All(made, closing => Assert.Contains(closing.Id, acting));
-            if (watch.Elapsed < best) best = watch.Elapsed;
-        }
-
-        return best;
+        return made;
     }
 
     public void Dispose()
