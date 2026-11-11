@@ -94,6 +94,7 @@ public class ContinuousIntegrationTests
         // A job skipped on every pull request is a check that never passes, which a checked merge refuses.
         string triggers = Block(workflow, "on:", 0);
         Assert.DoesNotContain("pull_request", triggers, StringComparison.Ordinal);
+        Assert.DoesNotContain("merge_group", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  release:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.DoesNotContain("id-token", Block(workflow, "permissions:", 0), StringComparison.Ordinal);
@@ -121,10 +122,12 @@ public class ContinuousIntegrationTests
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
         string workflow = Read(Path.Combine(workflows, "secret-scan.yml"));
 
-        // Every branch push, pull request and manual run, in a workflow of its own; the build stays in ci.yml, without the scan.
+        // Every branch push, pull request, merge queue group and manual run, in a workflow of its own; the build stays in ci.yml,
+        // without the scan. The merge queue's temporary branches are scanned by their merge_group run, not again as pushes.
         string triggers = Block(workflow, "on:", 0);
-        Assert.Contains("\n  push:\n    branches: ['**']\n", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  push:\n    branches: ['**', '!gh-readonly-queue/**']\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  pull_request:\n", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  merge_group:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);
         // ci.yml installs the same pinned gitleaks for the secret scan's own tests, and scans nothing with it.
@@ -170,10 +173,13 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n          persist-credentials: false\n", scan, StringComparison.Ordinal);
         Assert.Contains("PR_BASE: ${{ github.event.pull_request.base.sha }}", scan, StringComparison.Ordinal);
         Assert.Contains("PR_HEAD: ${{ github.event.pull_request.head.sha }}", scan, StringComparison.Ordinal);
+        Assert.Contains("GROUP_BASE: ${{ github.event.merge_group.base_sha }}", scan, StringComparison.Ordinal);
+        Assert.Contains("GROUP_HEAD: ${{ github.event.merge_group.head_sha }}", scan, StringComparison.Ordinal);
         Assert.Contains("PUSH_BEFORE: ${{ github.event.before }}", scan, StringComparison.Ordinal);
         Assert.Contains("PUSH_AFTER: ${{ github.event.after }}", scan, StringComparison.Ordinal);
         Assert.Contains("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", scan, StringComparison.Ordinal);
         Assert.Contains("pull_request) range=\"$PR_BASE..$PR_HEAD\" ;;", scan, StringComparison.Ordinal);
+        Assert.Contains("merge_group) range=\"$GROUP_BASE..$GROUP_HEAD\" ;;", scan, StringComparison.Ordinal);
         Assert.Contains("if git cat-file -e \"$PUSH_BEFORE^{commit}\" 2> /dev/null; then range=\"$PUSH_BEFORE..$PUSH_AFTER\"\n", scan, StringComparison.Ordinal);
         Assert.Contains("elif [ \"$GITHUB_REF\" = \"refs/heads/$DEFAULT_BRANCH\" ]; then range=--all\n", scan, StringComparison.Ordinal);
         Assert.Contains("else range=\"origin/$DEFAULT_BRANCH..$PUSH_AFTER\"\n", scan, StringComparison.Ordinal);
@@ -594,6 +600,31 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n    needs: [enclave-helper]\n", package, StringComparison.Ordinal);
         Assert.DoesNotContain("always()", package, StringComparison.Ordinal);
         Assert.Contains("built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform.", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryRequiredWorkflowRunsTheSameJobsForAMergeQueueGroup()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // A required check that a queued group never reports would hold the queue for good, so both workflows whose jobs the
+        // default branch requires run on merge_group as on a pull request.
+        foreach (string file in new[] { "ci.yml", "secret-scan.yml" })
+        {
+            string triggers = Block(Read(Path.Combine(workflows, file)), "on:", 0);
+            Assert.Contains("\n  pull_request:\n", triggers, StringComparison.Ordinal);
+            Assert.Contains("\n  merge_group:\n", triggers, StringComparison.Ordinal);
+        }
+
+        // The same jobs run for every event: no job of ci.yml, or of the packaging path it calls, depends on the event, and
+        // secret-scan's one job skips only a push that deletes a branch.
+        foreach (string file in new[] { "ci.yml", "package.yml" })
+            foreach (string job in Jobs(Read(Path.Combine(workflows, file))))
+                Assert.DoesNotContain(job.Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
+        Assert.Single(Read(Path.Combine(workflows, "secret-scan.yml")).Split('\n'), line => line.StartsWith("    if:", StringComparison.Ordinal));
+
+        // Releases and publications run only when a person starts them or publishes a release, never for the queue.
+        foreach (string file in new[] { "release.yml", "nuget.yml", "mcp-registry.yml" })
+            Assert.DoesNotContain("merge_group", Block(Read(Path.Combine(workflows, file)), "on:", 0), StringComparison.Ordinal);
     }
 
     private static string[] WorkflowFiles()

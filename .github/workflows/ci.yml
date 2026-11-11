@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue's event. Every job runs for a queued group exactly as for a pull request, so each check the default
+  # branch requires reports on the commit the queue would move main to.
+  merge_group:
   workflow_dispatch:
 
 permissions:
