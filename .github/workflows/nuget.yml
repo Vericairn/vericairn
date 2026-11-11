@@ -5,7 +5,8 @@ name: nuget
 # workflow; that run pushes exactly the same verified assets, and a version nuget.org already holds is skipped.
 #
 # It has no pull-request or merge-queue trigger: package.yml packs and verifies the packages on every change and every queued
-# group, and a job skipped on every pull request would be a check that never passes, which a checked merge refuses.
+# group, and a job skipped on every pull request would be a check that never passes, which a checked merge refuses. It has no
+# concurrency group either, so no run of it is ever cancelled.
 on:
   release:
     types: [published]

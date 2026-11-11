@@ -3,6 +3,9 @@ name: package
 # The release's packaging path, shared by release.yml and by every change's ci.yml so that no release-only step can first fail
 # during a release. It builds every asset a release attaches, verifies the packages and checksums, and uploads them as this run's
 # artifact. It creates no tag, release or upload and holds only the read token: release.yml's draft job alone writes.
+#
+# It runs for whatever event its caller runs for, a merge queue group included, and has no concurrency group of its own: it
+# stops only with a pull request's ci.yml run that a newer commit cancels, and release.yml, which cancels nothing, never stops it.
 
 on:
   workflow_call:

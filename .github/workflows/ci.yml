@@ -12,6 +12,13 @@ on:
 permissions:
   contents: read
 
+# A newer commit on a pull request cancels that pull request's run still in progress: no merge can use the head it tests.
+# Every other run, a push to main, a merge queue group or a manual run, has a group of its own, so none is ever cancelled or
+# held back by another. The jobs package.yml runs for this workflow belong to this run and stop with it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # A second line behind tools/BuildTelemetry.targets: Avalonia's build statistics stay off in every job.
   AVALONIA_TELEMETRY_OPTOUT: "1"

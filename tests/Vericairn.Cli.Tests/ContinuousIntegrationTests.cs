@@ -627,6 +627,32 @@ public class ContinuousIntegrationTests
             Assert.DoesNotContain("merge_group", Block(Read(Path.Combine(workflows, file)), "on:", 0), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void OnlyAPullRequestRunThatANewerCommitSupersedesIsCancelled()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // A newer commit cancels its pull request's run in progress; a push, a queued group and a manual run each have a group
+        // of their own, so none is cancelled or held back.
+        const string concurrency = "\nconcurrency:\n"
+            + "  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}\n"
+            + "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n";
+        foreach (string file in new[] { "ci.yml", "secret-scan.yml" })
+        {
+            string workflow = Read(Path.Combine(workflows, file));
+            Assert.Contains(concurrency, workflow, StringComparison.Ordinal);
+            Assert.Single(workflow.Split('\n'), line => line.Contains("concurrency:", StringComparison.Ordinal));
+            Assert.Single(workflow.Split('\n'), line => line.Contains("cancel-in-progress", StringComparison.Ordinal));
+        }
+
+        // A release run, a publication and the packaging path a release shares hold no concurrency group, so none is ever cancelled.
+        foreach (string file in new[] { "release.yml", "package.yml", "nuget.yml", "mcp-registry.yml" })
+        {
+            string workflow = Read(Path.Combine(workflows, file));
+            Assert.DoesNotContain(workflow.Split('\n'), line => line.TrimStart().StartsWith("concurrency:", StringComparison.Ordinal));
+            Assert.DoesNotContain("cancel-in-progress", workflow, StringComparison.Ordinal);
+        }
+    }
+
     private static string[] WorkflowFiles()
     {
         string[] files = Directory.GetFiles(Path.Combine(RepositoryRoot(), ".github", "workflows"))
