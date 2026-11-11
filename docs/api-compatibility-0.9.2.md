@@ -785,9 +785,21 @@ Each records ordinary `verification` records through the existing record route, 
 ## Authority revisions (FIX-108)
 
 No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In every estate,
-a `principal` or `authority` revision dated before the record it supersedes, already reported as `record.supersedes`, now
-counts for nothing. Anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's closing read
-only grants and principal revisions written by the root operator or by an operator who held the role at the revision's time and
-still holds it, decided by dropping revisions until none changes
-([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). Other records keep reading roles and grants
-as they stood at their time. An estate holding no such revision, such as the first-party estate, reads as before.
+a `principal` or `authority` revision dated before the record below it in its line, already reported as `record.supersedes`,
+now counts for nothing, and a revision on top of such a one follows the line there, so `EstateModel.Current`, `IsCurrent`,
+`CurrentPrincipal`, `HasRole`, `HasScope` and `HasScopeAt` read one current record of that line. Anchoring, acknowledging a
+removal, rooting an adoption and signing a device's or a grant's closing read a grant or principal revision as written when the
+root operator wrote it, or an operator who held the role at its time and still holds it; as a removal when its author had been
+given the role by then but had lost it or no longer holds it; and not at all when its author had never been given it
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). Removing an operator's role therefore
+takes, for those acts, what that person appointed, granted and closed. Other records keep reading roles and grants as they
+stood at their time.
+
+New finding: the warning `history.revision-author`, only in an estate holding a history checkpoint, on each grant revision
+giving `administer` and each principal revision giving the operator role that counts but that those acts read as a removal.
+
+An estate holding no history checkpoint reads as before, apart from revisions dated before the record below them. In an estate
+holding one, those acts read differently only where a grant or principal revision is dated before the record below it, sits on
+top of a revision they do not read, or was written by someone other than the root operator who did not hold the operator role
+at its time or does not hold it now. The first-party estate, which holds no checkpoint and no revision dated before the record
+it supersedes, reads exactly as before.

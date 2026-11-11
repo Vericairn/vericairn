@@ -641,13 +641,39 @@ already read its grants at the action's time. The strongest acts read more stric
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) the grants and principal
-revisions those acts rest on count only when the root operator, or an operator whose role
-stood at the revision's time and still stands, wrote them, decided by dropping revisions until
-none changes; and in every estate a grant or principal revision dated before the record it
-supersedes counts for nothing. Ordinary records keep the reading as it stood. A role has no
-closing: a former operator's records dated into the time the role stood read as it stood, so
-close and revoke a person's devices when removing their role.
+withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) those acts read grant and
+principal revisions as follows. The revisions considered are those authentic by their
+signatures and not refused for their date (below), with the root operator's first record. A
+person has been given the operator role by a time when a revision considered of their line,
+dated by then, gives it and was written by the root operator or by a person given the role by
+an earlier revision, taken in time order, ids breaking ties; removals do not count here. Taking
+every line in that order, a revision is read as written when its author is the root operator,
+or stands now and held the role as their line stood before the revision; as a removal,
+whatever it says, when its author had been given the role by then but had lost it or does not
+stand now, after which the line gives no operator role or `administer` until a revision read
+as written follows it; and not at all when its author had never been given the role, which
+leaves the line as it was: a revision follows the nearest revision below it that is read. A
+line describes a person at a time by the single revision read, dated by then, that no other
+follows; a revision read as a removal keeps the kind the revision below it described. Who
+stands now is the least set holding the root operator and every person whose line gives the
+operator role at the end when only members of the set give, built up from the root operator;
+grants do not count towards it. So a removal keeps counting after its author is removed, a
+revision by one never given the role changes nothing, a circle of appointments gives nothing,
+and two operators other than the root operator who remove each other both lose these acts,
+closings of each other's devices included, until the root operator settles it. Removing an
+operator's role takes, for these acts, what that person appointed, granted and closed. In an
+estate holding a history checkpoint, each grant revision giving `administer` and each
+principal revision giving the operator role that counts but that these acts read as a removal
+is the warning `history.revision-author`: it no longer counts for anchoring and closings, and
+a standing operator should write it again. Other records keep the reading as it stood.
+
+In every estate, a grant or principal revision dated before the record it attaches to counts
+for nothing, whoever signed it. It attaches to the record it supersedes, or, when that one is
+itself refused this way, to the record that one attaches to. A revision on top of a refused one
+is compared with, and follows, the line there, so its line has one current record in every
+read. A role has no closing; role closings are planned. A former operator's records dated into
+the time the role stood read as it stood, so close and revoke a person's devices when removing
+their role.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The

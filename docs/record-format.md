@@ -232,11 +232,19 @@ and a later narrowing withdraws nothing already written. A record the adoption c
 witnesses keeps the reading it had then, read at the adoption's time. Anchoring, acknowledging
 a removal, rooting an adoption and signing a device's or a grant's closing read more
 strictly, as before: the role or grant must still stand, so a later narrowing withdraws those
-powers for every checkpoint. They read authority only from the root operator or an operator
-who still stands, and a grant or principal revision dated before the record it supersedes
-counts for nothing; ordinary records keep the reading as it stood. A role has no closing, so
-close and revoke a person's devices when removing their operator role or `administer` grant. Status and policy
-evaluation take their recorded time from the records that count.
+powers for every checkpoint. They read a grant or principal revision as written when the root
+operator wrote it, or an operator who held the role at its time and still holds it; as a
+removal, whatever it says, when its author had been given the role by then but had lost it or
+no longer holds it; and not at all when its author had never been given the role. The role is
+given by the root operator or by someone given it earlier, so a circle of appointments gives
+nothing. Removing an operator's role therefore takes, for those acts, what that person
+appointed, granted and closed, and the warning `history.revision-author` names each grant or
+appointment it takes; other records keep reading roles and grants as they stood. In every
+read, a grant or principal revision dated before the record below it in its line counts for
+nothing, and a revision on top of such a one follows the line there. A role has no closing;
+role closings are planned. Close and revoke a person's devices when removing their operator
+role or `administer` grant. Status and policy evaluation take their recorded time from the
+records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
 warning `history.dated-after-witness`. In every estate, the runtime refuses a stated time
