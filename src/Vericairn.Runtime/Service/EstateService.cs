@@ -2591,7 +2591,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({exception.Message}).", []));
+            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({FailureKind(exception)}).", []));
         }
 
         var written = new List<RecordWritten>();
@@ -2610,7 +2610,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     journal.Close();
                 }
 
-                return (written, new Problem("refused", $"Not written: {exception.Message}", []));
+                // Described by its kind and type, never by its message, which may name a path on this machine and reaches skip reasons.
+                return (written, new Problem("refused", $"Not written: {record.Envelope.Type} record {record.Envelope.Id} could not be stored ({FailureKind(exception)}).", []));
             }
 
             written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
@@ -2627,6 +2628,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         journal.Close();
         return (written, null);
     }
+
+    /// <summary>A storage failure by its kind and exception type, without its message, which may name a path on this machine.</summary>
+    private static string FailureKind(Exception exception) => (exception switch
+    {
+        UnauthorizedAccessException => "access to the file was denied",
+        IOException => "the file system refused the write",
+        _ => "the estate's store refused the write",
+    }) + ", " + exception.GetType().Name;
 
     /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
     private void JudgeInterruptedBatches()
