@@ -61,6 +61,7 @@ internal sealed partial class EstateTrust
     private StrictIndex? strictIndex;
     private StrictView? strictNone;
     private List<RecordEnvelope>? principalsInOrder;
+    private AuthorityReplay? loadedAuthority;
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
@@ -491,12 +492,43 @@ internal sealed partial class EstateTrust
     {
         private readonly Dictionary<string, bool> verdicts = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> operators = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> formers = new(StringComparer.Ordinal);
         private readonly HashSet<string> checking = new(StringComparer.Ordinal);
 
-        /// <summary>Whether a revision is the root operator's own first record, or passes the test and was written by a trusted operator at its time.</summary>
+        /// <summary>
+        /// Whether a revision is the root operator's own first record, or passes the test and was written by a trusted operator at its time,
+        /// or is a removal by one who held the operator role earlier (<see cref="TrustedRemoval"/>); never a principal's own record, which
+        /// counts for nothing in every read (<see cref="SelfAuthored"/>).
+        /// </summary>
         private bool TrustedRevision(RecordEnvelope revision) =>
             (revision.Type == "principal" && revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null) ||
-            (Authentic(revision) && TrustedOperator(revision.By, revision.At));
+            (!trust.SelfAuthored(revision) && Authentic(revision) && (TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision)));
+
+        /// <summary>
+        /// Whether a revision is a removal that keeps counting after its author lost the operator role, as the records that give roles read
+        /// it (<see cref="AuthorityReplay"/>): a principal revision giving no operator role on top of a trusted revision that gives it, or a
+        /// grant revision that only narrows the trusted revision it supersedes, written by one who held the operator role at its time or
+        /// earlier through trusted revisions. So it takes away and never gives.
+        /// </summary>
+        private bool TrustedRemoval(RecordEnvelope revision)
+        {
+            if (revision.Supersedes is null || !trust.model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) || previous.Type != revision.Type) return false;
+            bool takesAway = revision.Type == "principal" ? !IsOperator(revision) && IsOperator(previous) : revision.Type == "authority" && AuthorityReplay.Narrows(revision, previous);
+            return takesAway && TrustedRevision(previous) && FormerOperator(revision.By, revision.At);
+        }
+
+        /// <summary>Whether a principal is the root operator, or held the operator role through trusted revisions at some time up to a time.</summary>
+        private bool FormerOperator(string principal, string at)
+        {
+            if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
+            string key = principal + " " + at;
+            if (formers.TryGetValue(key, out bool known)) return known;
+            if (!checking.Add("former " + key)) return false;
+            bool value = trust.principalRecords.Any(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && IsOperator(p) && TrustedOperator(principal, p.At));
+            checking.Remove("former " + key);
+            formers[key] = value;
+            return value;
+        }
 
         private bool Authentic(RecordEnvelope revision)
         {
@@ -815,7 +847,7 @@ internal sealed partial class EstateTrust
             if (!migration.Body.TryGetProperty("migrations", out JsonElement steps) || steps.ValueKind != JsonValueKind.Array ||
                 !steps.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == "record-format-2"))
                 continue;
-            if (migration.By != RootOperator && !model.HasScope(migration.By, Scopes.Administer, migration.AtTime)) continue;
+            if (migration.By != RootOperator && !LoadedAdministers(migration.By, migration.AtTime)) continue;
             if (Verification(migration, Mode.Signatures).HasErrors || !migration.Body.TryGetProperty("anchored", out JsonElement list) || list.ValueKind != JsonValueKind.Array) continue;
             foreach (JsonElement entry in list.EnumerateArray())
             {
@@ -826,6 +858,18 @@ internal sealed partial class EstateTrust
         }
 
         return anchored;
+    }
+
+    /// <summary>
+    /// Whether a grant its author may write gives a principal administer, unexpired at a time, read as <see cref="EstateModel.HasScope"/>
+    /// reads it (<see cref="AuthorityReplay"/>) from every principal and authority record loaded, under this judgment's root operator: the
+    /// model takes its root operator from this judgment, so it cannot be asked while the judgment is made.
+    /// </summary>
+    private bool LoadedAdministers(string principal, DateTimeOffset at)
+    {
+        loadedAuthority ??= AuthorityReplay.Run(principalRecords, authorityRecords, RootOperator, r => model.Chain(r)[0],
+            id => model.ById.TryGetValue(id, out RecordEnvelope? found) ? found : null);
+        return loadedAuthority.GrantLines.Select(loadedAuthority.Current).OfType<RecordEnvelope>().Any(g => Administers(g, principal, at));
     }
 
     /// <summary>
@@ -907,18 +951,23 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: one dated before the record it attaches
-    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
+    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: a principal record the principal it
+    /// describes wrote, at any revision, unless that principal is the root operator (<see cref="SelfAuthored"/>); and one dated before the
+    /// record it attaches to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
     /// </summary>
     internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
-        AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+        SelfAuthored(revision) || AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>Whether a principal record was written by the principal it describes, which only the root operator may do.</summary>
+    internal bool SelfAuthored(RecordEnvelope revision) =>
+        revision.Type == "principal" && revision.By != RootOperator && PrincipalIdentity(revision) == revision.By;
 
     /// <summary>
     /// The record a grant or principal revision attaches to in its line: the nearest record below it that counts, skipping any that does
-    /// not, whether unsigned, refused for its date or not counting otherwise. Null for a line's first record, for a revision naming no
-    /// record of its own type and for one with no record below it that counts. So a revision on top of one that does not count is
-    /// compared with, and follows, the line where that one would have joined it. Read only once history is judged, since what counts
-    /// depends on it.
+    /// not, whether unsigned, refused for its date, a principal's own record (<see cref="SelfAuthored"/>) or not counting otherwise. Null
+    /// for a line's first record, for a revision naming no record of its own type and for one with no record below it that counts. So a
+    /// revision on top of one that does not count is compared with, and follows, the line where that one would have joined it. Read only
+    /// once history is judged, since what counts depends on it.
     /// </summary>
     internal RecordEnvelope? AttachedTo(RecordEnvelope revision)
     {
@@ -1262,13 +1311,15 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the
-    /// root operator's first record. A revision the model holds is read through the view of those closings (<see cref="View"/>).
+    /// root operator's first record; never a principal's own record, which counts for nothing in every read (<see cref="SelfAuthored"/>). A
+    /// revision the model holds is read through the view of those closings (<see cref="View"/>).
     /// </summary>
     private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
-        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
+        !SelfAuthored(revision) &&
+        (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
         (revision.Type is "principal" or "authority" && model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision)
             ? StrictVerdict(revision, null) != view.Changed.Contains(revision.Id)
-            : AuthenticBySignaturesWith(revision, bound));
+            : AuthenticBySignaturesWith(revision, bound)));
 
     /// <summary>
     /// Whether the strongest acts refuse a principal or grant revision for its date, against the closings given: it is dated before the

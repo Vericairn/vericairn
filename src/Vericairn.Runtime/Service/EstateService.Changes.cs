@@ -350,7 +350,8 @@ public sealed partial class EstateService
         if (session.Manifest.RecordFormat < 2) throw new ProviderRefusedException("Repository changes require record format 2 so target failures can raise an operator ask.");
         if (model.Findings.HasErrors) throw new ProviderRefusedException("The estate has validation errors; no repository operation is admitted.");
         DateTimeOffset at = DateTimeOffset.UtcNow;
-        bool granted = model.Current("authority").Any(a => a.AtTime <= at && !EstateModel.Expired(a, at)
+        // Grants are read only from records their authors may write (EstateModel.Authority).
+        bool granted = model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>().Any(a => a.AtTime <= at && !EstateModel.Expired(a, at)
             && EstateModel.BodyString(a, "grantee") == by && a.Body.GetProperty("scope").EnumerateArray().Any(s => s.GetString() == Scopes.RepositoryWrite));
         if (!Ulid.IsValid(by) || model.CurrentPrincipal(by) is null || !model.HasRole(by, Roles.Operator) && !granted)
             throw new ProviderRefusedException("The acting principal needs repository-write authority in force.");

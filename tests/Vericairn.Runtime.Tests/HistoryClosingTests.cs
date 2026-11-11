@@ -686,10 +686,23 @@ public class HistoryClosingTests
         int records = f.Api.Session.Load().Records.Count;
 
         string hourAgo = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(-1));
+        // A grant revision takes the runtime's time, so one stating an earlier time is refused before any closing is prepared.
         WriteOutcome early = f.Api.NewRecord(new NewRecordRequest("authority", op, PolicyFixture.Element(Grant(f, builder, Scopes.LocalEngineering)), Supersedes: grant.Id, At: hourAgo));
         Assert.False(early.Ok);
-        Assert.Contains($"states {hourAgo}, more than five minutes before head checkpoint", early.Problem!.Message, StringComparison.Ordinal);
-        Assert.Contains("Write the grant revision again at the present time", early.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains("Principal and authority records are written at the runtime's time", early.Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal(records, f.Api.Session.Load().Records.Count);
+
+        // A revocation may state its time. The builder's first device was admitted weeks ago, so a revocation stated an hour ago is not
+        // moved up to its admission, and its closing cannot be dated before the head checkpoint.
+        EstateModel before = f.Api.Session.Load();
+        RecordEnvelope first = before.ById[f.Records.BuilderDevice.Id];
+        RecordEnvelope firstAdmission = SignatureChecks.AdmissionOf(before, first)!;
+        var stated = new JsonObject { ["principal"] = builder, ["status"] = "revoked", ["note"] = "Stated an hour ago.", ["revokedAt"] = hourAgo };
+        WriteOutcome earlyRevocation = f.Api.NewRecord(new NewRecordRequest("admission", op, PolicyFixture.Element(stated), Subject: $"device:{first.Id}:{first.ComputedHash}",
+            Supersedes: firstAdmission.Id, At: hourAgo));
+        Assert.False(earlyRevocation.Ok);
+        Assert.Contains($"states {hourAgo}, more than five minutes before head checkpoint", earlyRevocation.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("Write the revocation again at the present time", earlyRevocation.Problem.Message, StringComparison.Ordinal);
         Assert.Equal(records, f.Api.Session.Load().Records.Count);
         WriteOutcome narrowed = f.Api.NewRecord(new NewRecordRequest("authority", op, PolicyFixture.Element(Grant(f, builder, Scopes.LocalEngineering)), Supersedes: grant.Id));
         Assert.True(narrowed.Ok, Describe(narrowed));

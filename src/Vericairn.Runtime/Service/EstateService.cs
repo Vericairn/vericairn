@@ -217,13 +217,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             if (!cache.TryGetValue(record.Id, out RecordResponse? response))
             {
                 using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
-                response = new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
+                response = new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, ReportedCurrent(model, record), document.RootElement.Clone());
                 cache.Add(record.Id, response);
             }
             return response;
         }
         return new AttentionDerivation(
-            type => model.Current(type).Select(Response).ToList(),
+            type => ReportedCurrent(model, type).Select(Response).ToList(),
             id => model.ById.TryGetValue(id, out RecordEnvelope? record) ? Response(record) : null,
             progress,
             recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
@@ -312,9 +312,22 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             RecordFile? file = session.LoadedFile(record.ExpectedPath);
             using JsonDocument document = JsonDocument.Parse(file?.Bytes ?? []);
-            return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
+            return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, ReportedCurrent(model, record), document.RootElement.Clone());
         }
     }
+
+    /// <summary>
+    /// Whether a record is current as the API reports it: a principal record only when it is the revision that describes its principal,
+    /// read from the records their authors may write (EstateModel.Authority), so a client reading roles from it reads what the estate
+    /// grants; any other record when it counts and no counting record supersedes it.
+    /// </summary>
+    private static bool ReportedCurrent(EstateModel model, RecordEnvelope record) =>
+        record.Type == "principal" ? model.CurrentPrincipal(record.Id)?.Id == record.Id : model.IsCurrent(record);
+
+    /// <summary>The current records of a type as the API reports them (<see cref="ReportedCurrent(EstateModel, RecordEnvelope)"/>).</summary>
+    private static IEnumerable<RecordEnvelope> ReportedCurrent(EstateModel model, string type) => type == "principal"
+        ? model.OfType("principal").Select(p => model.CurrentPrincipal(p.Id)).OfType<RecordEnvelope>().DistinctBy(p => p.Id)
+        : model.Current(type);
 
     /// <inheritdoc />
     public IReadOnlyList<RecordResponse> Records(string type)
@@ -324,7 +337,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             var rows = new List<RecordResponse>();
-            foreach (RecordEnvelope record in model.Current(type).OrderBy(r => r.Id, StringComparer.Ordinal))
+            foreach (RecordEnvelope record in ReportedCurrent(model, type).OrderBy(r => r.Id, StringComparer.Ordinal))
             {
                 using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
                 rows.Add(new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, true, document.RootElement.Clone()));
@@ -374,6 +387,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (request.Type == "history-checkpoint" && (request.At is not null || request.Id is not null))
         {
             return Refuse("A history checkpoint is written at the runtime's time with a fresh identity; it states no earlier time.");
+        }
+
+        // A principal or authority record gives roles and scopes read in time order, so it takes the runtime's fresh time and identity and
+        // is judged against its author's authority now.
+        if (request.Type is "principal" or "authority" && (request.At is not null || request.Id is not null))
+        {
+            return Refuse("Principal and authority records are written at the runtime's time with a fresh identity; they state no earlier time or chosen id.");
         }
 
         if (request.Type is "result" or "review")

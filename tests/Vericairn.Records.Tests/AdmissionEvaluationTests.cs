@@ -206,4 +206,70 @@ public class AdmissionEvaluationTests
         Assert.True(SignatureChecks.IsAdmitted(model, written));
         Assert.False(SignatureChecks.IsAdmitted(model, backdated));
     }
+
+    [Fact]
+    public void AnOperatorsOwnRevisionDoesNotChangeWhoMayAdmit()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second Operator","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope secondDevice, _) = f.Admitted(second.Id, "Second operator's device");
+        f.Require();
+        // The second operator's own revision taking the role away counts for nothing in every read, so they still admit.
+        f.Estate.Add("principal", second.Id, """{"kind":"human","name":"Second Operator","roles":[]}""", supersedes: second.Id, signer: f.Signer(secondDevice));
+        RecordEnvelope device = f.Device(f.Estate.BuilderId, "Admitted by the second operator");
+        RecordEnvelope admission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By the second operator."), device.Reference, signer: f.Signer(secondDevice));
+        EstateModel model = f.Load();
+        Assert.True(model.HasRole(second.Id, Roles.Operator));
+        Assert.DoesNotContain(model.Findings, x => x.Code == "admission.author" && x.Location == admission.ExpectedPath);
+        Assert.True(model.Counts(model.ById[admission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, device));
+    }
+
+    [Fact]
+    public void ARemovalByAFormerOperatorEndsThePowerToAdmit()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope a = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Operator A","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope aDevice, _) = f.Admitted(a.Id, "A's device");
+        RecordEnvelope b = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Operator B","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope bDevice, _) = f.Admitted(b.Id, "B's device");
+        f.Require();
+        // B removes A; A, who held the operator role earlier, removes B. Both removals count, so neither may admit afterwards.
+        f.Estate.Add("principal", b.Id, """{"kind":"human","name":"Operator A","roles":[]}""", supersedes: a.Id, signer: f.Signer(bDevice));
+        f.Estate.Add("principal", a.Id, """{"kind":"human","name":"Operator B","roles":[]}""", supersedes: b.Id, signer: f.Signer(aDevice));
+        RecordEnvelope byB = f.Device(f.Estate.BuilderId, "Admitted by B after its removal");
+        RecordEnvelope admission = f.Estate.Add("admission", b.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By B."), byB.Reference, signer: f.Signer(bDevice));
+        RecordEnvelope byA = f.Device(f.Estate.BuilderId, "Admitted by A after its removal");
+        f.Estate.Add("admission", a.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By A."), byA.Reference, signer: f.Signer(aDevice));
+        EstateModel model = f.Load();
+        Assert.False(model.HasRole(b.Id, Roles.Operator));
+        Assert.Contains(model.Findings, x => x.Code == "admission.author" && x.Location == admission.ExpectedPath);
+        Assert.False(SignatureChecks.IsAdmitted(model, byB));
+        Assert.False(SignatureChecks.IsAdmitted(model, byA));
+    }
+
+    [Fact]
+    public void ANarrowingByAFormerOperatorEndsAnAdministratorsPowerToAdmit()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope decision = f.Decision();
+        RecordEnvelope a = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Operator A","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope aDevice, _) = f.Admitted(a.Id, "A's device");
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["reviewer"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin device");
+        RecordEnvelope grant = f.Grant(admin.Id, decision, [Scopes.Administer, Scopes.LocalEngineering]);
+        f.Require();
+        RecordEnvelope before = f.Device(f.Estate.BuilderId, "Admitted under the grant");
+        f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Under the grant."), before.Reference, signer: f.Signer(adminDevice));
+        // The root operator removes A; A, who held the operator role earlier, then narrows the administrator's grant, which counts.
+        f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Operator A","roles":[]}""", supersedes: a.Id, signer: f.OperatorSigner);
+        f.Estate.Add("authority", a.Id, $$"""{"grantee":"{{admin.Id}}","scope":["local-engineering"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}"}""", supersedes: grant.Id, signer: f.Signer(aDevice));
+        RecordEnvelope after = f.Device(f.Estate.BuilderId, "Admitted after the narrowing");
+        RecordEnvelope admission = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "After the narrowing."), after.Reference, signer: f.Signer(adminDevice));
+        EstateModel model = f.Load();
+        Assert.False(model.HasScope(admin.Id, Scopes.Administer));
+        Assert.Contains(model.Findings, x => x.Code == "admission.author" && x.Location == admission.ExpectedPath);
+        Assert.True(SignatureChecks.IsAdmitted(model, before));
+        Assert.False(SignatureChecks.IsAdmitted(model, after));
+    }
 }

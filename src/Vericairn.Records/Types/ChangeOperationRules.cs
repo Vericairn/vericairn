@@ -13,12 +13,10 @@ internal static class ChangeOperationRules
     internal static bool IsChange(RecordEnvelope record) => EstateModel.BodyString(record, "action") is
         "change-push" or "change-open" or "change-merge" or "change-observe";
 
+    // An operator, or a holder of repository-write as its grant stood just before the record, read only from grants their authors may
+    // write (EstateModel.Authority).
     internal static bool AuthorizedWhen(ValidationContext context) => context.HasRole(context.Record.By, Roles.Operator)
-        || context.Model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == context.Record.By
-            && GoalRules.Before(grant, context.Record) && !EstateModel.Expired(grant, context.Record.AtTime)
-            && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array
-            && scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.RepositoryWrite)
-            && (!context.Model.SupersededBy.TryGetValue(grant.Id, out string? next) || !GoalRules.Before(context.Model.ById[next], context.Record)));
+        || context.Model.ScopeBefore(context.Record.By, Scopes.RepositoryWrite, context.Record);
 
     internal static void Read(ValidationContext context)
     {

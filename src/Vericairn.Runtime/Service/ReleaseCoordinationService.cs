@@ -166,7 +166,7 @@ internal sealed partial class ReleaseCoordinationService(
     {
         if (by is null) return null;
         string scope = UncomparedScope(model, declaration, version);
-        return model.Current("authority").FirstOrDefault(a => EstateModel.BodyString(a, "grantee") == by && a.Signatures.Count > 0 && model.HasRole(a.By, Roles.Operator) &&
+        return model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>().FirstOrDefault(a => EstateModel.BodyString(a, "grantee") == by && a.Signatures.Count > 0 && model.HasRole(a.By, Roles.Operator) &&
             EstateModel.BodyString(a, "expires") is not null && !EstateModel.Expired(a, at) &&
             a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
             scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope));
