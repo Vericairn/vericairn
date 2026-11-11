@@ -50,9 +50,13 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
     private readonly List<RecordEnvelope> principalRecords;
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, StrictReading> strictReadings = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string Grant, string Bound), StrictClass> grantClasses = [];
-    private readonly Dictionary<(string Revision, string Bound), RecordEnvelope?> strictBelow = [];
+    private readonly Dictionary<IReadOnlyList<Closing>, StrictView> strictViews = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, StrictView> strictViewsByChange = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Revision, string Closings), bool> strictVerdicts = [];
+    private readonly Dictionary<string, HashSet<string>> strictIdentities = new(StringComparer.Ordinal);
+    private StrictStep? strictSteps;
+    private Dictionary<string, List<RecordEnvelope>>? strictAffected;
+    private List<RecordEnvelope>? principalsInOrder;
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -801,17 +805,18 @@ internal sealed partial class EstateTrust
     /// gives the role at the end when only members of the set give: built up from the root operator alone, one pass per level of
     /// appointment, until nothing is added. Grants do not count towards it. So a removal keeps counting after its author is removed, a
     /// revision by one never given the role changes nothing, and two operators other than the root operator who remove each other both
-    /// lose these acts, closings included, until the root operator settles it.
+    /// lose these acts, closings included, until the root operator settles it. The reading depends on the closings only through which
+    /// revisions verify against them, so it is made once for each view (<see cref="View"/>) and shared by every set of closings reaching it.
     /// </summary>
     private StrictReading ReadStrictly(IReadOnlyList<Closing> bound)
     {
         lock (gate)
         {
-            string key = BoundKey(bound);
-            if (strictReadings.TryGetValue(key, out StrictReading? known)) return known;
+            StrictView view = View(bound);
+            if (view.Reading is { } known) return known;
             string? root = RootOperator;
-            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => Considered(p, bound) && !StrictlyRefused(p, bound))
-                .OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
+            principalsInOrder ??= [.. principalRecords.OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
+            List<RecordEnvelope> revisions = [.. principalsInOrder.Where(p => Considered(p, bound, view) && !StrictlyRefused(p, bound, view))];
             int count = revisions.Count;
             var index = new Dictionary<string, int>(count, StringComparer.Ordinal);
             for (int i = 0; i < count; i++) index[revisions[i].Id] = i;
@@ -887,7 +892,7 @@ internal sealed partial class EstateTrust
             var now = new HashSet<string>(persons.Where(p => standing[p.Value]).Select(p => p.Key), StringComparer.Ordinal);
             if (root is not null) now.Add(root);
             var reading = new StrictReading { Revisions = revisions, Index = index, Below = below, Classes = classes, Lines = lines, GivenAt = givenAt, Standing = now };
-            strictReadings[key] = reading;
+            view.Reading = reading;
             return reading;
 
             int Person(string id)
@@ -960,16 +965,16 @@ internal sealed partial class EstateTrust
     {
         lock (gate)
         {
-            (string, string) key = (grant.Id, BoundKey(bound));
-            if (grantClasses.TryGetValue(key, out StrictClass known)) return known;
-            StrictClass value = Judge();
-            grantClasses[key] = value;
+            StrictView view = View(bound);
+            if (view.GrantClasses.TryGetValue(grant.Id, out StrictClass known)) return known;
+            StrictClass value = Judge(view);
+            view.GrantClasses[grant.Id] = value;
             return value;
         }
 
-        StrictClass Judge()
+        StrictClass Judge(StrictView view)
         {
-            if (!Considered(grant, bound) || StrictlyRefused(grant, bound)) return StrictClass.Unread;
+            if (!Considered(grant, bound, view) || StrictlyRefused(grant, bound, view)) return StrictClass.Unread;
             if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
             StrictReading reading = ReadStrictly(bound);
             if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
@@ -1017,28 +1022,34 @@ internal sealed partial class EstateTrust
         }
     }
 
-    /// <summary>Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the root operator's first record.</summary>
-    private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
-        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null || AuthenticBySignaturesWith(revision, bound);
+    /// <summary>
+    /// Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the
+    /// root operator's first record. A revision the model holds is read through the view of those closings (<see cref="View"/>).
+    /// </summary>
+    private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
+        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
+        (revision.Type is "principal" or "authority" && model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision)
+            ? StrictVerdict(revision, NoClosings) != view.Changed.Contains(revision.Id)
+            : AuthenticBySignaturesWith(revision, bound));
 
     /// <summary>
     /// Whether the strongest acts refuse a principal or grant revision for its date, against the closings given: it is dated before the
     /// nearest revision below it in its line that they consider and do not refuse (<see cref="StrictBelow"/>). Rule 1 as they read it.
     /// </summary>
-    private bool StrictlyRefused(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
-        StrictBelow(revision, bound) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+    private bool StrictlyRefused(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
+        StrictBelow(revision, bound, view) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
 
     /// <summary>The nearest revision below a principal or grant revision in its line that the strongest acts consider and do not refuse for its date, against the closings given.</summary>
-    private RecordEnvelope? StrictBelow(RecordEnvelope revision, IReadOnlyList<Closing> bound)
+    private RecordEnvelope? StrictBelow(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view)
     {
-        string key = BoundKey(bound);
         lock (gate)
         {
-            if (strictBelow.TryGetValue((revision.Id, key), out RecordEnvelope? known)) return known;
+            Dictionary<string, RecordEnvelope?> known = view.Below;
+            if (known.TryGetValue(revision.Id, out RecordEnvelope? settled)) return settled;
             var pending = new Stack<RecordEnvelope>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             RecordEnvelope? current = revision;
-            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && strictBelow.ContainsKey((current.Id, key))))
+            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && known.ContainsKey(current.Id)))
             {
                 pending.Push(current);
                 current = Below(current);
@@ -1050,18 +1061,170 @@ internal sealed partial class EstateTrust
                 RecordEnvelope? previous = Below(next);
                 // A record seen twice closes a cycle of supersession; it is taken as it is.
                 result = previous is null ? null
-                    : !strictBelow.TryGetValue((previous.Id, key), out RecordEnvelope? under) ? previous
-                    : Considered(previous, bound) && (under is null || string.CompareOrdinal(previous.At, under.At) >= 0) ? previous : under;
-                strictBelow[(next.Id, key)] = result;
+                    : !known.TryGetValue(previous.Id, out RecordEnvelope? under) ? previous
+                    : Considered(previous, bound, view) && (under is null || string.CompareOrdinal(previous.At, under.At) >= 0) ? previous : under;
+                known[next.Id] = result;
             }
 
             return result;
         }
     }
 
-    /// <summary>The key a set of closings is cached under: their ids in order.</summary>
-    private static string BoundKey(IReadOnlyList<Closing> bound) =>
-        bound.Count == 0 ? "" : string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+    /// <summary>
+    /// What the strongest acts read against a set of closings. It depends on the closings only through which principal and grant revisions
+    /// verify by signatures alone against them, so one view serves every set of closings that leaves the same revisions verifying.
+    /// </summary>
+    private sealed class StrictView
+    {
+        /// <summary>The principal and grant revisions the model holds whose verdict by signatures alone differs from their verdict with no closings, by id.</summary>
+        public required HashSet<string> Changed { get; init; }
+
+        /// <summary>The reading of principal lines (<see cref="ReadStrictly"/>), once made.</summary>
+        public StrictReading? Reading { get; set; }
+
+        /// <summary>How each grant revision is read (<see cref="GrantClass"/>), by id.</summary>
+        public Dictionary<string, StrictClass> GrantClasses { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>For each principal or grant revision, the nearest revision below it considered and not refused for its date (<see cref="StrictBelow"/>), by id.</summary>
+        public Dictionary<string, RecordEnvelope?> Below { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>A set of closings, taken in the order given as a path from no closings: its view, and the sets that add one closing to it, by that closing's id.</summary>
+    private sealed class StrictStep(StrictView view)
+    {
+        public StrictView View { get; } = view;
+
+        public Dictionary<string, StrictStep> Next { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The view of the strongest acts against the closings given. A set of closings is reached from no closings by adding its closings in
+    /// the order given, one step each, and a step made once is kept for every set that passes through it: so each closing judged against
+    /// the closings before it builds on the view of the closing before it. A step re-verifies only the revisions the closing it adds can
+    /// change (<see cref="StrictAffected"/>), and a step that changes no verdict keeps the view, and with it the reading, of the set before it.
+    /// </summary>
+    private StrictView View(IReadOnlyList<Closing> bound)
+    {
+        lock (gate)
+        {
+            if (strictViews.TryGetValue(bound, out StrictView? known)) return known;
+            if (strictSteps is null)
+            {
+                var none = new StrictView { Changed = new HashSet<string>(StringComparer.Ordinal) };
+                strictSteps = new StrictStep(none);
+                strictViewsByChange[""] = none;
+            }
+
+            StrictStep step = strictSteps;
+            for (int i = 0; i < bound.Count; i++)
+            {
+                string id = bound[i].Record.Id;
+                if (!step.Next.TryGetValue(id, out StrictStep? next)) step.Next[id] = next = new StrictStep(Extend(step.View, bound, i + 1));
+                step = next;
+            }
+
+            strictViews[bound] = step.View;
+            return step.View;
+        }
+    }
+
+    /// <summary>The view after the first <paramref name="count"/> closings given: the view before the last of them, with the verdicts that closing can change judged again.</summary>
+    private StrictView Extend(StrictView before, IReadOnlyList<Closing> bound, int count)
+    {
+        Closing added = bound[count - 1];
+        if (added.Kind == "grant" || added.Identity is not { } identity || !StrictAffected().TryGetValue(identity, out List<RecordEnvelope>? affected)) return before;
+        HashSet<string>? changed = null;
+        foreach (RecordEnvelope revision in affected)
+        {
+            // A verdict by signatures alone reads only the closings naming a device whose identity the revision's verification reads.
+            HashSet<string> identities = strictIdentities[revision.Id];
+            var relevant = new List<Closing>();
+            for (int i = 0; i < count; i++)
+            {
+                if (bound[i].Kind != "grant" && bound[i].Identity is { } closed && identities.Contains(closed)) relevant.Add(bound[i]);
+            }
+
+            bool differs = StrictVerdict(revision, relevant) != StrictVerdict(revision, NoClosings);
+            if (differs == before.Changed.Contains(revision.Id)) continue;
+            changed ??= new HashSet<string>(before.Changed, StringComparer.Ordinal);
+            if (differs) changed.Add(revision.Id);
+            else changed.Remove(revision.Id);
+        }
+
+        if (changed is null) return before;
+        string key = string.Join(",", changed.Order(StringComparer.Ordinal));
+        if (!strictViewsByChange.TryGetValue(key, out StrictView? view)) strictViewsByChange[key] = view = new StrictView { Changed = changed };
+        return view;
+    }
+
+    /// <summary>
+    /// For each device identity, the principal and grant revisions the model holds whose verdict by signatures alone a closing naming that
+    /// identity can change: every identity a revision's verification reads, the devices that signed it and the devices that signed the
+    /// admissions of each of those. A closing naming any other device refuses neither the revision nor an admission it rests on.
+    /// </summary>
+    private Dictionary<string, List<RecordEnvelope>> StrictAffected()
+    {
+        lock (gate)
+        {
+            if (strictAffected is not null) return strictAffected;
+            var affected = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
+            var admitters = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (RecordEnvelope revision in principalRecords.Concat(model.OfType("authority")))
+            {
+                if (!model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) || !ReferenceEquals(loaded, revision) || strictIdentities.ContainsKey(revision.Id)) continue;
+                var identities = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < revision.Signatures.Count; i++)
+                {
+                    SignatureProof proof = Proof(revision, i);
+                    identities.Add(proof.Identity);
+                    if (!admitters.TryGetValue(proof.Named, out List<string>? signers))
+                    {
+                        admitters[proof.Named] = signers = [];
+                        foreach (RecordEnvelope admission in AdmissionsAbout(proof.Named))
+                        {
+                            for (int j = 0; j < admission.Signatures.Count; j++) signers.Add(Proof(admission, j).Identity);
+                        }
+                    }
+
+                    identities.UnionWith(signers);
+                }
+
+                strictIdentities[revision.Id] = identities;
+                foreach (string identity in identities)
+                {
+                    if (!affected.TryGetValue(identity, out List<RecordEnvelope>? list)) affected[identity] = list = [];
+                    list.Add(revision);
+                }
+            }
+
+            strictAffected = affected;
+            return affected;
+        }
+    }
+
+    /// <summary>Whether a principal or grant revision verifies by signatures alone against the closings given, kept by their ids.</summary>
+    private bool StrictVerdict(RecordEnvelope revision, IReadOnlyList<Closing> relevant)
+    {
+        lock (gate)
+        {
+            (string, string) key = (revision.Id, relevant.Count == 0 ? "" : string.Join(",", relevant.Select(c => c.Record.Id).Order(StringComparer.Ordinal)));
+            if (strictVerdicts.TryGetValue(key, out bool known)) return known;
+            bool value = AuthenticBySignaturesWith(revision, relevant);
+            strictVerdicts[key] = value;
+            return value;
+        }
+    }
+
+    /// <summary>Forgets every view, verdict and reading of the strongest acts, which read proofs and closings that are judged afresh.</summary>
+    private void ForgetStrictViews()
+    {
+        strictViews.Clear();
+        strictViewsByChange.Clear();
+        strictVerdicts.Clear();
+        strictIdentities.Clear();
+        strictSteps = null;
+        strictAffected = null;
+    }
 
     /// <summary>Whether every signature of a record verifies by signatures alone against the closings given.</summary>
     private bool AuthenticBySignaturesWith(RecordEnvelope record, IReadOnlyList<Closing> bound) =>
