@@ -909,8 +909,9 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// The principal record describing a person at a time as the strongest acts read it: among the revisions of its line they read dated
-    /// at or before the time, the single one no other of them follows; null when there is none or more than one. It describes a human as
-    /// written, or, read as a removal, as the revision read below it did; and it gives the operator role only as written.
+    /// at or before the time, the single one no other of them follows; null when there is none or more than one. It gives the operator
+    /// role only when read as written; read as a removal it keeps the person's kind and other roles as written, except that it describes a
+    /// human only where the revision read below it did, so it takes away and never gives (<see cref="DescribesHuman"/>).
     /// </summary>
     private (bool Human, bool Operator)? StrictHead(string principal, string at, IReadOnlyList<Closing> bound)
     {
@@ -928,11 +929,20 @@ internal sealed partial class EstateTrust
         List<int> heads = [.. line.Take(last + 1).Where(k => !followed.Contains(k))];
         if (heads.Count != 1) return null;
         int head = heads[0];
-        bool written = reading.Classes[head] == StrictClass.Written;
-        int describing = head;
-        while (reading.Classes[describing] == StrictClass.Removal && reading.Below[describing] >= 0) describing = reading.Below[describing];
-        bool human = reading.Classes[describing] == StrictClass.Written && EstateModel.BodyString(reading.Revisions[describing], "kind") == "human";
-        return (human, written && IsOperator(reading.Revisions[head]));
+        return (DescribesHuman(reading, head), reading.Classes[head] == StrictClass.Written && IsOperator(reading.Revisions[head]));
+    }
+
+    /// <summary>
+    /// Whether a principal revision the strongest acts read describes a human: it says so, and so does each revision read below it down
+    /// to one read as written or the line's first, so that a revision read as a removal never makes a person human.
+    /// </summary>
+    private static bool DescribesHuman(StrictReading reading, int revision)
+    {
+        for (int k = revision; ; k = reading.Below[k])
+        {
+            if (EstateModel.BodyString(reading.Revisions[k], "kind") != "human") return false;
+            if (reading.Classes[k] == StrictClass.Written || reading.Below[k] < 0) return true;
+        }
     }
 
     /// <summary>
@@ -977,22 +987,27 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// A warning, in an estate holding a checkpoint, for each principal revision giving the operator role and each grant revision giving
-    /// administer that counts but that the strongest acts read as a removal: anchoring and closings no longer rest on it.
+    /// A warning, in an estate holding a checkpoint, for each principal or grant revision that counts and that the strongest acts read as a
+    /// removal where that reading differs from the ordinary one in what those acts use: a principal revision giving the operator role or
+    /// describing a human they do not read as one, and a grant revision giving administer. Anchoring and closings no longer rest on it.
     /// </summary>
     private IEnumerable<Finding> RevisionsReadAsRemovals()
     {
         string? root = RootOperator;
         if (!model.OfType("history-checkpoint").Any()) yield break;
+        StrictReading reading = ReadStrictly(Acting);
         foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "principal" or "authority" && r.By != root))
         {
-            bool removal = record.Type == "principal"
-                ? IsOperator(record) && ReadStrictly(Acting) is var reading && reading.Index.TryGetValue(record.Id, out int k) && reading.Classes[k] == StrictClass.Removal
-                : GivesAdminister(record) && GrantClass(record, Acting) == StrictClass.Removal;
-            if (!removal || !Counts(record)) continue;
-            string gives = record.Type == "principal" ? "gives the operator role" : "gives administer";
+            string? gives;
+            if (record.Type == "principal")
+            {
+                if (!reading.Index.TryGetValue(record.Id, out int k) || reading.Classes[k] != StrictClass.Removal) continue;
+                gives = IsOperator(record) ? "gives the operator role" : EstateModel.BodyString(record, "kind") == "human" && !DescribesHuman(reading, k) ? "describes a human" : null;
+            }
+            else gives = GivesAdminister(record) && GrantClass(record, Acting) == StrictClass.Removal ? "gives administer" : null;
+            if (gives is null || !Counts(record)) continue;
             yield return new Finding(Severity.Warning, "history.revision-author", record.ExpectedPath,
-                $"This {record.Type} revision {gives}, but it no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
+                $"This {record.Type} revision {gives}, but that no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
         }
     }
 
