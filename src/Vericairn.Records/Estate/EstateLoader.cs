@@ -167,8 +167,8 @@ public static class EstateLoader
         else
         {
             // Divergence is judged among the records that count: a successor that does not count revises nothing, so it neither
-            // unseats a record nor makes a reconcile task. A grant or principal revision on top of one refused for its date follows the
-            // record the refused one attaches to, so its line reads one current record.
+            // unseats a record nor makes a reconcile task. A grant or principal revision on top of one that does not count follows the
+            // nearest record below it that counts, so its line reads one current record.
             var countingSupersession = new FindingList();
             Dictionary<string, string> countingSupersededBy = Successors(records.Where(r => !excluded.Contains(r.Id)).ToList(), byId, countingSupersession,
                 r => trust.AttachedTo(r)?.Id);

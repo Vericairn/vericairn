@@ -123,6 +123,7 @@ internal sealed partial class EstateTrust
         verified.Clear();
         counts.Clear();
         strictReadings.Clear();
+        strictBelow.Clear();
         grantClasses.Clear();
         anchors = NoAnchors;
         anchorsKnown = false;

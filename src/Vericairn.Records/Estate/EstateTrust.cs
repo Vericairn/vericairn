@@ -52,6 +52,7 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
     private readonly Dictionary<string, StrictReading> strictReadings = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Grant, string Bound), StrictClass> grantClasses = [];
+    private readonly Dictionary<(string Revision, string Bound), RecordEnvelope?> strictBelow = [];
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -665,16 +666,17 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: one dated before the record it attaches
-    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that is not itself refused this way.
+    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
     /// </summary>
     internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
         AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
 
     /// <summary>
-    /// The record a grant or principal revision attaches to in its line: the record it supersedes, or, when that one is refused for being
-    /// dated before the record it attaches to, the record that one attaches to, and so on down. Null for a line's first record and for a
-    /// revision naming no record of its own type. So a revision on top of a refused one is compared with, and follows, the line where
-    /// the refused one would have joined it.
+    /// The record a grant or principal revision attaches to in its line: the nearest record below it that counts, skipping any that does
+    /// not, whether unsigned, refused for its date or not counting otherwise. Null for a line's first record, for a revision naming no
+    /// record of its own type and for one with no record below it that counts. So a revision on top of one that does not count is
+    /// compared with, and follows, the line where that one would have joined it. Read only once history is judged, since what counts
+    /// depends on it.
     /// </summary>
     internal RecordEnvelope? AttachedTo(RecordEnvelope revision)
     {
@@ -683,7 +685,8 @@ internal sealed partial class EstateTrust
         {
             bool loaded = model.ById.TryGetValue(revision.Id, out RecordEnvelope? same) && ReferenceEquals(same, revision);
             if (loaded && attached.TryGetValue(revision.Id, out RecordEnvelope? known)) return known;
-            // Walk down to a record whose attachment is known or that supersedes nothing of its type, then settle each one on the way up.
+            // Walk down to a record whose attachment is known or that supersedes nothing of its type, then settle each one on the way up,
+            // so that whether the record below counts is judged once its own attachment is known.
             var pending = new Stack<RecordEnvelope>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             RecordEnvelope? current = revision;
@@ -697,20 +700,22 @@ internal sealed partial class EstateTrust
             while (pending.TryPop(out RecordEnvelope? next))
             {
                 RecordEnvelope? previous = Below(next);
-                // A record seen twice closes a cycle of supersession; it is taken as it is, refused or not.
-                result = previous is not null && attached.TryGetValue(previous.Id, out RecordEnvelope? under) && under is not null &&
-                    string.CompareOrdinal(previous.At, under.At) < 0 ? under : previous;
+                // A record seen twice closes a cycle of supersession; it is taken as it is.
+                result = previous is null ? null
+                    : !attached.TryGetValue(previous.Id, out RecordEnvelope? under) || Counts(previous) ? previous
+                    : under;
                 if (!ReferenceEquals(next, revision) || loaded) attached[next.Id] = result;
             }
 
             return result;
         }
-
-        RecordEnvelope? Below(RecordEnvelope record) =>
-            record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == record.Type ? previous : null;
     }
 
-    /// <summary>The revisions that attach to a grant or principal revision (<see cref="AttachedTo"/>): its successors, and through a refused one, that one's.</summary>
+    /// <summary>The record a grant or principal revision names as the one it supersedes, when that is a record of its own type.</summary>
+    private RecordEnvelope? Below(RecordEnvelope record) =>
+        record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == record.Type ? previous : null;
+
+    /// <summary>The counting revisions that follow a grant or principal revision (<see cref="AttachedTo"/>): its successors, and through one that does not count, that one's.</summary>
     internal IEnumerable<RecordEnvelope> AttachedSuccessors(RecordEnvelope revision)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
@@ -719,8 +724,8 @@ internal sealed partial class EstateTrust
         {
             foreach (RecordEnvelope next in successors[id].Where(s => s.Type == revision.Type && seen.Add(s.Id)))
             {
-                if (RefusedAuthorityRevision(next)) queue.Enqueue(next.Id);
-                else yield return next;
+                if (Counts(next)) yield return next;
+                else queue.Enqueue(next.Id);
             }
         }
     }
@@ -785,7 +790,8 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// How the strongest acts read principal lines against the closings given. The revisions considered are authentic by signatures with
-    /// those closings, so none they refuse, and not refused for their date, with the root operator's first record. A person has been given the operator role by a time when a revision considered of their line
+    /// those closings, so none they refuse, and not refused for their date against the nearest revision below them considered, with the
+    /// root operator's first record. A person has been given the operator role by a time when a revision considered of their line
     /// dated by then gives it and was written by the root operator or by a person given the role by an earlier revision, taken in time
     /// order, ids breaking ties, removals aside; so the role reaches a person only from the root operator, through earlier revisions, and a
     /// circle of appointments gives nothing. Walking every line in that order, a revision is read as written when its author is the root
@@ -804,7 +810,7 @@ internal sealed partial class EstateTrust
             string key = BoundKey(bound);
             if (strictReadings.TryGetValue(key, out StrictReading? known)) return known;
             string? root = RootOperator;
-            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => p.Id == root && p.By == root && p.Supersedes is null || !RefusedAuthorityRevision(p) && AuthenticBySignaturesWith(p, bound))
+            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => Considered(p, bound) && !StrictlyRefused(p, bound))
                 .OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
             int count = revisions.Count;
             var index = new Dictionary<string, int>(count, StringComparer.Ordinal);
@@ -963,7 +969,7 @@ internal sealed partial class EstateTrust
 
         StrictClass Judge()
         {
-            if (RefusedAuthorityRevision(grant) || !AuthenticBySignaturesWith(grant, bound)) return StrictClass.Unread;
+            if (!Considered(grant, bound) || StrictlyRefused(grant, bound)) return StrictClass.Unread;
             if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
             StrictReading reading = ReadStrictly(bound);
             if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
@@ -1008,6 +1014,48 @@ internal sealed partial class EstateTrust
             if (gives is null || !Counts(record)) continue;
             yield return new Finding(Severity.Warning, "history.revision-author", record.ExpectedPath,
                 $"This {record.Type} revision {gives}, but that no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
+        }
+    }
+
+    /// <summary>Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the root operator's first record.</summary>
+    private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
+        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null || AuthenticBySignaturesWith(revision, bound);
+
+    /// <summary>
+    /// Whether the strongest acts refuse a principal or grant revision for its date, against the closings given: it is dated before the
+    /// nearest revision below it in its line that they consider and do not refuse (<see cref="StrictBelow"/>). Rule 1 as they read it.
+    /// </summary>
+    private bool StrictlyRefused(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
+        StrictBelow(revision, bound) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>The nearest revision below a principal or grant revision in its line that the strongest acts consider and do not refuse for its date, against the closings given.</summary>
+    private RecordEnvelope? StrictBelow(RecordEnvelope revision, IReadOnlyList<Closing> bound)
+    {
+        string key = BoundKey(bound);
+        lock (gate)
+        {
+            if (strictBelow.TryGetValue((revision.Id, key), out RecordEnvelope? known)) return known;
+            var pending = new Stack<RecordEnvelope>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            RecordEnvelope? current = revision;
+            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && strictBelow.ContainsKey((current.Id, key))))
+            {
+                pending.Push(current);
+                current = Below(current);
+            }
+
+            RecordEnvelope? result = null;
+            while (pending.TryPop(out RecordEnvelope? next))
+            {
+                RecordEnvelope? previous = Below(next);
+                // A record seen twice closes a cycle of supersession; it is taken as it is.
+                result = previous is null ? null
+                    : !strictBelow.TryGetValue((previous.Id, key), out RecordEnvelope? under) ? previous
+                    : Considered(previous, bound) && (under is null || string.CompareOrdinal(previous.At, under.At) >= 0) ? previous : under;
+                strictBelow[(next.Id, key)] = result;
+            }
+
+            return result;
         }
     }
 
