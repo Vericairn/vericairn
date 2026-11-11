@@ -187,7 +187,8 @@ public sealed partial class EstateService
             if (PolicyAuthority.OperatorAt(model, principal, now)) return ["declare", "revise", "retire", "except", "revoke-exception", "writing-add", "writing-remove"];
             HashSet<string> allowed = [];
             foreach (RecordEnvelope grant in model.Current("authority").Where(g => EstateModel.BodyString(g, "grantee") == principal && g.AtTime <= instant &&
-                !EstateModel.Expired(g, instant) && SignatureChecks.IsAuthentic(model, g) && !PolicyInputs.Items(PolicyInputs.Get(g.Body, "conditions")).Any()))
+                !EstateModel.Expired(g, instant) && SignatureChecks.IsAuthentic(model, g) && PolicyAuthority.OperatorAt(model, g) &&
+                !PolicyInputs.Items(PolicyInputs.Get(g.Body, "conditions")).Any()))
             foreach (JsonElement bound in PolicyInputs.Items(PolicyInputs.Get(grant.Body, "bounds")))
             foreach (JsonElement action in PolicyInputs.Items(PolicyInputs.Get(bound, "actions")))
             {

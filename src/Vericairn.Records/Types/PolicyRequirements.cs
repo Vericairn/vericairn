@@ -33,7 +33,7 @@ internal static class PolicyRequirements
             requirement.NoOtherKeys();
             if (prior is not null && !context.Model.OfType("estate-policy").Any(p => PolicyRecords.Identity(context.Model, p) == PolicyRecords.Text(requirement.Element, "policy") && p.ComputedHash == prior && string.CompareOrdinal(p.At, context.Record.At) <= 0))
                 requirement.Error("policy.requirement", "priorHash", "The prior hash must name an existing revision of this policy.");
-            if (requirement.Has("definitionHash") && (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At) || context.Record.By != EstateModel.BodyString(context.Record, "decidedBy")))
+            if (requirement.Has("definitionHash") && (!PolicyAuthority.OperatorAt(context.Model, context.Record) || context.Record.By != EstateModel.BodyString(context.Record, "decidedBy")))
                 requirement.Error("policy.approval", "definitionHash", "An exact definition approval is authored and signed by the deciding operator.");
         }
     }
@@ -62,7 +62,7 @@ internal static class PolicyRequirements
             bool matches = PolicyRecords.Text(requirement, "action") == action &&
                 PolicyRecords.Text(requirement, "policy") == (previous is null ? EstateModel.BodyString(context.Record, "key") : PolicyRecords.Identity(context.Model, previous)) &&
                 PolicyRecords.Text(requirement, "priorHash") == previous?.ComputedHash && PolicyRecords.Text(requirement, "definitionHash") == DefinitionHash(context.Record.Body);
-            approved |= matches && decision.By == EstateModel.BodyString(decision, "decidedBy") && PolicyAuthority.OperatorAt(context.Model, decision.By, decision.At) && SignatureChecks.IsAuthentic(context.Model, decision);
+            approved |= matches && decision.By == EstateModel.BodyString(decision, "decidedBy") && PolicyAuthority.OperatorAt(context.Model, decision) && SignatureChecks.IsAuthentic(context.Model, decision);
         }
         bool transfer = action == "revise" && previous is not null && !PolicyRecords.SameFields(previous, context.Record, "owner");
         string permissionAction = transfer && !approvalRequired ? "transfer" : action;

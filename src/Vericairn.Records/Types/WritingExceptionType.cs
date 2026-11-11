@@ -48,7 +48,7 @@ public sealed partial class WritingExceptionType : IRecordType
         {
             string? kind = basis.Enum("kind", true, "operator", "authority");
             BodyReader? grant = basis.Nested("grant", kind == "authority");
-            if (kind == "operator" && (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At) || grant is not null)) basis.Error("policy.authority", "kind", "Only the operator can use operator authority.");
+            if (kind == "operator" && (!PolicyAuthority.OperatorAt(context.Model, context.Record) || grant is not null)) basis.Error("policy.authority", "kind", "Only the operator can use operator authority.");
             PolicyAuthority.Grant(context, grant, Scopes.ManageWritingExceptions, state == "removed" ? "remove" : "add", context.Record);
             basis.NoOtherKeys();
         }

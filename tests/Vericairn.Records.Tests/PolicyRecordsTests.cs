@@ -441,6 +441,11 @@ public class PolicyRecordsTests
         JsonObject choice = new() { ["kept"] = first.Id, ["withdrawn"] = new JsonArray(second.Id), ["note"] = "Reconcile the grant's retained history." };
         RecordEnvelope delegated = f.Add("reconciliation", choice, builder: true, subject: removed.Reference);
         Has(f, delegated, "policy.authority");
+        // A reconciliation whose authority fails counts for nothing: it settles neither revision.
+        EstateModel model = f.Estate.Load();
+        Assert.False(model.Counts(model.ById[delegated.Id]));
+        Assert.Contains(model.Current("authority"), a => a.Id == first.Id);
+        Assert.Contains(model.Current("authority"), a => a.Id == second.Id);
         RecordEnvelope unsigned = f.Add("reconciliation", choice, subject: removed.Reference, sign: false);
         Has(f, unsigned, "signature.required");
         RecordEnvelope disguised = f.Estate.Add("reconciliation", f.Estate.OperatorId, choice.ToJsonString(), removed.Reference, signer: f.OperatorSigner, format: 2);

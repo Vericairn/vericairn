@@ -126,6 +126,8 @@ internal sealed partial class EstateTrust
         counts.Clear();
         ForgetAdmissions();
         ForgetStrictViews();
+        policyOperators = null;
+        policyOperatorsBeforeHistory = null;
         anchors = NoAnchors;
         anchorsKnown = false;
 

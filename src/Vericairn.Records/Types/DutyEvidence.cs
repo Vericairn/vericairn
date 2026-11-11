@@ -208,7 +208,7 @@ internal static partial class DutyRecords
                 bool complete = ProofsComplete(model, result, link, discharge, due, instant, out List<RecordEnvelope> verifications);
                 string? required = PolicyRecords.Text(discharge, "review");
                 RecordEnvelope? review = model.OfType("review").Where(r => CurrentAt(model, r, instant) && r.Subject == result.Reference && r.By != result.By && SignatureChecks.IsAuthentic(model, r) &&
-                    (required == "independent" || required == "operator" && PolicyAuthority.OperatorAt(model, r.By, r.At))).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+                    (required == "independent" || required == "operator" && PolicyAuthority.OperatorAt(model, r))).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
                 if (required != "none" && (review is null || EstateModel.BodyString(review, "outcome") != "pass" || verifications.Where(v => v.Subject == result.Reference).Any(v => review.AtTime < v.AtTime || !PolicyRecords.Items(PolicyRecords.Property(review.Body, "read")).Any(r => PolicyRecords.Text(r, "id") == v.Id && PolicyRecords.Text(r, "hash") == v.ComputedHash)))) complete = false;
                 DateTimeOffset completion = qualified ?? instant;
                 if (PolicyRecords.Text(parameters, "renewal") == "next-date-required" && !NextDate(model, policy, key, parameters, link, instant, completion)) complete = false;

@@ -16,9 +16,12 @@ public sealed class HistoryState
 {
     internal HistoryState(bool adopted, IReadOnlyList<RecordReference> heads, int witnessed, int tail, IReadOnlyList<Finding> findings, bool inventoriesRead,
         IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting,
-        IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null)
+        IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? listings = null,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null)
     {
         AdoptionTimes = adoptionTimes ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        Listings = listings ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        Predecessors = predecessors ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         CountingCheckpoints = counting;
         Adopted = adopted;
         Heads = heads;
@@ -69,6 +72,12 @@ public sealed class HistoryState
 
     /// <summary>The earliest time a record of the unwitnessed tail states, or null when the tail is empty: what the interval trigger reads.</summary>
     public string? OldestTailAt { get; internal init; }
+
+    /// <summary>Each witnessed record present with listed bytes, and the counting checkpoints that list it with those bytes.</summary>
+    internal IReadOnlyDictionary<string, IReadOnlyList<string>> Listings { get; }
+
+    /// <summary>Each counting checkpoint and the counting checkpoints it follows through hashes that match.</summary>
+    internal IReadOnlyDictionary<string, IReadOnlyList<string>> Predecessors { get; }
 
     /// <summary>The records an adoption checkpoint witnesses with the bytes present, each with that checkpoint's time.</summary>
     internal IReadOnlyDictionary<string, DateTimeOffset> AdoptionTimes { get; }
@@ -328,6 +337,7 @@ internal sealed class HistoryAnalysis
         var entries = new Dictionary<string, WitnessedEntry>(StringComparer.Ordinal);
         var inventories = new Dictionary<string, IReadOnlyList<InventoryEntry>>(StringComparer.Ordinal);
         var adoptionTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var listingsByRecord = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         bool read = objects is not null;
         if (read)
         {
@@ -362,7 +372,11 @@ internal sealed class HistoryAnalysis
                     List<WitnessedEntry> agreeing = [.. standing.Where(v => v.Entry.Hash == present.ComputedHash)];
                     List<WitnessedEntry> disagreeing = [.. standing.Where(v => v.Entry.Hash != present.ComputedHash)];
                     entries[id] = agreeing.Count > 0 ? agreeing[0] : standing[0];
-                    if (agreeing.Count > 0) agreeingListings[id] = agreeing;
+                    if (agreeing.Count > 0)
+                    {
+                        agreeingListings[id] = agreeing;
+                        listingsByRecord[id] = [.. agreeing.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
+                    }
                     if (disagreeing.Count == 0) continue;
 
                     // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
@@ -441,8 +455,11 @@ internal sealed class HistoryAnalysis
             tail = model.Records.Count;
         }
 
-        return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,
-            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal), adoptionTimes) { OldestTailAt = oldest };
+        var countingIds = counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<string>> predecessors = counting.ToDictionary(c => c.Record.Id, c => (IReadOnlyList<string>)[.. c.Previous
+            .Where(p => countingIds.Contains(p.Id) && byId[p.Id].Record.ComputedHash == p.Hash).Select(p => p.Id).Distinct(StringComparer.Ordinal)], StringComparer.Ordinal);
+        return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged, countingIds, adoptionTimes,
+            listingsByRecord, predecessors) { OldestTailAt = oldest };
     }
 
     /// <summary>

@@ -62,6 +62,9 @@ internal sealed partial class EstateTrust
     private StrictView? strictNone;
     private List<RecordEnvelope>? principalsInOrder;
     private AuthorityReplay? loadedAuthority;
+    private OperatorReplay? policyOperators;
+    private OperatorReplay? policyOperatorsBeforeHistory;
+    private readonly Dictionary<string, HashSet<string>> checkpointAncestry = new(StringComparer.Ordinal);
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
@@ -1574,6 +1577,85 @@ internal sealed partial class EstateTrust
     private bool AuthenticBySignaturesWith(RecordEnvelope record, IReadOnlyList<Closing> bound) =>
         ReferenceEquals(bound, Acting) ? AuthenticBySignatures(record)
             : record.Signatures.Count > 0 && record.DeclaredHash == record.ComputedHash && !VerifyWith(record, Mode.Signatures, bound).HasErrors;
+
+    /// <summary>
+    /// Who acts as the operator for policy authority (<see cref="OperatorReplay"/>): the principal records that count, of which only those
+    /// authentic by signatures widen, and the root operator's own first record; a record by an author who no longer stands is read as
+    /// written only when signed history places it before the revision that took the role away (<see cref="WitnessedBefore"/>).
+    /// </summary>
+    internal OperatorReplay PolicyOperators
+    {
+        get
+        {
+            lock (gate)
+            {
+                return policyOperators ??= ReadPolicyOperators(beforeHistory: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="PolicyOperators"/> with every removal set aside that came before the estate's history checkpoints could place a record
+    /// earlier (<see cref="BeforeHistory"/>): how policy records would stand but for such a removal, which tells them apart from records
+    /// that fail for any other reason.
+    /// </summary>
+    internal OperatorReplay PolicyOperatorsBeforeHistory
+    {
+        get
+        {
+            lock (gate)
+            {
+                return policyOperatorsBeforeHistory ??= ReadPolicyOperators(beforeHistory: true);
+            }
+        }
+    }
+
+    private OperatorReplay ReadPolicyOperators(bool beforeHistory) =>
+        OperatorReplay.Run(principalRecords.Where(Counts), RootOperator, PrincipalIdentity, Authentic,
+            (record, loss) => WitnessedBefore(record, loss) || beforeHistory && BeforeHistory(record));
+
+    /// <summary>
+    /// Whether no history checkpoint could have placed a record before a later revision: the estate has not adopted checkpoints, or its
+    /// adoption witnesses the record, which was written before any checkpoint was.
+    /// </summary>
+    internal bool BeforeHistory(RecordEnvelope record) => !History.Adopted || History.AdoptedAt(record) is not null;
+
+    /// <summary>
+    /// Whether signed history places a record before the revision that took its author's operator role away: a counting checkpoint signed
+    /// by the root operator, or by an operator who held the role when it was written and stands now (<see cref="StandingOperator"/>, read
+    /// against the closings that act), lists the record with its bytes, is dated no later than the revision and does not list it, and
+    /// precedes every counting checkpoint that lists the revision. A checkpoint by anyone else, or one beside the revision rather than
+    /// before it, witnesses nothing for this; nor does any in an estate that has not adopted checkpoints.
+    /// </summary>
+    internal bool WitnessedBefore(RecordEnvelope record, RecordEnvelope loss)
+    {
+        if (!History.Adopted || !History.Listings.TryGetValue(record.Id, out IReadOnlyList<string>? listing) ||
+            !History.Entries.TryGetValue(record.Id, out WitnessedEntry? entry) || entry.Entry.Hash != record.ComputedHash)
+            return false;
+        IReadOnlyList<string> carrying = History.Listings.GetValueOrDefault(loss.Id) ?? [];
+        return listing.Any(id => model.ById.TryGetValue(id, out RecordEnvelope? checkpoint) && StandingOperator(checkpoint.By, checkpoint.At, Acting) &&
+            string.CompareOrdinal(checkpoint.At, loss.At) <= 0 && !carrying.Contains(id) && carrying.All(c => Ancestry(c).Contains(id)));
+
+        HashSet<string> Ancestry(string checkpoint)
+        {
+            lock (gate)
+            {
+                if (checkpointAncestry.TryGetValue(checkpoint, out HashSet<string>? known)) return known;
+                var set = new HashSet<string>(StringComparer.Ordinal) { checkpoint };
+                var queue = new Queue<string>([checkpoint]);
+                while (queue.TryDequeue(out string? current))
+                {
+                    foreach (string previous in History.Predecessors.GetValueOrDefault(current) ?? [])
+                    {
+                        if (set.Add(previous)) queue.Enqueue(previous);
+                    }
+                }
+
+                checkpointAncestry[checkpoint] = set;
+                return set;
+            }
+        }
+    }
 
     /// <summary>Whether a principal record describes a person holding the operator role.</summary>
     private static bool IsOperator(RecordEnvelope? head) =>

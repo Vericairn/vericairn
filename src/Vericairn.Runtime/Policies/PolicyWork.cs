@@ -130,5 +130,5 @@ internal static class PolicyWork
     internal static bool ReviewQualifies(EstateModel model, RecordEnvelope review, RecordEnvelope result, string requirement) =>
         review.Subject == result.Reference && (requirement == "any" || review.By != result.By &&
             (requirement == "independent" && EstateModel.BodyString(review, "independence") is "independent-agent" or "operator" ||
-             requirement == "operator" && EstateModel.BodyString(review, "independence") == "operator" && PolicyAuthority.OperatorAt(model, review.By, review.At)));
+             requirement == "operator" && EstateModel.BodyString(review, "independence") == "operator" && PolicyAuthority.OperatorAt(model, review)));
 }

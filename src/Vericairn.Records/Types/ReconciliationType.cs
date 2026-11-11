@@ -66,7 +66,7 @@ public sealed class ReconciliationType : IRecordType
         }
         else if (policyGrant)
         {
-            if (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At)) context.Error("policy.authority", "Only the operator reconciles bounded policy grants and their revocations.");
+            if (!PolicyAuthority.OperatorAt(context.Model, context.Record)) context.Error("policy.authority", "Only the operator reconciles bounded policy grants and their revocations.");
         }
         else if (identity)
         {

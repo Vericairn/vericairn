@@ -43,7 +43,7 @@ public sealed class PromptPreferenceType : IRecordType
         SavedPrompts.RequireSigned(context);
         if (scope == "estate")
         {
-            if (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At)) context.Error("prompt.authority", "Only the operator disables prompts estate-wide.");
+            if (!PolicyAuthority.OperatorAt(context.Model, context.Record)) context.Error("prompt.authority", "Only the operator disables prompts estate-wide.");
             if (person is not null || context.Body.Has("hidden") || context.Body.Has("favorite"))
                 context.Error("prompt.preference", "Estate choices only carry disabled; personal choices belong to their author.");
         }

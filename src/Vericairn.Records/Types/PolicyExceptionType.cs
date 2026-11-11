@@ -67,7 +67,7 @@ public sealed class PolicyExceptionType : IRecordType
             if (!PolicyRecords.Property(policy.Body, "maxExceptionDays").TryGetInt64Safe(out long maximum) || maximum is < 1 or > 36500 || expiry <= first.AtTime || expiry - first.AtTime > TimeSpan.FromDays(maximum)) body.Error("exception.expiry", "expiresAt", "Expiry must follow the grant and fit the policy's maximum duration.");
         }
         PolicyAuthority.Grant(context, authority, Scopes.GrantPolicyExceptions, state == "revoked" ? "revoke" : "grant", policy);
-        if (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At))
+        if (!PolicyAuthority.OperatorAt(context.Model, context.Record))
         {
             RecordEnvelope first = context.Model.ById[PolicyRecords.Identity(context.Model, context.Record)];
             if (state == "revoked" && context.Record.By != first.By) context.Error("exception.revoker", "Only the operator or the still-authorized original grantor revokes an exception.");
