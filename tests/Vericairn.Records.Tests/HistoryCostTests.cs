@@ -153,6 +153,81 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         Assert.True(checkpointBytes.Average() < 2048, $"Checkpoints average {checkpointBytes.Average():N0} bytes.");
     }
 
+    /// <summary>
+    /// The cost of how the strongest acts read principal lines (FIX-108): a chain of 800 appointments, each appointee holding a device and
+    /// appointing the next, and a flat set of 1,600 appointments by one operator, each loaded while that operator stands and after the root
+    /// operator removes its role. Each load stays within twice the load of the same estate whose appointments the root operator wrote,
+    /// where those reads settle in one pass.
+    /// </summary>
+    [Theory]
+    [InlineData(800, true)]
+    [InlineData(1600, false)]
+    public void StrictAuthorityReadsStayWithinTwiceAnEstateOfTheRootOperatorsAppointments(int count, bool chain)
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The appointment cost test runs when {EnvironmentVariable} is 1.");
+        (TimeSpan rootStanding, TimeSpan rootRemoved) = Appointments(count, chain, byRoot: true);
+        (TimeSpan standing, TimeSpan removed) = Appointments(count, chain, byRoot: false);
+        output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}: {standing.TotalMilliseconds:N0} ms standing and {removed.TotalMilliseconds:N0} ms after its base is removed; {rootStanding.TotalMilliseconds:N0} ms and {rootRemoved.TotalMilliseconds:N0} ms when the root operator wrote them");
+        Assert.True(standing <= 2 * rootStanding + TimeSpan.FromMilliseconds(50), $"Standing: {standing.TotalMilliseconds:N0} ms against {rootStanding.TotalMilliseconds:N0} ms.");
+        Assert.True(removed <= 2 * rootRemoved + TimeSpan.FromMilliseconds(50), $"Removed: {removed.TotalMilliseconds:N0} ms against {rootRemoved.TotalMilliseconds:N0} ms.");
+    }
+
+    /// <summary>
+    /// Loads an adopted estate in which a second operator, or the root operator when <paramref name="byRoot"/>, writes the appointments,
+    /// once while the second operator stands and once after the root operator removes its role; returns the faster of two loads each time.
+    /// </summary>
+    private static (TimeSpan Standing, TimeSpan Removed) Appointments(int count, bool chain, bool byRoot)
+    {
+        static string Person(string name, string role) => $$"""{"kind":"human","name":"{{name}}","roles":["{{role}}"]}""";
+        using var f = new HistoryFixture();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "operator"), signer: f.OperatorSigner);
+        (RecordEnvelope secondDevice, _) = f.Admitted(second.Id, "The second operator's device");
+        f.Require();
+        f.Adopt();
+        RecordEnvelope author = second;
+        RecordEnvelope authorDevice = secondDevice;
+        for (int i = 0; i < count; i++)
+        {
+            string name = "Appointee " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope next = byRoot
+                ? f.Estate.Add("principal", f.Estate.OperatorId, Person(name, "operator"), signer: f.OperatorSigner)
+                : f.Estate.Add("principal", author.Id, Person(name, "operator"), signer: f.Signer(authorDevice));
+            if (!chain) continue;
+            (authorDevice, _) = f.Admitted(next.Id, name + "'s device");
+            author = next;
+        }
+
+        RecordEnvelope bySecond = f.Close("device", f.BuilderDevice.Id, second.Id, f.Signer(secondDevice));
+        RecordEnvelope byLast = f.Close("device", f.BuilderDevice.Id, author.Id, f.Signer(authorDevice));
+        TimeSpan standing = Fastest(f, model =>
+        {
+            Assert.Contains(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
+            Assert.Contains(model.Trust.Closings, c => c.Record.Id == byLast.Id);
+        });
+        f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "reviewer"), supersedes: second.Id, signer: f.OperatorSigner);
+        TimeSpan removed = Fastest(f, model =>
+        {
+            Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
+            Assert.Equal(byRoot && chain, model.Trust.Closings.Any(c => c.Record.Id == byLast.Id));
+        });
+        return (standing, removed);
+
+        static TimeSpan Fastest(HistoryFixture f, Action<EstateModel> check)
+        {
+            TimeSpan best = TimeSpan.MaxValue;
+            for (int run = 0; run < 2; run++)
+            {
+                var watch = Stopwatch.StartNew();
+                EstateModel model = f.Load();
+                watch.Stop();
+                check(model);
+                if (watch.Elapsed < best) best = watch.Elapsed;
+            }
+
+            return best;
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(keyHome)) Directory.Delete(keyHome, recursive: true);
