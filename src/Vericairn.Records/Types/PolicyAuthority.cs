@@ -52,9 +52,9 @@ internal static class PolicyAuthority
     /// gives the operator role at that time and still gives it now, as policy authority reads principal records (<see cref="OperatorReplay"/>:
     /// only signed records widen, a removal keeps counting, and a former operator's appointment counts only where signed history places it
     /// before the removal). A person who has since lost the role acted as the operator only through a record that signed history places
-    /// before the loss (<see cref="EstateTrust.WitnessedBefore"/>): one listed by a checkpoint that the root operator or a standing
-    /// operator signed before the revision that took the role away. So a record dated back into the time a removed operator held the role,
-    /// and written after, authorizes nothing.
+    /// before the loss (<see cref="EstateTrust.WitnessedBefore"/>): one that a checkpoint the root operator or a standing operator signed
+    /// before the revision that took the role away lists, or follows a checkpoint listing. So a record dated back into the time a removed
+    /// operator held the role, and written after, authorizes nothing.
     /// </summary>
     internal static bool OperatorAt(EstateModel model, string by, string at, RecordEnvelope? record)
     {
@@ -103,8 +103,9 @@ internal static class PolicyAuthority
     /// its adoption witnessed, a record whose own validation finds errors and finds none once such removals are set aside. Each counts for
     /// nothing and is reported as one warning, policy.operator-removed, rather than as errors, so the removal leaves the estate valid;
     /// a record written after adoption that no checkpoint places before the removal stays an error. The runtime refuses to write such a
-    /// removal in an estate that has not adopted; the warning keeps valid an estate holding one written otherwise, or a removal after an
-    /// adoption whose author is neither the root operator nor a standing operator.
+    /// removal in an estate that has not adopted, and in one that has it writes a checkpoint before it; the warning keeps valid an estate
+    /// holding one written otherwise, such as a removal written with no checkpoint by the root operator or a standing operator after an
+    /// adoption signed by someone else.
     /// </summary>
     internal static IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> RemovedBeforeHistory(EstateModel model)
     {
@@ -141,7 +142,7 @@ internal static class PolicyAuthority
         return new Finding(Severity.Warning, "policy.operator-removed", record.ExpectedPath,
             $"This {record.Type} record rests on an operator role that was taken away ({removals}) before any history checkpoint the root operator or a " +
             "standing operator signed placed the record earlier, so it counts for nothing. Such a checkpoint written before a removal keeps such records: " +
-            "adopt history checkpoints as the root operator before removing a role, and the runtime writes one with each removal; the operator may write the change again.");
+            "adopt history checkpoints before removing a role, and the runtime writes one with each removal; the operator may write the change again.");
     }
 
     internal static void ValidateGrant(ValidationContext context)

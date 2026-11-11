@@ -561,4 +561,208 @@ public class PolicyAuthorityTimeTests
         Assert.True(model.Counts(model.ById[admitted.Id]));
         Assert.Equal(admitted.Id, model.CurrentPrincipal(admitted.Id)!.Id);
     }
+
+    /// <summary>A device for a principal whose key the runtime holds, admitted by the root operator, so the runtime signs that principal's writes.</summary>
+    private static void RuntimeHeldDevice(PolicyFixture f, EstateService api, string principal)
+    {
+        WriteOutcome device = api.DeviceCreate(new(principal, "A runtime-held device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        RecordEnvelope held = api.Session.Load().ById[device.Written!.Id];
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        f.Add("admission", new JsonObject { ["principal"] = principal, ["status"] = "admitted", ["note"] = "Runtime-held device." }, subject: held.Reference);
+    }
+
+    private static RecordEnvelope OperatorWriting(PolicyFixture f, string by, IRecordSigner signer) =>
+        f.Estate.Add("writing-exception", by, new JsonObject { ["token"] = "Open511", ["code"] = "writing.spacing", ["reason"] = "An intentional service name.", ["state"] = "active", ["basis"] = new JsonObject { ["kind"] = "operator" } }.ToJsonString(), signer: signer);
+
+    /// <summary>
+    /// What an operator recorded is listed only by the interval checkpoint the runtime wrote with the builder's record, signed by the
+    /// builder's device. The checkpoint the runtime writes before the root operator's removal follows it, so the records keep counting.
+    /// </summary>
+    [Fact]
+    public void ARecordListedByAnotherAuthorsCheckpointIsKeptThroughTheCheckpointBeforeTheRemoval()
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        RuntimeHeldRootDevice(f, api);
+        RuntimeHeldDevice(f, api, f.Estate.BuilderId);
+        RecordEnvelope o = f.Add("principal", Person("O", "operator"));
+        StoreSigner os = f.AdmitSigner(o.Id);
+        Checkpoint(f, "adoption");
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope writing = OperatorWriting(f, o.Id, os);
+        RecordEnvelope policy = Declare(f, o.Id, os, "o-policy");
+        RecordEnvelope decision = f.Estate.Load().OfType("decision").Single(d => d.By == o.Id);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+
+        // The builder's next write carries the interval checkpoint, which lists what O wrote.
+        WriteOutcome order = api.NewRecord(new NewRecordRequest("work-order", f.Estate.BuilderId, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("INT-1"))!)));
+        Assert.True(order.Ok, Outcome(order));
+        Assert.Equal("interval", order.Checkpoint?.Trigger);
+        string interval = order.Checkpoint!.Written!.Id;
+        Assert.Equal(f.Estate.BuilderId, api.Session.Load().ById[interval].By);
+
+        WriteOutcome removal = api.NewRecord(new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("O", "contributor")), Supersedes: o.Id));
+        Assert.True(removal.Ok, Outcome(removal));
+        EstateModel model = api.Session.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(e => e.Severity == Severity.Error)));
+        RecordEnvelope revision = model.ById[removal.Written!.Id];
+        string before = removal.Checkpoint!.Written!.Id;
+        Assert.Contains(interval, model.Trust.History.Predecessors[before]);
+        foreach (RecordEnvelope kept in new[] { writing, policy, decision })
+        {
+            // Listed by the builder's checkpoint alone; the root operator's checkpoint before the removal follows it.
+            Assert.Equal([interval], model.Trust.History.Listings[kept.Id]);
+            Assert.True(model.Trust.WitnessedBefore(model.ById[kept.Id], revision), kept.Type);
+            Assert.True(model.Counts(model.ById[kept.Id]), kept.Type);
+            Assert.False(Warned(model, kept), kept.Type);
+        }
+
+        Assert.Contains(model.Current("estate-policy"), p => EstateModel.BodyString(p, "key") == "o-policy");
+        Assert.False(PolicyAuthority.OperatorAt(model, o.Id, Now(f)));
+    }
+
+    /// <summary>
+    /// The same record, listed only by the builder's checkpoint, on a fork beside the removal and the root operator's checkpoint listing
+    /// it: no checkpoint by the root operator follows the builder's and precedes the removal, so the record is not kept, even once the
+    /// root operator's next checkpoint joins the fork. Without the fork, the root operator's checkpoint between them keeps it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ARecordListedOnAForkBesideTheRemovalIsNotKept(bool fork)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        RecordEnvelope o = f.Add("principal", Person("O", "operator"));
+        StoreSigner os = f.AdmitSigner(o.Id);
+        Checkpoint(f, "adoption");
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope writing = OperatorWriting(f, o.Id, os);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope listing = Checkpoint(f, "interval", f.Estate.BuilderId, f.BuilderSigner);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+
+        // On the fork, a copy that holds neither the builder's checkpoint nor what it lists takes the removal.
+        var withheld = new List<(string Path, byte[] Bytes)>();
+        if (fork)
+        {
+            foreach (RecordEnvelope record in new[] { writing, listing })
+            {
+                string path = Path.Combine(f.Estate.Root, record.ExpectedPath);
+                withheld.Add((path, File.ReadAllBytes(path)));
+                File.Delete(path);
+            }
+        }
+        else
+        {
+            Checkpoint(f, "manual");
+        }
+
+        RecordEnvelope removal = f.Add("principal", Person("O", "contributor"), supersedes: o.Id);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope carrying = Checkpoint(f, "manual");
+        foreach ((string path, byte[] bytes) in withheld) File.WriteAllBytes(path, bytes);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope joined = Checkpoint(f, "manual");
+
+        EstateModel model = f.Estate.Load();
+        Assert.Equal([listing.Id], model.Trust.History.Listings[writing.Id]);
+        Assert.Equal([carrying.Id], model.Trust.History.Listings[removal.Id]);
+        // On the fork the root operator's next checkpoint joins the builder's directly, after the removal.
+        if (fork) Assert.Contains(listing.Id, model.Trust.History.Predecessors[joined.Id]);
+        Assert.Equal(!fork, model.Trust.WitnessedBefore(model.ById[writing.Id], model.ById[removal.Id]));
+        Assert.Equal(!fork, model.Counts(model.ById[writing.Id]));
+        Assert.Equal(!fork, PolicyAuthority.OperatorAt(model, model.ById[writing.Id]));
+        if (fork) Assert.Contains(model.Findings, e => e.Code == "policy.authority" && e.Severity == Severity.Error && e.Location.StartsWith(writing.ExpectedPath, StringComparison.Ordinal));
+        else Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(e => e.Severity == Severity.Error)));
+    }
+
+    /// <summary>
+    /// A record the removed operator dates back into its time and lists in a checkpoint it signs itself, after the removal or in a copy
+    /// without it: a later checkpoint by the root operator follows that checkpoint, but after the removal, so the record is not kept.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ARecordListedOnlyByTheRemovedOperatorsOwnCheckpointIsNotKept(bool withoutTheRemoval)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        RecordEnvelope o = f.Add("principal", Person("O", "operator"));
+        StoreSigner os = f.AdmitSigner(o.Id);
+        Checkpoint(f, "adoption");
+        DateTimeOffset appointed = f.Estate.Clock;
+        f.Estate.SetClock(appointed.AddHours(1));
+        RecordEnvelope removal = f.Add("principal", Person("O", "contributor"), supersedes: o.Id);
+        DateTimeOffset resume = f.Estate.Clock;
+        string removalPath = Path.Combine(f.Estate.Root, removal.ExpectedPath);
+        byte[] removalBytes = File.ReadAllBytes(removalPath);
+        if (withoutTheRemoval) File.Delete(removalPath);
+
+        f.Estate.SetClock(appointed.AddMinutes(10));
+        RecordEnvelope writing = OperatorWriting(f, o.Id, os);
+        f.Estate.SetClock(withoutTheRemoval ? appointed.AddMinutes(20) : resume.AddMinutes(1));
+        RecordEnvelope own = Checkpoint(f, "manual", o.Id, os);
+        if (withoutTheRemoval) File.WriteAllBytes(removalPath, removalBytes);
+        f.Estate.SetClock(resume.AddMinutes(2));
+        RecordEnvelope root = Checkpoint(f, "manual");
+
+        EstateModel model = f.Estate.Load();
+        Assert.Equal([own.Id], model.Trust.History.Listings[writing.Id]);
+        Assert.Contains(own.Id, model.Trust.History.Predecessors[root.Id]);
+        Assert.False(model.Trust.WitnessedBefore(model.ById[writing.Id], model.ById[removal.Id]));
+        Assert.False(model.Counts(model.ById[writing.Id]));
+        Assert.False(PolicyAuthority.OperatorAt(model, model.ById[writing.Id]));
+        Assert.Contains(model.Findings, e => e.Code == "policy.authority" && e.Severity == Severity.Error && e.Location.StartsWith(writing.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// An estate whose adoption a person holding administer signed: what the operator recorded before it is listed by that adoption alone.
+    /// A removal the runtime writes is preceded by its checkpoint, which the root operator signs and which follows the adoption, so those
+    /// records keep counting. A removal written with no checkpoint by the root operator or a standing operator after the adoption leaves
+    /// each of them counting for nothing, the warning policy.operator-removed.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AfterAnAdministratorsAdoptionTheCheckpointBeforeTheRemovalKeepsWhatTheAdoptionListed(bool throughTheRuntime)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        using EstateService api = EstateService.Open(f.Estate.Root);
+        RuntimeHeldRootDevice(f, api);
+        RecordEnvelope a = f.Add("principal", Person("A", "reviewer"));
+        StoreSigner signer = f.AdmitSigner(a.Id);
+        f.Add("authority", new JsonObject { ["grantee"] = a.Id, ["scope"] = new JsonArray(Scopes.Administer), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = f.Decision.Id });
+        RecordEnvelope o = f.Add("principal", Person("O", "operator"));
+        StoreSigner os = f.AdmitSigner(o.Id);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope writing = OperatorWriting(f, o.Id, os);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope adoption = Checkpoint(f, "adoption", a.Id, signer);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        Assert.Equal(0, api.Check().Errors);
+
+        RecordEnvelope revision;
+        if (throughTheRuntime)
+        {
+            WriteOutcome removal = api.NewRecord(new NewRecordRequest("principal", f.Estate.OperatorId, PolicyFixture.Element(Person("O", "contributor")), Supersedes: o.Id));
+            Assert.True(removal.Ok, Outcome(removal));
+            Assert.NotNull(removal.Checkpoint?.Written);
+            revision = api.Session.Load().ById[removal.Written!.Id];
+        }
+        else
+        {
+            revision = f.Add("principal", Person("O", "contributor"), supersedes: o.Id);
+        }
+
+        EstateModel model = api.Session.Load();
+        Assert.Equal([adoption.Id], model.Trust.History.Listings[writing.Id]);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(e => e.Severity == Severity.Error)));
+        Assert.Equal(throughTheRuntime, model.Trust.WitnessedBefore(model.ById[writing.Id], model.ById[revision.Id]));
+        Assert.Equal(throughTheRuntime, model.Counts(model.ById[writing.Id]));
+        Assert.Equal(!throughTheRuntime, Warned(model, writing));
+    }
 }

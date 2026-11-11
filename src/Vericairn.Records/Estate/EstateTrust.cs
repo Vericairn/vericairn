@@ -65,6 +65,8 @@ internal sealed partial class EstateTrust
     private OperatorReplay? policyOperators;
     private OperatorReplay? policyOperatorsBeforeHistory;
     private readonly Dictionary<string, HashSet<string>> checkpointAncestry = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> checkpointDescendants = new(StringComparer.Ordinal);
+    private ILookup<string, string>? checkpointFollowers;
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
@@ -1623,9 +1625,11 @@ internal sealed partial class EstateTrust
     /// <summary>
     /// Whether signed history places a record before the revision that took its author's operator role away: a counting checkpoint signed
     /// by the root operator, or by an operator who held the role when it was written and stands now (<see cref="StandingOperator"/>, read
-    /// against the closings that act), lists the record with its bytes, is dated no later than the revision and does not list it, and
-    /// precedes every counting checkpoint that lists the revision. A checkpoint by anyone else, or one beside the revision rather than
-    /// before it, witnesses nothing for this; nor does any in an estate that has not adopted checkpoints.
+    /// against the closings that act), lists the record with its bytes or follows, through its predecessors, a counting checkpoint that
+    /// does; is dated no later than the revision and does not list it; and precedes every counting checkpoint that lists the revision. So
+    /// a checkpoint by anyone else witnesses only through such a checkpoint that follows it before the revision, and one beside the
+    /// revision or after it witnesses nothing for this, whoever follows it later; nor does any in an estate that has not adopted
+    /// checkpoints.
     /// </summary>
     internal bool WitnessedBefore(RecordEnvelope record, RecordEnvelope loss)
     {
@@ -1633,8 +1637,32 @@ internal sealed partial class EstateTrust
             !History.Entries.TryGetValue(record.Id, out WitnessedEntry? entry) || entry.Entry.Hash != record.ComputedHash)
             return false;
         IReadOnlyList<string> carrying = History.Listings.GetValueOrDefault(loss.Id) ?? [];
-        return listing.Any(id => model.ById.TryGetValue(id, out RecordEnvelope? checkpoint) && StandingOperator(checkpoint.By, checkpoint.At, Acting) &&
-            string.CompareOrdinal(checkpoint.At, loss.At) <= 0 && !carrying.Contains(id) && carrying.All(c => Ancestry(c).Contains(id)));
+        return listing.SelectMany(Descendants).Distinct(StringComparer.Ordinal).Any(id => !carrying.Contains(id) &&
+            model.ById.TryGetValue(id, out RecordEnvelope? checkpoint) && string.CompareOrdinal(checkpoint.At, loss.At) <= 0 &&
+            carrying.All(c => Ancestry(c).Contains(id)) && StandingOperator(checkpoint.By, checkpoint.At, Acting));
+
+        // A counting checkpoint and every counting checkpoint that follows it, through hashes that match.
+        HashSet<string> Descendants(string checkpoint)
+        {
+            lock (gate)
+            {
+                if (checkpointDescendants.TryGetValue(checkpoint, out HashSet<string>? known)) return known;
+                checkpointFollowers ??= History.Predecessors.SelectMany(p => p.Value.Select(previous => (Previous: previous, Next: p.Key)))
+                    .ToLookup(x => x.Previous, x => x.Next, StringComparer.Ordinal);
+                var set = new HashSet<string>(StringComparer.Ordinal) { checkpoint };
+                var queue = new Queue<string>([checkpoint]);
+                while (queue.TryDequeue(out string? current))
+                {
+                    foreach (string next in checkpointFollowers[current])
+                    {
+                        if (set.Add(next)) queue.Enqueue(next);
+                    }
+                }
+
+                checkpointDescendants[checkpoint] = set;
+                return set;
+            }
+        }
 
         HashSet<string> Ancestry(string checkpoint)
         {

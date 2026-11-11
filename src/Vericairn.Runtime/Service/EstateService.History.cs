@@ -654,7 +654,7 @@ public sealed partial class EstateService
         string list = string.Join("; ", named.Take(Shown)) + (named.Count > Shown ? $"; and {named.Count - Shown} more, each in the findings" : "");
         return new Problem("refused",
             $"Not written: this estate has not adopted history checkpoints, so nothing places what was written under the role before this removal, " +
-            $"and {named.Count} {(named.Count == 1 ? "record" : "records")} would fail with it: {list}. Adopt history checkpoints first, as the root operator: " +
+            $"and {named.Count} {(named.Count == 1 ? "record" : "records")} would fail with it: {list}. Adopt history checkpoints first: " +
             $"the runtime then writes a checkpoint before the removal, and {(named.Count == 1 ? "this record keeps its" : "these records keep their")} reading.",
             [.. ended.Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message))]);
     }
