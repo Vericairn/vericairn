@@ -57,7 +57,8 @@ public sealed record HistoryCheckpointResponse(string Trigger, bool Applied, boo
     /// <summary>
     /// For adoption, the records that read otherwise when roles and grants are read at each record's own time, as an adopted estate reads
     /// every record its adoption does not witness, each with a note saying what differs; adoption keeps, for every record it witnesses,
-    /// the reading it has at adoption.
+    /// the reading it has at adoption. Advisory: <see cref="PlanHash"/> does not cover it, and adoption computes it again from the copy
+    /// it signs, so the adoption's list can differ from its check's.
     /// </summary>
     public IReadOnlyList<HistoryRecordItem> AuthorityChanges { get; init; } = [];
 }
