@@ -2423,6 +2423,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // A revision taking a role away is stored after a history checkpoint, or says what it ends (design/signed-history.md § 8). A grant
+        // revision that needs a closing is stored after its closing instead, which is such a checkpoint (OPS-07).
+        if (signers is null && !session.IsReadOnly && TakesRoleAway(draft, current) && ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is null)
+        {
+            return UnderWriteLock(() => StoreRemovalLocked(draft), WriteOutcome.Fail);
+        }
+
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
         if (record is null)
         {
@@ -2807,13 +2814,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
             // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
             // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
+            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal: it witnesses only what
+            // was there, and the revision written again is preceded by a checkpoint of its own.
             bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
             bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
             bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
             bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
             global::Vericairn.Records.Estate.Closing? unfollowed = closingAlone
                 ? model.Trust.Closings.FirstOrDefault(c => stored.Any(s => s.Id == c.Record.Id) && model.Counts(c.Record) && !model.Trust.Followed(c)) : null;
-            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || (routing &&
+            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal");
+            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || removalAlone || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)

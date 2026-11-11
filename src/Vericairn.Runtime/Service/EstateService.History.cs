@@ -561,6 +561,88 @@ public sealed partial class EstateService
     private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };
 
     /// <summary>
+    /// Whether a draft takes a role away (signed history and policy authority, 0.9.2): a principal revision whose line gives the operator
+    /// role and that gives it no more, or a grant revision whose line gives its grantee administer and that gives it no more, each line as
+    /// read from the records their authors may write.
+    /// </summary>
+    private static bool TakesRoleAway(RecordDraft draft, EstateModel model)
+    {
+        if (draft.Type is not ("principal" or "authority") || draft.Supersedes is null || !model.ById.TryGetValue(draft.Supersedes, out RecordEnvelope? previous) ||
+            previous.Type != draft.Type || draft.Body.ValueKind != JsonValueKind.Object)
+            return false;
+        RecordEnvelope? held = model.Authority.Current(model.Chain(previous)[0]);
+        if (held is null) return false;
+        return draft.Type == "principal"
+            ? AuthorityReplay.IsOperator(held) && !(Text(draft.Body, "kind") == "human" && Strings(draft.Body, "roles").Contains(Vericairn.Records.Types.Roles.Operator))
+            : Strings(held.Body, "scope").Contains(Vericairn.Records.Types.Scopes.Administer) &&
+              !(Text(draft.Body, "grantee") == EstateModel.BodyString(held, "grantee") && Strings(draft.Body, "scope").Contains(Vericairn.Records.Types.Scopes.Administer));
+
+        static string? Text(JsonElement body, string name) => body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        static HashSet<string> Strings(JsonElement body, string name) => body.TryGetProperty(name, out JsonElement items) && items.ValueKind == JsonValueKind.Array
+            ? [.. items.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String).Select(i => i.GetString()!)]
+            : [];
+    }
+
+    /// <summary>
+    /// Stores a revision that takes a role away (<see cref="TakesRoleAway"/>). In an estate that has adopted history checkpoints, a
+    /// checkpoint signed by the acting principal's device is written first, in the same batch, over the copy as it is, so what the person
+    /// wrote before the removal stays witnessed before it and keeps its reading (design/signed-history.md § 8); the revision is authored
+    /// after it. In an estate that has not, the revision is written alone, and its outcome says first which policy records resting on the
+    /// role now count for nothing. Caller holds the gate and the write lock.
+    /// </summary>
+    private WriteOutcome StoreRemovalLocked(RecordDraft draft)
+    {
+        EstateModel current = LoadWith([]);
+        if (!SignedHistory.Adopted(current))
+        {
+            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current);
+            if (alone is null) return EstateServiceValues.Refuse(refusal!);
+            string? ended = EndedByRemoval(current, alone);
+            WriteOutcome outcome = StoreAuthoredLocked(alone, current);
+            return ended is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, ended) };
+        }
+
+        (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, "manual", draft.By);
+        (AuthoredRecord? record, string? why) = AuthorLocked(draft, current);
+        if (record is null)
+        {
+            if (checkpoint is not null) RemoveObjects(checkpoint);
+            return EstateServiceValues.Refuse(why!);
+        }
+
+        if (checkpoint is null)
+        {
+            WriteOutcome outcome = StoreAuthoredLocked(record, current);
+            return skipped is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, skipped) };
+        }
+
+        (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record, record],
+            "Store a history checkpoint and then the revision that takes a role away, so what was written before the removal keeps its reading.", null, null, null);
+        if (written.Count < 2)
+        {
+            if (written.Count == 0) RemoveObjects(checkpoint);
+            return WriteOutcome.Fail(problem ?? new Problem("refused", "The revision was not written.", []));
+        }
+
+        return new WriteOutcome(written[1], problem) { Checkpoint = new TriggeredCheckpoint("manual", written[0], null) };
+    }
+
+    /// <summary>
+    /// What a removal ends in an estate that has not adopted history checkpoints: the policy records it would leave counting for nothing,
+    /// each reported as policy.operator-removed; null when none.
+    /// </summary>
+    private string? EndedByRemoval(EstateModel current, AuthoredRecord removal)
+    {
+        var before = current.Findings.Where(f => f.Code == "policy.operator-removed").Select(f => f.Location).ToHashSet(StringComparer.Ordinal);
+        List<string> ended = [.. LoadWith([removal]).Findings.Where(f => f.Code == "policy.operator-removed" && !before.Contains(f.Location)).Select(f => f.Location).Distinct(StringComparer.Ordinal)];
+        return ended.Count == 0 ? null
+            : $"This estate has not adopted history checkpoints, so none was written before this removal, and nothing places what was written under the role before it: " +
+              $"{ended.Count} policy {(ended.Count == 1 ? "record" : "records")} resting on it now {(ended.Count == 1 ? "counts" : "count")} for nothing, each reported as policy.operator-removed ({string.Join(", ", ended)}). " +
+              "Adopting history checkpoints before removing a role keeps such records.";
+    }
+
+    /// <summary>
     /// What a charter revision's checkpoint anchors (design/signed-history.md § 6): a revision moving the charter to required signatures,
     /// by the root operator or a person holding administer, is followed in the same batch by a checkpoint anchoring the unsigned records
     /// that count before it and no anchor lists yet, so an earlier optional period leaves nothing to backdate into and no reading changes.
