@@ -544,6 +544,18 @@ public sealed partial class EstateService
     private static string SignedElsewhereRefusal((string Kind, string Id) closes) =>
         $"{Needs(closes)} A record signed elsewhere, presigned or by a device-signed request, carries no closing: write it on a machine that holds a device of one who may perform it{(closes.Kind == "device" ? ", or with the operator's recovery key" : string.Empty)}. Nothing was written.";
 
+    /// <summary>Why operator record refuses an act a closing precedes in an estate that has adopted: it carries one signed record, never its closing.</summary>
+    private static string OperatorRecordClosingRefusal((string Kind, string Id) closes) =>
+        $"{Needs(closes)} An operator record carries one signed record through a checked merge and cannot carry the closing, so this {Act(closes.Kind)} is not recorded through it: write it with {ClosingCommand(closes, "<operator id>")}, which writes the closing and the act together. Nothing was written.";
+
+    /// <summary>The command that writes an act with its closing (OPS-07).</summary>
+    private static string ClosingCommand((string Kind, string Id) closes, string by) => closes.Kind switch
+    {
+        "device" => $"vericairn devices revoke {closes.Id} --by {by} --reason \"<why>\"",
+        "key" => $"vericairn devices rotate {closes.Id}",
+        _ => $"vericairn records new authority --by {by} --supersedes {closes.Id} --body <file>",
+    };
+
     private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", _ => "grant revision" };
 
     private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };

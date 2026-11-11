@@ -151,6 +151,35 @@ public sealed class OperatorRecordTests
     }
 
     [Fact]
+    public void InAnEstateThatAdoptedAnActAClosingPrecedesIsRefusedWithTheCommandThatWritesItsClosing()
+    {
+        using var f = new Fixture();
+        string op = f.Estate.OperatorId;
+        string plan = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!.PlanHash!;
+        (HistoryCheckpointResponse? adopted, Problem? problem) = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(op, Adopt: true, ExpectPlan: plan));
+        Assert.True(adopted?.Applied == true, JsonSerializer.Serialize(problem, ProtocolJson.Options));
+        EstateModel model = f.Service.Session.Load();
+        RecordEnvelope device = model.ById[f.Device!];
+        RecordEnvelope admission = SignatureChecks.AdmissionOf(model, device)!;
+        int records = model.Records.Count;
+
+        // A revocation is written with its closing, which one signed record carried through a checked merge cannot carry.
+        var request = new OperatorRecordRequest("admission", op, JsonSerializer.SerializeToElement(new
+        { principal = op, status = "revoked", note = "Lost.", revokedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) }),
+            $"device:{device.Id}:{device.ComputedHash}", Supersedes: admission.Id, WaitSeconds: 0);
+        OperatorRecordResponse result = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(result.Ok);
+        Assert.Equal("refused", result.Status);
+        Assert.Contains("cannot carry the closing", result.Message, StringComparison.Ordinal);
+        Assert.Contains($"vericairn devices revoke {device.Id} --by <operator id>", result.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("did not pass validation", result.Message, StringComparison.Ordinal);
+        Assert.Equal($"vericairn devices revoke {device.Id} --by {op} --reason \"<why>\"", result.NextStep);
+        Assert.Null(result.Record);
+        Assert.Empty(f.Events);
+        Assert.Equal(records, f.Service.Session.Load().Records.Count);
+    }
+
+    [Fact]
     public void AnUnconfirmedPushCannotBeRetriedEvenWithReconciliationText()
     {
         using var f = new Fixture();
