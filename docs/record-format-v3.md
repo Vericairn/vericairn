@@ -642,6 +642,11 @@ device, key or grant revision no closing that acts names, is the warning `histor
 it arrived without its closing, so what its target signs with an earlier date still counts. A
 closing that names the target, written later, ends it.
 
+A grant revision is compared with, and its closing names, the revision it replaces: the one it
+supersedes when that counts, otherwise the nearest revision below it in its line that counts,
+the record it follows there; with none below it that counts, it narrows nothing. A key closing
+needs no such reading, since a device revision counts only on top of one that counts.
+
 **Authority as it stood.** In an adopted estate, the roles and grants a record's rules read
 are read at its authority time: its own `at`, or, for a record the adoption checkpoint
 witnesses with its present bytes, the adoption's `at`, so that such a record keeps the

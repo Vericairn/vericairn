@@ -439,7 +439,7 @@ internal sealed partial class EstateTrust
         if (!History.Adopted) yield break;
         foreach (RecordEnvelope act in ClosingActs.Types.SelectMany(model.OfType).Where(r => r.Supersedes is not null).OrderBy(r => r.Id, StringComparer.Ordinal))
         {
-            if (History.AdoptedAt(act) is not null || ClosingActs.For(model, act) is not { } closes || !Counts(act) || Named(closes)) continue;
+            if (History.AdoptedAt(act) is not null || ClosingActs.For(model, this, act.Type, act.Body, act.Subject, act.Supersedes) is not { } closes || !Counts(act) || Named(closes)) continue;
             string message = closes.Kind switch
             {
                 "device" => $"This revocation of device {closes.Id} counts, and no closing names the device, so a record the device signs with an earlier date still counts.",
