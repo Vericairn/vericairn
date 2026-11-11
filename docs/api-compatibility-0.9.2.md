@@ -716,8 +716,10 @@ stored closing before the error, as `<path>  <id>  <hash>  (history checkpoint, 
 
 A batch whose store fails part-way now describes the failure by its kind and exception type, as `Not written: <type> record
 <id> could not be stored (the file system refused the write, IOException).`, never by the exception's message, which may name
-a path on this machine; the same holds for a batch journal that cannot be written. These texts reach a write's `problem` and a
-triggered checkpoint's `skipped`.
+a path on this machine; the same holds for a batch journal that cannot be written. A record whose signature fails on this
+machine is described the same way, as `The record could not be signed on this machine (the signing key could not be read,
+IOException).`; a record's own refusals, which name its fields and values, and a presigned signature's keep their text. These
+texts reach a write's `problem` and a triggered checkpoint's `skipped`, a closing's refusal among them.
 
 `Vericairn.Records` adds, each additively: `SignedHistory.IntervalRecords`, `IntervalAge`, `IntervalDue`, `TailRecords`,
 `PlanAdoption`, `Follows` and `ExpectMatch`; `AdoptionPlan` with `AlreadyAnchored` and `AnchoredHash`; `HistoryState.OldestTailAt`; and `History.HistoryLine` (`States`,

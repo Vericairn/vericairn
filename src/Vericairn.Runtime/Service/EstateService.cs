@@ -2508,14 +2508,55 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
+        // A signing failure is described by its kind and type, never by its message, which may name a path on this machine and reaches
+        // refusals and a checkpoint's skip reason. The record's own refusals name its fields and values, and keep their message, as does
+        // a presigned signature's, which is fixed text.
+        List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s))];
         try
         {
             if (signers.Count > 0) BeforeSigningRecord?.Invoke();
-            return (RecordAuthor.Create(draft, signers), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return (null, exception.Message);
+            return (null, SigningFailure(exception));
+        }
+
+        try
+        {
+            return (RecordAuthor.Create(draft, watched), null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return (null, watched.Any(s => s is WatchedSigner { Failed: true }) ? SigningFailure(exception) : exception.Message);
+        }
+    }
+
+    /// <summary>A signing failure by its kind and exception type, without its message, which may name a path on this machine.</summary>
+    private static string SigningFailure(Exception exception) => "The record could not be signed on this machine (" + (exception switch
+    {
+        UnauthorizedAccessException => "access to the signing key was denied",
+        IOException => "the signing key could not be read",
+        _ => "the device's key store refused to sign",
+    }) + ", " + exception.GetType().Name + ").";
+
+    /// <summary>A signer that notes whether its signature failed, so the failure is told from the record's own refusals.</summary>
+    private sealed class WatchedSigner(IRecordSigner inner) : IRecordSigner
+    {
+        public bool Failed { get; private set; }
+
+        public string DeviceId => inner.DeviceId;
+
+        public RecordSignature Sign(ReadOnlySpan<byte> digest)
+        {
+            try
+            {
+                return inner.Sign(digest);
+            }
+            catch
+            {
+                Failed = true;
+                throw;
+            }
         }
     }
 

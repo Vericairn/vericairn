@@ -752,6 +752,73 @@ public class HistoryClosingTests
         Assert.Contains("could not be stored (the file system refused the write, IOException)", stopped.Problem.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ASigningFailureIsDescribedByItsKindWithoutItsMessageOrAPath()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        string op = f.Records.Estate.OperatorId;
+        string named = Path.Combine(f.Records.Estate.Root, "keys", "device.key");
+        const string Described = "The record could not be signed on this machine (the signing key could not be read, IOException).";
+
+        // The closing's signature, the second the revocation needs, fails with a message naming a path on this machine.
+        int signatures = 0;
+        f.Api.BeforeSigningRecord = () => { if (++signatures == 2) throw new IOException($"Could not read {named}."); };
+        int records = f.Api.Session.Load().Records.Count;
+        WriteOutcome revoked = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, op, "Lost."));
+        Assert.Equal(2, signatures);
+        Assert.False(revoked.Ok);
+        Assert.Contains("The closing could not be written", revoked.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains(Described, revoked.Problem.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(f.Records.Estate.Root, revoked.Problem.Message, StringComparison.Ordinal);
+        Assert.Equal(records, f.Api.Session.Load().Records.Count);
+
+        // An interval checkpoint whose signature fails the same way is skipped with the same description; the record is written.
+        signatures = 0;
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddDays(-2));
+        f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("OLD-9"))!.AsObject());
+        WriteOutcome order = f.Api.NewRecord(new NewRecordRequest("work-order", op, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("NEW-9"))!)));
+        f.Api.BeforeSigningRecord = null;
+        Assert.Equal(2, signatures);
+        Assert.NotNull(order.Written);
+        Assert.Equal("interval", order.Checkpoint!.Trigger);
+        Assert.Null(order.Checkpoint.Written);
+        Assert.Contains(Described, order.Checkpoint.Skipped, StringComparison.Ordinal);
+        Assert.DoesNotContain(f.Records.Estate.Root, order.Checkpoint.Skipped!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnreadableSigningKeyIsDescribedByItsKindWithoutAPath()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            Assert.Skip("This permission-denial case requires Unix file modes and an unprivileged reader.");
+            return;
+        }
+
+        using var f = new HistoryTriggerTests.Fixture();
+        string op = f.Records.Estate.OperatorId;
+        f.Records.Add("work-order", JsonNode.Parse(HistoryFixture.Order("KEY-1"))!.AsObject());
+        string key = Path.Combine(VericairnHome.Path(), "keys", f.OperatorDevice + ".p8");
+        Assert.True(File.Exists(key));
+
+        // The key store's own failure names the key's path; the refusal names its kind and type only.
+        UnixFileMode mode = File.GetUnixFileMode(key);
+        File.SetUnixFileMode(key, UnixFileMode.None);
+        Problem? problem;
+        try
+        {
+            problem = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(op)).Problem;
+        }
+        finally
+        {
+            File.SetUnixFileMode(key, mode);
+        }
+
+        Assert.NotNull(problem);
+        Assert.Contains("The record could not be signed on this machine (access to the signing key was denied, UnauthorizedAccessException).", problem.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(VericairnHome.Path(), problem.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>The act a test performs again and again: a rotation of the operator's only device, its revocation of itself, its revocation of the builder's device, or a narrowing.</summary>
     private static Func<WriteOutcome> Act(HistoryTriggerTests.Fixture f, string act)
     {
