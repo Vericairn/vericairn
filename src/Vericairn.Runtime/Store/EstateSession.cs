@@ -259,6 +259,15 @@ public sealed class EstateSession : IDisposable
         Live.Remove(record.RelativePath);
     }
 
+    /// <summary>Whether a record's file is stored where the profile keeps records: the working tree, or the live store.</summary>
+    internal bool Holds(AuthoredRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return Profile == "repository-synced"
+            ? File.Exists(Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar)))
+            : Live.Has(record.RelativePath);
+    }
+
     /// <summary>Every record file the estate holds, in path order (from the repository or the live store).</summary>
     public IReadOnlyList<RecordFile> Files()
     {

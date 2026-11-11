@@ -357,12 +357,32 @@ public sealed partial class EstateService
     /// operator's recovery device for a revocation, the device's current key for a rotation, the operator's device for a grant revision),
     /// dated no later than the act, then the act, in one batch. The judgment of the batch decides whether that signer may close: a
     /// closing it would not let act refuses both. In an estate that has adopted, an act whose closing cannot be written is refused, and
-    /// nothing is written; one that has not adopted stores the act alone, as before. Caller holds the gate and the write lock.
+    /// nothing is written; one that has not adopted stores the act alone, as before. An act stated more than five minutes before what
+    /// its closing would follow or witness is refused, since its closing would be dated before what it lists. When a batch stopped
+    /// between a closing and its act, the closing is removed again where that can be done cleanly; one that stays, as after a process
+    /// stopped between the two, is used by the act written again, which is then stored alone after it. Caller holds the gate and the
+    /// write lock.
     /// </summary>
     private WriteOutcome StoreWithClosingLocked(AuthoredRecord record, EstateModel current, IReadOnlyList<IRecordSigner>? signers)
     {
         EstateModel copy = LoadWith([]);
         if (!SignedHistory.Adopted(copy) || ClosingActs.For(copy, record.Envelope) is not { } closes) return StoreAuthoredLocked(record, current);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (StatedEarlyRefusal(copy, record.Envelope, closes, now) is string early) return Refuse(early);
+
+        // A closing stored earlier without its act, by the act's author, is the act's closing: the act follows it alone, since a closed
+        // key or device could not sign another, and no new checkpoint witnesses what was written since (OPS-07).
+        if (ClosingActs.Stored(copy, closes, record.Envelope.By) is { } stored)
+        {
+            if (SelfRevocationRefusal(copy, record.Envelope, closes, stored.Record.AtTime) is string late) return Refuse(late);
+            WriteOutcome alone = StoreAuthoredLocked(record, current);
+            return alone.Written is null ? alone : alone with
+            {
+                Checkpoint = new TriggeredCheckpoint(ClosingTrigger, null,
+                    $"No closing was written with this {Act(closes.Kind)}: it follows closing {stored.Record.Id} ({stored.Record.ExpectedPath}), which an earlier attempt stored without its act."),
+            };
+        }
+
         IRecordSigner? closer = null;
         if (closes.Kind == "key")
         {
@@ -377,8 +397,8 @@ public sealed partial class EstateService
             closer = signers[0];
         }
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         DateTimeOffset at = record.Envelope.AtTime < now ? record.Envelope.AtTime : now;
+        if (SelfRevocationRefusal(copy, record.Envelope, closes, at) is string self) return Refuse(self);
         (PreparedCheckpoint? closing, string? skipped) = CheckpointLocked(copy, ClosingTrigger, record.Envelope.By, closes: closes, signer: closer, at: at);
         if (closing is null) return Refuse(Unclosed(closes, skipped ?? "no checkpoint could be prepared."));
         (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([closing.Record, record], $"Store the closing and the {Act(closes.Kind)} it precedes.", null, null, null);
@@ -389,22 +409,123 @@ public sealed partial class EstateService
             return WriteOutcome.Fail(refused with { Message = $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written." });
         }
 
-        // The closing was stored: it closes whether or not its act follows (design/signed-history.md § 8), so a batch stopped after it is
-        // reported with it.
         var checkpoint = new TriggeredCheckpoint(ClosingTrigger, written[0], null);
-        return written.Count > 1
-            ? new WriteOutcome(written[1], problem) { Checkpoint = checkpoint }
-            : new WriteOutcome(null, problem ?? new Problem("reconcile-required", $"Closing {written[0].Id} was stored and the {Act(closes.Kind)} after it was not; it closes all the same. Write the act again.", [])) { Checkpoint = checkpoint };
+        if (written.Count > 1) return new WriteOutcome(written[1], problem) { Checkpoint = checkpoint };
+
+        // The batch stopped between the closing and its act. The closing is removed again when that can be done cleanly; otherwise it
+        // stays and closes all the same (design/signed-history.md § 8), and the act written again follows it alone.
+        string reason = Reason(problem);
+        if (UndoStoredClosing(closing.Record, record))
+        {
+            RemoveObjects(closing);
+            return Refuse($"The {Act(closes.Kind)} was not written: {reason} Its closing, stored just before it in the same batch, was removed again, so nothing was written: write the {Act(closes.Kind)} again.");
+        }
+
+        return new WriteOutcome(null, new Problem(ClosingStoredCode,
+            $"The {Act(closes.Kind)} was not written: {reason} Closing {written[0].Id}, stored just before it in the same batch, was kept and closes {closes.Kind} {closes.Id} all the same, warned as history.closing-unfollowed until an act follows it. Writing the {Act(closes.Kind)} again as {record.Envelope.By} uses the stored closing: the {Act(closes.Kind)} is written after it, alone, with no new closing. Until then this machine reports the batch as a reconcile task (batch.incomplete).", []))
+        { Checkpoint = checkpoint };
     }
 
-    /// <summary>The batch's refusal of an act without its closing (OPS-07): in an estate that has adopted, each such act follows, in its own batch, a closing naming what it closes.</summary>
-    private static Problem? UnclosedActRefusal(EstateModel proposed, IReadOnlyList<AuthoredRecord> records)
+    /// <summary>The outcome's code when a closing was stored and the act after it was not (OPS-07).</summary>
+    internal const string ClosingStoredCode = "closing-stored";
+
+    /// <summary>A test's hook, called before a closing whose act was not stored is removed again: a test throws from it to keep the closing.</summary>
+    internal Action<AuthoredRecord>? BeforeUndoingClosing { get; set; }
+
+    /// <summary>
+    /// Removes again a closing whose act was not stored (OPS-07), when that can be done cleanly: the act is surely absent, the closing's
+    /// file is removed and is gone, and the batch's journal is closed. False, with the closing kept, when any of that fails; a journal
+    /// that cannot be closed names nothing stored and is forgotten at the next judgment of interrupted batches. Caller holds the gate
+    /// and the write lock.
+    /// </summary>
+    private bool UndoStoredClosing(AuthoredRecord closing, AuthoredRecord act)
+    {
+        try
+        {
+            if (session.Holds(act)) return false;
+            BeforeUndoingClosing?.Invoke(closing);
+            session.Discard(closing);
+            if (session.Holds(closing)) return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return false;
+        }
+
+        try
+        {
+            foreach (BatchJournal journal in BatchJournal.All(session).Journals.Where(j => j.Records.Any(r => r.Id == closing.Envelope.Id))) journal.Close();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // Nothing the journal names is stored now, so the next judgment of interrupted batches forgets it.
+        }
+
+        return true;
+    }
+
+    /// <summary>A store's refusal without its leading "Not written: ", to follow another sentence.</summary>
+    private static string Reason(Problem? problem)
+    {
+        const string Prefix = "Not written: ";
+        string message = problem?.Message.Trim() ?? "the batch stopped.";
+        return message.StartsWith(Prefix, StringComparison.Ordinal) ? message[Prefix.Length..] : message;
+    }
+
+    /// <summary>
+    /// Why an act a closing precedes is refused for the time it states (OPS-07): in an estate that has adopted, its closing is dated no
+    /// later than the act, so an act stated more than five minutes before the newest record its closing would witness, or before the
+    /// head checkpoint, would date that closing before what it lists and leave history.dated-after-witness on those records for good.
+    /// A record or checkpoint dated past the runtime's clock is read at that clock. Null when the act's time stands.
+    /// </summary>
+    private static string? StatedEarlyRefusal(EstateModel copy, RecordEnvelope act, (string Kind, string Id) closes, DateTimeOffset now)
+    {
+        HistoryState state = SignedHistory.Of(copy);
+        RecordEnvelope? newest = SignedHistory.TailRecords(copy)
+            .Concat(state.Heads.Select(h => copy.ById.GetValueOrDefault(h.Id)).OfType<RecordEnvelope>())
+            .OrderByDescending(r => r.AtTime).ThenByDescending(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (newest is null) return null;
+        DateTimeOffset limit = newest.AtTime < now ? newest.AtTime : now;
+        if (act.AtTime + SignedHistory.ClockTolerance >= limit) return null;
+        string what = state.Heads.Any(h => h.Id == newest.Id) ? $"head checkpoint {newest.Id}" : $"{newest.Type} {newest.Id}";
+        return $"This {Act(closes.Kind)} states {act.At}, more than five minutes before {what}, dated {newest.At}: in an estate that has adopted history checkpoints, the closing before such an act is dated no later than the act and follows or witnesses what this copy holds, so it cannot be dated before them. Write the {Act(closes.Kind)} again at the present time, without an earlier stated time. Nothing was written.";
+    }
+
+    /// <summary>
+    /// Why a device's revocation of itself is refused for its revokedAt (OPS-07): from its closing on, a closed device's signature counts
+    /// only on its own revocation from that closing's time on, so a revocation the device signs states revokedAt at or after the closing,
+    /// here <paramref name="closingAt"/>, and after every other closing of the device. Null for any other act, or when it does.
+    /// </summary>
+    private static string? SelfRevocationRefusal(EstateModel copy, RecordEnvelope act, (string Kind, string Id) closes, DateTimeOffset closingAt)
+    {
+        if (closes.Kind != "device" || EstateModel.BodyString(act, "revokedAt") is not { } revokedAt || !copy.ById.TryGetValue(closes.Id, out RecordEnvelope? device)) return null;
+        string identity = copy.Chain(device)[0];
+        if (!act.Signatures.Any(s => copy.ById.TryGetValue(s.Device, out RecordEnvelope? signer) && signer.Type == "device" && copy.Chain(signer)[0] == identity)) return null;
+        string closed = RecordParser.FormatTimestamp(closingAt);
+        foreach (string other in copy.Trust.Closings.Where(c => c.Kind == "device" && c.Identity == identity).Select(c => c.Record.At))
+        {
+            if (string.CompareOrdinal(other, closed) > 0) closed = other;
+        }
+
+        return string.CompareOrdinal(revokedAt, closed) >= 0 ? null
+            : $"Device {identity} signs its own revocation with revokedAt {revokedAt}, before its closing, dated {closed}: from its closing on, a closed device's signature counts only on its own revocation from the closing's time on, so the revocation would revoke nothing. Write the revocation with revokedAt at the present time, or have another operator's device, a device of a person holding administer, or the operator's recovery key revoke the device as of the earlier time. Nothing was written.";
+    }
+
+    /// <summary>
+    /// The batch's refusal of an act without its closing (OPS-07): in an estate that has adopted, each such act follows, in its own batch,
+    /// a closing naming what it closes, or, written again after a batch stopped between them, the closing its author stored then, which
+    /// counts, acts and no act follows yet, read in <paramref name="current"/>, the copy without the batch.
+    /// </summary>
+    private static Problem? UnclosedActRefusal(EstateModel proposed, IReadOnlyList<AuthoredRecord> records, Func<EstateModel> current)
     {
         if (!records.Any(r => r.Envelope.Type is "admission" or "device" or "authority" && r.Envelope.Supersedes is not null) || !SignedHistory.Adopted(proposed)) return null;
+        EstateModel? before = null;
         for (int i = 0; i < records.Count; i++)
         {
             if (ClosingActs.For(proposed, records[i].Envelope) is not { } closes) continue;
             if (records.Take(i).Any(r => r.Envelope.Type == "history-checkpoint" && CheckpointBody.ReadCloses(r.Envelope.Body) is { } named && named == closes)) continue;
+            before ??= current();
+            if (ClosingActs.Stored(before, closes, records[i].Envelope.By) is not null) continue;
             return new Problem("refused", $"{Needs(closes)} Record {records[i].Envelope.Id} comes without it, so nothing was written.", []);
         }
 
