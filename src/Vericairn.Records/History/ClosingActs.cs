@@ -13,6 +13,23 @@ namespace Vericairn.Records.History;
 /// </summary>
 internal static class ClosingActs
 {
+    /// <summary>The record types such an act can be: a revision of an admission, a device or an authority record.</summary>
+    internal static readonly IReadOnlyList<string> Types = ["admission", "device", "authority"];
+
+    /// <summary>
+    /// The closing a retried act is written after, alone (OPS-07): a closing that counts and acts, names exactly what the act closes,
+    /// was written by the act's author, and that no act follows yet, as a batch stopped between a closing and its act, or a process
+    /// that stopped between them, leaves it. The newest such closing, or null when there is none and the act carries its own. Nothing
+    /// else changes: the act is judged by its own rules, and what the closed device or key signed after the closing still counts only
+    /// when the closing witnesses it.
+    /// </summary>
+    internal static Closing? Stored(EstateModel model, (string Kind, string Id) closes, string by)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        EstateTrust trust = model.Trust;
+        return trust.Closings.LastOrDefault(c => c.Kind == closes.Kind && c.Target == closes.Id && c.Record.By == by && model.Counts(c.Record) && !trust.Followed(c));
+    }
+
     /// <summary>
     /// What the closing before a record names, when the record is such an act: <c>device</c> and the device record a revocation names;
     /// <c>key</c> and the device revision whose key a revision replaces; <c>grant</c> and the authority revision a revision narrows.
