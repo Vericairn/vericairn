@@ -43,6 +43,7 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, IReadOnlyList<RecordEnvelope>> deviceChains = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> deviceRevisions = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Record, int Index), SignatureProof> proofs = [];
+    private readonly Dictionary<(string Key, string Hash, string Signature), bool> keyVerdicts = [];
     private readonly IReadOnlyDictionary<string, string> rawSupersededBy;
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
@@ -447,12 +448,12 @@ internal sealed partial class EstateTrust
         }
 
         byte[] digest = RecordSigning.Digest(record.ComputedHash);
-        string? verifying = keys.FirstOrDefault(key => key is not null && RecordSigning.Verify(key, digest, signature.Signature));
+        string? verifying = keys.FirstOrDefault(key => key is not null && VerifiesWith(key, record.ComputedHash, digest, signature.Signature));
         if (verifying is null)
         {
             // A key the device held at another time names the revision, so a key used after its rotation, or a rotation dated
             // earlier than it was made, reads as what it is.
-            string? other = ownRecord ? null : chain.FirstOrDefault(r => EstateModel.BodyString(r, "publicKey") is string key && !keys.Contains(key) && RecordSigning.Verify(key, digest, signature.Signature))?.Id;
+            string? other = ownRecord ? null : chain.FirstOrDefault(r => EstateModel.BodyString(r, "publicKey") is string key && !keys.Contains(key) && VerifiesWith(key, record.ComputedHash, digest, signature.Signature))?.Id;
             return other is not null
                 ? new(new Finding(Severity.Error, "signature.key-time", location, $"The signature by device {identity} verifies only with the key of its revision {other}, which was not the device's key at this record's time {record.At}."), identity, signature.Device, ownRecord, false)
                 : new(new Finding(Severity.Error, "signature.invalid", location, $"The signature by device {identity} does not verify against the record's content hash with the key the device held when it was authored."), identity, signature.Device, ownRecord, false);
@@ -465,6 +466,21 @@ internal sealed partial class EstateTrust
         bool selfAdmission = record.Type == "admission" && record.By == RootOperator && record.Subject?.Id is { } subject &&
             model.ById.TryGetValue(subject, out RecordEnvelope? admitted) && admitted.Type == "device" && IdentityOf(admitted) == identity;
         return new(null, identity, signature.Device, ownRecord, selfAdmission, verifying);
+    }
+
+    /// <summary>
+    /// Whether a signature over a content hash verifies with a key. The answer depends on nothing else, so it is kept when judgments are
+    /// made afresh after closings: the proofs that read it depend on device lines, which closings change, but the arithmetic does not.
+    /// </summary>
+    private bool VerifiesWith(string key, string hash, byte[] digest, string signature)
+    {
+        lock (gate)
+        {
+            if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
+            bool value = RecordSigning.Verify(key, digest, signature);
+            keyVerdicts[(key, hash, signature)] = value;
+            return value;
+        }
     }
 
     private void Verify(RecordEnvelope record, int index, Func<string, string, SignatureChecks.AdmissionState> state, FindingList findings)
