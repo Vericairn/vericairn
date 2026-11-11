@@ -238,9 +238,12 @@ powers for every checkpoint. They read a grant or principal revision as written 
 operator wrote it, or an operator who held the role at its time and still holds it; as a
 removal, whatever it says, when its author had been given the role by then but had lost it or
 no longer holds it; and not at all when its author had never been given the role. A revision
-read as a removal takes away only the operator role or `administer`, never makes someone
-human, and keeps the person's kind and other roles. The role is given by the root operator or
-by someone given it earlier, so a circle of appointments gives nothing. A revision a closing
+read as a removal reads as written, except that it gives no operator role or `administer`, and
+that on top of a revision read below it, it describes a human only where that revision does
+too: so one saying the person is not human takes that away, and one with no revision read
+below it, such as the first record of a person's line, describes a human when it says so. The
+role is given by the root operator or by someone given it earlier, so a circle of appointments
+gives nothing. A revision a closing
 refuses is not read for anchoring, for the adoption or for the closings that follow that
 closing. Removing an operator's role therefore takes, for those acts, what that person
 appointed, granted and closed, and the warning `history.revision-author` names each grant or

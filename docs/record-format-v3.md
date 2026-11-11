@@ -664,8 +664,10 @@ stand now, after which the line gives no operator role or `administer` until a r
 as written follows it; and not at all when its author had never been given the role, which
 leaves the line as it was: a revision follows the nearest revision below it that is read. A
 line describes a person at a time by the single revision read, dated by then, that no other
-follows; a revision read as a removal reads as written except that it gives no operator role
-or `administer` and describes a human only where the revision read below it did. Who
+follows; a revision read as a removal reads as written, except that it gives no operator role
+or `administer`, and that on top of a revision read below it, it describes a human only where
+that revision does too: so one saying the person is not human takes that away, and one with no
+revision read below it, such as a line's first record, describes a human when it says so. Who
 stands now is the least set holding the root operator and every person whose line gives the
 operator role at the end when only members of the set give, built up from the root operator;
 grants do not count towards it. So a removal keeps counting after its author is removed, a
