@@ -50,8 +50,8 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
     private readonly List<RecordEnvelope> principalRecords;
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
-    private StrictReading? strict;
-    private readonly Dictionary<string, StrictClass> grantClasses = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, StrictReading> strictReadings = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Grant, string Bound), StrictClass> grantClasses = [];
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -591,20 +591,23 @@ internal sealed partial class EstateTrust
     /// never an agent; and the checkpoint signed by devices whose own admissions rest on signatures, none of them a recovery device. The
     /// same test tells whether any other record was signed by one who may anchor.
     /// </summary>
-    internal bool MayAnchor(RecordEnvelope checkpoint)
+    internal bool MayAnchor(RecordEnvelope checkpoint) => MayAnchor(checkpoint, Acting);
+
+    /// <summary>Whether the author of a checkpoint may anchor, reading authority against the closings given.</summary>
+    private bool MayAnchor(RecordEnvelope checkpoint, IReadOnlyList<Closing> bound)
     {
         if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
         if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        return StandingAdministrator(checkpoint, Acting);
+        return StandingAdministrator(checkpoint, bound);
     }
 
     /// <summary>
     /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
-    /// always; otherwise a person who stands now and whose line, as those acts read it, gives the role at the record's time
-    /// (<see cref="ReadStrictly"/>), so a later revision taking it away withdraws the power for every checkpoint.
+    /// always; otherwise a person who stands now and whose line, as those acts read it against the closings given, gives the role at the
+    /// record's time (<see cref="ReadStrictly"/>), so a later revision taking it away withdraws the power for every checkpoint.
     /// </summary>
-    private bool StandingOperator(string principal, string at) =>
-        principal == RootOperator && RootOperator is not null || ReadStrictly().Standing.Contains(principal) && StrictHead(principal, at) is { Operator: true };
+    private bool StandingOperator(string principal, string at, IReadOnlyList<Closing> bound) =>
+        principal == RootOperator && RootOperator is not null || ReadStrictly(bound).Standing.Contains(principal) && StrictHead(principal, at, bound) is { Operator: true };
 
     /// <summary>
     /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
@@ -617,10 +620,10 @@ internal sealed partial class EstateTrust
     /// </summary>
     private bool StandingAdministrator(RecordEnvelope record, IReadOnlyList<Closing> bound)
     {
-        if (StrictHead(record.By, record.At) is not { Human: true }) return false;
+        if (StrictHead(record.By, record.At, bound) is not { Human: true }) return false;
         DateTimeOffset at = record.AtTime;
-        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && GrantClass(grant) == StrictClass.Written &&
-            !StrictSuccessors(grant).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) &&
+        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && GrantClass(grant, bound) == StrictClass.Written &&
+            !StrictSuccessors(grant, bound).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) &&
             Still(grant) && !bound.Any(c => c.Kind == "grant" && c.Line == LineOf(grant) && !Witnesses(c, record)));
 
         // Every revision read that has followed the grant since still gives administer as written, unexpired at the record's time.
@@ -630,9 +633,9 @@ internal sealed partial class EstateTrust
             var queue = new Queue<RecordEnvelope>([grant]);
             while (queue.TryDequeue(out RecordEnvelope? current))
             {
-                foreach (RecordEnvelope next in StrictSuccessors(current).Where(s => seen.Add(s.Id)))
+                foreach (RecordEnvelope next in StrictSuccessors(current, bound).Where(s => seen.Add(s.Id)))
                 {
-                    if (GrantClass(next) != StrictClass.Written || !Administers(next, record.By, at)) return false;
+                    if (GrantClass(next, bound) != StrictClass.Written || !Administers(next, record.By, at)) return false;
                     queue.Enqueue(next);
                 }
             }
@@ -723,7 +726,7 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor"/> that does not depend on a
+    /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor(RecordEnvelope)"/> that does not depend on a
     /// signature: the root operator, or a person holding administer that still stands (<see cref="StandingAdministrator"/>), judged for a
     /// checkpoint no closing witnesses yet. What the runtime checks before it signs an adoption or a charter revision's anchors.
     /// </summary>
@@ -781,8 +784,8 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// How the strongest acts read principal lines. The revisions considered are authentic by signatures and not refused for their date,
-    /// with the root operator's first record. A person has been given the operator role by a time when a revision considered of their line
+    /// How the strongest acts read principal lines against the closings given. The revisions considered are authentic by signatures with
+    /// those closings, so none they refuse, and not refused for their date, with the root operator's first record. A person has been given the operator role by a time when a revision considered of their line
     /// dated by then gives it and was written by the root operator or by a person given the role by an earlier revision, taken in time
     /// order, ids breaking ties, removals aside; so the role reaches a person only from the root operator, through earlier revisions, and a
     /// circle of appointments gives nothing. Walking every line in that order, a revision is read as written when its author is the root
@@ -794,13 +797,14 @@ internal sealed partial class EstateTrust
     /// revision by one never given the role changes nothing, and two operators other than the root operator who remove each other both
     /// lose these acts, closings included, until the root operator settles it.
     /// </summary>
-    private StrictReading ReadStrictly()
+    private StrictReading ReadStrictly(IReadOnlyList<Closing> bound)
     {
         lock (gate)
         {
-            if (strict is { } known) return known;
+            string key = BoundKey(bound);
+            if (strictReadings.TryGetValue(key, out StrictReading? known)) return known;
             string? root = RootOperator;
-            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => p.Id == root && p.By == root && p.Supersedes is null || !RefusedAuthorityRevision(p) && AuthenticBySignatures(p))
+            List<RecordEnvelope> revisions = [.. principalRecords.Where(p => p.Id == root && p.By == root && p.Supersedes is null || !RefusedAuthorityRevision(p) && AuthenticBySignaturesWith(p, bound))
                 .OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
             int count = revisions.Count;
             var index = new Dictionary<string, int>(count, StringComparer.Ordinal);
@@ -876,8 +880,9 @@ internal sealed partial class EstateTrust
 
             var now = new HashSet<string>(persons.Where(p => standing[p.Value]).Select(p => p.Key), StringComparer.Ordinal);
             if (root is not null) now.Add(root);
-            strict = new StrictReading { Revisions = revisions, Index = index, Below = below, Classes = classes, Lines = lines, GivenAt = givenAt, Standing = now };
-            return strict;
+            var reading = new StrictReading { Revisions = revisions, Index = index, Below = below, Classes = classes, Lines = lines, GivenAt = givenAt, Standing = now };
+            strictReadings[key] = reading;
+            return reading;
 
             int Person(string id)
             {
@@ -907,9 +912,9 @@ internal sealed partial class EstateTrust
     /// at or before the time, the single one no other of them follows; null when there is none or more than one. It describes a human as
     /// written, or, read as a removal, as the revision read below it did; and it gives the operator role only as written.
     /// </summary>
-    private (bool Human, bool Operator)? StrictHead(string principal, string at)
+    private (bool Human, bool Operator)? StrictHead(string principal, string at, IReadOnlyList<Closing> bound)
     {
-        StrictReading reading = ReadStrictly();
+        StrictReading reading = ReadStrictly(bound);
         if (!reading.Lines.TryGetValue(principal, out List<int>? line)) return null;
         var followed = new HashSet<int>();
         int last = -1;
@@ -935,28 +940,29 @@ internal sealed partial class EstateTrust
     /// signatures and not refused for its date; as written by the root operator, or by a person who stands now and held the operator role
     /// at its time as those acts read it; as a removal by a person given the role by then who had lost it or does not stand now.
     /// </summary>
-    private StrictClass GrantClass(RecordEnvelope grant)
+    private StrictClass GrantClass(RecordEnvelope grant, IReadOnlyList<Closing> bound)
     {
         lock (gate)
         {
-            if (grantClasses.TryGetValue(grant.Id, out StrictClass known)) return known;
+            (string, string) key = (grant.Id, BoundKey(bound));
+            if (grantClasses.TryGetValue(key, out StrictClass known)) return known;
             StrictClass value = Judge();
-            grantClasses[grant.Id] = value;
+            grantClasses[key] = value;
             return value;
         }
 
         StrictClass Judge()
         {
-            if (RefusedAuthorityRevision(grant) || !AuthenticBySignatures(grant)) return StrictClass.Unread;
+            if (RefusedAuthorityRevision(grant) || !AuthenticBySignaturesWith(grant, bound)) return StrictClass.Unread;
             if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
-            StrictReading reading = ReadStrictly();
-            if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At) is { Operator: true }) return StrictClass.Written;
+            StrictReading reading = ReadStrictly(bound);
+            if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
             return reading.GivenAt.TryGetValue(grant.By, out string? given) && string.CompareOrdinal(given, grant.At) <= 0 ? StrictClass.Removal : StrictClass.Unread;
         }
     }
 
     /// <summary>The grant revisions the strongest acts read that follow a grant revision: its successors, through any they do not read.</summary>
-    private IEnumerable<RecordEnvelope> StrictSuccessors(RecordEnvelope grant)
+    private IEnumerable<RecordEnvelope> StrictSuccessors(RecordEnvelope grant, IReadOnlyList<Closing> bound)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
         var queue = new Queue<string>([grant.Id]);
@@ -964,7 +970,7 @@ internal sealed partial class EstateTrust
         {
             foreach (RecordEnvelope next in successors[id].Where(s => s.Type == "authority" && seen.Add(s.Id)))
             {
-                if (GrantClass(next) == StrictClass.Unread) queue.Enqueue(next.Id);
+                if (GrantClass(next, bound) == StrictClass.Unread) queue.Enqueue(next.Id);
                 else yield return next;
             }
         }
@@ -981,14 +987,23 @@ internal sealed partial class EstateTrust
         foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "principal" or "authority" && r.By != root))
         {
             bool removal = record.Type == "principal"
-                ? IsOperator(record) && ReadStrictly() is var reading && reading.Index.TryGetValue(record.Id, out int k) && reading.Classes[k] == StrictClass.Removal
-                : GivesAdminister(record) && GrantClass(record) == StrictClass.Removal;
+                ? IsOperator(record) && ReadStrictly(Acting) is var reading && reading.Index.TryGetValue(record.Id, out int k) && reading.Classes[k] == StrictClass.Removal
+                : GivesAdminister(record) && GrantClass(record, Acting) == StrictClass.Removal;
             if (!removal || !Counts(record)) continue;
             string gives = record.Type == "principal" ? "gives the operator role" : "gives administer";
             yield return new Finding(Severity.Warning, "history.revision-author", record.ExpectedPath,
                 $"This {record.Type} revision {gives}, but it no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
         }
     }
+
+    /// <summary>The key a set of closings is cached under: their ids in order.</summary>
+    private static string BoundKey(IReadOnlyList<Closing> bound) =>
+        bound.Count == 0 ? "" : string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+
+    /// <summary>Whether every signature of a record verifies by signatures alone against the closings given.</summary>
+    private bool AuthenticBySignaturesWith(RecordEnvelope record, IReadOnlyList<Closing> bound) =>
+        ReferenceEquals(bound, Acting) ? AuthenticBySignatures(record)
+            : record.Signatures.Count > 0 && record.DeclaredHash == record.ComputedHash && !VerifyWith(record, Mode.Signatures, bound).HasErrors;
 
     /// <summary>Whether a principal record describes a person holding the operator role.</summary>
     private static bool IsOperator(RecordEnvelope? head) =>
