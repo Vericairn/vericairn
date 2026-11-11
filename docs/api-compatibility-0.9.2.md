@@ -595,7 +595,12 @@ device may sign a device closing; any other checkpoint it signs is still `signat
 change within `vericairn.records/readers/8`, which has not shipped.
 
 New findings: `history.after-closing` and `history.closing-author`, errors that status lists first and that hold release
-submission, and the warnings `history.closing-unfollowed` and `history.dated-after-witness`. `history.checkpoint-invalid` also
+submission, and the warnings `history.closing-unfollowed`, `history.dated-after-witness` and `history.closing-missing`.
+`history.closing-missing` stands on a revocation, a key rotation or a narrowing grant revision that counts in an adopted
+estate, that the adoption checkpoint does not witness, and whose device, key or grant revision no closing that acts names,
+as when such an act arrives as a file from a copy that had not adopted yet or is added by hand: the act takes effect, and
+what its target signs with an earlier date still counts. A closing written later, with `records new history-checkpoint`,
+ends the warning. Acts the adoption witnesses and estates that have not adopted have none. `history.checkpoint-invalid` also
 reports a closing that names a record of another type.
 
 In an adopted estate, roles and grants are read at a record's authority time: its own `at`, or the adoption checkpoint's for a
@@ -629,7 +634,8 @@ Each `HistoryRecordItem` gives `{id, type, at, path, commit, device, commitAt, n
 `expectPlan`, the `planHash` its check returned, and is refused when the anchored set differs. For adoption, `authorityChanges`
 lists the records whose findings differ when roles and grants are read at each record's own time, as an adopted estate reads the
 records its adoption does not witness, each with a `note` saying what differs; adoption keeps for every record it witnesses the
-reading it has then, and `planHash` does not cover the list. Adoption and its check are refused
+reading it has then. The list is advisory: `planHash` does not cover it, and adoption computes it again from the copy it
+signs, so the adoption's list can differ from its check's under the same plan hash. Adoption and its check are refused
 while the machine's memory holds a checkpoint the copy no longer holds. `IEstateApi` adds the default members
 `HistoryCheckpoint` and `HistoryCheckpointAsync`; an implementation that does not override them answers `unsupported`, so
 existing implementations compile unchanged. The SDK client and `CancellationBoundApi` implement both. With `check` it signs and
@@ -669,8 +675,9 @@ main line no longer holds the newest checkpoint this machine verified or the mem
 there is no main line, and `history.remembered`, information naming what the machine remembers; neither is in the canonical
 status. A batch journal treats a stored record whose history checkpoint was not stored as complete, except a birth adoption's
 admission while the estate has not adopted and a charter revision while an unsigned record is left unanchored; its
-`batch.incomplete` warning then says how to settle it, and the task ends once that holds. A closing stored without its act is
-complete too: `history.closing-unfollowed` stands until an act follows. An admission that would set off the birth adoption
+`batch.incomplete` warning then says how to settle it, and the task ends once that holds. A closing stored without its act
+stays a task too, beside `history.closing-unfollowed`, while it counts, acts and no act follows it: its warning says to write
+the act again, which then follows that closing, and the task ends once an act follows. An admission that would set off the birth adoption
 writes none while the machine's memory holds a checkpoint the copy no longer holds; the admission is written alone, and its
 `checkpoint` says why.
 
@@ -683,9 +690,32 @@ later than it. The outcome's `checkpoint` has trigger `closing`. The act is refu
 cannot be written or the batch with it is invalid, as when an agent holding `administer` revokes a device, since its closing
 would close nothing (`history.closing-author`). A device-signed request (MCP-03) and a presigned record (`POST
 /v1/records/prepare` and `POST /v1/records/signed`) cannot carry a closing, so such an act is refused, at preparation once the
-estate has adopted. Every store refuses a batch that holds such an act without a closing before it naming what it closes. An
-admission, a rename and a widening grant revision carry none, and an estate that has not adopted writes all of these as
-before.
+estate has adopted. Nor can `operator record` (`POST /v1/operator/record`), which carries one signed record through a checked
+merge: it refuses such an act before anything is signed, with `status` `refused`, a message saying why and `nextStep` naming
+`devices revoke`, `devices rotate` or `records new authority --supersedes`. Every runtime store refuses a batch that holds such
+an act without a closing before it naming what it closes, unless the act's author stored such a closing earlier that counts,
+acts and no act follows yet; an act that arrives as a file is not judged by a store, and is the warning
+`history.closing-missing` instead. An admission, a rename and a widening grant revision carry none, and an estate that has
+not adopted writes all of these as before.
+
+An act stated more than five minutes before the newest record its closing would witness, or before the head checkpoint, is
+refused with nothing written, since its closing, dated no later than the act, would be dated before what it lists; the
+message names that record and says to write the act at the present time. A device's revocation of itself with a `revokedAt`
+before its closing is refused with a message saying so, since a closed device's signature counts only on its own revocation
+from the closing's time on. When a batch stops after its closing and before its act, the runtime removes the closing again
+when that can be done cleanly (the act surely absent, the closing's file removed, the batch's journal closed) and refuses the
+act with nothing written. A closing it cannot remove, or one a stopped process left, stays and closes: the outcome then has
+`written` null, `problem` code `closing-stored`, whose message says that writing the act again uses the stored closing, and
+`checkpoint` naming the stored closing (HTTP 422). Writing the act again by the same author, through the same route, stores it
+alone after that closing, which counts, acts and no act follows yet, and its `checkpoint` has trigger `closing`, `written` null
+and `skipped` naming the closing it follows; no new checkpoint witnesses what was written meanwhile. The command line prints a
+stored closing before the error, as `<path>  <id>  <hash>  (history checkpoint, trigger closing)`, and with `--json` as
+`{"code":"closing-stored","checkpoint":{...}}` on standard output.
+
+A batch whose store fails part-way now describes the failure by its kind and exception type, as `Not written: <type> record
+<id> could not be stored (the file system refused the write, IOException).`, never by the exception's message, which may name
+a path on this machine; the same holds for a batch journal that cannot be written. These texts reach a write's `problem` and a
+triggered checkpoint's `skipped`.
 
 `Vericairn.Records` adds, each additively: `SignedHistory.IntervalRecords`, `IntervalAge`, `IntervalDue`, `TailRecords`,
 `PlanAdoption`, `Follows` and `ExpectMatch`; `AdoptionPlan` with `AlreadyAnchored` and `AnchoredHash`; `HistoryState.OldestTailAt`; and `History.HistoryLine` (`States`,

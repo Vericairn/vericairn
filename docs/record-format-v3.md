@@ -575,7 +575,9 @@ stated time more than five minutes past its clock in every estate (below).
 **Closings.** A closing is a checkpoint with `trigger` `closing` and `closes`, written just
 before the act it closes. In an estate that has adopted, the runtime writes it in the same batch as the act, dated no later
 than the act and signed by the key that performs it, and refuses an act whose closing it cannot write or that comes without
-one, such as a record signed elsewhere:
+one, such as a record signed elsewhere, and an act stated more than five minutes before what its closing would witness. An act
+written again after a batch stopped between the two is stored alone after the closing its author stored then, which counts,
+acts and no act follows yet:
 
 | `closes.kind` | `closes.id` names | The act it precedes | Who signs it |
 | --- | --- | --- | --- |
@@ -627,7 +629,11 @@ checkpoint naming one is refused; the device's line skips it. A checkpoint a clo
 following it. Deleting the revocation, rotation or narrowing after a closing reopens
 nothing. A closing that acts while no revocation of its device that counts, no rotation
 replacing its key or no revision of its grant follows it is the warning
-`history.closing-unfollowed`; it closes all the same.
+`history.closing-unfollowed`; it closes all the same. A revocation, a rotation to another key or
+a narrowing grant revision that counts, that the adoption checkpoint does not witness, and whose
+device, key or grant revision no closing that acts names, is the warning `history.closing-missing`:
+it arrived without its closing, so what its target signs with an earlier date still counts. A
+closing that names the target, written later, ends it.
 
 **Authority as it stood.** In an adopted estate, the roles and grants a record's rules read
 are read at its authority time: its own `at`, or, for a record the adoption checkpoint

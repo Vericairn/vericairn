@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 19, November 8, 2026. Add `estate checkpoint`, the history checkpoints the runtime writes, closings with `devices revoke`, `devices rotate` and narrowing grant revisions, and this machine's memory of the estate's history in `estate check`, in the development build.
+Revision 19, November 8, 2026. Add `estate checkpoint`, the history checkpoints the runtime writes, closings with `devices revoke`, `devices rotate` and narrowing grant revisions, a closing stored without its act and the act written again after it, and this machine's memory of the estate's history in `estate check`, in the development build.
 
 Revision 18, November 8, 2026. `mcp serve --connection` holds the session's server stream while its harness holds a resource subscription and writes the resource notifications to standard output, in the development build.
 
@@ -648,7 +648,8 @@ other principal, an agent above all, is refused before anything is signed. `--ad
 anchor: the count, each unsigned record it anchors with its type, date, path, the commit that added it and that commit's date,
 the unsigned records that count for nothing today and stay so, records signed by a device revoked now, records that read
 otherwise when roles and grants are read at each record's own time, each with a `NOTE` saying what differs (adoption keeps for
-every record it witnesses the reading it has then), record files deleted in the repository's history, which no checkpoint can
+every record it witnesses the reading it has then; the list is advisory, the plan hash does not cover it, and adoption computes
+it again, so it can differ from the check's), record files deleted in the repository's history, which no checkpoint can
 witness, and record files no commit holds yet; a `NOTE` points out a record
 dated more than a day before its adding commit, an uncommitted file and an admission the format-2 migration already anchored.
 It says what it cannot list in a shallow clone or outside a git repository, and ends with `plan: sha256:<hash>`, the hash of
@@ -673,7 +674,12 @@ exception: its gate refuses with `history.checkpoint` and says why. So is an act
 without `--recovery`, `devices rotate`, and `records new authority --supersedes` with a revision that names another grantee,
 drops a scope, reserves another action, adds a condition, adds or shortens an expiry or changes `bounds`. Each is stored after
 its closing, a checkpoint with trigger `closing` signed by the key that performs the act and printed after the act, and is
-refused with nothing written when the closing cannot be written or would close nothing, or when the act is signed elsewhere. Only one trigger anchors: a charter revision to required
+refused with nothing written when the closing cannot be written or would close nothing, when the act is signed elsewhere or
+goes through `operator record`, or when `--at` states a time more than five minutes before the newest record its closing would
+witness or before the head checkpoint. A batch that stops after its closing removes the closing again when it can; a closing
+that stays is printed before the error, which has code `closing-stored`, and with `--json` standard output holds
+`{"code":"closing-stored","checkpoint":{"trigger":"closing","written":{...}}}`. Running the same command again, as the same
+author, writes the act after that closing, alone, and standard error names the closing it follows. Only one trigger anchors: a charter revision to required
 signatures by the root operator or a person holding `administer` anchors the unsigned records that count before it. `status`
 shows the history line, for example
 `History: adopted · head 9f86d081884c7d65 · 5,140 witnessed · tail 12 · no problems`; its sixteen hexadecimal digits name the
