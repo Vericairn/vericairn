@@ -297,7 +297,7 @@ internal sealed partial class EstateTrust
             // In force at the record's time: dated at or before it, unexpired then, and no revision that counts replaces it by then.
             if (closed.Any(grant => EstateModel.BodyString(grant, "grantee") == record.By && string.CompareOrdinal(grant.At, record.At) <= 0 &&
                     !EstateModel.Expired(grant, record.AtTime) &&
-                    !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && Counts(s))))
+                    !AttachedSuccessors(grant).Any(s => string.CompareOrdinal(s.At, record.At) <= 0 && Counts(s))))
                 return closing;
         }
 
@@ -372,7 +372,7 @@ internal sealed partial class EstateTrust
             {
                 "device" => (AdmissionsAbout(closing.Target).Any(a => EstateModel.BodyString(a, "status") == "revoked" && AdmissionCounts(a, Mode.Anchors)), "revocation of the device"),
                 "key" => (closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing), "rotation to another key"),
-                _ => (successors[closing.Target].Any(s => s.Type == "authority" && Counts(s)), "revision of the grant"),
+                _ => (closing.Grant is { } grant && AttachedSuccessors(grant).Any(Counts), "revision of the grant"),
             };
             if (followed) continue;
             yield return new Finding(Severity.Warning, "history.closing-unfollowed", closing.Record.ExpectedPath + "#body.closes",

@@ -48,6 +48,7 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
     private readonly List<RecordEnvelope> principalRecords;
+    private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
     private (IReadOnlySet<string> Accepted, IReadOnlySet<string> Now)? standing;
     private IReadOnlySet<string> anchors = NoAnchors;
 
@@ -151,7 +152,7 @@ internal sealed partial class EstateTrust
         bool Judge(RecordEnvelope r)
         {
             if (History.Altered.Contains(r.Id)) return false;
-            // A grant or principal revision dated before the record it supersedes counts for nothing.
+            // A grant or principal revision dated before the record below it in its line counts for nothing.
             if (RefusedAuthorityRevision(r)) return false;
             if (r.Type == "admission") return AdmissionCounts(r, Mode.Anchors);
             if (r.Type == "history-checkpoint") return History.CountingCheckpoints.Contains(r.Id);
@@ -640,10 +641,67 @@ internal sealed partial class EstateTrust
         return current.Id;
     }
 
-    /// <summary>Whether a grant or principal revision counts for nothing in authority reads, whoever signed it: one dated before the record it supersedes.</summary>
+    /// <summary>
+    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: one dated before the record it attaches
+    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that is not itself refused this way.
+    /// </summary>
     internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
-        revision.Type is "principal" or "authority" && revision.Supersedes is not null &&
-        model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) && previous.Type == revision.Type && string.CompareOrdinal(revision.At, previous.At) < 0;
+        AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>
+    /// The record a grant or principal revision attaches to in its line: the record it supersedes, or, when that one is refused for being
+    /// dated before the record it attaches to, the record that one attaches to, and so on down. Null for a line's first record and for a
+    /// revision naming no record of its own type. So a revision on top of a refused one is compared with, and follows, the line where
+    /// the refused one would have joined it.
+    /// </summary>
+    internal RecordEnvelope? AttachedTo(RecordEnvelope revision)
+    {
+        if (revision.Type is not ("principal" or "authority")) return null;
+        lock (gate)
+        {
+            bool loaded = model.ById.TryGetValue(revision.Id, out RecordEnvelope? same) && ReferenceEquals(same, revision);
+            if (loaded && attached.TryGetValue(revision.Id, out RecordEnvelope? known)) return known;
+            // Walk down to a record whose attachment is known or that supersedes nothing of its type, then settle each one on the way up.
+            var pending = new Stack<RecordEnvelope>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            RecordEnvelope? current = revision;
+            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && attached.ContainsKey(current.Id)))
+            {
+                pending.Push(current);
+                current = Below(current);
+            }
+
+            RecordEnvelope? result = null;
+            while (pending.TryPop(out RecordEnvelope? next))
+            {
+                RecordEnvelope? previous = Below(next);
+                // A record seen twice closes a cycle of supersession; it is taken as it is, refused or not.
+                result = previous is not null && attached.TryGetValue(previous.Id, out RecordEnvelope? under) && under is not null &&
+                    string.CompareOrdinal(previous.At, under.At) < 0 ? under : previous;
+                if (!ReferenceEquals(next, revision) || loaded) attached[next.Id] = result;
+            }
+
+            return result;
+        }
+
+        RecordEnvelope? Below(RecordEnvelope record) =>
+            record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == record.Type ? previous : null;
+    }
+
+    /// <summary>The revisions that attach to a grant or principal revision (<see cref="AttachedTo"/>): its successors, and through a refused one, that one's.</summary>
+    internal IEnumerable<RecordEnvelope> AttachedSuccessors(RecordEnvelope revision)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+        var queue = new Queue<string>([revision.Id]);
+        while (queue.TryDequeue(out string? id))
+        {
+            foreach (RecordEnvelope next in successors[id].Where(s => s.Type == revision.Type && seen.Add(s.Id)))
+            {
+                if (RefusedAuthorityRevision(next)) queue.Enqueue(next.Id);
+                else yield return next;
+            }
+        }
+    }
 
     /// <summary>
     /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor"/> that does not depend on a

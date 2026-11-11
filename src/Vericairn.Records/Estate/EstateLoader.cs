@@ -167,9 +167,11 @@ public static class EstateLoader
         else
         {
             // Divergence is judged among the records that count: a successor that does not count revises nothing, so it neither
-            // unseats a record nor makes a reconcile task.
+            // unseats a record nor makes a reconcile task. A grant or principal revision on top of one refused for its date follows the
+            // record the refused one attaches to, so its line reads one current record.
             var countingSupersession = new FindingList();
-            Dictionary<string, string> countingSupersededBy = Successors(records.Where(r => !excluded.Contains(r.Id)).ToList(), byId, countingSupersession);
+            Dictionary<string, string> countingSupersededBy = Successors(records.Where(r => !excluded.Contains(r.Id)).ToList(), byId, countingSupersession,
+                r => trust.AttachedTo(r)?.Id);
             foreach (Finding finding in supersession.Where(f => f.Code != "reconcile.successors").Concat(countingSupersession.Where(f => f.Code == "reconcile.successors"))) findings.Add(finding);
             model.ApplyCounting(trust, excluded, countingSupersededBy);
         }
@@ -240,15 +242,17 @@ public static class EstateLoader
 
     /// <summary>
     /// Which record each superseded record is superseded by, from the records given: divergent successors are a reconcile task unless a
-    /// reconciliation settles them, and an authored document's revisions form one line ordered by time and id.
+    /// reconciliation settles them, and an authored document's revisions form one line ordered by time and id. A record follows the one it
+    /// supersedes, or the one <paramref name="attachedTo"/> names for it.
     /// </summary>
-    private static Dictionary<string, string> Successors(IReadOnlyList<RecordEnvelope> records, Dictionary<string, RecordEnvelope> byId, FindingList findings)
+    private static Dictionary<string, string> Successors(IReadOnlyList<RecordEnvelope> records, Dictionary<string, RecordEnvelope> byId, FindingList findings,
+        Func<RecordEnvelope, string?>? attachedTo = null)
     {
         var supersededBy = new Dictionary<string, string>(StringComparer.Ordinal);
         var successors = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
         foreach (RecordEnvelope record in records.Where(r => r.Supersedes is not null))
         {
-            string previousId = record.Supersedes!;
+            string previousId = attachedTo?.Invoke(record) ?? record.Supersedes!;
             if (!byId.TryGetValue(previousId, out RecordEnvelope? previous))
             {
                 findings.Error("record.supersedes", record.ExpectedPath, $"Supersedes {previousId}, which does not exist.");
