@@ -351,7 +351,7 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// A warning for each closing that acts while no act follows it: no revocation of its device that counts, no rotation replacing its
-    /// key, no revision of its grant. A closing closes all the same.
+    /// key and no revocation or device closing of that key's device, no revision of its grant. A closing closes all the same.
     /// </summary>
     private IEnumerable<Finding> Unfollowed()
     {
@@ -369,7 +369,7 @@ internal sealed partial class EstateTrust
         foreach (Closing closing in closings)
         {
             if (Followed(closing)) continue;
-            string act = closing.Kind switch { "device" => "revocation of the device", "key" => "rotation to another key", _ => "revision of the grant" };
+            string act = closing.Kind switch { "device" => "revocation of the device", "key" => "rotation to another key, revocation of its device or closing of its device", _ => "revision of the grant" };
             yield return new Finding(Severity.Warning, "history.closing-unfollowed", closing.Record.ExpectedPath + "#body.closes",
                 string.Create(CultureInfo.InvariantCulture, $"This checkpoint closes {closing.Kind} {closing.Target} as of {closing.Record.At}, and no {act} follows it yet. It closes all the same: from it on, only what it witnesses counts for that {closing.Kind}."));
         }
@@ -377,18 +377,25 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether the act a closing that acts precedes follows it: a revocation of its device that counts, the rotation replacing its key
-    /// that counts, or a revision of its grant that counts.
+    /// that counts, or a revision of its grant that counts. A key closing is followed as well when its device is revoked instead, by a
+    /// revocation that counts, or closed by a device closing that acts: the device is retired with its key, and no rotation of that key
+    /// can be written any more.
     /// </summary>
     internal bool Followed(Closing closing)
     {
         ArgumentNullException.ThrowIfNull(closing);
         return closing.Kind switch
         {
-            "device" => AdmissionsAbout(closing.Target).Any(a => EstateModel.BodyString(a, "status") == "revoked" && AdmissionCounts(a, Mode.Anchors)),
-            "key" => closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing),
+            "device" => Revoked(closing.Target),
+            "key" => closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing) ||
+                Revoked(closing.Target) || closings.Any(c => c.Kind == "device" && c.Identity == closing.Identity),
             _ => successors[closing.Target].Any(s => s.Type == "authority" && Counts(s)),
         };
     }
+
+    /// <summary>Whether a revocation that counts names a record of a device's line.</summary>
+    private bool Revoked(string device) =>
+        AdmissionsAbout(device).Any(a => EstateModel.BodyString(a, "status") == "revoked" && AdmissionCounts(a, Mode.Anchors));
 
     /// <summary>
     /// A warning for each act a closing precedes that counts in an estate that has adopted, that its adoption does not witness, and

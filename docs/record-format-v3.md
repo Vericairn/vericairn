@@ -629,7 +629,8 @@ checkpoint naming one is refused; the device's line skips it. A checkpoint a clo
 following it. Deleting the revocation, rotation or narrowing after a closing reopens
 nothing. A closing that acts while no revocation of its device that counts, no rotation
 replacing its key or no revision of its grant follows it is the warning
-`history.closing-unfollowed`; it closes all the same. A revocation, a rotation to another key or
+`history.closing-unfollowed`; it closes all the same. A key's closing is followed as well by a
+revocation of its device that counts or a closing of its device that acts. A revocation, a rotation to another key or
 a narrowing grant revision that counts, that the adoption checkpoint does not witness, and whose
 device, key or grant revision no closing that acts names, is the warning `history.closing-missing`:
 it arrived without its closing, so what its target signs with an earlier date still counts. A

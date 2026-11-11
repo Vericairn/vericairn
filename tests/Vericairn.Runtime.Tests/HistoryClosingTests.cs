@@ -480,6 +480,84 @@ public class HistoryClosingTests
         }
     }
 
+    [Theory]
+    [InlineData("revoked")]
+    [InlineData("revoked by a file")]
+    [InlineData("closed")]
+    public void AKeyClosingKeptAfterItsBatchStoppedIsSettledByRetiringTheDeviceInstead(string instead)
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        string op = f.Records.Estate.OperatorId, builder = f.Records.Estate.BuilderId;
+        f.Api.BeforeStoringTogether = record => { if (record.Envelope.Type != "history-checkpoint") throw new IOException("The test stops the batch after its closing."); };
+        f.Api.BeforeUndoingClosing = _ => throw new IOException("The test keeps the closing.");
+        WriteOutcome stopped = f.Api.DeviceRotate(new DeviceRotateRequest(f.BuilderDevice));
+        f.Api.BeforeStoringTogether = null;
+        f.Api.BeforeUndoingClosing = null;
+        Assert.Equal(EstateService.ClosingStoredCode, stopped.Problem!.Code);
+        string closing = stopped.Checkpoint!.Written!.Id;
+        Assert.Contains(f.Api.Session.Load().Findings, x => x.Code == "history.closing-unfollowed" && x.Location.Contains(closing, StringComparison.Ordinal));
+        ReconcileTask task = Assert.Single(f.Api.Reconcile(), t => t.Code == "batch.incomplete");
+        Assert.Contains($"Write the key rotation again as {builder}, with the same command", task.Message, StringComparison.Ordinal);
+        Assert.Contains($"Or revoke device {f.BuilderDevice} instead, with vericairn devices revoke", task.Message, StringComparison.Ordinal);
+
+        // The operator retires the device instead of rotating its key again, as the guide advises when a key may have leaked: a
+        // revocation with its closing, a revocation arriving as a file, or a closing of the device alone.
+        Thread.Sleep(1100);
+        string? deviceClosing = null;
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope device = model.ById[f.BuilderDevice];
+        switch (instead)
+        {
+            case "revoked":
+                WriteOutcome revoked = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, op, "Retired instead of rotated."));
+                Assert.True(revoked.Ok, Describe(revoked));
+                deviceClosing = revoked.Checkpoint!.Written!.Id;
+                break;
+            case "revoked by a file":
+                f.Records.Estate.SetClock(DateTimeOffset.UtcNow);
+                f.Records.Add("admission", new JsonObject
+                {
+                    ["principal"] = builder, ["status"] = "revoked", ["note"] = "Retired by a file.", ["revokedAt"] = RecordParser.FormatTimestamp(f.Records.Estate.Clock),
+                }, subject: device.Reference, supersedes: SignatureChecks.AdmissionOf(model, device)!.Id);
+                break;
+            default:
+                CheckpointDraft draft = SignedHistory.Prepare(model, "closing", closes: ("device", device.Id));
+                foreach (byte[] bytes in draft.Objects) f.Api.Session.Objects.Put(bytes);
+                WriteOutcome closed = f.Api.NewRecord(new NewRecordRequest("history-checkpoint", op, draft.Body));
+                Assert.True(closed.Ok, Describe(closed));
+                deviceClosing = closed.Written!.Id;
+                break;
+        }
+
+        // The key's closing is followed: no warning for it, and no task, on this service or on one opened afresh.
+        EstateModel after = f.Api.Session.Load();
+        Assert.False(after.Findings.HasErrors, string.Join('\n', after.Findings.Where(x => x.Severity == Severity.Error)));
+        Assert.Contains(after.Trust.Closings, c => c.Record.Id == closing);
+        Assert.DoesNotContain(after.Findings, x => x.Code == "history.closing-unfollowed" && x.Location.Contains(closing, StringComparison.Ordinal));
+        using (EstateService again = EstateService.Open(f.Records.Estate.Root))
+        {
+            again.HistoryMemoryHome = f.MemoryHome;
+            Assert.DoesNotContain(again.Reconcile(), t => t.Code == "batch.incomplete");
+        }
+
+        Assert.DoesNotContain(f.Api.Reconcile(), t => t.Code == "batch.incomplete");
+        if (instead == "closed")
+        {
+            // The device's own closing waits for its revocation.
+            Assert.Single(after.Findings, x => x.Code == "history.closing-unfollowed" && x.Location.Contains(deviceClosing!, StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.DoesNotContain(after.Findings, x => x.Code == "history.closing-unfollowed");
+        }
+
+        // The retired device's key is rotated no more: the rotation is refused, and nothing is written.
+        int records = after.Records.Count;
+        WriteOutcome rotation = f.Api.DeviceRotate(new DeviceRotateRequest(f.BuilderDevice));
+        Assert.False(rotation.Ok);
+        Assert.Equal(records, f.Api.Session.Load().Records.Count);
+    }
+
     [Fact]
     public void AClosedDevicesRecordsStillCountForNothingWhenTheActFollowsAStoredClosing()
     {

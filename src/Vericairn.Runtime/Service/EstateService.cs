@@ -2698,7 +2698,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // ids alone and the checkpoint cannot be stored again: a birth adoption, until the estate has adopted, and the checkpoint of a
             // charter revision anchoring the unsigned records that counted before it, until none is left unanchored. A closing stored
             // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
-            // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07).
+            // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
+            // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
             bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
             bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
             bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
@@ -2722,7 +2723,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 : anchorsMissing
                 ? "The checkpoint anchoring the unsigned records that counted before the charter revision was not stored, so they count for nothing (history.unanchored): the root operator or a person holding administer anchors each, after reading it, in a checkpoint's anchored list (records new history-checkpoint). This task ends once no unsigned record is left unanchored."
                 : unfollowed is not null
-                ? $"Closing {unfollowed.Record.Id} closes {unfollowed.Kind} {unfollowed.Target} all the same, and the {Act(unfollowed.Kind)} it precedes was not stored (history.closing-unfollowed). Write the {Act(unfollowed.Kind)} again as {unfollowed.Record.By}, with the same command: it uses the stored closing and is written after it, alone, with no new closing. This task ends once an act follows the closing."
+                ? Unfollowed(unfollowed)
                 : "Reconcile the missing records from the stored evidence; nothing stored is removed, and the task remains until the batch is complete.";
             findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. {consequence}");
         }
@@ -2730,6 +2731,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return findings;
 
         static string Listed(List<BatchJournal.Entry> entries) => string.Join(", ", entries.Select(e => $"{e.Type} {e.Id}"));
+
+        // How a closing stored without its act is settled: the act written again by its author, or, for a key, its device revoked instead.
+        static string Unfollowed(global::Vericairn.Records.Estate.Closing closing)
+        {
+            string again = $"Closing {closing.Record.Id} closes {closing.Kind} {closing.Target} all the same, and the {Act(closing.Kind)} it precedes was not stored (history.closing-unfollowed). Write the {Act(closing.Kind)} again as {closing.Record.By}, with the same command: it uses the stored closing and is written after it, alone, with no new closing.";
+            return closing.Kind == "key"
+                ? $"{again} Or revoke device {closing.Identity} instead, with vericairn devices revoke, as an operator or a person holding administer: the revocation retires the closed key with its device. This task ends once the rotation follows the closing, or the device's revocation or closing does."
+                : $"{again} This task ends once an act follows the closing.";
+        }
     }
 
     private static FindingList UnreadableBatches(BatchJournal.ReadResult read)

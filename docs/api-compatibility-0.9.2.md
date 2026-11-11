@@ -677,7 +677,9 @@ status. A batch journal treats a stored record whose history checkpoint was not 
 admission while the estate has not adopted and a charter revision while an unsigned record is left unanchored; its
 `batch.incomplete` warning then says how to settle it, and the task ends once that holds. A closing stored without its act
 stays a task too, beside `history.closing-unfollowed`, while it counts, acts and no act follows it: its warning says to write
-the act again, which then follows that closing, and the task ends once an act follows. An admission that would set off the birth adoption
+the act again, which then follows that closing, and the task ends once an act follows. A key's closing is followed as well by
+a revocation of its device that counts or by a closing of its device that acts, so for a key the warning also names revoking
+the device instead, and the task and `history.closing-unfollowed` end once the device is revoked or closed. An admission that would set off the birth adoption
 writes none while the machine's memory holds a checkpoint the copy no longer holds; the admission is written alone, and its
 `checkpoint` says why.
 
