@@ -85,6 +85,7 @@ internal sealed partial class EstateTrust
         Required = Charter is not null && RequiresSignatures(Charter);
         History = analysis.Complete(objects, files);
         closingFindings.AddRange(Unfollowed());
+        closingFindings.AddRange(RevisionsReadAsRemovals());
     }
 
     /// <summary>The manifest this judgment read the record format from.</summary>
@@ -966,6 +967,26 @@ internal sealed partial class EstateTrust
                 if (GrantClass(next) == StrictClass.Unread) queue.Enqueue(next.Id);
                 else yield return next;
             }
+        }
+    }
+
+    /// <summary>
+    /// A warning, in an estate holding a checkpoint, for each principal revision giving the operator role and each grant revision giving
+    /// administer that counts but that the strongest acts read as a removal: anchoring and closings no longer rest on it.
+    /// </summary>
+    private IEnumerable<Finding> RevisionsReadAsRemovals()
+    {
+        string? root = RootOperator;
+        if (!model.OfType("history-checkpoint").Any()) yield break;
+        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "principal" or "authority" && r.By != root))
+        {
+            bool removal = record.Type == "principal"
+                ? IsOperator(record) && ReadStrictly() is var reading && reading.Index.TryGetValue(record.Id, out int k) && reading.Classes[k] == StrictClass.Removal
+                : GivesAdminister(record) && GrantClass(record) == StrictClass.Removal;
+            if (!removal || !Counts(record)) continue;
+            string gives = record.Type == "principal" ? "gives the operator role" : "gives administer";
+            yield return new Finding(Severity.Warning, "history.revision-author", record.ExpectedPath,
+                $"This {record.Type} revision {gives}, but it no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
         }
     }
 
