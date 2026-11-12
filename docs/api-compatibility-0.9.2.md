@@ -563,13 +563,56 @@ read from its latest revision that counts.
 What counts changes in every estate, without a format step. `EstateModel.OfType`, `Current`, `About`, `IsCurrent`,
 `SupersededBy`, `RolesOf`, `HasRole` and `HasScope` read only records that count. `Latest` follows only counting
 successors and returns the record it starts from when none follows it, which may itself not count; `CurrentPrincipal`
-returns the newest counting revision of a principal's line, or null when none of its revisions counts, so a principal
-record that does not count grants no role. `Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
+returns the newest counting revision of a principal's line that its author may write
+([below](#authority-records-and-policy-authority-fix-110-fix-111)), or null when there is none, so a principal record that does
+not count grants no role. `Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
 policy refuses (after adoption, any unanchored unsigned record under required signatures), an unsigned policy record,
 checkpoint or device revision, or a witnessed record present with another hash. `SignatureChecks.Anchored` includes anchoring checkpoints'
 anchors; a device revision changes the device's key or name only when its device signed it. A policy basis
 holds only records that count, and its recorded time is the greatest `at` among them. An estate without checkpoints and
 without signature errors, such as the first-party estate, reads as before.
+
+`SignatureChecks.Counts`, `IsAdmitted`, `AdmissionOf` and `AdmissionStateAt` count a signed admission only when its signatures
+verify by devices admitted at its time through admissions that count in turn, from the estate's first authority outward, and its
+author is the root operator, an operator or a person holding `administer` at its time, read from the principal and grant
+revisions their authors may write as the records that give roles read them (signed revisions that verify that way, anchored ones,
+and, before adoption, unsigned ones dated no later than the charter first required signatures), each following the nearest such
+revision below it, never a principal's own record, and not through a grant revision a closing closed without witnessing the
+admission, judged the same whatever order records are read in. Whether a holder of `administer` is a person is read only from
+signed or anchored revisions. An admission that would unseat what its own signature or its author's authority rests on is left
+out and the others are judged again without it. An admission that an earlier build counted because it was signed, though its
+signature did not verify, its signer's admission did not count, its author may not admit at its time, or it unseats its own
+support, now admits and revokes nothing. Its existing `signature.*` or `admission.author` finding is unchanged; the estate check
+adds `admission.author` as a warning where only this reading refuses the author, as in an estate that has not adopted
+checkpoints, which reads roles and grants as they are now, and the new warning `admission.unseats-support`, so an estate holding
+such an admission stays valid. `NewRecord`, `DeviceAdmit` and `DeviceRevoke` refuse a new admission or revocation that would
+carry either warning, with problem code `rejected` and the finding as an error. Before adoption, while the charter requires
+signatures, an admission that counts only because its author's role or grant rests on an unsigned record that no checkpoint
+anchors is the new warning `admission.author-unanchored`. Adoption's check (`estate checkpoint --adopt
+--check`) no longer lists, among the records whose roles and grants read otherwise at their own time, a record that counts for
+nothing in both readings, such as such an admission. A record that does not count also includes one whose signature does not
+verify by a device admitted when it was signed.
+
+`EstateModel.FirstEstate`, `RootOperator` and `CurrentEstate` read the first charter as follows. It is the charter the manifest
+names when the model has a manifest, and a model without one keeps the first charter by id; `CurrentEstate` is null when the
+manifest names no first charter the estate holds, which the estate check reports as before. Witnessed history only confirms it:
+when any charter that supersedes nothing other than the manifest's is witnessed first by the counting checkpoints judged under
+its own operator, alone or beside the manifest's, all three are null and no record counts (`CountingRecords` is empty). The
+estate check adds two error codes, `history.root-ambiguous` (at `records`) and `history.manifest-root` (at
+`estate/manifest.json`, when the manifest's own charter or first authority is not witnessed while another is), and
+`EstateStatus.HistoryProblems` and the status history problems include them.
+
+`SignatureChecks.FirstAuthority` no longer returns the earliest self-admission by date. For the root operator it returns the
+self-admission the manifest names, or the only one when it names none; for any other principal, null. Only admissions with
+status `admitted` are candidates. Several with none named, or a manifest naming an admission that is not one, give null and the
+error `manifest.first-authority` (at `estate/manifest.json`), which `EstateStatus.HistoryProblems` includes; another witnessed
+first by checkpoints judged with it as the first authority gives null and `history.root-ambiguous`, with no record counting.
+`EstateManifest` gains the optional `FirstAuthority` (the manifest's `firstAuthority`, a ULID) and `NamingFirstAuthority(bytes,
+admission)`; `UpgradePlan` gains `FirstAuthority`, which `EstateUpgrade.ManifestAfter` writes, and the migration's `changes` say
+so when the manifest named none. When the root operator's first device admits itself through `NewRecord` or `DeviceAdmit`, the
+runtime adds `firstAuthority` to the manifest after storing the admission. A build before 0.9.2 refuses a manifest that carries
+the field (`body.unknown-key`). Estates with one first charter and one self-admission of the root operator's device, which their
+manifest names or leaves unnamed, such as the first-party estate, read exactly as before.
 
 `Vericairn.Records` adds, each additively: the namespace `Vericairn.Records.History` with `HistoryInventory`,
 `InventoryEntry`, `InventoryObject`, `RecordSets`, `HistoryState`, `CheckpointDraft` and `SignedHistory` (`Of`,
@@ -862,3 +905,102 @@ them. In an estate holding one, those acts read differently only where a grant o
 below it, sits on top of a revision they do not read, was written by someone other than the root operator who did not hold the
 operator role at its time or does not hold it now, or is refused by a closing. The first-party estate, which holds no checkpoint and no revision dated before the record
 it supersedes, reads exactly as before.
+
+## Authority records and policy authority (FIX-110, FIX-111)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In every estate,
+`EstateModel.CurrentPrincipal`, `RolesOf`, `HasRole`, `PrincipalAt`, `RolesAt`, `HasRoleAt`, `HasScope` and `HasScopeAt` read only
+principal and authority records whose authors may write them, judged in time order from the root operator: a principal record by an
+operator or a principal holding `administer`, one giving the operator role only by an operator, an amendment by a holder of
+`administer` only of a line whose revision it wrote, a grant by an operator, and a removal or a narrowing by anyone who held the
+operator role earlier. A principal record written by the principal it describes, other than the root operator's, at any revision,
+counts for nothing in every read, admissions, anchoring and closings included, and is `principal.self-authored`: an error when it
+would give a role or change the kind of principal, a warning when it would give nothing; before, only a principal's first record was
+held to this. An agent's or a service's principal record gives no operator role. Harness qualifications and repository-change
+operations read their author's role and grants this way, as do the runtime's repository writes, routing's grant of a reserved
+scope, pairing and a release's uncompared-document exception. `GET /v1/records` and `GET /v1/records/{id}` report a principal
+record as current only when it is the revision that gives its principal's roles, so one current record describes each principal.
+`NewRecord` (`POST /v1/records`, `records new`) refuses `at` and `id` for principal and authority records.
+
+`PolicyAuthority`, which every policy, exception, writing entry, policy reconciliation, prompt preference, policy requirement, duty
+proof, operator review of duty evidence, saved prompt and reserved step reads, counts a person as the operator at a record's time
+only while the role still stands or when a counting checkpoint signed by the root operator or a standing operator lists the record,
+or follows a counting checkpoint that lists it, is dated no later than the revision that took the role away and precedes every
+checkpoint that lists that revision. Only signed principal records give the role there; a revision that takes it away keeps
+counting, signed or not, after its author loses the role; and an appointment by a person who no longer stands counts only where
+such a checkpoint places it before that person's removal. A policy, exception or writing record, a prompt preference, a saved
+prompt or a reconciliation whose own validation finds its approval or authority missing counts for nothing. `PolicyAccess` lists
+only actions under grants whose authors act as the operator for them.
+
+New finding: the warning `policy.operator-removed`, on a policy record that fails only because an operator role it rests on was
+taken away where no checkpoint could place it earlier: in an estate that has not adopted checkpoints, or for a record its adoption
+checkpoint witnesses when someone else than the root operator or a standing operator signed that adoption and no checkpoint by one
+of them follows it before the removal. Such a record counts for nothing, and so do the policy records of a person the removed
+operator appointed, directly or through another appointee, each reported the same way. When `NewRecord` writes a revision that
+takes away the operator role or `administer` in an estate that has adopted checkpoints, it first stores a checkpoint signed by the
+acting principal's device on the runtime's machine, which follows every checkpoint before it, and `WriteOutcome.Checkpoint` names
+it: with trigger `closing` for a grant revision that needs a closing, the closing OPS-07 writes with it, and with trigger `manual`
+for a principal revision and for a grant revision that OPS-07 does not read as narrowing, which is written alone when signed
+elsewhere, as a principal revision is. In an estate that has not, it refuses the revision, with problem code `refused` and nothing
+written, when any record would fail with it: the message names the records with their finding codes, the first twenty of them, and
+says that adopting checkpoints first keeps them, and the problem's findings carry every finding, `policy.operator-removed` warnings
+and errors such as `decision.operator` alike. A removal no record fails with is written, and a device-signed removal is judged the
+same way when it is written. `OperatorRecord` (`POST /v1/operator/record`, `operator record`) refuses, with status `refused` and
+nothing written, committed or pushed, a revision that takes a role away in an estate that has adopted checkpoints, before anything
+is signed, since one signed record carried through a checked merge cannot carry the checkpoint; its message and next step name
+`records new`, which writes the checkpoint and the revision together. In an estate that has not, it refuses such a revision when
+any record would fail with it, with the message and findings `NewRecord` gives, and its next step names adopting checkpoints and
+then `records new`; one no record fails with is recorded as before. An action stopped at its record stage is judged again when it
+resumes, against what arrived since it was prepared; a refused one is no longer the clone's unfinished action. The first-party
+estate, all of whose principal and authority records the root operator wrote, reads exactly as before.
+
+## Per-user state is owner-only on every path (FIX-104)
+
+No route, interface member or protocol type is added or changed. On Linux and macOS, a writable `LiveStore` or
+`SqliteObjectStore` creates its directory 0700 and its database as an empty 0600 file before SQLite opens it, so SQLite gives its
+`-wal` and `-shm` files the same mode, and narrows an existing database, `-wal`, `-shm` and `-journal` to 0600. A writable
+`EstateSession` creates the Vericairn home and every directory down to the live store's 0700, or narrows them; a home that belongs
+to another user is left as it is. A live store directory or database (and a `FileKeyStore` `keys/` directory) that belongs to
+another user throws an `IOException` that says so, before anything is changed or created there. The keyword search index
+(`search.db`, CONTEXT-02) follows the same rule: an existing index that others could read is narrowed and kept rather than
+replaced, one that others could write is rebuilt once it is owner-only, and a link is replaced as before. On a filesystem where a
+mode change is refused or does not hold, the user's own state, the search index included, is used as it is (the index is no longer
+replaced at every opening); the command line reports it once per process on standard error, and `doctor` reports it on a `state`
+line. Canonical output, `status --json` included, is unchanged. `FileKeyStore.Create` narrows the home that holds `keys/` too.
+Batch journals beside the live store are written 0600 in a 0700 directory. Read-only sessions create and change nothing. Windows
+is unchanged.
+
+## Matching held work and blocked terms (FIX-105)
+
+No route, interface member or protocol type is added or changed. `DisclosureHolds.Active` and `DisclosureHolds.Disclosed` compare
+keys and phrases, and `BlockedTerms` (`In`, `TermsOf`, `Validate`, `Introduced`, `IntroducedInRecord`, `IntroducedInFiles`)
+compare terms and text, after `UnicodeFolding.NfkcCaseFold`: Unicode 16.0.0 NFKC, full case folding and NFKC again, computed from
+tables in the assembly, independent of ICU and of the process's globalization mode. Before, they used
+`string.Normalize(NormalizationForm.FormKC)` and `ToLowerInvariant()`, and the normalization did nothing in a process with
+invariant globalization, which the shipped builds use. ASCII text folds as before. Non-ASCII terms returned by `In` and `TermsOf`
+are now in folded form (for example `ss` for `ß`), and `Validate` reports two terms that fold alike as duplicates.
+
+## Device standing from a kept model (FIX-106)
+
+No route, interface member or protocol type is added or changed. `EstateService.Standing` and
+`EstateService.AdmittedDevicePublicKey` read from a model kept with a stamp of the canonical records: the live store's snapshot for
+a local-only estate, or every record file's path, size and modification time for a repository-synced one, with the manifest's size
+and modification time. The records are read again only when the stamp changes, so each call gives the same answer as before, and a
+change by any process counts from the next call. Neither refreshes the live cache or its metadata; `AdmittedDevicePublicKey` no
+longer updates `lastLoadedAt`. For a repository-synced estate whose records are unchanged, neither waits for the service's lock. A
+local-network request without a client certificate is refused before standing is read.
+
+## The MCP server's registry name (FIX-101)
+
+No route, interface member, protocol type or record changes. The `dotnet-vc` package's embedded `.mcp/server.json` and the
+`mcp-name` line of its README name the server `io.github.Vericairn/vericairn`, in the organization's exact case, where the 0.8.2
+to 0.9.1 packages named it `io.github.vericairn/vericairn`, which the official MCP Registry refuses. A client configuration that
+names the server by its registry name uses the new spelling. The package verifier still accepts the lowercase name when it
+verifies a release before 0.9.2 again.
+
+## The embedded runtime (FIX-115)
+
+No route, interface member, protocol type or record changes. The self-contained distributables are built with SDK 10.0.404 and
+embed the .NET and ASP.NET Core 10.0.15 runtimes in place of 10.0.14; the distributable lock files pin the SDK's implicit
+`Microsoft.NET.ILLink.Tasks` at 10.0.15, the only package change. The NuGet packages still target `net10.0` and run on the shared
+runtimes the installed .NET 10 SDK supplies.
