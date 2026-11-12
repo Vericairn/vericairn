@@ -56,6 +56,9 @@ public static class SignatureChecks
             RecoveryUse(model, trust, record, findings);
         }
 
+        // An admission that does not count where nothing above says why: one that would unseat what it rests on.
+        foreach (Finding finding in trust.AdmissionFindings()) findings.Add(finding);
+
         foreach (RecordEnvelope revision in model.Records.Where(r => r.Type == "estate" && r.Supersedes is not null))
         {
             if (model.ById.TryGetValue(revision.Supersedes!, out RecordEnvelope? revised) && revised.Type == "estate" && !trust.CharterRevisionCounts(revised, revision))

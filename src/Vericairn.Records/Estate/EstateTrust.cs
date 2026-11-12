@@ -49,9 +49,11 @@ internal sealed partial class EstateTrust
     private readonly IReadOnlyDictionary<string, string> rawSupersededBy;
     private readonly HashSet<string>?[] admittedActing = new HashSet<string>?[2];
     private readonly Dictionary<string, HashSet<string>>[] admittedByClosings = [new(StringComparer.Ordinal), new(StringComparer.Ordinal)];
+    private readonly Dictionary<HashSet<string>, HashSet<string>> unseating = new(ReferenceEqualityComparer.Instance);
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
+    private readonly List<RecordEnvelope> admissionRecords;
     private readonly List<RecordEnvelope> principalRecords;
     private readonly List<RecordEnvelope> authorityRecords;
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
@@ -78,7 +80,8 @@ internal sealed partial class EstateTrust
         Unsettled = unsettled;
         // Read through the type lookups, which hold every record until the loader keeps only those that count, so that judging a model
         // walks only the records trust rests on.
-        admissionsBySubject = model.OfType("admission").Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
+        admissionRecords = [.. model.OfType("admission")];
+        admissionsBySubject = admissionRecords.Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
         successors = TrustTypes.SelectMany(model.OfType).Where(r => r.Supersedes is not null).ToLookup(r => r.Supersedes!, StringComparer.Ordinal);
         rawSupersededBy = model.SupersededBy;
         principalRecords = [.. model.OfType("principal")];
@@ -86,7 +89,7 @@ internal sealed partial class EstateTrust
         FirstEstate = firstCharter;
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
-        AuthorityCandidates = [.. model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
+        AuthorityCandidates = [.. admissionRecords.Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
             .OrderBy(a => a.Id, StringComparer.Ordinal)];
         FirstAuthority = authorityGiven ? authority : FirstAuthorityByManifest();
 
@@ -487,23 +490,28 @@ internal sealed partial class EstateTrust
     private IEnumerable<RecordEnvelope> AdmissionsAbout(string deviceId) => RawChain(deviceId).SelectMany(id => admissionsBySubject[id]);
 
     /// <summary>
-    /// Whether an admission can admit or revoke. The root operator's first self-signed admission does. A signed one does when every
-    /// signature verifies by a device admitted when it was signed, through admissions that count in turn, and its author may admit at its
-    /// time: an operator or a person holding administer, judged by signatures alone (<see cref="Standing"/>). An unsigned one does at record
-    /// format 1, and otherwise only with anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a
-    /// closing refuses neither admits nor revokes.
+    /// Whether an admission can admit or revoke. The estate's first authority does. A signed one does when every signature verifies by a
+    /// device admitted when it was signed, through admissions that count in turn, and its author may admit at its time: an operator or a
+    /// person holding administer (<see cref="Standing"/>). An unsigned one does at record format 1, and otherwise only with anchors, when
+    /// the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a closing refuses neither admits nor revokes,
+    /// and neither does one that would unseat what it rests on (<see cref="CountingAdmissions"/>).
     /// </summary>
     internal bool AdmissionCounts(RecordEnvelope admission, Mode mode) => AdmissionCounts(admission, mode, Acting);
 
     private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound) => CountingAdmissions(mode, bound).Contains(admission.Id);
 
     /// <summary>
-    /// The admissions that count in a mode, against the closings given. Starting from the root operator's first self-signed admission and,
-    /// with anchors, from the unsigned admissions anchored or read under record format 1, every signed admission whose signatures verify by
-    /// devices those admissions admit at its time, and whose author may admit by revisions so verified, joins, until none does; then any
-    /// that no longer passes against the whole set is dropped, until every one passes. Each step judges every admission against the same
-    /// set, so the result does not depend on the order records are read in. An admission one of the closings refuses never joins, and the
-    /// author's authority is read against the same closings. The result is kept for each set of closings.
+    /// The admissions that count in a mode, against the closings given. Starting from the estate's first authority and, with anchors, from
+    /// the unsigned admissions anchored or read under record format 1, every signed admission whose signatures verify by devices those
+    /// admissions admit at its time, and whose author may admit by the revisions that stand with them, joins, until none does. Each step
+    /// judges every admission against the same set, so the result does not depend on the order records are read in. A set that holds an
+    /// admission that no longer passes against it, such as one signed by a device a revocation in the set revoked before, is judged again
+    /// without some of those admissions, from the start, so that one left out unseats nothing: first those of the admissions that helped
+    /// make another fail which fail by themselves, judged with every admission that failed beside them left out, such as a revocation that
+    /// revokes what its own signature or its author's authority rests on; failing those, those of them that failed themselves, which unseat
+    /// one another; and failing those, every admission that failed, each of which another admission that stands revoked. An admission one
+    /// of the closings refuses never joins, and the author's authority is read against the same closings. The result is kept for each set
+    /// of closings, with the admissions left out that would otherwise pass (<see cref="Unseating"/>).
     /// </summary>
     private HashSet<string> CountingAdmissions(Mode mode, IReadOnlyList<Closing> bound)
     {
@@ -525,40 +533,118 @@ internal sealed partial class EstateTrust
 
         HashSet<string> Judge()
         {
-            List<RecordEnvelope> all = [.. model.OfType("admission").Where(Open)];
-            var known = new HashSet<string>(StringComparer.Ordinal);
-            if (FirstAuthority is { } first && Open(first)) known.Add(first.Id);
+            List<RecordEnvelope> all = [.. admissionRecords.Where(a => Open(this, a, bound, mode))];
+            var start = new HashSet<string>(StringComparer.Ordinal);
+            if (FirstAuthority is { } first && Open(this, first, bound, mode)) start.Add(first.Id);
             foreach (RecordEnvelope admission in all.Where(a => a.Signatures.Count == 0))
             {
-                if (mode == Mode.Anchors && (Format < 2 || anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)))) known.Add(admission.Id);
+                if (mode == Mode.Anchors && (Format < 2 || anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)))) start.Add(admission.Id);
             }
 
-            List<RecordEnvelope> undecided = [.. all.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash)];
+            List<RecordEnvelope> signed = [.. all.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash)];
+            var left = new HashSet<string>(StringComparer.Ordinal);
+            while (true)
+            {
+                HashSet<string> known = Join(start, signed, left);
+                Standing found = Against(known);
+                List<RecordEnvelope> failed = [.. signed.Where(a => known.Contains(a.Id) && !Passes(a, known, found))];
+                if (failed.Count == 0)
+                {
+                    unseating[known] = [.. signed.Where(a => left.Contains(a.Id) && Passes(a, known, found)).Select(a => a.Id)];
+                    return known;
+                }
+
+                left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
+            }
+        }
+
+        // Every signed admission not left out whose signatures verify against the set, and whose author may admit, joins, until none does.
+        HashSet<string> Join(HashSet<string> start, List<RecordEnvelope> signed, HashSet<string> left)
+        {
+            var known = new HashSet<string>(start, StringComparer.Ordinal);
+            List<RecordEnvelope> undecided = [.. signed.Where(a => !left.Contains(a.Id))];
             while (true)
             {
                 Standing found = Against(known);
                 List<RecordEnvelope> joined = [.. undecided.Where(a => VerifiesAgainst(a, known) && found.MayAdmit(a))];
-                if (joined.Count == 0) break;
+                if (joined.Count == 0) return known;
                 foreach (RecordEnvelope admission in joined) known.Add(admission.Id);
                 undecided.RemoveAll(joined.Contains);
             }
-
-            while (true)
-            {
-                Standing found = Against(known);
-                List<RecordEnvelope> failed = [.. all.Where(a => known.Contains(a.Id) && a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && !(VerifiesAgainst(a, known) && found.MayAdmit(a)))];
-                if (failed.Count == 0) break;
-                foreach (RecordEnvelope admission in failed) known.Remove(admission.Id);
-            }
-
-            return known;
         }
 
-        bool Open(RecordEnvelope admission) => bound.Count == 0 || Refuser(admission, bound, mode) is null;
+        // Which admissions a set that holds failing ones is judged again without (above).
+        List<RecordEnvelope> LeftOut(HashSet<string> known, List<RecordEnvelope> failed, List<RecordEnvelope> signed)
+        {
+            var failing = new HashSet<string>(failed.Select(a => a.Id), StringComparer.Ordinal);
+            // Only an admission about a device that signed a failing admission, or a principal or grant revision, can be what made one fail.
+            var signers = new HashSet<string>(StringComparer.Ordinal);
+            foreach (RecordEnvelope record in failed.Concat(principalRecords).Concat(authorityRecords))
+            {
+                for (int i = 0; i < record.Signatures.Count; i++) signers.Add(Proof(record, i).Identity);
+            }
 
-        // Who may admit, judged from revisions whose signatures verify by the devices a set of admissions admits, against the same closings.
-        Standing Against(HashSet<string> counting) =>
-            new(this, bound, mode, r => r.Signatures.Count > 0 && r.DeclaredHash == r.ComputedHash && Open(r) && VerifiesAgainst(r, counting));
+            List<RecordEnvelope> helped = [];
+            foreach (RecordEnvelope candidate in signed.Where(a => known.Contains(a.Id) && a.Subject?.Id is { } subject && model.ById.TryGetValue(subject, out RecordEnvelope? device) &&
+                device.Type == "device" && signers.Contains(IdentityOf(device))))
+            {
+                var without = new HashSet<string>(known, StringComparer.Ordinal);
+                without.Remove(candidate.Id);
+                Standing found = Against(without);
+                if (failed.Any(a => a.Id != candidate.Id && VerifiesAgainst(a, without) && found.MayAdmit(a))) helped.Add(candidate);
+            }
+
+            var rest = new HashSet<string>(known, StringComparer.Ordinal);
+            rest.ExceptWith(failing);
+            List<RecordEnvelope> alone = [.. helped.Where(a => new HashSet<string>(rest, StringComparer.Ordinal) { a.Id } is var with && !Passes(a, with, Against(with)))];
+            if (alone.Count > 0) return alone;
+            List<RecordEnvelope> mutual = [.. helped.Where(a => failing.Contains(a.Id))];
+            return mutual.Count > 0 ? mutual : failed;
+        }
+
+        bool Passes(RecordEnvelope admission, HashSet<string> counting, Standing found) => VerifiesAgainst(admission, counting) && found.MayAdmit(admission);
+
+        Standing Against(HashSet<string> counting) => StandingAgainst(counting, bound, mode);
+    }
+
+    /// <summary>Whether no closing given refuses a record.</summary>
+    private static bool Open(EstateTrust trust, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode) => bound.Count == 0 || trust.Refuser(record, bound, mode) is null;
+
+    /// <summary>Who may admit, judged from revisions whose signatures verify by the devices a set of admissions admits, against the same closings.</summary>
+    private Standing StandingAgainst(HashSet<string> counting, IReadOnlyList<Closing> bound, Mode mode) =>
+        new(this, bound, mode, r => r.Signatures.Count > 0 && r.DeclaredHash == r.ComputedHash && Open(this, r, bound, mode) && VerifiesAgainst(r, counting));
+
+    /// <summary>
+    /// The admissions left out of those that count with anchors and the closings that act which would pass against them: each would unseat
+    /// what it rests on, directly or through another that would unseat it in turn (<see cref="CountingAdmissions"/>).
+    /// </summary>
+    internal IReadOnlySet<string> Unseating()
+    {
+        lock (gate)
+        {
+            return unseating.TryGetValue(CountingAdmissions(Mode.Anchors, Acting), out HashSet<string>? left) ? left : NoAnchors;
+        }
+    }
+
+    /// <summary>
+    /// The findings about admissions that do not count where nothing else says why: one left out because it would unseat what it rests on
+    /// (<c>admission.unseats-support</c>).
+    /// </summary>
+    internal IEnumerable<Finding> AdmissionFindings()
+    {
+        lock (gate)
+        {
+            IReadOnlySet<string> left = Unseating();
+            var findings = new List<Finding>();
+            foreach (RecordEnvelope admission in admissionRecords.Where(a => left.Contains(a.Id)))
+            {
+                string kind = EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission";
+                findings.Add(new Finding(Severity.Error, "admission.unseats-support", admission.ExpectedPath,
+                    $"This {kind} counts for nothing: counting it would unseat what its own signature or its author's authority rests on, directly or through another admission or revocation that would unseat it in turn. One that does not count admits and revokes nothing, so what it would have unseated is read without it. Write it again from a device whose admission does not rest on what it revokes, or as of a time after the admissions it rests on."));
+            }
+
+            return findings;
+        }
     }
 
     /// <summary>
@@ -689,6 +775,7 @@ internal sealed partial class EstateTrust
     {
         Array.Clear(admittedActing);
         foreach (Dictionary<string, HashSet<string>> judged in admittedByClosings) judged.Clear();
+        unseating.Clear();
     }
 
     /// <summary>The admission state of a device at a time, from the admissions about its line that count in the mode.</summary>

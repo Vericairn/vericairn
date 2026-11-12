@@ -235,7 +235,7 @@ public class AdmissionEvaluationTests
         (RecordEnvelope bDevice, _) = f.Admitted(b.Id, "B's device");
         f.Require();
         // B removes A; A, who held the operator role earlier, removes B. Both removals count, so neither may admit afterwards.
-        f.Estate.Add("principal", b.Id, """{"kind":"human","name":"Operator A","roles":[]}""", supersedes: a.Id, signer: f.Signer(bDevice));
+        f.Estate.Add("principal", b.Id, """{"kind":"human","name":"Operator A","roles":["contributor"]}""", supersedes: a.Id, signer: f.Signer(bDevice));
         f.Estate.Add("principal", a.Id, """{"kind":"human","name":"Operator B","roles":[]}""", supersedes: b.Id, signer: f.Signer(aDevice));
         RecordEnvelope byB = f.Device(f.Estate.BuilderId, "Admitted by B after its removal");
         RecordEnvelope admission = f.Estate.Add("admission", b.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By B."), byB.Reference, signer: f.Signer(bDevice));
@@ -271,5 +271,83 @@ public class AdmissionEvaluationTests
         Assert.Contains(model.Findings, x => x.Code == "admission.author" && x.Location == admission.ExpectedPath);
         Assert.True(SignatureChecks.IsAdmitted(model, before));
         Assert.False(SignatureChecks.IsAdmitted(model, after));
+    }
+    private static bool Reported(EstateModel model, RecordEnvelope record, string code) =>
+        model.Findings.Any(x => x.Code == code && x.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal));
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ARevocationThatWouldUnseatItsOwnAuthorityRevokesNothing(bool adopt)
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope basis = f.Decision();
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["contributor"]}""", signer: f.OperatorSigner);
+        f.Grant(admin.Id, basis, [Scopes.Administer]);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin's laptop");
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("UNS-1"), signer: f.BuilderSigner);
+        if (adopt) f.Adopt();
+        RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+
+        // The administrator revokes the root operator's first device as of its own admission, before the grant and the admission its own
+        // authority and signature rest on, both signed by that device.
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+        RecordEnvelope revocation = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(adminDevice));
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(model.ById[revocation.Id]));
+        Assert.True(Reported(model, revocation, "admission.unseats-support"));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
+        Assert.True(SignatureChecks.IsAdmitted(model, adminDevice));
+        Assert.True(model.Counts(model.ById[order.Id]));
+        Assert.DoesNotContain(model.Findings, x => x.Code == "signature.unadmitted");
+    }
+
+    [Fact]
+    public void AnOperatorsRevocationOfALostFirstDeviceCountsOnlyWhenItRestsOnNothingItRevokes()
+    {
+        // Revoked as of the first device's own admission, before the admission of the device that signs the revocation: it revokes nothing.
+        using (var f = new HistoryFixture())
+        {
+            f.Require();
+            (RecordEnvelope second, _) = f.Admitted(f.Estate.OperatorId, "Operator's second device");
+            RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("LOST-1"), signer: f.Signer(second));
+            RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+            f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+            RecordEnvelope revocation = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "Lost.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(second));
+            EstateModel model = f.Load();
+            Assert.False(model.Counts(model.ById[revocation.Id]));
+            Assert.True(Reported(model, revocation, "admission.unseats-support"));
+            Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+            Assert.True(SignatureChecks.IsAdmitted(model, second));
+            Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
+            Assert.True(model.Counts(model.ById[order.Id]));
+        }
+
+        // Revoked as of a time after that admission: it counts, and what the lost device signs from then on does not.
+        using (var f = new HistoryFixture())
+        {
+            f.Require();
+            (RecordEnvelope second, RecordEnvelope admitted) = f.Admitted(f.Estate.OperatorId, "Operator's second device");
+            RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+            string revokedAt = RecordParser.FormatTimestamp(admitted.AtTime.AddSeconds(5));
+            f.Estate.SetClock(admitted.AtTime.AddSeconds(10));
+            RecordEnvelope late = f.Device(f.Estate.BuilderId, "Admitted by the lost device");
+            RecordEnvelope lateAdmission = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.BuilderId, "After the loss."), late.Reference, signer: f.OperatorSigner);
+            f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+            RecordEnvelope revocation = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "Lost.", "revoked", revokedAt), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(second));
+            RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("LOST-2"), signer: f.OperatorSigner);
+            EstateModel model = f.Load();
+            Assert.True(model.Counts(model.ById[revocation.Id]));
+            Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+            Assert.True(SignatureChecks.IsAdmitted(model, second));
+            Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
+            Assert.False(model.Counts(model.ById[lateAdmission.Id]));
+            Assert.False(SignatureChecks.IsAdmitted(model, late));
+            Assert.False(model.Counts(model.ById[order.Id]));
+            Assert.False(Reported(model, lateAdmission, "admission.unseats-support"));
+            Assert.True(Reported(model, lateAdmission, "signature.revoked"));
+        }
     }
 }
