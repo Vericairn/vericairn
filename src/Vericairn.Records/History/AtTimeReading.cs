@@ -16,7 +16,9 @@ internal static class AtTimeReading
 {
     /// <summary>
     /// The records whose findings differ between a copy read today and the same copy read with every record's roles and grants at its
-    /// own time, by id, each with what differs: a finding that holds only at its own time, or one that holds today and not then.
+    /// own time, by id, each with what differs: a finding that holds only at its own time, or one that holds today and not then. A record
+    /// that counts for nothing in both readings, such as an admission its signer could not make at its own time, keeps no reading at
+    /// adoption, so it is not listed.
     /// </summary>
     internal static IReadOnlyList<(RecordEnvelope Record, string Note)> Changes(EstateModel today, EstateModel atTime)
     {
@@ -37,6 +39,7 @@ internal static class AtTimeReading
             int hash = finding.Location.IndexOf('#', StringComparison.Ordinal);
             string path = hash < 0 ? finding.Location : finding.Location[..hash];
             if (!byPath.TryGetValue(path, out RecordEnvelope? record)) return;
+            if (!today.Counts(record) && !(atTime.ById.TryGetValue(record.Id, out RecordEnvelope? then) && atTime.Counts(then))) return;
             if (!notes.TryGetValue(record.Id, out (RecordEnvelope Record, List<string> Notes) entry)) notes[record.Id] = entry = (record, []);
             if (!entry.Notes.Contains(note, StringComparer.Ordinal)) entry.Notes.Add(note);
         }

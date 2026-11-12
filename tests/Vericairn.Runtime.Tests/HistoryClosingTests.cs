@@ -297,14 +297,19 @@ public class HistoryClosingTests
     {
         using var f = new HistoryTriggerTests.Fixture(adopt: false);
         string builder = f.Records.Estate.BuilderId;
-        // The builder revokes a device in a revocation dated before the grant of administer that today's reading lets it rest on.
         DateTimeOffset now = DateTimeOffset.UtcNow;
         f.Records.Estate.SetClock(now.AddHours(-2));
         StoreSigner held = f.Records.AdmitSigner(f.Records.Estate.OperatorId);
         EstateModel model = f.Api.Session.Load();
         RecordEnvelope device = model.ById[held.DeviceId];
         RecordEnvelope admission = SignatureChecks.AdmissionOf(model, device)!;
+        // The builder records a principal, and revokes a device, both dated before the grant of administer that today's reading lets
+        // the principal record rest on.
         f.Records.Estate.SetClock(now.AddHours(-1));
+        RecordEnvelope helper = f.Records.Add("principal", new JsonObject
+        {
+            ["kind"] = "agent", ["name"] = "Helper", ["roles"] = new JsonArray("reviewer"), ["agent"] = new JsonObject { ["vendor"] = "Example", ["product"] = "Example Agent" },
+        }, builder: true);
         RecordEnvelope revocation = f.Records.Add("admission", new JsonObject
         {
             ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Revoked before the grant.",
@@ -312,19 +317,31 @@ public class HistoryClosingTests
         }, builder: true, subject: device.Reference, supersedes: admission.Id);
         f.Records.Estate.SetClock(now.AddMinutes(-30));
         f.Records.Add("authority", Grant(f, builder, Scopes.Administer));
-        Assert.DoesNotContain(f.Api.Session.Load().Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(revocation.ExpectedPath, StringComparison.Ordinal));
+        EstateModel today = f.Api.Session.Load();
+        Assert.DoesNotContain(today.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(helper.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(today.Counts(today.ById[helper.Id]));
+        // An admission or revocation is judged by its signer's authority at its own time, and administer counts for that only for a
+        // person: the agent's revocation counts for nothing, so the device stays admitted.
+        Assert.False(today.Counts(today.ById[revocation.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(today, today.ById[device.Id]));
 
         HistoryCheckpointResponse check = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!;
         HistoryRecordItem changed = Assert.Single(check.AuthorityChanges);
-        Assert.Equal((revocation.Id, "admission"), (changed.Id, changed.Type));
-        Assert.StartsWith("read at its own time, admission.author: ", changed.Note, StringComparison.Ordinal);
+        Assert.Equal((helper.Id, "principal"), (changed.Id, changed.Type));
+        Assert.StartsWith("read at its own time, principal.author: ", changed.Note, StringComparison.Ordinal);
+        // Adoption neither anchors the revocation nor lists it among the readings it keeps: it counts for nothing in either reading.
+        Assert.DoesNotContain(check.Anchored, x => x.Id == revocation.Id);
+        Assert.DoesNotContain(check.AuthorityChanges, x => x.Id == revocation.Id);
 
-        // Adoption keeps the reading each record has then: the revocation still counts once the estate has adopted.
+        // Adoption keeps the reading each record has then: the principal record still holds once the estate has adopted, and the
+        // revocation still counts for nothing.
         f.Adopt();
         EstateModel adopted = f.Api.Session.Load();
         Assert.True(SignedHistory.Adopted(adopted));
-        Assert.DoesNotContain(adopted.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(revocation.ExpectedPath, StringComparison.Ordinal));
-        Assert.False(SignatureChecks.IsAdmitted(adopted, adopted.ById[device.Id]));
+        Assert.DoesNotContain(adopted.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(helper.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(adopted.Counts(adopted.ById[helper.Id]));
+        Assert.False(adopted.Counts(adopted.ById[revocation.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(adopted, adopted.ById[device.Id]));
     }
 
     [Fact]
