@@ -810,4 +810,43 @@ public class PolicyAuthorityTimeTests
         Assert.Equal(throughTheRuntime, model.Counts(model.ById[writing.Id]));
         Assert.Equal(!throughTheRuntime, Warned(model, writing));
     }
+
+    /// <summary>
+    /// An adoption signed by a person holding administer lists O1's appointment of O2, and O1 is then removed with no checkpoint: O2's
+    /// policy record that the adoption listed rests on that removal before history and is a warning; one O2 wrote after adoption, which
+    /// no checkpoint places, stays an error. Neither counts.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnAppointeesRecordAnAdministratorsAdoptionListedIsAWarningAndOneWrittenAfterStaysAnError(bool afterAdoption)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        RecordEnvelope a = f.Add("principal", Person("A", "reviewer"));
+        StoreSigner adminSigner = f.AdmitSigner(a.Id);
+        f.Add("authority", new JsonObject { ["grantee"] = a.Id, ["scope"] = new JsonArray(Scopes.Administer), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = f.Decision.Id });
+        RecordEnvelope o1 = f.Add("principal", Person("O1", "operator"));
+        StoreSigner s1 = f.AdmitSigner(o1.Id);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope o2 = f.Estate.Add("principal", o1.Id, Person("O2", "operator").ToJsonString(), signer: s1);
+        StoreSigner s2 = f.AdmitSigner(o2.Id);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope? writing = afterAdoption ? null : OperatorWriting(f, o2.Id, s2);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        Checkpoint(f, "adoption", a.Id, adminSigner);
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        writing ??= OperatorWriting(f, o2.Id, s2);
+        EstateModel before = f.Estate.Load();
+        Assert.True(SignedHistory.Adopted(before));
+        Assert.False(before.Findings.HasErrors, string.Join('\n', before.Findings.Where(e => e.Severity == Severity.Error)));
+        Assert.True(before.Counts(before.ById[writing.Id]));
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        f.Add("principal", Person("O1", "contributor"), supersedes: o1.Id);
+        EstateModel model = f.Estate.Load();
+        Assert.Equal(!afterAdoption, model.Trust.BeforeHistory(model.ById[writing.Id]));
+        Assert.False(model.Counts(model.ById[writing.Id]));
+        Assert.Equal(!afterAdoption, Warned(model, writing));
+        Assert.Equal(afterAdoption, model.Findings.Any(e => e.Severity == Severity.Error && e.Location.StartsWith(writing.ExpectedPath, StringComparison.Ordinal)));
+    }
 }

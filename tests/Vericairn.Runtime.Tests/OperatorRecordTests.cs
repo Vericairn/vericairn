@@ -196,11 +196,15 @@ public sealed class OperatorRecordTests
         (HistoryCheckpointResponse? adopted, Problem? problem) = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(op, Adopt: true, ExpectPlan: plan));
         Assert.True(adopted?.Applied == true, JsonSerializer.Serialize(problem, ProtocolJson.Options));
         int records = f.Service.Session.Load().Records.Count;
+        int signings = 0;
+        f.Service.BeforeSigningRecord = () => signings++;
 
         var request = new OperatorRecordRequest("principal", op, Person("O", "contributor"), null, Supersedes: o, WaitSeconds: 0);
         OperatorRecordResponse result = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
         Assert.False(result.Ok);
         Assert.Equal("refused", result.Status);
+        Assert.Equal(0, signings);
+        f.Service.BeforeSigningRecord = null;
         Assert.Contains("cannot carry the checkpoint", result.Message, StringComparison.Ordinal);
         Assert.Contains($"vericairn records new principal --by <operator id> --supersedes {o} --body <file>", result.Message, StringComparison.Ordinal);
         Assert.Equal($"vericairn records new principal --by {op} --supersedes {o} --body <file>", result.NextStep);
@@ -255,6 +259,94 @@ public sealed class OperatorRecordTests
         Assert.Equal(records, unchanged.Records.Count);
         Assert.True(unchanged.HasRole(o, Vericairn.Records.Types.Roles.Operator));
         Assert.True(unchanged.Counts(unchanged.ById[preference.Written.Id]));
+    }
+
+    /// <summary>
+    /// An action that stopped at the record stage is judged again when it resumes: a record the operator wrote before the action's
+    /// time that arrived meanwhile, as from another clone, makes the removal refused, the record keeps counting, and the refused action
+    /// no longer holds the clone, so the next operator action completes.
+    /// </summary>
+    [Fact]
+    public void AResumedRemovalIsJudgedAgainAgainstWhatArrivedMeanwhile()
+    {
+        using var f = new Fixture();
+        string op = f.Estate.OperatorId;
+        WriteOutcome appointed = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "operator")));
+        Assert.True(appointed.Ok, appointed.Problem?.Message);
+        string o = appointed.Written!.Id;
+        WriteOutcome device = f.Service.DeviceCreate(new(o, "O's device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        WriteOutcome admitted = f.Service.DeviceAdmit(new(device.Written!.Id, op, "Admit O's device."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        // Whole seconds: the preference is dated after the admission and before the removal's prepare step.
+        Thread.Sleep(1100);
+        string earlier = Vericairn.Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        Thread.Sleep(1100);
+        var request = new OperatorRecordRequest("principal", op, Person("O", "contributor"), null, Supersedes: o, WaitSeconds: 0);
+        f.Service.BeforeValidatingRecords = _ => f.Local.Dirty = true;
+        OperatorRecordResponse first = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(first.Ok, first.Message);
+        Assert.Null(first.Record);
+        f.Service.BeforeValidatingRecords = null;
+        f.Local.Dirty = false;
+        WriteOutcome preference = f.Service.NewRecord(new NewRecordRequest("prompt-preference", o,
+            JsonSerializer.SerializeToElement(new { prompt = "estate:review", scope = "estate", disabled = true }), At: earlier));
+        Assert.True(preference.Ok, preference.Problem?.Message);
+        Assert.Equal(0, f.Service.Validate().Errors);
+
+        OperatorRecordResponse resumed = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(resumed.Ok, resumed.Message);
+        Assert.Equal("refused", resumed.Status);
+        Assert.Null(resumed.Record);
+        Assert.Contains(preference.Written!.Id, resumed.Message, StringComparison.Ordinal);
+        EstateModel after = f.Service.Session.Load();
+        Assert.True(after.HasRole(o, Vericairn.Records.Types.Roles.Operator));
+        Assert.True(after.Counts(after.ById[preference.Written.Id]));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        OperatorRecordResponse other = f.Run();
+        Assert.True(other.Ok, other.Message);
+    }
+
+    /// <summary>
+    /// An action that stopped at the record stage before the estate adopted history checkpoints is refused when it resumes after
+    /// adoption, before anything is signed again, so the removal never lands without a checkpoint before it, and the clone is free.
+    /// </summary>
+    [Fact]
+    public void AResumedRemovalAfterAdoptionIsRefusedBeforeSigning()
+    {
+        using var f = new Fixture();
+        string op = f.Estate.OperatorId;
+        WriteOutcome appointed = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "operator")));
+        Assert.True(appointed.Ok, appointed.Problem?.Message);
+        string o = appointed.Written!.Id;
+        Thread.Sleep(1100);
+        var request = new OperatorRecordRequest("principal", op, Person("O", "contributor"), null, Supersedes: o, WaitSeconds: 0);
+        f.Service.BeforeValidatingRecords = _ => f.Local.Dirty = true;
+        OperatorRecordResponse first = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(first.Ok, first.Message);
+        f.Service.BeforeValidatingRecords = null;
+        f.Local.Dirty = false;
+        Thread.Sleep(1100);
+        string plan = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!.PlanHash!;
+        (HistoryCheckpointResponse? adopted, Problem? problem) = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(op, Adopt: true, ExpectPlan: plan));
+        Assert.True(adopted?.Applied == true, JsonSerializer.Serialize(problem, ProtocolJson.Options));
+        int records = f.Service.Session.Load().Records.Count;
+        int signings = 0;
+        f.Service.BeforeSigningRecord = () => signings++;
+
+        OperatorRecordResponse resumed = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        f.Service.BeforeSigningRecord = null;
+        Assert.False(resumed.Ok, resumed.Message);
+        Assert.Equal("refused", resumed.Status);
+        Assert.Contains("cannot carry the checkpoint", resumed.Message, StringComparison.Ordinal);
+        Assert.Null(resumed.Record);
+        Assert.Equal(0, signings);
+        EstateModel after = f.Service.Session.Load();
+        Assert.Equal(records, after.Records.Count);
+        Assert.True(after.HasRole(o, Vericairn.Records.Types.Roles.Operator));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        OperatorRecordResponse other = f.Run();
+        Assert.True(other.Ok, other.Message);
     }
 
     private static JsonElement Person(string name, string role) => JsonSerializer.SerializeToElement(new { kind = "human", name, roles = new[] { role } });

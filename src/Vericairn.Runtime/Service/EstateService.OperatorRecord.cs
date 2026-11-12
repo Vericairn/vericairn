@@ -121,6 +121,9 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("The subject must be type:id or type:id:hash.");
                 if (checkpoint is null)
                 {
+                    // In an estate that has adopted, a role removal is refused from the unsigned intent, so nothing is signed for it.
+                    if (OperatorRecordRemovalRefusal(new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes), session.Load(), null) is { } early)
+                        return new(identity, "refused", early.Message, false, early.NextStep, Problem: early.Problem);
                     string? follows = session.Live.Meta(OperatorFinished);
                     OperatorCheckpoint? followed = string.IsNullOrEmpty(follows) ? null : OperatorCheckpointLocked(follows);
                     RecordCommitBasis basis = adapter.Prepare(Root, followed is null ? new HashSet<string>(StringComparer.Ordinal) : OperatorReceiptsLocked(followed));
@@ -175,6 +178,13 @@ public sealed partial class EstateService
                 if (written is null)
                 {
                     adapter.Check(Root, checkpoint.Basis.Branch, checkpoint.Basis.Head, Receipts());
+                    // A resumed action is judged again: the estate may have adopted since it stopped, and that refusal needs no signature.
+                    if (authored is null && OperatorRecordRemovalRefusal(new RecordDraft(request.Type, request.By, request.Body, null, request.Supersedes), session.Load(), null) is { } before)
+                    {
+                        if (session.Live.Meta(OperatorActive) == identity) session.Live.SetMeta(OperatorActive, string.Empty);
+                        if (checkpoint.Follows is { } follows) session.Live.SetMeta(OperatorFinished, follows);
+                        return Answer("refused", before.Message, false, before.NextStep) with { Problem = before.Problem };
+                    }
                     // A crash before publication can require presence again, but never creates a second record identity.
                     if (authored is null)
                     {
@@ -186,6 +196,15 @@ public sealed partial class EstateService
                         if (authored is null) throw new ProviderRefusedException(refusal!);
                     }
                     if (authored.Envelope.ComputedHash != checkpoint.Hash) throw new ProviderRefusedException("The resumed record differs from the original intent.");
+                    // The removal is judged again at the record stage, against what arrived since the prepare step. Nothing is stored,
+                    // branched or committed yet, so a refused action stops being this clone's unfinished one and the finished action it
+                    // followed is tolerated again.
+                    if (OperatorRecordRemovalRefusal(new RecordDraft(request.Type, request.By, request.Body, authored.Envelope.Subject, request.Supersedes), session.Load(), authored) is { } late)
+                    {
+                        if (session.Live.Meta(OperatorActive) == identity) session.Live.SetMeta(OperatorActive, string.Empty);
+                        if (checkpoint.Follows is { } follows) session.Live.SetMeta(OperatorFinished, follows);
+                        return Answer("refused", late.Message, false, late.NextStep) with { Problem = late.Problem };
+                    }
                     (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([authored],
                         "Store the operator record and its generated register members.", null);
                     written = stored.SingleOrDefault();

@@ -562,7 +562,7 @@ public sealed partial class EstateService
     /// batch (<see cref="StoreRemovalLocked"/>), which one signed record carried through a checked merge cannot carry; in one that has
     /// not, a revision that would make records fail is refused, naming them (<see cref="RemovalRefusal"/>). Caller holds the gate.
     /// </summary>
-    private (string Message, string NextStep, Problem? Problem)? OperatorRecordRemovalRefusal(RecordDraft draft, EstateModel current, AuthoredRecord authored)
+    private (string Message, string NextStep, Problem? Problem)? OperatorRecordRemovalRefusal(RecordDraft draft, EstateModel current, AuthoredRecord? authored)
     {
         if (!TakesRoleAway(draft, current)) return null;
         if (SignedHistory.Adopted(current))
@@ -573,6 +573,7 @@ public sealed partial class EstateService
                 "which writes the checkpoint and the revision together. Nothing was written.", RemovalCommand(draft, draft.By), null);
         }
 
+        if (authored is null) return null;
         return RemovalRefusal(current, authored) is { } refused
             ? (refused.Message, "Adopt history checkpoints with vericairn estate checkpoint --adopt --check and vericairn estate checkpoint --adopt --expect-plan <plan hash> --by <root operator>, " +
                 $"then write the revision with {RemovalCommand(draft, draft.By)}, which writes a checkpoint before it.", refused)
