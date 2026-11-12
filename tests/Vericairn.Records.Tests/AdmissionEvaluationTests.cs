@@ -538,4 +538,103 @@ public class AdmissionEvaluationTests
         Assert.Equal(SignatureChecks.IsAdmitted(model, byB), SignatureChecks.IsAdmitted(reversed, byB));
         Assert.Equal(model.Records.Select(r => model.Counts(r)), model.Records.Select(r => reversed.Counts(r)));
     }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void CopiesOfARevocationThatWouldUnseatItsOwnAuthorityRevokeNothing(int copies)
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope basis = f.Decision();
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["contributor"]}""", signer: f.OperatorSigner);
+        f.Grant(admin.Id, basis, [Scopes.Administer]);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin's laptop");
+        (RecordEnvelope second, _) = f.Admitted(f.Estate.OperatorId, "Operator's second device");
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.BuilderId, HistoryFixture.Order("UNS-2"), signer: f.BuilderSigner);
+        RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+        // The administrator writes the same revocation more than once, and the operator retries a lost-device revocation as often.
+        var revocations = new List<RecordEnvelope>();
+        for (int i = 0; i < copies; i++)
+        {
+            f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+            revocations.Add(f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, $"Revoked {i}.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(adminDevice)));
+            revocations.Add(f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, $"Lost {i}.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(second)));
+        }
+
+        EstateModel model = f.Load();
+        Assert.All(revocations, r => Assert.False(model.Counts(model.ById[r.Id])));
+        Assert.All(revocations, r => Assert.True(Reported(model, r, "admission.unseats-support")));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        Assert.True(SignatureChecks.IsAdmitted(model, second));
+        Assert.True(SignatureChecks.IsAdmitted(model, adminDevice));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
+        Assert.True(model.Counts(model.ById[order.Id]));
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnAdmissionWhoseAuthorRestsOnAnUnanchoredUnsignedRecordIsReported(bool adopt)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope contributor = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Contributor","roles":["contributor"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope laptop, _) = f.Admitted(contributor.Id, "Contributor's laptop");
+        DateTimeOffset before = f.Estate.Clock;
+        f.Estate.SetClock(before.AddSeconds(100));
+        f.Require();
+        if (adopt) f.Adopt();
+        // An unsigned revision giving the contributor the operator role, dated before the charter required signatures.
+        f.Estate.SetClock(before.AddSeconds(50));
+        f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Contributor","roles":["operator"]}""", supersedes: contributor.Id);
+        f.Estate.SetClock(before.AddSeconds(300));
+        RecordEnvelope device = f.Device(f.Estate.OperatorId, "Another device of the operator");
+        RecordEnvelope admission = f.Estate.Add("admission", contributor.Id, HistoryFixture.Admission(f.Estate.OperatorId, "By the contributor."), device.Reference, signer: f.Signer(laptop));
+        EstateModel model = f.Load();
+        if (adopt)
+        {
+            // After adoption an unanchored unsigned record gives nothing.
+            Assert.False(model.Counts(model.ById[admission.Id]));
+            Assert.False(Reported(model, admission, "admission.author-unanchored"));
+        }
+        else
+        {
+            Assert.True(model.Counts(model.ById[admission.Id]));
+            Finding finding = Assert.Single(model.Findings, x => x.Code == "admission.author-unanchored");
+            Assert.Equal(Severity.Warning, finding.Severity);
+            Assert.Equal(admission.ExpectedPath, finding.Location);
+        }
+    }
+
+    [Fact]
+    public void ARevocationLeftOutBesideOneThatUnseatsItselfStillCounts()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope basis = f.Decision();
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["contributor"]}""", signer: f.OperatorSigner);
+        f.Grant(admin.Id, basis, [Scopes.Administer]);
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin's laptop");
+        (RecordEnvelope second, RecordEnvelope secondAdmission) = f.Admitted(f.Estate.OperatorId, "Operator's second device");
+        RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+        string revokedAt = RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(10));
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(20));
+        RecordEnvelope late = f.Device(f.Estate.BuilderId, "Admitted by the second device after its revocation");
+        RecordEnvelope lateAdmission = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.BuilderId, "Late."), late.Reference, signer: f.Signer(second));
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+        // The administrator revokes the root operator's first device as of its own admission, which unseats itself, and the second device
+        // from a time after its admission, which stands.
+        RecordEnvelope unseating = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(adminDevice));
+        RecordEnvelope standing = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked.", "revoked", revokedAt), second.Reference, supersedes: secondAdmission.Id, signer: f.Signer(adminDevice));
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(model.ById[unseating.Id]));
+        Assert.True(Reported(model, unseating, "admission.unseats-support"));
+        Assert.True(model.Counts(model.ById[standing.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        Assert.False(SignatureChecks.IsAdmitted(model, second));
+        Assert.False(model.Counts(model.ById[lateAdmission.Id]));
+        Assert.False(SignatureChecks.IsAdmitted(model, late));
+        Assert.True(SignatureChecks.IsAdmitted(model, adminDevice));
+    }
 }

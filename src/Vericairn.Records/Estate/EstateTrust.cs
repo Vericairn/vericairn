@@ -518,12 +518,15 @@ internal sealed partial class EstateTrust
     /// admissions admit at its time, and whose author may admit by the revisions that stand with them, joins, until none does. Each step
     /// judges every admission against the same set, so the result does not depend on the order records are read in. A set that holds an
     /// admission that no longer passes against it, such as one signed by a device a revocation in the set revoked before, is judged again
-    /// without some of those admissions, from the start, so that one left out unseats nothing: first those of the admissions that helped
-    /// make another fail which fail by themselves, judged with every admission that failed beside them left out, such as a revocation that
-    /// revokes what its own signature or its author's authority rests on; failing those, those of them that failed themselves, which unseat
-    /// one another; and failing those, every admission that failed, each of which another admission that stands revoked. An admission one
-    /// of the closings refuses never joins, and the author's authority is read against the same closings. The result is kept for each set
-    /// of closings, with the admissions left out that would otherwise pass (<see cref="Unseating"/>).
+    /// without some of those admissions, from the start, so that one left out unseats nothing. An admission helped make another fail
+    /// when that one passes without it; a device's revocations are judged together for this, so that copies of one revocation cannot
+    /// hide each other. Left out are first those that helped and fail by themselves, judged with every admission that failed beside them
+    /// left out, such as a revocation that revokes what its own signature or its author's authority rests on; failing those, those that
+    /// helped and failed themselves, which unseat one another; and failing those, every admission that failed, each of which another
+    /// admission that stands revoked. A set in which nothing fails is judged again with each admission left out that passes against it,
+    /// one at a time and once each, the others still left out. An admission one of the closings refuses never joins, and the author's
+    /// authority is read against the same closings. The result is kept for each set of closings, with the admissions left out that would
+    /// otherwise pass (<see cref="Unseating"/>).
     /// </summary>
     private HashSet<string> CountingAdmissions(Mode mode, IReadOnlyList<Closing> bound)
     {
@@ -555,18 +558,30 @@ internal sealed partial class EstateTrust
 
             List<RecordEnvelope> signed = [.. all.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash)];
             var left = new HashSet<string>(StringComparer.Ordinal);
+            var cleared = new HashSet<string>(StringComparer.Ordinal);
             while (true)
             {
                 HashSet<string> known = Join(start, signed, left);
                 Standing found = Against(known);
                 List<RecordEnvelope> failed = [.. signed.Where(a => known.Contains(a.Id) && !Passes(a, known, found))];
-                if (failed.Count == 0)
+                if (failed.Count > 0)
                 {
-                    unseating[known] = [.. signed.Where(a => left.Contains(a.Id) && Passes(a, known, found)).Select(a => a.Id)];
-                    return known;
+                    left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
+                    continue;
                 }
 
-                left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
+                // An admission left out that passes against the set may have been left out only beside another that unseated it: each is
+                // judged again once, alone, from the start, with it in and the others still out.
+                List<RecordEnvelope> passing = [.. signed.Where(a => left.Contains(a.Id) && Passes(a, known, found))];
+                if (passing.FirstOrDefault(a => !cleared.Contains(a.Id)) is { } back)
+                {
+                    left.Remove(back.Id);
+                    cleared.Add(back.Id);
+                    continue;
+                }
+
+                unseating[known] = [.. passing.Select(a => a.Id)];
+                return known;
             }
         }
 
@@ -596,14 +611,24 @@ internal sealed partial class EstateTrust
                 for (int i = 0; i < record.Signatures.Count; i++) signers.Add(Proof(record, i).Identity);
             }
 
+            // Each revoked device's revocations are judged together, so that copies of one revocation cannot hide each other, and every
+            // other admission alone: one of them helped make a failing admission fail when that admission passes without them.
             List<RecordEnvelope> helped = [];
+            var groups = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
             foreach (RecordEnvelope candidate in signed.Where(a => known.Contains(a.Id) && a.Subject?.Id is { } subject && model.ById.TryGetValue(subject, out RecordEnvelope? device) &&
                 device.Type == "device" && signers.Contains(IdentityOf(device))))
             {
+                string key = EstateModel.BodyString(candidate, "status") == "revoked" ? "revoked " + IdentityOf(model.ById[candidate.Subject!.Id]) : candidate.Id;
+                if (!groups.TryGetValue(key, out List<RecordEnvelope>? group)) groups[key] = group = [];
+                group.Add(candidate);
+            }
+
+            foreach (List<RecordEnvelope> group in groups.Values)
+            {
                 var without = new HashSet<string>(known, StringComparer.Ordinal);
-                without.Remove(candidate.Id);
+                without.ExceptWith(group.Select(a => a.Id));
                 Standing found = Against(without);
-                if (failed.Any(a => a.Id != candidate.Id && VerifiesAgainst(a, without) && found.MayAdmit(a))) helped.Add(candidate);
+                if (failed.Any(a => !group.Contains(a) && VerifiesAgainst(a, without) && found.MayAdmit(a))) helped.AddRange(group);
             }
 
             var rest = new HashSet<string>(known, StringComparer.Ordinal);
@@ -643,7 +668,10 @@ internal sealed partial class EstateTrust
     /// (<c>admission.unseats-support</c>), and a signed admission whose signatures verify by devices admitted at its time but whose author
     /// may not admit then as admissions read authority (<c>admission.author</c>), which the model's own reading may not show. Each is a
     /// warning, as a policy record that counts for nothing only because of what came after it is: the admission admits and revokes
-    /// nothing, the estate stays valid, and one who may writes it again.
+    /// nothing, the estate stays valid, and one who may writes it again. Before the estate adopts history checkpoints, while its charter
+    /// requires signatures, an admission that counts only because an unsigned principal or grant record that no checkpoint anchors gives
+    /// its author the standing is the warning <c>admission.author-unanchored</c>: such a record is one anyone able to add records can
+    /// write, dated as they choose.
     /// </summary>
     internal IEnumerable<Finding> AdmissionFindings()
     {
@@ -667,6 +695,17 @@ internal sealed partial class EstateTrust
                     findings.Add(new Finding(Severity.Warning, "admission.author", admission.ExpectedPath,
                         $"This {kind} admits and revokes nothing: devices are admitted by an operator or a person holding the 'administer' scope, read as they stood at its time from the root operator's own record and from principal and grant records that rest on signatures, an anchor or, before the estate adopted history checkpoints, the charter's signature rule at their time; {admission.By} held neither then by that reading. Admit or revoke again as one who may now."));
                 }
+            }
+
+            if (RequiredSince() is null || adoptionEligible) return findings;
+            // The same reading with unsigned principal and grant records only when anchored: what an admission's author may do without them.
+            var grounded = new Standing(this, Acting, Mode.Anchors, r => r.Signatures.Count > 0
+                ? r.DeclaredHash == r.ComputedHash && Open(this, r, Acting, Mode.Anchors) && VerifiesAgainst(r, counting)
+                : anchors.Contains(SignatureChecks.AnchorKey(r.Id, r.ComputedHash)));
+            foreach (RecordEnvelope admission in admissionRecords.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && counting.Contains(a.Id) && !grounded.MayAdmit(a)))
+            {
+                findings.Add(new Finding(Severity.Warning, "admission.author-unanchored", admission.ExpectedPath,
+                    $"This {(EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission")} counts because {admission.By}'s operator role or 'administer' rests on an unsigned principal or grant record dated before the charter required signatures, which no history checkpoint anchors. Anyone able to add records can write such a record with any date. Review it: adopting history checkpoints anchors what you keep, and from then on an unsigned record counts only when anchored."));
             }
 
             return findings;
