@@ -546,7 +546,7 @@ revision. An unsigned admission also counts when an anchoring checkpoint lists i
 besides the format-2 migration's list. Before adoption the earlier rule holds:
 an unsigned record dated at or before the current required revision counts.
 
-**What an anchor decides.** An anchor decides only that the exact bytes it lists count.
+**What an anchor decides.** An anchor exempts the exact bytes it lists from the signature requirement and, except for a device revision, from a closing's refusal; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not.
 It authenticates nothing: an anchored record's `by` stays its author's claim, and the
 rules that judge its author read that principal's roles and grants as for any record.
 Its `at` is read as any counting record's. A device revision a closing refused changes
@@ -555,7 +555,7 @@ a signed record no closing refuses and of a device revision a closing refused.
 
 **What a removal leaves.** A removed witnessed record is absent, so every rule reads
 the copy without it: a removed revocation leaves its device admitted there, bounded
-only by a closing of that device ([below](#closings-and-authority-at-a-records-time-092)).
+only by a closing of that device or of its key ([below](#closings-and-authority-at-a-records-time-092)).
 The error holds release submission, and the runtime refuses every write that would
 leave it standing. An acknowledgement ends the error for the version it names and
 decides nothing else: that version is no longer witnessed, the estate reads on without

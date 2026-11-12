@@ -199,14 +199,14 @@ history ([CLI](cli.md#vericairn-estate-check---expect-092)).
 
 A witnessed record that is removed is absent, and every rule reads the copy without it: a
 removed revocation, for example, leaves its device admitted on that copy, bounded only by a
-closing of that device ([below](#closings-and-authority-at-a-records-time-092)). While
+closing of that device or of its key ([below](#closings-and-authority-at-a-records-time-092)). While
 `history.removed` stands, the runtime refuses every write that would leave it standing, since
 it writes nothing that leaves the estate with an error, and release submission waits. An
 acknowledgement settles the error and decides nothing else: it lists the witnessed version's
 id and hash with a reason, the estate reads on without the record, and a record under that id,
 written again or present with other bytes, is part of the unwitnessed tail and counts by its
-own rules until a checkpoint lists it. An anchor likewise decides only that the exact bytes it
-lists count. It authenticates nothing: the record's `by` stays a claim, which the rules judging
+own rules until a checkpoint lists it. An anchor likewise
+exempts the exact bytes it lists from the signature requirement and, except for a device revision, from a closing's refusal; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not. It authenticates nothing: the record's `by` stays a claim, which the rules judging
 its author check against that principal's roles and grants as for any record, and its `at` is
 read as any counting record's. A device revision a closing refused changes no key or name,
 anchored or not. The runtime refuses an anchor of bytes not present, of a signed record no
@@ -223,7 +223,9 @@ are read as they stood at a record's time
 A closing is a history checkpoint with `closes`, written just before the act it closes:
 `{kind: device, id}` before a device's revocation, `{kind: key, id}` naming the device
 revision whose key a rotation replaces, or `{kind: grant, id}` naming the authority revision
-that a revision dropping a scope or shortening an expiry narrows; a grant closing closes that
+that a narrowing revision replaces, one naming another grantee, dropping a scope, reserving
+another action, adding a condition, adding or shortening an expiry, or changing a policy scope's
+bounds; a grant closing closes that
 revision and every revision of its line dated at or before it. Only someone who may perform
 the act signs it: an operator, a person holding `administer` or an operator's recovery device
 for a device, the device itself for its own key, and an operator for a grant. For a device
@@ -276,7 +278,8 @@ role or `administer` grant. Status and policy evaluation take their recorded tim
 records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
-warning `history.dated-after-witness`. In every estate, the runtime refuses a stated time
+warning `history.dated-after-witness`; a record the adoption checkpoint witnesses is not
+questioned. In every estate, the runtime refuses a stated time
 more than five minutes past its own clock, such as `records new --at` or
 `work attempt --at`. An estate that has not adopted checkpoints, such as the first-party
 estate before it adopts, reads exactly as before.
@@ -290,9 +293,8 @@ earlier time can still be stated, and what it decides depends on whether the est
 adopted history checkpoints.
 
 - **In every estate**, `at` places a record that counts: its path month, its order, release-notes
-  windows, progress, ages and duty sequence, ids breaking ties. It cannot place a grant or
-  principal revision before the nearest counting record below it in its line, which then counts
-  for nothing, and a new record's `by` must name a principal the estate holds when the record is
+  windows, progress, ages and duty sequence, ids breaking ties. A grant or principal
+  revision dated before the nearest counting record below it in its line counts for nothing, and a new record's `by` must name a principal the estate holds when the record is
   written, whatever its `at` says.
 - **Before adoption**, `at` also decides whether an unsigned record counts under required
   signatures, by comparison with the current charter revision, and which key and admission a
@@ -305,8 +307,9 @@ adopted history checkpoints.
   anchored. Roles and grants are read as they stood at the stated time, or at the adoption for a
   record it witnesses, bounded by grant closings; anchoring, acknowledging a removal, rooting an
   adoption and signing a device's or a grant's closing also need the role or grant to still
-  stand (above). A checkpoint questions a signed record dated more than five minutes after it,
-  as a warning, and refuses nothing. No checkpoint questions an earlier date: a signed record in
+  stand (above). A checkpoint questions a signed record it witnesses, other than one the
+  adoption witnesses, dated more than five minutes after the earliest-dated counting checkpoint
+  that witnesses it, with a warning that refuses nothing. No checkpoint questions an earlier date: a signed record in
   the unwitnessed tail may state a time before the newest checkpoint, and is read at that time
   unless a closing refuses it. A revocation, rotation or narrowing stated more than five minutes
   before the newest record its closing would witness, or before the head checkpoint, is refused.
