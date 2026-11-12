@@ -268,16 +268,28 @@ internal sealed partial class EstateTrust
         if (mode == Mode.Anchors && anchorsKnown && record.Type != "device" && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return null;
         foreach (Closing closing in bound)
         {
-            if (closing.Kind == "grant" || Witnesses(closing, record)) continue;
-            for (int i = 0; i < record.Signatures.Count; i++)
-            {
-                SignatureProof proof = Proof(record, i);
-                if (proof.Identity != closing.Identity) continue;
-                if (closing.Kind == "device" ? !RevokesFrom(record, closing) : proof.Key == closing.Key && record.Id != closing.Rotation) return closing;
-            }
+            if (Refuses(closing, record)) return closing;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether one closing refuses a signed record, anchors aside: it closes the device that signed it, or the key it was signed with, and
+    /// does not witness it, the record being neither the revocation nor the rotation the closing precedes. The answer depends on no other
+    /// closing.
+    /// </summary>
+    private bool Refuses(Closing closing, RecordEnvelope record)
+    {
+        if (closing.Kind == "grant" || Witnesses(closing, record)) return false;
+        for (int i = 0; i < record.Signatures.Count; i++)
+        {
+            SignatureProof proof = Proof(record, i);
+            if (proof.Identity != closing.Identity) continue;
+            if (closing.Kind == "device" ? !RevokesFrom(record, closing) : proof.Key == closing.Key && record.Id != closing.Rotation) return true;
+        }
+
+        return false;
     }
 
     /// <summary>Whether a record revokes a closed device from its closing's time on: the act the closing precedes.</summary>
