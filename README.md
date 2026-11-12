@@ -6,8 +6,8 @@ and history kept as records you own: by default in a git repository beside your 
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
 accept it. Software is its first domain, and the one that ships today.
 
-**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.1, from
-November 7, 2026.
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.2, from
+November 12, 2026.
 [Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
 [NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
 [Limitations](docs/limitations-and-platforms.md) ·
@@ -152,7 +152,7 @@ release and pins the one it runs on.
 
 ## What is here
 
-The following capabilities are in 0.9.1.
+The following capabilities are in 0.9.2.
 
 - `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
@@ -178,7 +178,8 @@ The following capabilities are in 0.9.1.
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
   `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `handoff`, `resume`,
-  `communication`, `context`, `policies`, `operator`, `changes`, `doctor`, `version`, `updates`; a
+  `communication`, `context`, `policies`, `operator`, `changes`, `doctor`, `version`, `updates`, and from 0.9.2
+  `events`, `search` and `security-reports`; a
   client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records, with repository-check findings: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
@@ -204,8 +205,8 @@ The following capabilities are in 0.9.1.
   `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
   a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
   takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent.
-  Explicit and routed runs on the old assignment are then refused before intent, without a charge. In the
-  development build, a goal can run a flow, a template of kind `flow` declaring roles and ordered steps with their
+  Explicit and routed runs on the old assignment are then refused before intent, without a charge. From 0.9.2,
+  a goal can run a flow, a template of kind `flow` declaring roles and ordered steps with their
   hand-off contract: `vericairn goal show` derives each step's state, and each item it must hand on with its
   provenance, evidence and review, from the records, and `vericairn goal step` moves the run one work or review step
   per command, routed by the step's role, its brief pinning the inputs by hash; a reserved step is never dispatched. Multi-step planning and scheduling are outside this Community implementation.
