@@ -201,6 +201,9 @@ internal sealed class HistoryAnalysis
     /// <summary>The anchors of every checkpoint whose author may anchor, as id and hash keys.</summary>
     internal HashSet<string> AnchorKeys { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Whether the estate holds an adoption checkpoint whose author may anchor, judged by signatures alone.</summary>
+    internal bool AdoptionEligible => checkpoints.Any(c => c.Previous.Count == 0 && eligible.Contains(c.Record.Id));
+
     /// <summary>Reads the anchors and acknowledged removals, judged by signatures alone.</summary>
     internal static HistoryAnalysis Anchoring(EstateTrust trust, EstateModel model)
     {

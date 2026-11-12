@@ -50,6 +50,9 @@ internal sealed partial class EstateTrust
     private readonly HashSet<string>?[] admittedActing = new HashSet<string>?[2];
     private readonly Dictionary<string, HashSet<string>>[] admittedByClosings = [new(StringComparer.Ordinal), new(StringComparer.Ordinal)];
     private readonly Dictionary<HashSet<string>, HashSet<string>> unseating = new(ReferenceEqualityComparer.Instance);
+    private RecordEnvelope? requiredSince;
+    private bool requiredSinceKnown;
+    private bool adoptionEligible;
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
@@ -100,6 +103,7 @@ internal sealed partial class EstateTrust
         // Anchors are judged by signatures alone, so that nothing they anchor can be what makes them count.
         MigrationAnchors = ComputeMigrationAnchors();
         HistoryAnalysis analysis = HistoryAnalysis.Anchoring(this, model);
+        adoptionEligible = analysis.AdoptionEligible;
         var all = new HashSet<string>(MigrationAnchors, StringComparer.Ordinal);
         all.UnionWith(analysis.AnchorKeys);
         anchors = all;
@@ -610,9 +614,9 @@ internal sealed partial class EstateTrust
     /// <summary>Whether no closing given refuses a record.</summary>
     private static bool Open(EstateTrust trust, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode) => bound.Count == 0 || trust.Refuser(record, bound, mode) is null;
 
-    /// <summary>Who may admit, judged from revisions whose signatures verify by the devices a set of admissions admits, against the same closings.</summary>
+    /// <summary>Who may admit, judged from the revisions that stand with the devices a set of admissions admits, against the closings given.</summary>
     private Standing StandingAgainst(HashSet<string> counting, IReadOnlyList<Closing> bound, Mode mode) =>
-        new(this, bound, mode, r => r.Signatures.Count > 0 && r.DeclaredHash == r.ComputedHash && Open(this, r, bound, mode) && VerifiesAgainst(r, counting));
+        new(this, bound, mode, r => r.Signatures.Count > 0 ? r.DeclaredHash == r.ComputedHash && Open(this, r, bound, mode) && VerifiesAgainst(r, counting) : mode == Mode.Anchors && UnsignedStands(r));
 
     /// <summary>
     /// The admissions left out of those that count with anchors and the closings that act which would pass against them: each would unseat
@@ -628,19 +632,31 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// The findings about admissions that do not count where nothing else says why: one left out because it would unseat what it rests on
-    /// (<c>admission.unseats-support</c>).
+    /// (<c>admission.unseats-support</c>), and a signed admission whose signatures verify by devices admitted at its time but whose author
+    /// may not admit then as admissions read authority (<c>admission.author</c>), which the model's own reading may not show.
     /// </summary>
     internal IEnumerable<Finding> AdmissionFindings()
     {
         lock (gate)
         {
+            HashSet<string> counting = CountingAdmissions(Mode.Anchors, Acting);
             IReadOnlySet<string> left = Unseating();
+            Standing found = StandingAgainst(counting, Acting, Mode.Anchors);
             var findings = new List<Finding>();
-            foreach (RecordEnvelope admission in admissionRecords.Where(a => left.Contains(a.Id)))
+            foreach (RecordEnvelope admission in admissionRecords.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash &&
+                !counting.Contains(a.Id) && Open(this, a, Acting, Mode.Anchors)))
             {
                 string kind = EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission";
-                findings.Add(new Finding(Severity.Error, "admission.unseats-support", admission.ExpectedPath,
-                    $"This {kind} counts for nothing: counting it would unseat what its own signature or its author's authority rests on, directly or through another admission or revocation that would unseat it in turn. One that does not count admits and revokes nothing, so what it would have unseated is read without it. Write it again from a device whose admission does not rest on what it revokes, or as of a time after the admissions it rests on."));
+                if (left.Contains(admission.Id))
+                {
+                    findings.Add(new Finding(Severity.Error, "admission.unseats-support", admission.ExpectedPath,
+                        $"This {kind} counts for nothing: counting it would unseat what its own signature or its author's authority rests on, directly or through another admission or revocation that would unseat it in turn. One that does not count admits and revokes nothing, so what it would have unseated is read without it. Write it again from a device whose admission does not rest on what it revokes, or as of a time after the admissions it rests on."));
+                }
+                else if (VerifiesAgainst(admission, counting) && !found.MayAdmit(admission))
+                {
+                    findings.Add(new Finding(Severity.Error, "admission.author", admission.ExpectedPath,
+                        $"This {kind} admits and revokes nothing: devices are admitted by an operator or a person holding the 'administer' scope, read as they stood at its time from the root operator's own record and from principal and grant records that rest on signatures, an anchor or, before the estate adopted history checkpoints, the charter's signature rule at their time; {admission.By} held neither then by that reading. Admit or revoke again as one who may now."));
+                }
             }
 
             return findings;
@@ -648,58 +664,79 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Who may admit or revoke devices at an admission's time, judged from the principal and grant revisions a given test finds authentic:
-    /// the root operator's own first principal record, and revisions that pass the test and were written by a person holding the operator
-    /// role at their time, read the same way. Authority is read as it stood at the admission's time, bounded by the closings given: the
-    /// author's principal line as its trusted revisions stood then, and a trusted grant revision in force then, unexpired then, and closed by
-    /// none of those closings without witnessing the admission; so a later grant authorizes nothing earlier and a later narrowing withdraws
-    /// nothing already written, as <see cref="EstateModel.HasRoleAt"/> and <see cref="EstateModel.HasScopeAt"/> read authority. Admissions
-    /// are judged with a test built from the admissions found so far (<see cref="CountingAdmissions"/>), so the first authority is the base
-    /// and nothing here reads which admissions count.
+    /// Whether an unsigned principal or grant revision stands for the reading of who may admit, with anchors, as other rules read unsigned
+    /// records (<see cref="Unsigned"/>): an anchoring checkpoint or the signed format-2 migration lists it by id and hash; or the charter
+    /// left signatures optional at its time, that is it is dated no later than the first revision along the first charter's line that
+    /// requires them (<see cref="RequiredSince"/>), or the line never requires them, and the estate has not adopted history checkpoints
+    /// while the line requires them. Closings are judged only in an estate that has adopted, so while they are, it reads as adopted.
+    /// </summary>
+    private bool UnsignedStands(RecordEnvelope record)
+    {
+        if (record.Type is not ("principal" or "authority") || PolicyAuthority.RequiresSignature(model, record)) return false;
+        if (anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return true;
+        if (RequiredSince() is not { } since) return true;
+        return closingsKnown && !adoptionEligible && string.CompareOrdinal(record.At, since.At) <= 0;
+    }
+
+    /// <summary>
+    /// The first revision along the first charter's line that requires signatures, reached through revisions of charters that leave them
+    /// optional, each of which counts whoever wrote it (<see cref="CharterRevisionCounts"/>); null when the line never requires them that way.
+    /// </summary>
+    private RecordEnvelope? RequiredSince()
+    {
+        if (requiredSinceKnown) return requiredSince;
+        RecordEnvelope? current = FirstEstate;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (current is not null && seen.Add(current.Id) && !RequiresSignatures(current))
+            current = model.SupersededBy.TryGetValue(current.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" ? successor : null;
+        requiredSince = current is not null && RequiresSignatures(current) ? current : null;
+        requiredSinceKnown = true;
+        return requiredSince;
+    }
+
+    /// <summary>
+    /// Who may admit or revoke devices at an admission's time, judged from the principal and grant revisions that stand by a given test:
+    /// signed ones whose signatures verify by the devices the admissions found so far admit, and, with anchors, unsigned ones as
+    /// <see cref="UnsignedStands"/> reads them. A revision is trusted when it stands and its author may write it at its time, as the records
+    /// that give roles read it (<see cref="AuthorityReplay"/>): the root operator's own first principal record; a principal revision by an
+    /// operator, one giving the operator role only for a human; a principal revision by a person holding administer, giving no operator role,
+    /// of a line whose revision it wrote; a grant revision by an operator; and a removal or narrowing by one who held the operator role
+    /// earlier (<see cref="TrustedRemoval"/>); never a principal's own record (<see cref="SelfAuthored"/>), nor one dated before the trusted
+    /// revision below it. Each trusted revision follows the nearest trusted revision below it in its line, as <see cref="AttachedTo"/> reads
+    /// lines. Authority is read as it stood at the admission's time, bounded by the closings given: the author's principal line as its
+    /// trusted revisions stood then, and a trusted grant revision in force then, unexpired then, and closed by none of those closings without
+    /// witnessing the admission; so a later grant authorizes nothing earlier and a later narrowing withdraws nothing already written, as
+    /// <see cref="EstateModel.HasRoleAt"/> and <see cref="EstateModel.HasScopeAt"/> read authority, and a revision written later restores
+    /// nothing earlier. Administer counts only for a person. Admissions are judged with a test built from the admissions found so far
+    /// (<see cref="CountingAdmissions"/>), so the first authority is the base and nothing here reads which admissions count. A circle of
+    /// appointments gives nothing.
     /// </summary>
     private sealed class Standing(EstateTrust trust, IReadOnlyList<Closing> bound, Mode mode, Func<RecordEnvelope, bool> authentic)
     {
         private readonly Dictionary<string, bool> verdicts = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, bool> operators = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, bool> formers = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> kept = new(StringComparer.Ordinal);
         private readonly HashSet<string> checking = new(StringComparer.Ordinal);
 
-        /// <summary>
-        /// Whether a revision is the root operator's own first record, or passes the test and was written by a trusted operator at its time,
-        /// or is a removal by one who held the operator role earlier (<see cref="TrustedRemoval"/>); never a principal's own record, which
-        /// counts for nothing in every read (<see cref="SelfAuthored"/>).
-        /// </summary>
-        private bool TrustedRevision(RecordEnvelope revision) =>
-            (revision.Type == "principal" && revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null) ||
-            (!trust.SelfAuthored(revision) && Authentic(revision) && (TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision)));
-
-        /// <summary>
-        /// Whether a revision is a removal that keeps counting after its author lost the operator role, as the records that give roles read
-        /// it (<see cref="AuthorityReplay"/>): a principal revision giving no operator role on top of a trusted revision that gives it, or a
-        /// grant revision that only narrows the trusted revision it supersedes, written by one who held the operator role at its time or
-        /// earlier through trusted revisions. So it takes away and never gives.
-        /// </summary>
-        private bool TrustedRemoval(RecordEnvelope revision)
+        /// <summary>A verdict asked for by key, kept once reached; false for one already being evaluated, a circle cut short.</summary>
+        private bool Guarded(string key, Func<bool> evaluate)
         {
-            if (revision.Supersedes is null || !trust.model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) || previous.Type != revision.Type) return false;
-            bool takesAway = revision.Type == "principal" ? !IsOperator(revision) && IsOperator(previous) : revision.Type == "authority" && AuthorityReplay.Narrows(revision, previous);
-            return takesAway && TrustedRevision(previous) && FormerOperator(revision.By, revision.At);
-        }
+            if (kept.TryGetValue(key, out bool known)) return known;
+            if (!checking.Add(key)) return false;
+            bool value;
+            try
+            {
+                value = evaluate();
+            }
+            finally
+            {
+                checking.Remove(key);
+            }
 
-        /// <summary>Whether a principal is the root operator, or held the operator role through trusted revisions at some time up to a time.</summary>
-        private bool FormerOperator(string principal, string at)
-        {
-            if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
-            string key = principal + " " + at;
-            if (formers.TryGetValue(key, out bool known)) return known;
-            if (!checking.Add("former " + key)) return false;
-            bool value = trust.principalRecords.Any(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && IsOperator(p) && TrustedOperator(principal, p.At));
-            checking.Remove("former " + key);
-            formers[key] = value;
+            kept[key] = value;
             return value;
         }
 
-        private bool Authentic(RecordEnvelope revision)
+        private bool Stands(RecordEnvelope revision)
         {
             if (verdicts.TryGetValue(revision.Id, out bool known)) return known;
             bool value = authentic(revision);
@@ -707,41 +744,119 @@ internal sealed partial class EstateTrust
             return value;
         }
 
-        /// <summary>
-        /// The principal record that describes a principal at a time: among the revisions of its line dated at or before the time that are
-        /// trusted, the single one no other of them supersedes. Revisions anyone else wrote, signed or not, are not read.
-        /// </summary>
-        private RecordEnvelope? PrincipalAt(string principal, string at)
+        /// <summary>Whether a principal or grant revision is trusted (above).</summary>
+        private bool TrustedRevision(RecordEnvelope revision)
         {
-            List<RecordEnvelope> revisions = [.. trust.principalRecords.Where(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p))];
-            List<RecordEnvelope> heads = [.. revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id))];
+            if (revision.Type == "principal" && revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null) return true;
+            if (trust.SelfAuthored(revision) || !Stands(revision)) return false;
+            return Guarded("trusted " + revision.Id, () =>
+            {
+                // The revisions below are settled first, from the bottom of the line, so that a long line is walked, never recursed.
+                List<RecordEnvelope> lower = [];
+                var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+                for (RecordEnvelope? current = Previous(revision); current is not null && seen.Add(current.Id); current = Previous(current)) lower.Add(current);
+                for (int i = lower.Count - 1; i >= 0; i--) TrustedRevision(lower[i]);
+                RecordEnvelope? below = Below(revision);
+                if (below is not null && string.CompareOrdinal(revision.At, below.At) < 0) return false;
+                if (revision.Type == "authority") return TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision, below);
+                bool givesOperator = AuthorityReplay.Roles(revision).Contains(Roles.Operator);
+                if (givesOperator && EstateModel.BodyString(revision, "kind") != "human") return false;
+                if (TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision, below)) return true;
+                if (givesOperator || !HoldsAdminister(revision)) return false;
+                // A person holding administer amends only a line whose revision it wrote: the one below, or, when none below is trusted, the one named.
+                RecordEnvelope? amended = below ?? Previous(revision);
+                return amended is null || amended.By == revision.By;
+            });
+        }
+
+        /// <summary>The record a revision names as the one it supersedes, when that is a record of its own type.</summary>
+        private RecordEnvelope? Previous(RecordEnvelope revision) =>
+            revision.Supersedes is not null && trust.model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) && previous.Type == revision.Type ? previous : null;
+
+        /// <summary>The nearest trusted revision below a revision in its line, skipping any that is not trusted; null when there is none.</summary>
+        private RecordEnvelope? Below(RecordEnvelope revision)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+            for (RecordEnvelope? current = Previous(revision); current is not null && seen.Add(current.Id); current = Previous(current))
+            {
+                if (TrustedRevision(current)) return current;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Whether a revision is a removal that keeps counting after its author lost the operator role, as the records that give roles read
+        /// it (<see cref="AuthorityReplay"/>): a principal revision giving no operator role on top of a trusted revision that gives it, or a
+        /// grant revision that only narrows the trusted revision below it, written by one who held the operator role at its time or earlier
+        /// through trusted revisions. So it takes away and never gives.
+        /// </summary>
+        private bool TrustedRemoval(RecordEnvelope revision, RecordEnvelope? below)
+        {
+            if (below is null) return false;
+            bool takesAway = revision.Type == "principal" ? !IsOperator(revision) && IsOperator(below) : AuthorityReplay.Narrows(revision, below);
+            return takesAway && FormerOperator(revision.By, revision.At);
+        }
+
+        /// <summary>Whether a principal is the root operator, or held the operator role through trusted revisions at some time up to a time.</summary>
+        private bool FormerOperator(string principal, string at)
+        {
+            if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
+            return Guarded("former " + principal + " " + at, () =>
+                trust.principalRecords.Any(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && IsOperator(p) && TrustedOperator(principal, p.At)));
+        }
+
+        /// <summary>
+        /// The principal record that describes a principal at a time: among the trusted revisions of its line dated at or before the time, the
+        /// single one no other of them follows, directly or through trusted revisions below it. Revisions that are not trusted are not read,
+        /// and, when <paramref name="grounded"/> is set, nor are unsigned ones that stand only by their date (<see cref="Grounded"/>).
+        /// </summary>
+        private RecordEnvelope? PrincipalAt(string principal, string at, bool grounded = false)
+        {
+            List<RecordEnvelope> revisions = [.. trust.principalRecords.Where(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p) &&
+                (!grounded || Grounded(p)))];
+            var followed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (RecordEnvelope revision in revisions)
+            {
+                RecordEnvelope? below = Below(revision);
+                while (below is not null && followed.Add(below.Id)) below = Below(below);
+            }
+
+            List<RecordEnvelope> heads = [.. revisions.Where(p => !followed.Contains(p.Id))];
             return heads.Count == 1 ? heads[0] : null;
         }
+
+        /// <summary>
+        /// Whether a principal revision rests on more than its stated date: signed, anchored, or the root operator's own first record. An
+        /// unsigned record standing only because it is dated before the charter required signatures is one anyone able to add records can
+        /// write, so it never makes a principal a person who may admit under administer.
+        /// </summary>
+        private bool Grounded(RecordEnvelope revision) =>
+            revision.Signatures.Count > 0 || trust.anchors.Contains(SignatureChecks.AnchorKey(revision.Id, revision.ComputedHash)) ||
+            revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null;
 
         /// <summary>Whether a principal is the root operator, or held the operator role at a time through trusted revisions.</summary>
         private bool TrustedOperator(string principal, string at)
         {
             if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
-            string key = principal + " " + at;
-            if (operators.TryGetValue(key, out bool known)) return known;
-            if (!checking.Add(key)) return false;
-            bool value = IsOperator(PrincipalAt(principal, at));
-            checking.Remove(key);
-            operators[key] = value;
-            return value;
+            return Guarded("operator " + principal + " " + at, () => IsOperator(PrincipalAt(principal, at)));
         }
 
         /// <summary>
         /// Whether a record's author, a person at its time, held administer then through a grant: a trusted grant revision dated at or before
         /// the record, followed by no trusted revision dated by then, unexpired at the record's time, and closed by none of the closings given
         /// without witnessing the record. Only trusted grant revisions decide, so a revision anyone else writes neither grants nor withdraws it.
+        /// The author is a person when their line describes a human as read, and also when read without the unsigned revisions that stand
+        /// only by their date (<see cref="Grounded"/>): such a revision may take that away, never give it.
         /// </summary>
         private bool HoldsAdminister(RecordEnvelope record)
         {
-            if (PrincipalAt(record.By, record.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+            if (!Human(PrincipalAt(record.By, record.At)) || !Human(PrincipalAt(record.By, record.At, grounded: true))) return false;
             return trust.authorityRecords.Any(grant => Administers(grant, record.By, record.AtTime) && string.CompareOrdinal(grant.At, record.At) <= 0 && TrustedRevision(grant) &&
                 !TrustedSuccessors(grant).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) && !trust.GrantClosedWithin(grant, record, bound, mode));
         }
+
+        private static bool Human(RecordEnvelope? principal) => principal is not null && EstateModel.BodyString(principal, "kind") == "human";
 
         /// <summary>The trusted revisions that follow a grant revision: its successors, through any that are not trusted.</summary>
         private IEnumerable<RecordEnvelope> TrustedSuccessors(RecordEnvelope grant)

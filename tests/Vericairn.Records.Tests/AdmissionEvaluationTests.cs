@@ -350,4 +350,159 @@ public class AdmissionEvaluationTests
             Assert.True(Reported(model, lateAdmission, "signature.revoked"));
         }
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnOperatorsLineFollowsTheNearestTrustedRevisionBelow(bool onTop)
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope laptop, _) = f.Admitted(second.Id, "Second's laptop");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        // The operator's own rename counts for nothing; the root operator's revision on top of it follows the record below it.
+        RecordEnvelope renamed = f.Estate.Add("principal", second.Id, """{"kind":"human","name":"Second Renamed","roles":["operator"]}""", supersedes: second.Id, signer: f.Signer(laptop));
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        if (onTop) f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second Again","roles":["operator"]}""", supersedes: renamed.Id, signer: f.OperatorSigner);
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        RecordEnvelope phone = f.Device(second.Id, "Second's phone");
+        RecordEnvelope admission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(second.Id, "By the second operator."), phone.Reference, signer: f.Signer(laptop));
+        EstateModel model = f.Load();
+        Assert.True(model.HasRoleAt(second.Id, Roles.Operator, admission));
+        Assert.True(model.Counts(model.ById[admission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, phone));
+        Assert.False(Reported(model, admission, "admission.author"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnOperatorAppointedUnsignedWhileSignaturesWereOptionalMayAdmit(bool adopt)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["operator"]}""");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        f.Require();
+        if (adopt) f.Adopt();
+        (RecordEnvelope laptop, _) = f.Admitted(second.Id, "Second's laptop");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        RecordEnvelope phone = f.Device(second.Id, "Second's phone");
+        RecordEnvelope admission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(second.Id, "By the second operator."), phone.Reference, signer: f.Signer(laptop));
+        EstateModel model = f.Load();
+        Assert.True(model.Counts(second));
+        Assert.True(model.Counts(model.ById[admission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, phone));
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+    }
+
+    [Fact]
+    public void AnUnsignedAppointmentCountsForAdmissionsAfterAdoptionOnlyWhenAnchored()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        f.Adopt();
+        // Written unsigned after adoption, dated back to before the charter required signatures, and anchored by nothing.
+        f.Estate.SetClock(f.Estate.Estate.AtTime);
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["operator"]}""");
+        f.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 13, 0, 0, TimeSpan.Zero));
+        (RecordEnvelope laptop, _) = f.Admitted(second.Id, "Second's laptop");
+        RecordEnvelope phone = f.Device(second.Id, "Second's phone");
+        RecordEnvelope admission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(second.Id, "By the second operator."), phone.Reference, signer: f.Signer(laptop));
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(second));
+        Assert.False(model.Counts(model.ById[admission.Id]));
+        Assert.False(SignatureChecks.IsAdmitted(model, phone));
+        Assert.True(Reported(model, admission, "admission.author"));
+
+        // Anchored by the root operator, it counts, for admissions too, from its own time.
+        f.Checkpoint(anchored: [second]);
+        model = f.Load();
+        Assert.True(model.Counts(second));
+        Assert.True(model.Counts(model.ById[admission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, phone));
+    }
+
+    [Fact]
+    public void AnAdministratorWrittenPersonAndAnUnsignedGrantGiveTheirStandingToAdmissions()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope basis = f.Decision();
+        // A grant written unsigned while signatures were optional.
+        RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["contributor"]}""", signer: f.OperatorSigner);
+        f.Estate.Add("authority", f.Estate.OperatorId, $$"""{"grantee":"{{admin.Id}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{basis.Id}}"}""");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        f.Require();
+        (RecordEnvelope adminDevice, _) = f.Admitted(admin.Id, "Admin's laptop");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        // The administrator records a person, whom the root operator then grants administer.
+        RecordEnvelope person = f.Estate.Add("principal", admin.Id, """{"kind":"human","name":"Person","roles":["contributor"]}""", signer: f.Signer(adminDevice));
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        f.Grant(person.Id, basis, [Scopes.Administer]);
+        (RecordEnvelope personDevice, _) = f.Admitted(person.Id, "Person's laptop");
+        f.Estate.SetClock(f.Estate.Clock.AddSeconds(10));
+        RecordEnvelope byAdmin = f.Device(f.Estate.BuilderId, "Admitted by the administrator");
+        RecordEnvelope adminAdmission = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By the administrator."), byAdmin.Reference, signer: f.Signer(adminDevice));
+        RecordEnvelope phone = f.Device(person.Id, "Person's phone");
+        RecordEnvelope personAdmission = f.Estate.Add("admission", person.Id, HistoryFixture.Admission(person.Id, "By the person."), phone.Reference, signer: f.Signer(personDevice));
+        EstateModel model = f.Load();
+        Assert.True(model.HasScope(person.Id, Scopes.Administer));
+        Assert.True(model.Counts(model.ById[adminAdmission.Id]));
+        Assert.True(model.Counts(model.ById[personAdmission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, byAdmin));
+        Assert.True(SignatureChecks.IsAdmitted(model, phone));
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+    }
+
+    [Fact]
+    public void AnUnsignedRecordStandingOnlyByItsDateNeverMakesAnAdministratorAPerson()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope basis = f.Decision();
+        // The agent's line describes a human from an unsigned revision dated before the charter required signatures.
+        f.Estate.SetClock(f.Estate.Builder.AtTime);
+        RecordEnvelope human = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Test Builder","roles":["builder"]}""", supersedes: f.Estate.BuilderId);
+        f.Estate.SetClock(f.Decision().AtTime);
+        f.Require();
+        f.Grant(f.Estate.BuilderId, basis, [Scopes.Administer]);
+        RecordEnvelope device = f.Device(f.Estate.BuilderId, "Admitted by the agent");
+        RecordEnvelope admission = f.Estate.Add("admission", f.Estate.BuilderId, HistoryFixture.Admission(f.Estate.BuilderId, "By the agent."), device.Reference, signer: f.BuilderSigner);
+        EstateModel model = f.Load();
+        Assert.True(model.Counts(human));
+        Assert.True(model.HasScope(f.Estate.BuilderId, Scopes.Administer));
+        Assert.False(model.Counts(model.ById[admission.Id]));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.True(Reported(model, admission, "admission.author"));
+
+        // Anchored by the root operator, the revision is one the estate's history vouches for.
+        f.Adopt();
+        model = f.Load();
+        Assert.True(model.Counts(model.ById[admission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, device));
+    }
+
+    [Fact]
+    public void AnAdmissionWhoseAuthorCountingRefusesIsReportedAndALaterAppointmentRestoresNothing()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope laptop, _) = f.Admitted(second.Id, "Second's laptop");
+        f.Require();
+        RecordEnvelope removed = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["contributor"]}""", supersedes: second.Id, signer: f.OperatorSigner);
+        // Admitted while the role was taken away; the root operator appoints the person again afterwards.
+        RecordEnvelope early = f.Device(f.Estate.BuilderId, "Admitted while not an operator");
+        RecordEnvelope earlyAdmission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(f.Estate.BuilderId, "Not an operator then."), early.Reference, signer: f.Signer(laptop));
+        f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Second","roles":["operator"]}""", supersedes: removed.Id, signer: f.OperatorSigner);
+        RecordEnvelope late = f.Device(f.Estate.BuilderId, "Admitted after the new appointment");
+        RecordEnvelope lateAdmission = f.Estate.Add("admission", second.Id, HistoryFixture.Admission(f.Estate.BuilderId, "An operator again."), late.Reference, signer: f.Signer(laptop));
+        EstateModel model = f.Load();
+        // Before adoption validation reads roles as they are now, so only the admission reading says why the earlier admission counts for nothing.
+        Assert.True(model.HasRole(second.Id, Roles.Operator));
+        Assert.False(model.Counts(model.ById[earlyAdmission.Id]));
+        Assert.False(SignatureChecks.IsAdmitted(model, early));
+        Assert.Single(model.Findings, x => x.Code == "admission.author" && x.Location == earlyAdmission.ExpectedPath);
+        Assert.True(model.Counts(model.ById[lateAdmission.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(model, late));
+        Assert.False(Reported(model, lateAdmission, "admission.author"));
+    }
 }

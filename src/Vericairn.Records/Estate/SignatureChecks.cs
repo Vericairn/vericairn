@@ -56,8 +56,13 @@ public static class SignatureChecks
             RecoveryUse(model, trust, record, findings);
         }
 
-        // An admission that does not count where nothing above says why: one that would unseat what it rests on.
-        foreach (Finding finding in trust.AdmissionFindings()) findings.Add(finding);
+        // An admission that does not count where nothing above says why: one that would unseat what it rests on, and one whose author may not
+        // admit as admissions read authority, which validation may not show when it reads roles and grants as they are now.
+        foreach (Finding finding in trust.AdmissionFindings())
+        {
+            if (finding.Code == "admission.author" && findings.Any(x => x.Code == finding.Code && x.Location == finding.Location)) continue;
+            findings.Add(finding);
+        }
 
         foreach (RecordEnvelope revision in model.Records.Where(r => r.Type == "estate" && r.Supersedes is not null))
         {
