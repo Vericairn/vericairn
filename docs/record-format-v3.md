@@ -546,6 +546,24 @@ revision. An unsigned admission also counts when an anchoring checkpoint lists i
 besides the format-2 migration's list. Before adoption the earlier rule holds:
 an unsigned record dated at or before the current required revision counts.
 
+**What an anchor decides.** An anchor decides only that the exact bytes it lists count.
+It authenticates nothing: an anchored record's `by` stays its author's claim, and the
+rules that judge its author read that principal's roles and grants as for any record.
+Its `at` is read as any counting record's. A device revision a closing refused changes
+no key or name, anchored or not. The runtime refuses an anchor of bytes not present, of
+a signed record no closing refuses and of a device revision a closing refused.
+
+**What a removal leaves.** A removed witnessed record is absent, so every rule reads
+the copy without it: a removed revocation leaves its device admitted there, bounded
+only by a closing of that device ([below](#closings-and-authority-at-a-records-time-092)).
+The error holds release submission, and the runtime refuses every write that would
+leave it standing. An acknowledgement ends the error for the version it names and
+decides nothing else: that version is no longer witnessed, the estate reads on without
+the record, and a record under that id, written again or present with other bytes, is
+part of the tail and counts by its own rules until a checkpoint lists it. The runtime
+refuses a `removed` entry for a record present with the listed hash, or for a version
+no head witnesses.
+
 **Who writes them (OPS-07).** `vericairn estate checkpoint` writes one with trigger `manual` and, with `--adopt`, the
 adoption checkpoint, anchoring the unsigned records that count; a new estate's root operator's first device writes the
 adoption when it admits itself. In an estate that has adopted, the runtime writes one in the same batch as the act, signed by
@@ -731,12 +749,18 @@ and duty sequence still follow `at` for records that count, ids breaking ties. T
 required-signature boundary is decided by anchoring. The key and admission a signature
 verifies against is the signer's claim of time, bounded by closings. Canonical status and
 policy evaluation take their recorded time from the records that count.
+Roles and grants are read at the stated time as above, bounded by grant closings, while the
+strongest acts also need the role or grant to still stand, so a stated time carries none of those
+powers past a later removal or narrowing.
 
 **Dates checkpoints question.** A signed record dated more than five minutes after the
 earliest-dated counting checkpoint that witnesses it, the checkpoint listing it or one that
 follows, is the warning `history.dated-after-witness`, naming that checkpoint; a record
-the adoption checkpoint witnesses is not questioned. The runtime refuses `records new --at`
-and `work attempt --at` more than five minutes past its own clock.
+the adoption checkpoint witnesses is not questioned. No checkpoint questions an earlier
+date: a signed record in the unwitnessed tail may state a time before the newest checkpoint,
+and is read at that time unless a closing refuses it. The runtime refuses `records new --at`
+and `work attempt --at` more than five minutes past its own clock, and `records new` refuses
+`--at` and an explicit id for a history checkpoint, which the runtime dates itself.
 
 ## Search selections in agent runs (0.9.2)
 
