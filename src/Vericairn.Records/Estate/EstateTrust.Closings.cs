@@ -50,6 +50,8 @@ internal sealed partial class EstateTrust
     private bool closingsKnown;
     private bool grantClosings;
     private Dictionary<string, List<(string Checkpoint, string Hash)>>? listings;
+    private readonly Dictionary<(string Revision, string Previous), bool> revisionRefusals = [];
+    private Dictionary<string, RecordSigning.ImportedKey>? closedKeys = new(StringComparer.Ordinal);
 
     /// <summary>The closings that act, in checkpoint order.</summary>
     internal IReadOnlyList<Closing> Closings => closings;
@@ -300,25 +302,74 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether a closing that acts refuses a device revision: its device is closed, or it is signed with a closed key and is not the
-    /// rotation replacing it, and the closing does not witness it. Read without proofs, since proofs read the device's line.
+    /// rotation replacing it, and the closing does not witness it. Read without proofs, since proofs read the device's line. Once the
+    /// closings that act are known nothing it reads changes, so each answer is kept, and whether a signature verifies with a closed key is
+    /// kept with every other verdict on a key (<see cref="VerifiesWithClosedKey"/>).
     /// </summary>
     private bool RevisionRefused(RecordEnvelope revision, RecordEnvelope previous)
     {
         if (!closingsKnown || closings.Count == 0) return false;
-        string identity = IdentityOf(previous);
-        byte[]? digest = null;
-        foreach (Closing closing in closings)
+        lock (gate)
         {
-            if (closing.Identity != identity || Witnesses(closing, revision)) continue;
-            if (closing.Kind == "device") return true;
-            if (closing.Kind == "key" && revision.Id != closing.Rotation)
-            {
-                digest ??= RecordSigning.Digest(revision.ComputedHash);
-                if (revision.Signatures.Any(s => RecordSigning.Verify(closing.Key!, digest, s.Signature))) return true;
-            }
+            (string, string) key = (revision.Id, previous.Id);
+            if (revisionRefusals.TryGetValue(key, out bool known)) return known;
+            bool value = Judge();
+            if (model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision) &&
+                model.ById.TryGetValue(previous.Id, out RecordEnvelope? below) && ReferenceEquals(below, previous))
+                revisionRefusals[key] = value;
+            return value;
         }
 
-        return false;
+        bool Judge()
+        {
+            string identity = IdentityOf(previous);
+            byte[]? digest = null;
+            foreach (Closing closing in closings)
+            {
+                if (closing.Identity != identity || Witnesses(closing, revision)) continue;
+                if (closing.Kind == "device") return true;
+                if (closing.Kind == "key" && revision.Id != closing.Rotation)
+                {
+                    digest ??= RecordSigning.Digest(revision.ComputedHash);
+                    if (revision.Signatures.Any(s => VerifiesWithClosedKey(closing.Key!, revision.ComputedHash, digest, s.Signature))) return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a signature over a content hash verifies with a closed key, as <see cref="RecordSigning.Verify"/> answers it: the answer is
+    /// kept with every other verdict on a key, and while the estate is judged each closed key is imported once.
+    /// </summary>
+    private bool VerifiesWithClosedKey(string key, string hash, byte[] digest, string signature)
+    {
+        lock (gate)
+        {
+            if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
+            bool value;
+            if (closedKeys is null) value = RecordSigning.Verify(key, digest, signature);
+            else
+            {
+                if (!closedKeys.TryGetValue(key, out RecordSigning.ImportedKey? imported)) closedKeys[key] = imported = RecordSigning.ImportedKey.Import(key);
+                value = imported.Verify(digest, signature);
+            }
+
+            keyVerdicts[(key, hash, signature)] = value;
+            return value;
+        }
+    }
+
+    /// <summary>Releases the closed keys imported while the estate was judged; a later verdict imports its key for that verdict alone.</summary>
+    private void ReleaseClosedKeys()
+    {
+        lock (gate)
+        {
+            if (closedKeys is null) return;
+            foreach (RecordSigning.ImportedKey imported in closedKeys.Values) imported.Dispose();
+            closedKeys = null;
+        }
     }
 
     /// <summary>
