@@ -1,0 +1,29 @@
+# Generated reference inventory
+
+Revision 2, October 18, 2026. Define the retained reference inventory used by document checks, readable companions and reference-coverage policies.
+
+Vericairn 0.8.0 adds `vericairn docs companions` and
+`vericairn docs render` to the command inventory, and `GET /v1/companions`,
+`GET /v1/companions/render`, `GET /v1/companions/sources` and
+`GET /v1/companions/compare` to the operation inventory. The compare-only flag
+belongs to the existing `vericairn docs regenerate` identity. Their proposed
+vocabulary mapping is **Generated**, in the maintained
+[reference coverage proposals](policy-adoption-proposals.md#generated-reference-coverage).
+The generated inventory derives these identities from the build; no frozen set is
+rewritten and a proposed mapping is not estate adoption.
+
+`vericairn.reference-inventory/1` accompanies the generated CLI, record and API references as `reference-inventory.json`. Its exact build `commit` is a full lowercase Git commit. The `references` array binds each category to its generated file and SHA-256 byte hash: `command` to `cli-reference.md`, `record-type` to `record-reference.md`, and `api-operation` to `api-reference.md`. Its `items` array contains one `{category, name}` per public reference identity, in ordinal category/name order.
+
+Commands use the full canonical invocation, such as `vericairn release submit`, without arguments or flags. Record types use serialized names such as `release`. API operations use an uppercase method, one space and the exact route template, such as `GET /v1/records/{id}`. A command family does not cover its children. Aliases enter only if the generator declares them public. All comparisons are ordinal and case-sensitive.
+
+The build generator supplies the item lists from the command tree, record-type registry and OpenAPI document it uses to write the references. Generation verifies that those identities exactly match the generated headings. Inventory validation rejects unknown fields or formats, duplicate JSON fields, duplicate identities, missing categories, unsafe or conflicting paths, different commits, unavailable bytes, hash mismatches and differences between the item set and reference headings. Fenced examples cannot supply headings. Evaluation reads the retained snapshot supplied by its caller and starts no build, process or network request.
+
+The bounds are 100,000 items, a 32 MiB inventory, a 64 MiB combined generated-reference set and JSON depth 16. Exhaustion is unavailable, with no partial coverage claim. A source adapter supplies normalized relative paths, byte hashes, availability and the exact source commit through the existing policy repository contract.
+
+The documentation manifest names the inventory through `referenceInventory`. Build comparison must check it against the build commit and public item lists. Document checking must verify its commit against the documentation manifest, its hashes and its exact item set. Sets documenting record format 3 or version 0.8.0 onward require the inventory declaration. Earlier frozen sets keep their original contract and bytes. `ReferenceInventoryFiles` is the internal build/document adapter; the evaluator consumes only retained snapshots.
+
+The software pack's `vericairn.software/reference-index` generator renders this inventory under READ-01's contract. It links each category and name to its retained reference file. The build tool's existing `generate --register <file>` option explicitly selects a register snapshot, retained as `inputs/reference-register.md`; the index links its recorded mappings to that snapshot's generated-reference coverage table. Regeneration preserves that selection. Without a selected register the report says so, and a selected register with no matching row is reported as not recorded. Rendering a mapping makes no coverage or acceptance judgment and never discovers a register from the checkout.
+
+The set's `companions` manifest section retains the selected source paths, hashes and sizes, generator identity and implementation source digest, parameters and each output's input digest. The readable index also carries this provenance. The existing build comparison verifies the complete reference and index bytes, their input inventories and the exact public item lists. A matching inventory hash alone cannot make an edited reference current.
+
+The inventory's build commit is distinct from the candidate commit that contains it. Candidate verification reads only that candidate's exact manifest and input inventory; a different clone head cannot supply missing files. A later documentation-only commit may retain the build pin when its build sources are identical. A missing commit or incomplete selection is unavailable. Retained inputs and generated outputs travel together in the serialized build's companion archive; they introduce no second editable source or shared change ledger. See [retained build companions](software.md#retained-build-companions) for byte and release custody rules.

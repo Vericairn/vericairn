@@ -1,6 +1,6 @@
-# Record formats, Vericairn 0.9.1
+# Record formats, Vericairn 0.9.2
 
-Vericairn 0.9.1 reads record formats 1, 2 and 3. It writes an estate's own format,
+Vericairn 0.9.2 reads record formats 1, 2 and 3. It writes an estate's own format,
 at most 3; new estates start at 3. API version 1 remains the transport contract.
 Context, hand-over, reference inventories and readable renditions have their own
 artifact contracts and are not additional record formats.
@@ -13,11 +13,27 @@ artifact contracts and are not additional record formats.
   recurring-duty evidence, decision requirements, typed work placement, checked
   repository changes and the generated-document `pathPattern` contract.
 
-A record keeps the format in its own envelope, its original bytes, hash and
-signatures. Format-2 rules extend format 1, and format-3 rules extend format 2.
-The admission rule is estate-wide: at format 2 or 3 an admission or revocation
-counts only when signed or anchored by the signed move to format 2, or from 0.9.2
-by an anchoring history checkpoint, whatever format or date that admission claims. Policy and writing changes and duty
+A record keeps the format in its own envelope, its original bytes, hash and signatures. Format-2 rules extend format 1, and
+format-3 rules extend format 2. The admission rule is estate-wide: at format 2 or 3 an admission or revocation counts only when
+it is signed by a device that an admission that counts admitted at the time it was signed, tracing back to the estate's first
+authority, and its author may admit at its time, or when the signed move to format 2 or, from 0.9.2, an anchoring history
+checkpoint anchors it, whatever format or date that admission claims. Those who may admit are the operator and any person
+holding `administer`, read as they stood at the admission's time from the principal and grant revisions their authors may write,
+as other rules read those records (signed, anchored, or, before the estate adopts history checkpoints, written unsigned while
+the charter left signatures optional), and never through a grant revision a closing closed without witnessing the admission;
+whether a holder of `administer` is a person is read only from revisions that are signed or anchored. The recovery device may
+sign for them. An admission by anyone else is reported (`admission.author`) and admits and revokes nothing, also where
+validation, reading roles as they are now, finds no fault, and then as a warning. One that would unseat what its own signature
+or its author's authority rests on, such as a revocation stated as of a time before them, counts for nothing and revokes nothing
+(the warning `admission.unseats-support`). Admissions are judged the same whatever order the records are read in, whichever is
+written or numbered first. The root operator is the operator that the charter named by the estate's manifest
+(`estate/manifest.json`, `estate`) states, and the estate's first authority is the root operator's admission of its own device
+that the manifest names (`firstAuthority`), or the only one when it names none, until the estate adopts history checkpoints
+([below](#history-checkpoints-092)). Another charter that supersedes nothing, or another such self-admission, is reported
+(`estate.multiple`, `signature.self-admission`) and never takes its place, whatever its id or date, and one that comes with
+history checkpoints of its own at most leaves the copy unsettled ([below](#history-checkpoints-092)); several self-admissions
+with none named are reported (`manifest.first-authority`, listing each with its device) and none is the first authority until
+the manifest names one. A reader without a manifest takes the first charter by id. Policy and writing changes and duty
 results/reviews have additional signature and exact-approval requirements.
 
 After the target's accepted publication is recorded, an upgrade from 0.7.3
@@ -100,7 +116,7 @@ cache retain their `current/stable` meaning; other lines use published release r
 ## Acceptance on passing reviews (0.9.2)
 
 From 0.9.2, an acceptance by a principal other than the operator rests only on reviews of its subject whose
-`outcome` is `pass`. The rule is prospective, as 0.9.1's rule for decision times is: it adds no field and no format
+`outcome` is `pass`. The rule is prospective, as the decision-time rule added in 0.9.1 is: it adds no field and no format
 number, and it binds the records written by a runtime that has it. Such a runtime refuses a new acceptance whose
 `basis` names a review with outcome `findings` or `fail` (`acceptance.basis-outcome`, an error), in every record
 format, whatever authority scope its author holds. An acceptance already in the estate keeps its reading: it still
@@ -111,7 +127,7 @@ its outcome. The operator's acceptance is unchanged; it may rest on any review o
 
 From 0.9.2, a result output's `location` names a repository-relative path and never carries a URL
 scheme: letters, digits, `+`, `-` or `.` before a colon at its start, as in `https:`, `file:` or `s3:`.
-The rule is prospective, as 0.9.1's rule for decision times is: it adds no field and no format number,
+The rule is prospective, as the decision-time rule added in 0.9.1 is: it adds no field and no format number,
 and it binds the results written by a runtime that has it. Such a runtime refuses a new result, a
 correction included, whose output location carries a scheme (`result.output-scheme`, an error), in
 every record format and at every write surface. A result already in the estate keeps its reading:
@@ -124,8 +140,8 @@ backslashes and `..` remain errors (`result.output-path`), as before.
 
 An envelope's `by` names the authoring principal by its id, the id of that principal's first
 record. From 0.9.2, a new record's `by` names a `principal` record the estate holds when the record is
-written, whatever time the record's `at` states. The rule is prospective, as 0.9.1's rule for decision
-times is: it adds no field and no format number, and it binds the records written by a runtime that has
+written, whatever time the record's `at` states. The rule is prospective, as the decision-time rule
+added in 0.9.1 is: it adds no field and no format number, and it binds the records written by a runtime that has
 it. Such a runtime refuses a new record whose `by` names no record or names a record of another type,
 such as the estate charter or a work order (`record.author`, an error), in every record format and at
 every write surface. The root operator's own principal record names itself and is its own author. A
@@ -184,11 +200,23 @@ first device admits itself; an existing one adopts when the root operator runs
 at upgrades, release submissions, charter revisions and intervals ([operator's
 guide](operator-guide.md#history-checkpoints-092)).
 
-In every estate from 0.9.2, a record that does not count, such as an unsigned record
-refused by the signature policy or an altered witnessed record, is reported and kept as evidence, and no rule that admits,
-authorizes, accepts, clears or holds reads it. Format 2 already read admissions this
-way; 0.9.2 reads every type this way. An unsigned device revision changes no key
-or name.
+In every estate from 0.9.2, a record that does not count, such as an unsigned record refused by the signature policy, a record
+whose signature does not verify by a device admitted when it was signed, or an altered witnessed record, is reported and kept as
+evidence, and no rule that admits, authorizes, accepts, clears or holds reads it. An admission whose signature does not verify
+admits and revokes nothing, and an unsigned device revision changes no key or name.
+
+Witnessed history confirms the manifest's choice and never displaces it. Each charter that supersedes nothing is judged under
+its own operator, and each self-admission of the root operator's device with it as the first authority; one is witnessed when,
+so judged, the estate has adopted history checkpoints and they witnessed it, with its bytes present, before any rival. Since
+added records can arrange that for a forged charter or self-admission with history checkpoints of its own, in an estate that has
+adopted or not, a witnessed one counts only as the manifest's: the charter the manifest names, witnessed alone, is the first
+charter, and the self-admission its `firstAuthority` names, witnessed alone, is the first authority. When another is witnessed,
+alone or beside the manifest's, the estate check reports `history.root-ambiguous`, with `history.manifest-root` when the
+manifest's own is not witnessed, and no record counts until the manifest or the history that does not belong is removed; neither
+finding names an id to restore. A charter or self-admission that first appears after adoption is never witnessed first. When
+none is witnessed, the manifest decides, as the introduction says. The runtime writes `firstAuthority` when the root operator's
+first device admits itself, and the 0.9.2 upgrade writes it for an estate whose manifest names none, naming the first authority
+the estate reads; a release before 0.9.2 refuses a manifest that carries it.
 
 Canonical status adds `history`: whether the estate has adopted checkpoints, its heads
 by id and hash, how many records they witness, the unwitnessed tail and the standing
@@ -270,7 +298,17 @@ gives nothing. A revision a closing
 refuses is not read for anchoring, for the adoption or for the closings that follow that
 closing. Removing an operator's role therefore takes, for those acts, what that person
 appointed, granted and closed, and the warning `history.revision-author` names each grant or
-appointment it takes; other records keep reading roles and grants as they stood. In every
+appointment it takes; other records keep reading roles and grants as they stood. Roles and
+scopes come only from principal and authority records their authors may write, judged in time
+order from the root operator: only an operator gives the operator role, a principal's own
+revision of its record other than the root operator's counts for nothing in every read, and a
+removal keeps counting. Policy authority counts a person as the operator only while the role
+still stands, or through a record that a checkpoint by the root operator or a standing operator
+places before the role was taken away, and a policy record whose approval or authority fails
+counts for nothing; where no checkpoint could place it before a removal, it is the warning
+`policy.operator-removed` instead of an error. In an estate that has adopted checkpoints the
+runtime writes a checkpoint before it writes a revision that takes a role away; in one that has
+not, it refuses such a revision when any record would fail with it. In every
 read, a grant or principal revision counts for nothing when it is dated before the nearest
 record below it in its line that counts; a record below that does not count is skipped, and a
 revision on top of one follows the line there. A role has no closing; role closings are planned. Close and revoke a person's devices when removing their operator
@@ -287,9 +325,10 @@ estate before it adopts, reads exactly as before.
 ## What a claimed time decides (0.9.2)
 
 A record's `at` is its author's statement of when it was written. From 0.9.2, in every estate,
-the runtime refuses a stated time more than five minutes past its own clock, and `records new`
-refuses `--at` and an explicit id for a history checkpoint, which the runtime dates itself. Any
-earlier time can still be stated, and what it decides depends on whether the estate has
+the runtime refuses a stated time more than five minutes past its own clock, and the runtime
+writes a history checkpoint, a principal record and an authority record at its own time with a
+fresh id, so `records new` refuses `--at` and an explicit id for them. Any earlier time can still
+be stated for other records, and what it decides depends on whether the estate has
 adopted history checkpoints.
 
 - **In every estate**, `at` places a record that counts: its path month, its order, release-notes
@@ -298,14 +337,16 @@ adopted history checkpoints.
   written, whatever its `at` says.
 - **Before adoption**, `at` also decides whether an unsigned record counts under required
   signatures, by comparison with the current charter revision, and which key and admission a
-  signature verifies against. Roles and grants are read as before 0.9.2, apart from the rule
-  above and the records that do not count.
+  signature verifies against. Roles and grants are read as they are now, apart from the rule
+  above, the records that do not count and the principal and authority records their authors
+  may not write; policy authority reads its own way ([above](#closings-and-authority-at-a-records-time-092)).
 - **After adoption**, `at` decides neither alone. Under required signatures an unsigned record
   counts only when anchored, whatever its date. A signature still verifies against the key and
   admission of the stated time, but once a closing of that device or key acts, a record signed
   with it that the closing does not witness counts for nothing, whatever its date, until
   anchored. Roles and grants are read as they stood at the stated time, or at the adoption for a
-  record it witnesses, bounded by grant closings; anchoring, acknowledging a removal, rooting an
+  record it witnesses, bounded by grant closings; policy authority also needs the role to still
+  stand, or a checkpoint to place the record before its removal; anchoring, acknowledging a removal, rooting an
   adoption and signing a device's or a grant's closing also need the role or grant to still
   stand (above). A checkpoint questions a signed record it witnesses, other than one the
   adoption witnesses, dated more than five minutes after the earliest-dated counting checkpoint

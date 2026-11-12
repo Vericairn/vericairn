@@ -1,5 +1,7 @@
 # Estate policies, writing exceptions and release admission
 
+Revision 15, November 12, 2026. Say that from 0.9.2 blocked terms and the text they are matched in are compared after Vericairn's own Unicode NFKC normalization and full case folding, the same in every build (FIX-105).
+
 Revision 14, November 6, 2026. State what a release basis retains: files read from a working tree, within a bound, while each file of an exact commit is named by path and hash and read from Git (FIX-95).
 
 Revision 13, November 3, 2026. Add the flow-steps rule kind, by which an estate requires steps of a flow that no configuration turns off.
@@ -155,7 +157,10 @@ While a current policy declares the list, from its `startsAt` when one is set:
 - Generating a document that would introduce a term is refused: release notes from `docs notes`, the generated companions a
   record write refreshes, refreshed template regions and new template instances. A generated document may keep a term its
   sources already carried; it never gains one.
-- A term matches whole, ignoring case and Unicode compatibility forms, so it is never found inside a longer word.
+- A term matches whole, ignoring case and Unicode compatibility forms, so it is never found inside a longer word. From 0.9.2 both
+  the term and the text are compared after Unicode NFKC normalization and full case folding computed by Vericairn itself, the same
+  on every platform and build: full-width, ligature, circled and mathematical forms of a term match it, and full case folding also
+  matches forms such as `ß` and `ss`. Two declared terms that fold to the same text are duplicates.
 
 Evaluating the rule reports each current record written after the policy began that still holds a term, such as one from an
 older build or merged from another copy of the estate. Earlier records are left alone, and no record is rewritten. A finding

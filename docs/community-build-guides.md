@@ -158,7 +158,7 @@ grants no first-party identity or authority.
 
 ## Prepare the proposed catalog repository
 
-0.9.0 also prepares the proposed `Vericairn/catalog`
+From 0.9.0, Vericairn also prepares the proposed `Vericairn/catalog`
 repository as a separate local bundle. Repository creation, request activation
 and each publication remain the operator's separate decisions. These commands
 make no network call, initialize no repository and activate no site. The provider
