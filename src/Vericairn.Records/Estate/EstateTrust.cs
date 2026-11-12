@@ -709,19 +709,39 @@ internal sealed partial class EstateTrust
     /// <see cref="EstateModel.HasRoleAt"/> and <see cref="EstateModel.HasScopeAt"/> read authority, and a revision written later restores
     /// nothing earlier. Administer counts only for a person. Admissions are judged with a test built from the admissions found so far
     /// (<see cref="CountingAdmissions"/>), so the first authority is the base and nothing here reads which admissions count. A circle of
-    /// appointments gives nothing.
+    /// appointments gives nothing; a verdict reached through a circle cut short is kept only for the evaluation it was reached in, so the
+    /// verdicts do not depend on the order they are asked for.
     /// </summary>
     private sealed class Standing(EstateTrust trust, IReadOnlyList<Closing> bound, Mode mode, Func<RecordEnvelope, bool> authentic)
     {
         private readonly Dictionary<string, bool> verdicts = new(StringComparer.Ordinal);
         private readonly Dictionary<string, bool> kept = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> transient = new(StringComparer.Ordinal);
         private readonly HashSet<string> checking = new(StringComparer.Ordinal);
+        private int cuts;
+        private int depth;
 
-        /// <summary>A verdict asked for by key, kept once reached; false for one already being evaluated, a circle cut short.</summary>
+        /// <summary>
+        /// A verdict asked for by key: kept when its evaluation met no circle cut short, kept only until the outermost evaluation ends when it
+        /// did, and false for one already being evaluated, a circle cut short.
+        /// </summary>
         private bool Guarded(string key, Func<bool> evaluate)
         {
             if (kept.TryGetValue(key, out bool known)) return known;
-            if (!checking.Add(key)) return false;
+            if (transient.TryGetValue(key, out known))
+            {
+                cuts++;
+                return known;
+            }
+
+            if (!checking.Add(key))
+            {
+                cuts++;
+                return false;
+            }
+
+            int before = cuts;
+            depth++;
             bool value;
             try
             {
@@ -730,9 +750,12 @@ internal sealed partial class EstateTrust
             finally
             {
                 checking.Remove(key);
+                depth--;
             }
 
-            kept[key] = value;
+            if (cuts == before) kept[key] = value;
+            else transient[key] = value;
+            if (depth == 0) transient.Clear();
             return value;
         }
 

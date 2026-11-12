@@ -505,4 +505,35 @@ public class AdmissionEvaluationTests
         Assert.True(SignatureChecks.IsAdmitted(model, late));
         Assert.False(Reported(model, lateAdmission, "admission.author"));
     }
+
+    [Fact]
+    public void SameSecondAppointmentsReadTheSameWhateverTheOrderTheyAreAskedFor()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope a = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Operator A","roles":["operator"]}""", signer: f.OperatorSigner);
+        (RecordEnvelope aDevice, _) = f.Admitted(a.Id, "A's device");
+        f.Require();
+        // In one second, A appoints B and B takes the role away from A, each signed by a device admitted before.
+        DateTimeOffset second = f.Estate.Clock.AddSeconds(100);
+        f.Estate.SetClock(second.AddSeconds(-1));
+        RecordEnvelope b = f.Estate.Add("principal", a.Id, """{"kind":"human","name":"Operator B","roles":["operator"]}""", signer: f.Signer(aDevice));
+        RecordEnvelope bDevice = f.Device(b.Id, "B's device");
+        f.Estate.SetClock(second.AddSeconds(-50));
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(b.Id, "B's device."), bDevice.Reference, signer: f.OperatorSigner);
+        f.Estate.SetClock(second.AddSeconds(-1));
+        f.Estate.Add("principal", b.Id, """{"kind":"human","name":"Operator A","roles":["contributor"]}""", supersedes: a.Id, signer: f.Signer(bDevice));
+        f.Estate.SetClock(second.AddSeconds(20));
+        RecordEnvelope byA = f.Device(f.Estate.BuilderId, "Admitted by A");
+        RecordEnvelope admissionByA = f.Estate.Add("admission", a.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By A."), byA.Reference, signer: f.Signer(aDevice));
+        RecordEnvelope byB = f.Device(f.Estate.BuilderId, "Admitted by B");
+        RecordEnvelope admissionByB = f.Estate.Add("admission", b.Id, HistoryFixture.Admission(f.Estate.BuilderId, "By B."), byB.Reference, signer: f.Signer(bDevice));
+
+        EstateModel model = f.Load();
+        var reversed = new EstateModel(model.Root, [.. model.Records.Reverse()], model.ById, model.SupersededBy, new FindingList()) { Manifest = model.Manifest, ObjectReader = model.ObjectReader };
+        Assert.Equal(model.Counts(model.ById[admissionByA.Id]), reversed.Counts(reversed.ById[admissionByA.Id]));
+        Assert.Equal(model.Counts(model.ById[admissionByB.Id]), reversed.Counts(reversed.ById[admissionByB.Id]));
+        Assert.Equal(SignatureChecks.IsAdmitted(model, byA), SignatureChecks.IsAdmitted(reversed, byA));
+        Assert.Equal(SignatureChecks.IsAdmitted(model, byB), SignatureChecks.IsAdmitted(reversed, byB));
+        Assert.Equal(model.Records.Select(r => model.Counts(r)), model.Records.Select(r => reversed.Counts(r)));
+    }
 }
