@@ -179,6 +179,86 @@ public sealed class OperatorRecordTests
         Assert.Equal(records, f.Service.Session.Load().Records.Count);
     }
 
+    /// <summary>
+    /// In an estate that has adopted history checkpoints, a revision that takes an operator's role away is written after a checkpoint, in
+    /// the same batch, which one signed record carried through a checked merge cannot carry: operator record refuses it, naming records
+    /// new, and writes nothing; the command it names writes the checkpoint and then the revision.
+    /// </summary>
+    [Fact]
+    public void InAnEstateThatAdoptedARemovalIsRefusedWithTheCommandThatWritesItsCheckpointFirst()
+    {
+        using var f = new Fixture();
+        string op = f.Estate.OperatorId;
+        WriteOutcome appointed = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "operator")));
+        Assert.True(appointed.Ok, appointed.Problem?.Message);
+        string o = appointed.Written!.Id;
+        string plan = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!.PlanHash!;
+        (HistoryCheckpointResponse? adopted, Problem? problem) = f.Service.HistoryCheckpoint(new HistoryCheckpointRequest(op, Adopt: true, ExpectPlan: plan));
+        Assert.True(adopted?.Applied == true, JsonSerializer.Serialize(problem, ProtocolJson.Options));
+        int records = f.Service.Session.Load().Records.Count;
+
+        var request = new OperatorRecordRequest("principal", op, Person("O", "contributor"), null, Supersedes: o, WaitSeconds: 0);
+        OperatorRecordResponse result = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(result.Ok);
+        Assert.Equal("refused", result.Status);
+        Assert.Contains("cannot carry the checkpoint", result.Message, StringComparison.Ordinal);
+        Assert.Contains($"vericairn records new principal --by <operator id> --supersedes {o} --body <file>", result.Message, StringComparison.Ordinal);
+        Assert.Equal($"vericairn records new principal --by {op} --supersedes {o} --body <file>", result.NextStep);
+        Assert.Null(result.Record);
+        Assert.Empty(f.Events);
+        EstateModel unchanged = f.Service.Session.Load();
+        Assert.Equal(records, unchanged.Records.Count);
+        Assert.True(unchanged.HasRole(o, Vericairn.Records.Types.Roles.Operator));
+
+        WriteOutcome written = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "contributor"), Supersedes: o));
+        Assert.True(written.Ok, written.Problem?.Message);
+        Assert.NotNull(written.Checkpoint?.Written);
+        Assert.False(f.Service.Session.Load().HasRole(o, Vericairn.Records.Types.Roles.Operator));
+    }
+
+    /// <summary>
+    /// In an estate that has not adopted history checkpoints, nothing places what an operator wrote before a removal: operator record
+    /// refuses a revision taking the role away when a record the operator wrote would count for nothing with it, though only warnings
+    /// say so, naming that record and the step that keeps it, and writes nothing.
+    /// </summary>
+    [Fact]
+    public void WithoutHistoryCheckpointsARemovalThatWouldEndWhatTheOperatorWroteIsRefused()
+    {
+        using var f = new Fixture();
+        string op = f.Estate.OperatorId;
+        WriteOutcome appointed = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "operator")));
+        Assert.True(appointed.Ok, appointed.Problem?.Message);
+        string o = appointed.Written!.Id;
+        WriteOutcome device = f.Service.DeviceCreate(new(o, "O's device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        WriteOutcome admitted = f.Service.DeviceAdmit(new(device.Written!.Id, op, "Admit O's device."));
+        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        WriteOutcome preference = f.Service.NewRecord(new NewRecordRequest("prompt-preference", o,
+            JsonSerializer.SerializeToElement(new { prompt = "estate:review", scope = "estate", disabled = true })));
+        Assert.True(preference.Ok, preference.Problem?.Message);
+        Assert.Equal(0, f.Service.Validate().Errors);
+        int records = f.Service.Session.Load().Records.Count;
+        // The removal is dated at the runtime's clock, in whole seconds: a later second than the preference, which it would otherwise share.
+        Thread.Sleep(1100);
+
+        var request = new OperatorRecordRequest("principal", op, Person("O", "contributor"), null, Supersedes: o, WaitSeconds: 0);
+        OperatorRecordResponse result = f.Service.OperatorRecord(request, TestContext.Current.CancellationToken);
+        Assert.False(result.Ok, result.Message);
+        Assert.Equal("refused", result.Status);
+        Assert.Contains("has not adopted history checkpoints", result.Message, StringComparison.Ordinal);
+        Assert.Contains(preference.Written!.Id, result.Message, StringComparison.Ordinal);
+        Assert.Contains(result.Problem!.Findings, x => x.Code == "policy.operator-removed" && x.Location == preference.Written.Path);
+        Assert.Contains($"vericairn records new principal --by {op} --supersedes {o} --body <file>", result.NextStep, StringComparison.Ordinal);
+        Assert.Null(result.Record);
+        Assert.Empty(f.Events);
+        EstateModel unchanged = f.Service.Session.Load();
+        Assert.Equal(records, unchanged.Records.Count);
+        Assert.True(unchanged.HasRole(o, Vericairn.Records.Types.Roles.Operator));
+        Assert.True(unchanged.Counts(unchanged.ById[preference.Written.Id]));
+    }
+
+    private static JsonElement Person(string name, string role) => JsonSerializer.SerializeToElement(new { kind = "human", name, roles = new[] { role } });
+
     [Fact]
     public void AnUnconfirmedPushCannotBeRetriedEvenWithReconciliationText()
     {

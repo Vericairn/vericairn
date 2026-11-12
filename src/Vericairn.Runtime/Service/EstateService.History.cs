@@ -556,6 +556,32 @@ public sealed partial class EstateService
         _ => $"vericairn records new authority --by {by} --supersedes {closes.Id} --body <file>",
     };
 
+    /// <summary>
+    /// Why operator record refuses a revision that takes a role away (<see cref="TakesRoleAway"/>), with the step that writes it, or null
+    /// when it does not: in an estate that has adopted history checkpoints, such a revision is written after a checkpoint, in the same
+    /// batch (<see cref="StoreRemovalLocked"/>), which one signed record carried through a checked merge cannot carry; in one that has
+    /// not, a revision that would make records fail is refused, naming them (<see cref="RemovalRefusal"/>). Caller holds the gate.
+    /// </summary>
+    private (string Message, string NextStep, Problem? Problem)? OperatorRecordRemovalRefusal(RecordDraft draft, EstateModel current, AuthoredRecord authored)
+    {
+        if (!TakesRoleAway(draft, current)) return null;
+        if (SignedHistory.Adopted(current))
+        {
+            return ("In an estate that has adopted history checkpoints, a revision that takes a role away is written after a history checkpoint, in the same batch, " +
+                "signed on the runtime's machine by the acting principal's device, so what was written under the role before it keeps its reading. An operator record " +
+                $"carries one signed record through a checked merge and cannot carry the checkpoint, so this revision is not recorded through it: write it with {RemovalCommand(draft, "<operator id>")}, " +
+                "which writes the checkpoint and the revision together. Nothing was written.", RemovalCommand(draft, draft.By), null);
+        }
+
+        return RemovalRefusal(current, authored) is { } refused
+            ? (refused.Message, "Adopt history checkpoints with vericairn estate checkpoint --adopt --check and vericairn estate checkpoint --adopt --expect-plan <plan hash> --by <root operator>, " +
+                $"then write the revision with {RemovalCommand(draft, draft.By)}, which writes a checkpoint before it.", refused)
+            : null;
+    }
+
+    /// <summary>The command that writes a revision taking a role away after a history checkpoint (<see cref="StoreRemovalLocked"/>).</summary>
+    private static string RemovalCommand(RecordDraft draft, string by) => $"vericairn records new {draft.Type} --by {by} --supersedes {draft.Supersedes} --body <file>";
+
     private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", _ => "grant revision" };
 
     private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };

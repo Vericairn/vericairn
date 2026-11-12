@@ -127,8 +127,13 @@ public sealed partial class EstateService
                     string id = Ulid.NewUlid().Value;
                     string at = Now();
                     var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(at), id);
-                    (authored, string? refusal) = AuthorLocked(draft, session.Load());
+                    EstateModel model = session.Load();
+                    (authored, string? refusal) = AuthorLocked(draft, model);
                     if (authored is null) throw new ProviderRefusedException(refusal!);
+                    // A revision taking a role away is written after a history checkpoint, which this path cannot carry, or is refused where
+                    // it would make records fail (design/signed-history.md § 8).
+                    if (OperatorRecordRemovalRefusal(draft, model, authored) is { } removal)
+                        return new(identity, "refused", removal.Message, false, removal.NextStep, Problem: removal.Problem);
                     if (JudgeProposedLocked([authored]) is Problem rejected)
                         return new(identity, "refused", "The proposed signed record did not pass validation.", false, "Correct the JSON body and " + resume, Problem: rejected);
                     checkpoint = new(configuration.Product.Id, configuration.Product.ComputedHash, configuration.Repository.ComputedHash,
