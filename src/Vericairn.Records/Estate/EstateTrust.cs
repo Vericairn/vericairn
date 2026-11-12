@@ -17,16 +17,18 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 /// <remarks>
 /// Everything here reads the records as loaded, never the model's counting indexes, so the judgment cannot depend on itself. The root
-/// operator is read from the first charter. Signatures are judged in two modes: without anchors, where only signed admissions count,
-/// which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count; and with
-/// anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are judged
-/// before anything else, in checkpoint order, and every later judgment reads the closings that act (EstateTrust.Closings.cs).
+/// operator is read from the first charter, and admissions count outward from the first authority, the root operator's self-signed
+/// admission that witnessed history or the manifest names, never the earliest by date. Signatures
+/// are judged in two modes: without anchors, where an admission counts only when signed by a device whose own admission rests on
+/// signatures, which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count;
+/// and with anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are
+/// judged before anything else, in checkpoint order, and every later judgment reads the closings that act (EstateTrust.Closings.cs).
 /// </remarks>
 internal sealed partial class EstateTrust
 {
     internal enum Mode
     {
-        /// <summary>No anchor keeps an unsigned admission counting.</summary>
+        /// <summary>Admissions count only when signed, by devices whose own admissions rest on signatures.</summary>
         Signatures,
 
         /// <summary>Unsigned admissions also count when anchored.</summary>
@@ -45,9 +47,16 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<(string Record, int Index), SignatureProof> proofs = [];
     private readonly Dictionary<(string Key, string Hash, string Signature), bool> keyVerdicts = [];
     private readonly IReadOnlyDictionary<string, string> rawSupersededBy;
+    private readonly HashSet<string>?[] admittedActing = new HashSet<string>?[2];
+    private readonly Dictionary<string, HashSet<string>>[] admittedByClosings = [new(StringComparer.Ordinal), new(StringComparer.Ordinal)];
+    private readonly Dictionary<HashSet<string>, HashSet<string>> unseating = new(ReferenceEqualityComparer.Instance);
+    private RecordEnvelope? requiredSince;
+    private bool requiredSinceKnown;
+    private bool adoptionEligible;
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
+    private readonly List<RecordEnvelope> admissionRecords;
     private readonly List<RecordEnvelope> principalRecords;
     private readonly List<RecordEnvelope> authorityRecords;
     private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
@@ -58,24 +67,34 @@ internal sealed partial class EstateTrust
     private StrictIndex? strictIndex;
     private StrictView? strictNone;
     private List<RecordEnvelope>? principalsInOrder;
+    private AuthorityReplay? loadedAuthority;
+    private OperatorReplay? policyOperators;
+    private OperatorReplay? policyOperatorsBeforeHistory;
+    private readonly Dictionary<string, HashSet<string>> checkpointAncestry = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> checkpointDescendants = new(StringComparer.Ordinal);
+    private ILookup<string, string>? checkpointFollowers;
     private IReadOnlySet<string> anchors = NoAnchors;
 
-    private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
+    private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
+        bool unsettled = false, bool authorityGiven = false, RecordEnvelope? authority = null)
     {
         this.model = model;
         Manifest = manifest;
+        Unsettled = unsettled;
         // Read through the type lookups, which hold every record until the loader keeps only those that count, so that judging a model
         // walks only the records trust rests on.
-        admissionsBySubject = model.OfType("admission").Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
+        admissionRecords = [.. model.OfType("admission")];
+        admissionsBySubject = admissionRecords.Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
         successors = TrustTypes.SelectMany(model.OfType).Where(r => r.Supersedes is not null).ToLookup(r => r.Supersedes!, StringComparer.Ordinal);
         rawSupersededBy = model.SupersededBy;
         principalRecords = [.. model.OfType("principal")];
         authorityRecords = [.. model.OfType("authority")];
-        FirstEstate = model.RawFirstEstate();
+        FirstEstate = firstCharter;
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
-        FirstAuthority = model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).FirstOrDefault();
+        AuthorityCandidates = [.. admissionRecords.Where(r => r.By == RootOperator && RootOperator is not null && EstateModel.BodyString(r, "status") == "admitted" &&
+            SelfSigned(r) && !Recovers(r.Subject?.Id)).OrderBy(a => a.Id, StringComparer.Ordinal)];
+        FirstAuthority = authorityGiven ? authority : FirstAuthorityByManifest();
 
         // Closings come first: each is judged against the closings before it in checkpoint order, with the format-2 migration's anchors
         // as they stand before any closing, and then every judgment is made afresh with the closings that act (design/signed-history.md § 8).
@@ -84,6 +103,7 @@ internal sealed partial class EstateTrust
         // Anchors are judged by signatures alone, so that nothing they anchor can be what makes them count.
         MigrationAnchors = ComputeMigrationAnchors();
         HistoryAnalysis analysis = HistoryAnalysis.Anchoring(this, model);
+        adoptionEligible = analysis.AdoptionEligible;
         var all = new HashSet<string>(MigrationAnchors, StringComparer.Ordinal);
         all.UnionWith(analysis.AnchorKeys);
         anchors = all;
@@ -110,8 +130,14 @@ internal sealed partial class EstateTrust
     /// <summary>The root operator the first charter names.</summary>
     internal string? RootOperator { get; }
 
-    /// <summary>The root operator's first self-signed admission.</summary>
+    /// <summary>
+    /// The estate's first authority: the root operator's admission of its own device, signed by that device, from which every admission
+    /// counts. Never chosen by a stated date or id (<see cref="Build"/>, <see cref="FirstAuthorityByManifest"/>).
+    /// </summary>
     internal RecordEnvelope? FirstAuthority { get; }
+
+    /// <summary>Every admission that could be the first authority: by the root operator, admitting a device that signed it, not a recovery device; by id.</summary>
+    internal IReadOnlyList<RecordEnvelope> AuthorityCandidates { get; }
 
     /// <summary>Unsigned admissions the signed format-2 migration lists, as id and hash keys.</summary>
     internal IReadOnlySet<string> MigrationAnchors { get; }
@@ -131,9 +157,168 @@ internal sealed partial class EstateTrust
     /// <summary>Whether the estate has adopted history checkpoints: it holds a checkpoint that counts.</summary>
     internal bool Adopted => History.Adopted;
 
-    /// <summary>Judges a model's records.</summary>
-    internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null) =>
-        new(model, manifest, objects, files);
+    /// <summary>The errors about which charter is the estate's first, reported with the history findings.</summary>
+    internal List<Finding> RootFindings { get; } = [];
+
+    /// <summary>Whether witnessed history names more than one first charter or first authority, so that no record counts until the copy is settled.</summary>
+    internal bool Unsettled { get; }
+
+    /// <summary>
+    /// Judges a model's records. The first charter, which names the root operator, is the one the manifest names; another charter that
+    /// supersedes nothing never displaces it, and only a model read without a manifest falls back to the first such charter by id.
+    /// Witnessed history only confirms it: each charter that supersedes nothing is judged under its own root operator, and is witnessed
+    /// when, so judged, the estate has adopted checkpoints and they witnessed it first. Added files can arrange that for a
+    /// forged charter, so a witnessed charter never displaces the manifest's: the manifest's charter witnessed alone is the first, and
+    /// any other witnessed charter, alone or beside it, leaves no charter read as the first and no record counting until the copy is
+    /// settled, so that nothing built from the records that count can take either root. A charter is judged witnessed with its own
+    /// first authority, whatever first authority the manifest names for another (<see cref="OwnFirstAuthority"/>). A charter that first
+    /// appears after adoption is never witnessed first. Under each charter the first authority is chosen the same way
+    /// (<see cref="UnderCharter"/>).
+    /// </summary>
+    internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null)
+    {
+        RecordEnvelope? named = manifest is null ? model.RawFirstEstate() : NamedCharter(model, manifest.Estate);
+        EstateTrust chosen = UnderCharter(model, manifest, objects, files, named);
+        List<RecordEnvelope> charters = [.. model.OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal)];
+        if (objects is null || manifest is null || charters.Count == 0) return chosen;
+        if (charters.Count == 1 && ReferenceEquals(charters[0], named)) return chosen;
+
+        // Whether a charter is witnessed is judged with its own first authority: a manifest's firstAuthority that is no candidate under
+        // it, such as one naming another charter's, does not keep it from being witnessed.
+        List<EstateTrust> witnessed = [];
+        foreach (RecordEnvelope charter in charters)
+        {
+            EstateTrust trust = ReferenceEquals(charter, named) ? chosen : UnderCharter(model, manifest, objects, files, charter);
+            EstateTrust? judged = manifest.FirstAuthority is { } name && trust.AuthorityCandidates.All(c => c.Id != name)
+                ? OwnFirstAuthority(model, manifest, objects, files, charter, trust.AuthorityCandidates) : trust;
+            if (judged is not null && judged.WitnessedFirst(charter, charters)) witnessed.Add(trust);
+        }
+
+        // Each charter is judged witnessed under itself, which added files can arrange for a forged one, so witnessed history only
+        // confirms the manifest's charter: one witnessed alone and named by the manifest is the first; any other witnessed one leaves
+        // the copy unsettled rather than displacing the manifest's.
+        if (witnessed.Count == 0) return chosen;
+        if (witnessed.Count == 1 && ReferenceEquals(witnessed[0].FirstEstate, named)) return chosen;
+        var unsettled = new EstateTrust(model, manifest, objects, files, null, unsettled: true);
+        string ids = string.Join(", ", witnessed.Select(t => t.FirstEstate!.Id));
+        unsettled.RootFindings.Add(new Finding(Severity.Error, "history.root-ambiguous", EstateLayout.RecordsDirectory, witnessed.Count > 1
+            ? $"History checkpoints that count, each set under its own root operator, witness different first charters: {ids}. No root operator is read and no record counts until one set is removed; compare this copy with a head known elsewhere (estate check --expect) to tell which history belongs."
+            : $"History checkpoints that count only when read under charter {ids} witnessed it first, and the manifest names {manifest.Estate ?? "no charter"}, which no counting checkpoint witnessed first. Checkpoints read under the charter they would make first never displace the manifest's, and the manifest is not signed, so no root operator is read and no record counts until the copy is settled; compare it with a head known elsewhere (estate check --expect) and remove what does not belong."));
+        if (witnessed.All(t => !ReferenceEquals(t.FirstEstate, named)))
+        {
+            unsettled.RootFindings.Add(new Finding(Severity.Error, "history.manifest-root", EstateLayout.ManifestPath,
+                $"The manifest names {manifest.Estate ?? "no charter"} as the estate's first charter, which no counting history checkpoint witnessed first, and checkpoints read under another charter witnessed that one first ({ids}). Either the manifest or those checkpoints do not belong; the copy reads unsettled until a head known elsewhere (estate check --expect) tells which."));
+        }
+
+        return unsettled;
+    }
+
+    /// <summary>
+    /// The judgment under a first charter, with its first authority chosen. Without history, the manifest decides
+    /// (<see cref="FirstAuthorityByManifest"/>). Each self-admission of the root operator's device that could be the first authority is
+    /// also judged as the first authority, and is witnessed when, so judged, the estate has adopted checkpoints and they witnessed it
+    /// before any other: something added files can arrange for a forged one, in an estate that has not adopted as well as in one that
+    /// has. So witnessed history only confirms the manifest's choice: when the manifest names one and it alone is witnessed, it is the
+    /// first authority; when another is witnessed, alone or beside it, the copy is unsettled and no record counts; when none is witnessed,
+    /// the manifest decides; and when the manifest names none while there are several, there is no first authority, witnessed or not.
+    /// Nothing extra is judged when the estate holds one such admission and the manifest names it or none.
+    /// </summary>
+    private static EstateTrust UnderCharter(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? charter)
+    {
+        var byManifest = new EstateTrust(model, manifest, objects, files, charter);
+        IReadOnlyList<RecordEnvelope> candidates = byManifest.AuthorityCandidates;
+        if (objects is null || manifest is null || candidates.Count == 0) return byManifest;
+        if (manifest.FirstAuthority is not { } named) return byManifest;
+        if (candidates.Count == 1 && named == candidates[0].Id) return byManifest;
+
+        List<EstateTrust> witnessed = [];
+        foreach (RecordEnvelope candidate in candidates)
+        {
+            EstateTrust trust = ReferenceEquals(candidate, byManifest.FirstAuthority) ? byManifest
+                : new EstateTrust(model, manifest, objects, files, charter, authorityGiven: true, authority: candidate);
+            if (trust.WitnessedFirst(trust.FirstAuthority, candidates)) witnessed.Add(trust);
+        }
+
+        if (witnessed.Count == 0) return byManifest;
+        if (witnessed.Count == 1 && witnessed[0].FirstAuthority!.Id == named) return witnessed[0];
+        var unsettled = new EstateTrust(model, manifest, objects, files, charter, unsettled: true, authorityGiven: true);
+        string ids = string.Join(", ", witnessed.Select(t => t.FirstAuthority!.Id));
+        unsettled.RootFindings.Add(new Finding(Severity.Error, "history.root-ambiguous", EstateLayout.RecordsDirectory, witnessed.Count > 1
+            ? $"History checkpoints that count, each set under its own first authority, witness different admissions of the root operator's own devices first: {ids}. No record counts until one set is removed; compare this copy with a head known elsewhere (estate check --expect) to tell which history belongs."
+            : $"History checkpoints that count only when admission {ids} is read as the first authority witnessed it first, and the manifest names {named}, which no counting checkpoint witnessed first. Checkpoints read under the admission they would make first never displace the manifest's, and the manifest is not signed, so no record counts until the copy is settled; compare it with a head known elsewhere (estate check --expect) and remove what does not belong."));
+        if (witnessed.All(t => t.FirstAuthority!.Id != named))
+        {
+            unsettled.RootFindings.Add(new Finding(Severity.Error, "history.manifest-root", EstateLayout.ManifestPath,
+                $"The manifest names {named} as the estate's first authority, which no counting history checkpoint witnessed first, and checkpoints read with another as the first authority witnessed that one first ({ids}). Either the manifest or those checkpoints do not belong; the copy reads unsettled until a head known elsewhere (estate check --expect) tells which."));
+        }
+
+        return unsettled;
+    }
+
+    /// <summary>
+    /// The judgment under a charter with its own first authority, for telling whether the charter is witnessed when the manifest names a
+    /// first authority that is no candidate under it: its only candidate, or the one candidate witnessed first when judged as the first
+    /// authority; null when there is none of either.
+    /// </summary>
+    private static EstateTrust? OwnFirstAuthority(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope charter,
+        IReadOnlyList<RecordEnvelope> candidates)
+    {
+        List<EstateTrust> trusts = [.. candidates.Select(c => new EstateTrust(model, manifest, objects, files, charter, authorityGiven: true, authority: c))];
+        if (trusts.Count == 1) return trusts[0];
+        List<EstateTrust> witnessed = [.. trusts.Where(t => t.WitnessedFirst(t.FirstAuthority, candidates))];
+        return witnessed.Count == 1 ? witnessed[0] : null;
+    }
+
+    /// <summary>
+    /// The first authority read without history: the self-admission of the root operator's device that the manifest names, which no other
+    /// displaces; or, when the manifest names none, the only one. A manifest naming an admission that is not such a self-admission, or
+    /// naming none while there are several, is an error and there is no first authority, so no signed admission counts: a first authority
+    /// is never chosen by its stated date or id.
+    /// </summary>
+    private RecordEnvelope? FirstAuthorityByManifest()
+    {
+        string candidates = AuthorityCandidates.Count == 0 ? "the estate holds none" : "the estate holds " + string.Join(", ", AuthorityCandidates.Select(DescribeCandidate));
+        if (Manifest?.FirstAuthority is { } named)
+        {
+            RecordEnvelope? match = AuthorityCandidates.FirstOrDefault(c => c.Id == named);
+            if (match is null)
+            {
+                RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
+                    $"The manifest names {named} as the estate's first authority, and that is not an admission by the root operator of its own device, signed by that device ({candidates}). No admission counts from a first authority until the manifest's firstAuthority names one that is."));
+            }
+
+            return match;
+        }
+
+        if (AuthorityCandidates.Count <= 1) return AuthorityCandidates.Count == 0 ? null : AuthorityCandidates[0];
+        RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
+            $"The root operator's devices admitted themselves more than once ({string.Join(", ", AuthorityCandidates.Select(DescribeCandidate))}), and the manifest names none of them as the estate's first authority. A first authority is never chosen by its date or id, so no admission counts from one until the manifest's firstAuthority names the admission that is."));
+        return null;
+    }
+
+    /// <summary>A self-admission that could be the first authority, for a message: its id, the device it admits and that device's name.</summary>
+    private string DescribeCandidate(RecordEnvelope admission)
+    {
+        string? device = admission.Subject?.Id;
+        string? name = device is not null && model.ById.TryGetValue(device, out RecordEnvelope? record) ? EstateModel.BodyString(record, "name") : null;
+        return name is null ? $"admission {admission.Id} of device {device}" : $"admission {admission.Id} of device {device} \"{name}\"";
+    }
+
+    /// <summary>
+    /// Whether this judgment's estate has adopted checkpoints and its counting checkpoints witnessed a record, with the bytes present,
+    /// before any of its rivals: the charters that supersede nothing, or the self-admissions that could be the first authority.
+    /// </summary>
+    private bool WitnessedFirst(RecordEnvelope? record, IReadOnlyList<RecordEnvelope> rivals)
+    {
+        if (!Adopted || record is null) return false;
+        List<(string Id, string Checkpoint)> seen = [.. rivals
+            .Where(c => History.Entries.TryGetValue(c.Id, out WitnessedEntry? entry) && entry.Entry.Hash == c.ComputedHash)
+            .Select(c => (c.Id, History.Entries[c.Id].Checkpoint))];
+        int index = seen.FindIndex(s => s.Id == record.Id);
+        if (index < 0) return false;
+        string earliest = seen[index].Checkpoint;
+        return seen.All(s => s.Id == record.Id || string.CompareOrdinal(s.Checkpoint, earliest) > 0);
+    }
 
     /// <summary>The records that do not count, each with the reason the loader reports it under.</summary>
     internal IReadOnlySet<string> NotCounting()
@@ -148,8 +333,9 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a record counts. A witnessed record present with another hash does not; otherwise each kind follows its rule: admissions
-    /// <see cref="AdmissionCounts(RecordEnvelope, Mode)"/>, device revisions <see cref="DeviceRevisionCounts"/>, checkpoints the history graph, charter revisions
+    /// Whether a record counts. No record counts in an unsettled copy, and a witnessed record present with another hash does not; otherwise
+    /// each kind follows its rule: admissions <see cref="AdmissionCounts(RecordEnvelope, Mode)"/>, device revisions <see cref="DeviceRevisionCounts"/>,
+    /// checkpoints the history graph, charter revisions
     /// <see cref="CharterRevisionCounts"/>, other signed records <see cref="Authentic"/> and unsigned records <see cref="Unsigned"/>.
     /// </summary>
     internal bool Counts(RecordEnvelope record)
@@ -164,7 +350,7 @@ internal sealed partial class EstateTrust
 
         bool Judge(RecordEnvelope r)
         {
-            if (History.Altered.Contains(r.Id)) return false;
+            if (Unsettled || History.Altered.Contains(r.Id)) return false;
             // A grant or principal revision dated before the record below it in its line counts for nothing.
             if (RefusedAuthorityRevision(r)) return false;
             if (r.Type == "admission") return AdmissionCounts(r, Mode.Anchors);
@@ -336,26 +522,509 @@ internal sealed partial class EstateTrust
     private IEnumerable<RecordEnvelope> AdmissionsAbout(string deviceId) => RawChain(deviceId).SelectMany(id => admissionsBySubject[id]);
 
     /// <summary>
-    /// Whether an admission can admit or revoke. A signed one does. An unsigned one does at record format 1, and otherwise only with
-    /// anchors, when the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a closing refuses neither admits
-    /// nor revokes.
+    /// Whether an admission can admit or revoke. The estate's first authority does. A signed one does when every signature verifies by a
+    /// device admitted when it was signed, through admissions that count in turn, and its author may admit at its time: an operator or a
+    /// person holding administer (<see cref="Standing"/>). An unsigned one does at record format 1, and otherwise only with anchors, when
+    /// the format-2 migration or an anchoring checkpoint lists it by id and hash. One that a closing refuses neither admits nor revokes,
+    /// and neither does one that would unseat what it rests on (<see cref="CountingAdmissions"/>).
     /// </summary>
     internal bool AdmissionCounts(RecordEnvelope admission, Mode mode) => AdmissionCounts(admission, mode, Acting);
 
-    private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound)
+    private bool AdmissionCounts(RecordEnvelope admission, Mode mode, IReadOnlyList<Closing> bound) => CountingAdmissions(mode, bound).Contains(admission.Id);
+
+    /// <summary>
+    /// The admissions that count in a mode, against the closings given. Starting from the estate's first authority and, with anchors, from
+    /// the unsigned admissions anchored or read under record format 1, every signed admission whose signatures verify by devices those
+    /// admissions admit at its time, and whose author may admit by the revisions that stand with them, joins, until none does. Each step
+    /// judges every admission against the same set, so the result does not depend on the order records are read in. A set that holds an
+    /// admission that no longer passes against it, such as one signed by a device a revocation in the set revoked before, is judged again
+    /// without some of those admissions, from the start, so that one left out unseats nothing. An admission helped make another fail
+    /// when that one passes without it; a device's revocations are judged together for this, so that copies of one revocation cannot
+    /// hide each other. Left out are first those that helped and fail by themselves, judged with every admission that failed beside them
+    /// left out, such as a revocation that revokes what its own signature or its author's authority rests on; failing those, those that
+    /// helped and failed themselves, which unseat one another; and failing those, every admission that failed, each of which another
+    /// admission that stands revoked. Once nothing fails, each admission left out that passes against the set is judged again, once:
+    /// with the set alone, the others still left out, and beside each other one that stands alone; those that stand alone and beside
+    /// every such other are restored together, so the outcome never depends on which is read first. An admission one of the closings
+    /// refuses never joins, and the author's
+    /// authority is read against the same closings. The result is kept for each set of closings, with the admissions left out that would
+    /// otherwise pass (<see cref="Unseating"/>).
+    /// </summary>
+    private HashSet<string> CountingAdmissions(Mode mode, IReadOnlyList<Closing> bound)
     {
-        if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
-        bool counts = admission.Signatures.Count > 0 || Format < 2 || (mode == Mode.Anchors && anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)));
-        return counts && (bound.Count == 0 || Refuser(admission, bound, mode) is null);
+        lock (gate)
+        {
+            if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
+            bool acting = ReferenceEquals(bound, Acting);
+            if (acting && admittedActing[(int)mode] is { } settled) return settled;
+            string key = bound.Count == 0 ? "" : string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+            if (!admittedByClosings[(int)mode].TryGetValue(key, out HashSet<string>? judged))
+            {
+                judged = Judge();
+                admittedByClosings[(int)mode][key] = judged;
+            }
+
+            if (acting) admittedActing[(int)mode] = judged;
+            return judged;
+        }
+
+        HashSet<string> Judge()
+        {
+            List<RecordEnvelope> all = [.. admissionRecords.Where(a => Open(this, a, bound, mode))];
+            var start = new HashSet<string>(StringComparer.Ordinal);
+            if (FirstAuthority is { } first && Open(this, first, bound, mode)) start.Add(first.Id);
+            foreach (RecordEnvelope admission in all.Where(a => a.Signatures.Count == 0))
+            {
+                if (mode == Mode.Anchors && (Format < 2 || anchors.Contains(SignatureChecks.AnchorKey(admission.Id, admission.ComputedHash)))) start.Add(admission.Id);
+            }
+
+            List<RecordEnvelope> signed = [.. all.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash)];
+            var left = new HashSet<string>(StringComparer.Ordinal);
+            var cleared = new HashSet<string>(StringComparer.Ordinal);
+            while (true)
+            {
+                HashSet<string> known = Settle(start, signed, left);
+                Standing found = Against(known);
+                // An admission left out that passes against the set may have been left out only beside another that unseated it. Each such
+                // admission not judged so before is judged with the set alone, the others still left out, and then beside each other one
+                // that stands alone; those that stand alone and beside every such other are restored together, so that of two that unseat
+                // each other neither is, whichever is read first.
+                List<RecordEnvelope> passing = [.. signed.Where(a => left.Contains(a.Id) && Passes(a, known, found))];
+                List<RecordEnvelope> fresh = [.. passing.Where(a => !cleared.Contains(a.Id))];
+                cleared.UnionWith(fresh.Select(a => a.Id));
+                List<RecordEnvelope> alone = [.. fresh.Where(a => Without(left, a).Contains(a.Id))];
+                List<RecordEnvelope> restored = [.. alone.Where(a => alone.All(b => ReferenceEquals(a, b) || Without(left, a, b) is var both && both.Contains(a.Id) && both.Contains(b.Id)))];
+                if (restored.Count > 0)
+                {
+                    left.ExceptWith(restored.Select(a => a.Id));
+                    continue;
+                }
+
+                unseating[known] = [.. passing.Select(a => a.Id)];
+                return known;
+            }
+
+            // The admissions that count with the ones given taken out of those left out, judged without restoring any other.
+            HashSet<string> Without(HashSet<string> left, params RecordEnvelope[] restore)
+            {
+                var trial = new HashSet<string>(left, StringComparer.Ordinal);
+                trial.ExceptWith(restore.Select(a => a.Id));
+                return Settle(start, signed, trial);
+            }
+        }
+
+        // Joins and leaves out until no admission of the set fails against it: every signed admission not left out joins as it can, and
+        // a set that holds failing admissions is judged again with more of them left out (above). Adds to the admissions left out.
+        HashSet<string> Settle(HashSet<string> start, List<RecordEnvelope> signed, HashSet<string> left)
+        {
+            while (true)
+            {
+                HashSet<string> known = Join(start, signed, left);
+                Standing found = Against(known);
+                List<RecordEnvelope> failed = [.. signed.Where(a => known.Contains(a.Id) && !Passes(a, known, found))];
+                if (failed.Count == 0) return known;
+                left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
+            }
+        }
+
+        // Every signed admission not left out whose signatures verify against the set, and whose author may admit, joins, until none does.
+        HashSet<string> Join(HashSet<string> start, List<RecordEnvelope> signed, HashSet<string> left)
+        {
+            var known = new HashSet<string>(start, StringComparer.Ordinal);
+            List<RecordEnvelope> undecided = [.. signed.Where(a => !left.Contains(a.Id))];
+            while (true)
+            {
+                JoinSteps++;
+                Standing found = Against(known);
+                List<RecordEnvelope> joined = [.. undecided.Where(a => VerifiesAgainst(a, known) && found.MayAdmit(a))];
+                if (joined.Count == 0) return known;
+                foreach (RecordEnvelope admission in joined) known.Add(admission.Id);
+                undecided.RemoveAll(joined.Contains);
+            }
+        }
+
+        // Which admissions a set that holds failing ones is judged again without (above).
+        List<RecordEnvelope> LeftOut(HashSet<string> known, List<RecordEnvelope> failed, List<RecordEnvelope> signed)
+        {
+            var failing = new HashSet<string>(failed.Select(a => a.Id), StringComparer.Ordinal);
+            // Only an admission about a device that signed a failing admission, or a principal or grant revision, can be what made one fail.
+            var signers = new HashSet<string>(StringComparer.Ordinal);
+            foreach (RecordEnvelope record in failed.Concat(principalRecords).Concat(authorityRecords))
+            {
+                for (int i = 0; i < record.Signatures.Count; i++) signers.Add(Proof(record, i).Identity);
+            }
+
+            // Each revoked device's revocations are judged together, so that copies of one revocation cannot hide each other, and every
+            // other admission alone: one of them helped make a failing admission fail when that admission passes without them.
+            List<RecordEnvelope> helped = [];
+            var groups = new Dictionary<string, List<RecordEnvelope>>(StringComparer.Ordinal);
+            foreach (RecordEnvelope candidate in signed.Where(a => known.Contains(a.Id) && a.Subject?.Id is { } subject && model.ById.TryGetValue(subject, out RecordEnvelope? device) &&
+                device.Type == "device" && signers.Contains(IdentityOf(device))))
+            {
+                string key = EstateModel.BodyString(candidate, "status") == "revoked" ? "revoked " + IdentityOf(model.ById[candidate.Subject!.Id]) : candidate.Id;
+                if (!groups.TryGetValue(key, out List<RecordEnvelope>? group)) groups[key] = group = [];
+                group.Add(candidate);
+            }
+
+            foreach (List<RecordEnvelope> group in groups.Values)
+            {
+                var without = new HashSet<string>(known, StringComparer.Ordinal);
+                without.ExceptWith(group.Select(a => a.Id));
+                Standing found = Against(without);
+                if (failed.Any(a => !group.Contains(a) && VerifiesAgainst(a, without) && found.MayAdmit(a))) helped.AddRange(group);
+            }
+
+            var rest = new HashSet<string>(known, StringComparer.Ordinal);
+            rest.ExceptWith(failing);
+            List<RecordEnvelope> alone = [.. helped.Where(a => new HashSet<string>(rest, StringComparer.Ordinal) { a.Id } is var with && !Passes(a, with, Against(with)))];
+            if (alone.Count > 0) return alone;
+            List<RecordEnvelope> mutual = [.. helped.Where(a => failing.Contains(a.Id))];
+            return mutual.Count > 0 ? mutual : failed;
+        }
+
+        bool Passes(RecordEnvelope admission, HashSet<string> counting, Standing found) => VerifiesAgainst(admission, counting) && found.MayAdmit(admission);
+
+        Standing Against(HashSet<string> counting) => StandingAgainst(counting, bound, mode);
+    }
+
+    /// <summary>How many steps of joining admissions every judgment of which admissions count has taken.</summary>
+    internal int JoinSteps { get; private set; }
+
+    /// <summary>How many times a record's signatures were verified against a set of admissions: what the cost of judging admissions grows with.</summary>
+    internal long SetVerifications { get; private set; }
+
+    /// <summary>Whether no closing given refuses a record.</summary>
+    private static bool Open(EstateTrust trust, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode) => bound.Count == 0 || trust.Refuser(record, bound, mode) is null;
+
+    /// <summary>Who may admit, judged from the revisions that stand with the devices a set of admissions admits, against the closings given.</summary>
+    private Standing StandingAgainst(HashSet<string> counting, IReadOnlyList<Closing> bound, Mode mode) =>
+        new(this, bound, mode, r => r.Signatures.Count > 0 ? r.DeclaredHash == r.ComputedHash && Open(this, r, bound, mode) && VerifiesAgainst(r, counting) : mode == Mode.Anchors && UnsignedStands(r));
+
+    /// <summary>
+    /// The admissions left out of those that count with anchors and the closings that act which would pass against them: each would unseat
+    /// what it rests on, directly or through another that would unseat it in turn (<see cref="CountingAdmissions"/>).
+    /// </summary>
+    internal IReadOnlySet<string> Unseating()
+    {
+        lock (gate)
+        {
+            return unseating.TryGetValue(CountingAdmissions(Mode.Anchors, Acting), out HashSet<string>? left) ? left : NoAnchors;
+        }
+    }
+
+    /// <summary>
+    /// The findings about admissions that do not count where nothing else says why: one left out because it would unseat what it rests on
+    /// (<c>admission.unseats-support</c>), and a signed admission whose signatures verify by devices admitted at its time but whose author
+    /// may not admit then as admissions read authority (<c>admission.author</c>), which the model's own reading may not show. Each is a
+    /// warning, as a policy record that counts for nothing only because of what came after it is: the admission admits and revokes
+    /// nothing, the estate stays valid, and one who may writes it again. Before the estate adopts history checkpoints, while its charter
+    /// requires signatures, an admission that counts only because an unsigned principal or grant record that no checkpoint anchors gives
+    /// its author the standing is the warning <c>admission.author-unanchored</c>: such a record is one anyone able to add records can
+    /// write, dated as they choose.
+    /// </summary>
+    internal IEnumerable<Finding> AdmissionFindings()
+    {
+        lock (gate)
+        {
+            HashSet<string> counting = CountingAdmissions(Mode.Anchors, Acting);
+            IReadOnlySet<string> left = Unseating();
+            Standing found = StandingAgainst(counting, Acting, Mode.Anchors);
+            var findings = new List<Finding>();
+            foreach (RecordEnvelope admission in admissionRecords.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && a.DeclaredHash == a.ComputedHash &&
+                !counting.Contains(a.Id) && Open(this, a, Acting, Mode.Anchors)))
+            {
+                string kind = EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission";
+                if (left.Contains(admission.Id))
+                {
+                    findings.Add(new Finding(Severity.Warning, "admission.unseats-support", admission.ExpectedPath,
+                        $"This {kind} counts for nothing: counting it would unseat what its own signature or its author's authority rests on, directly or through another admission or revocation that would unseat it in turn. One that does not count admits and revokes nothing, so what it would have unseated is read without it. Write it again from a device whose admission does not rest on what it revokes, or as of a time after the admissions it rests on."));
+                }
+                else if (VerifiesAgainst(admission, counting) && !found.MayAdmit(admission))
+                {
+                    findings.Add(new Finding(Severity.Warning, "admission.author", admission.ExpectedPath,
+                        $"This {kind} admits and revokes nothing: devices are admitted by an operator or a person holding the 'administer' scope, read as they stood at its time from the root operator's own record and from principal and grant records that rest on signatures, an anchor or, before the estate adopted history checkpoints, the charter's signature rule at their time; {admission.By} held neither then by that reading. Admit or revoke again as one who may now."));
+                }
+            }
+
+            if (RequiredSince() is null || adoptionEligible) return findings;
+            // The same reading with unsigned principal and grant records only when anchored: what an admission's author may do without them.
+            var grounded = new Standing(this, Acting, Mode.Anchors, r => r.Signatures.Count > 0
+                ? r.DeclaredHash == r.ComputedHash && Open(this, r, Acting, Mode.Anchors) && VerifiesAgainst(r, counting)
+                : anchors.Contains(SignatureChecks.AnchorKey(r.Id, r.ComputedHash)));
+            foreach (RecordEnvelope admission in admissionRecords.Where(a => a.Signatures.Count > 0 && a.Id != FirstAuthority?.Id && counting.Contains(a.Id) && !grounded.MayAdmit(a)))
+            {
+                findings.Add(new Finding(Severity.Warning, "admission.author-unanchored", admission.ExpectedPath,
+                    $"This {(EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission")} counts because {admission.By}'s operator role or 'administer' rests on an unsigned principal or grant record dated before the charter required signatures, which no history checkpoint anchors. Anyone able to add records can write such a record with any date. Review it: adopting history checkpoints anchors what you keep, and from then on an unsigned record counts only when anchored."));
+            }
+
+            return findings;
+        }
+    }
+
+    /// <summary>
+    /// Whether an unsigned principal or grant revision stands for the reading of who may admit, with anchors, as other rules read unsigned
+    /// records (<see cref="Unsigned"/>): an anchoring checkpoint or the signed format-2 migration lists it by id and hash; or the charter
+    /// left signatures optional at its time, that is it is dated no later than the first revision along the first charter's line that
+    /// requires them (<see cref="RequiredSince"/>), or the line never requires them, and the estate has not adopted history checkpoints
+    /// while the line requires them. Closings are judged only in an estate that has adopted, so while they are, it reads as adopted.
+    /// </summary>
+    private bool UnsignedStands(RecordEnvelope record)
+    {
+        if (record.Type is not ("principal" or "authority") || PolicyAuthority.RequiresSignature(model, record)) return false;
+        if (anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return true;
+        if (RequiredSince() is not { } since) return true;
+        return closingsKnown && !adoptionEligible && string.CompareOrdinal(record.At, since.At) <= 0;
+    }
+
+    /// <summary>
+    /// The first revision along the first charter's line that requires signatures, reached through revisions of charters that leave them
+    /// optional, each of which counts whoever wrote it (<see cref="CharterRevisionCounts"/>); null when the line never requires them that way.
+    /// </summary>
+    private RecordEnvelope? RequiredSince()
+    {
+        if (requiredSinceKnown) return requiredSince;
+        RecordEnvelope? current = FirstEstate;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (current is not null && seen.Add(current.Id) && !RequiresSignatures(current))
+            current = model.SupersededBy.TryGetValue(current.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" ? successor : null;
+        requiredSince = current is not null && RequiresSignatures(current) ? current : null;
+        requiredSinceKnown = true;
+        return requiredSince;
+    }
+
+    /// <summary>
+    /// Who may admit or revoke devices at an admission's time, judged from the principal and grant revisions that stand by a given test:
+    /// signed ones whose signatures verify by the devices the admissions found so far admit, and, with anchors, unsigned ones as
+    /// <see cref="UnsignedStands"/> reads them. A revision is trusted when it stands and its author may write it at its time, as the records
+    /// that give roles read it (<see cref="AuthorityReplay"/>): the root operator's own first principal record; a principal revision by an
+    /// operator, one giving the operator role only for a human; a principal revision by a person holding administer, giving no operator role,
+    /// of a line whose revision it wrote; a grant revision by an operator; and a removal or narrowing by one who held the operator role
+    /// earlier (<see cref="TrustedRemoval"/>); never a principal's own record (<see cref="SelfAuthored"/>), nor one dated before the trusted
+    /// revision below it. Each trusted revision follows the nearest trusted revision below it in its line, as <see cref="AttachedTo"/> reads
+    /// lines. Authority is read as it stood at the admission's time, bounded by the closings given: the author's principal line as its
+    /// trusted revisions stood then, and a trusted grant revision in force then, unexpired then, and closed by none of those closings without
+    /// witnessing the admission; so a later grant authorizes nothing earlier and a later narrowing withdraws nothing already written, as
+    /// <see cref="EstateModel.HasRoleAt"/> and <see cref="EstateModel.HasScopeAt"/> read authority, and a revision written later restores
+    /// nothing earlier. Administer counts only for a person. Admissions are judged with a test built from the admissions found so far
+    /// (<see cref="CountingAdmissions"/>), so the first authority is the base and nothing here reads which admissions count. A circle of
+    /// appointments gives nothing; a verdict reached through a circle cut short is kept only for the evaluation it was reached in, so the
+    /// verdicts do not depend on the order they are asked for.
+    /// </summary>
+    private sealed class Standing(EstateTrust trust, IReadOnlyList<Closing> bound, Mode mode, Func<RecordEnvelope, bool> authentic)
+    {
+        private readonly Dictionary<string, bool> verdicts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> kept = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> transient = new(StringComparer.Ordinal);
+        private readonly HashSet<string> checking = new(StringComparer.Ordinal);
+        private int cuts;
+        private int depth;
+
+        /// <summary>
+        /// A verdict asked for by key: kept when its evaluation met no circle cut short, kept only until the outermost evaluation ends when it
+        /// did, and false for one already being evaluated, a circle cut short.
+        /// </summary>
+        private bool Guarded(string key, Func<bool> evaluate)
+        {
+            if (kept.TryGetValue(key, out bool known)) return known;
+            if (transient.TryGetValue(key, out known))
+            {
+                cuts++;
+                return known;
+            }
+
+            if (!checking.Add(key))
+            {
+                cuts++;
+                return false;
+            }
+
+            int before = cuts;
+            depth++;
+            bool value;
+            try
+            {
+                value = evaluate();
+            }
+            finally
+            {
+                checking.Remove(key);
+                depth--;
+            }
+
+            if (cuts == before) kept[key] = value;
+            else transient[key] = value;
+            if (depth == 0) transient.Clear();
+            return value;
+        }
+
+        private bool Stands(RecordEnvelope revision)
+        {
+            if (verdicts.TryGetValue(revision.Id, out bool known)) return known;
+            bool value = authentic(revision);
+            verdicts[revision.Id] = value;
+            return value;
+        }
+
+        /// <summary>Whether a principal or grant revision is trusted (above).</summary>
+        private bool TrustedRevision(RecordEnvelope revision)
+        {
+            if (revision.Type == "principal" && revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null) return true;
+            if (trust.SelfAuthored(revision) || !Stands(revision)) return false;
+            return Guarded("trusted " + revision.Id, () =>
+            {
+                // The revisions below are settled first, from the bottom of the line, so that a long line is walked, never recursed.
+                List<RecordEnvelope> lower = [];
+                var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+                for (RecordEnvelope? current = Previous(revision); current is not null && seen.Add(current.Id); current = Previous(current)) lower.Add(current);
+                for (int i = lower.Count - 1; i >= 0; i--) TrustedRevision(lower[i]);
+                RecordEnvelope? below = Below(revision);
+                if (below is not null && string.CompareOrdinal(revision.At, below.At) < 0) return false;
+                if (revision.Type == "authority") return TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision, below);
+                bool givesOperator = AuthorityReplay.Roles(revision).Contains(Roles.Operator);
+                if (givesOperator && EstateModel.BodyString(revision, "kind") != "human") return false;
+                if (TrustedOperator(revision.By, revision.At) || TrustedRemoval(revision, below)) return true;
+                if (givesOperator || !HoldsAdminister(revision)) return false;
+                // A person holding administer amends only a line whose revision it wrote: the one below, or, when none below is trusted, the one named.
+                RecordEnvelope? amended = below ?? Previous(revision);
+                return amended is null || amended.By == revision.By;
+            });
+        }
+
+        /// <summary>The record a revision names as the one it supersedes, when that is a record of its own type.</summary>
+        private RecordEnvelope? Previous(RecordEnvelope revision) =>
+            revision.Supersedes is not null && trust.model.ById.TryGetValue(revision.Supersedes, out RecordEnvelope? previous) && previous.Type == revision.Type ? previous : null;
+
+        /// <summary>The nearest trusted revision below a revision in its line, skipping any that is not trusted; null when there is none.</summary>
+        private RecordEnvelope? Below(RecordEnvelope revision)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+            for (RecordEnvelope? current = Previous(revision); current is not null && seen.Add(current.Id); current = Previous(current))
+            {
+                if (TrustedRevision(current)) return current;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Whether a revision is a removal that keeps counting after its author lost the operator role, as the records that give roles read
+        /// it (<see cref="AuthorityReplay"/>): a principal revision giving no operator role on top of a trusted revision that gives it, or a
+        /// grant revision that only narrows the trusted revision below it, written by one who held the operator role at its time or earlier
+        /// through trusted revisions. So it takes away and never gives.
+        /// </summary>
+        private bool TrustedRemoval(RecordEnvelope revision, RecordEnvelope? below)
+        {
+            if (below is null) return false;
+            bool takesAway = revision.Type == "principal" ? !IsOperator(revision) && IsOperator(below) : AuthorityReplay.Narrows(revision, below);
+            return takesAway && FormerOperator(revision.By, revision.At);
+        }
+
+        /// <summary>Whether a principal is the root operator, or held the operator role through trusted revisions at some time up to a time.</summary>
+        private bool FormerOperator(string principal, string at)
+        {
+            if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
+            return Guarded("former " + principal + " " + at, () =>
+                trust.principalRecords.Any(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && IsOperator(p) && TrustedOperator(principal, p.At)));
+        }
+
+        /// <summary>
+        /// The principal record that describes a principal at a time: among the trusted revisions of its line dated at or before the time, the
+        /// single one no other of them follows, directly or through trusted revisions below it. Revisions that are not trusted are not read,
+        /// and, when <paramref name="grounded"/> is set, nor are unsigned ones that stand only by their date (<see cref="Grounded"/>).
+        /// </summary>
+        private RecordEnvelope? PrincipalAt(string principal, string at, bool grounded = false)
+        {
+            List<RecordEnvelope> revisions = [.. trust.principalRecords.Where(p => trust.PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p) &&
+                (!grounded || Grounded(p)))];
+            var followed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (RecordEnvelope revision in revisions)
+            {
+                RecordEnvelope? below = Below(revision);
+                while (below is not null && followed.Add(below.Id)) below = Below(below);
+            }
+
+            List<RecordEnvelope> heads = [.. revisions.Where(p => !followed.Contains(p.Id))];
+            return heads.Count == 1 ? heads[0] : null;
+        }
+
+        /// <summary>
+        /// Whether a principal revision rests on more than its stated date: signed, anchored, or the root operator's own first record. An
+        /// unsigned record standing only because it is dated before the charter required signatures is one anyone able to add records can
+        /// write, so it never makes a principal a person who may admit under administer.
+        /// </summary>
+        private bool Grounded(RecordEnvelope revision) =>
+            revision.Signatures.Count > 0 || trust.anchors.Contains(SignatureChecks.AnchorKey(revision.Id, revision.ComputedHash)) ||
+            revision.Id == trust.RootOperator && revision.By == trust.RootOperator && revision.Supersedes is null;
+
+        /// <summary>Whether a principal is the root operator, or held the operator role at a time through trusted revisions.</summary>
+        private bool TrustedOperator(string principal, string at)
+        {
+            if (principal == trust.RootOperator && trust.RootOperator is not null) return true;
+            return Guarded("operator " + principal + " " + at, () => IsOperator(PrincipalAt(principal, at)));
+        }
+
+        /// <summary>
+        /// Whether a record's author, a person at its time, held administer then through a grant: a trusted grant revision dated at or before
+        /// the record, followed by no trusted revision dated by then, unexpired at the record's time, and closed by none of the closings given
+        /// without witnessing the record. Only trusted grant revisions decide, so a revision anyone else writes neither grants nor withdraws it.
+        /// The author is a person when their line describes a human as read, and also when read without the unsigned revisions that stand
+        /// only by their date (<see cref="Grounded"/>): such a revision may take that away, never give it.
+        /// </summary>
+        private bool HoldsAdminister(RecordEnvelope record)
+        {
+            if (!Human(PrincipalAt(record.By, record.At)) || !Human(PrincipalAt(record.By, record.At, grounded: true))) return false;
+            return trust.authorityRecords.Any(grant => Administers(grant, record.By, record.AtTime) && string.CompareOrdinal(grant.At, record.At) <= 0 && TrustedRevision(grant) &&
+                !TrustedSuccessors(grant).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) && !trust.GrantClosedWithin(grant, record, bound, mode));
+        }
+
+        private static bool Human(RecordEnvelope? principal) => principal is not null && EstateModel.BodyString(principal, "kind") == "human";
+
+        /// <summary>The trusted revisions that follow a grant revision: its successors, through any that are not trusted.</summary>
+        private IEnumerable<RecordEnvelope> TrustedSuccessors(RecordEnvelope grant)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
+            var queue = new Queue<string>([grant.Id]);
+            while (queue.TryDequeue(out string? id))
+            {
+                foreach (RecordEnvelope next in trust.successors[id].Where(s => s.Type == "authority" && seen.Add(s.Id)))
+                {
+                    if (TrustedRevision(next)) yield return next;
+                    else queue.Enqueue(next.Id);
+                }
+            }
+        }
+
+        /// <summary>Whether an admission's author may admit or revoke devices at its time: an operator, or a person holding administer.</summary>
+        internal bool MayAdmit(RecordEnvelope admission) => TrustedOperator(admission.By, admission.At) || HoldsAdminister(admission);
+    }
+
+    /// <summary>Whether every signature of a record verifies by devices that a set of admissions admits at its time.</summary>
+    private bool VerifiesAgainst(RecordEnvelope record, HashSet<string> counting)
+    {
+        SetVerifications++;
+        var findings = new FindingList();
+        for (int i = 0; i < record.Signatures.Count; i++) Verify(record, i, (deviceId, at) => StateFrom(deviceId, at, counting), findings);
+        return !findings.HasErrors;
+    }
+
+    /// <summary>Forgets which admissions count, which reads proofs, anchors and closings that are judged afresh.</summary>
+    private void ForgetAdmissions()
+    {
+        Array.Clear(admittedActing);
+        foreach (Dictionary<string, HashSet<string>> judged in admittedByClosings) judged.Clear();
+        unseating.Clear();
     }
 
     /// <summary>The admission state of a device at a time, from the admissions about its line that count in the mode.</summary>
     internal SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode) => AdmissionStateAt(deviceId, at, mode, Acting);
 
-    private SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode, IReadOnlyList<Closing> bound)
+    private SignatureChecks.AdmissionState AdmissionStateAt(string deviceId, string at, Mode mode, IReadOnlyList<Closing> bound) =>
+        StateFrom(deviceId, at, CountingAdmissions(mode, bound));
+
+    private SignatureChecks.AdmissionState StateFrom(string deviceId, string at, HashSet<string> counting)
     {
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => AdmissionCounts(a, mode, bound)))
+        foreach (RecordEnvelope admission in AdmissionsAbout(deviceId).Where(a => counting.Contains(a.Id)))
         {
             if (admission.Id != FirstAuthority?.Id && SelfSigned(admission)) continue;
             string? status = EstateModel.BodyString(admission, "status");
@@ -555,10 +1224,13 @@ internal sealed partial class EstateTrust
     internal bool CharterRevisionCounts(RecordEnvelope revised, RecordEnvelope revision) =>
         !RequiresSignatures(revised) || (revision.By == RootOperator && Authentic(revision));
 
+    private static RecordEnvelope? NamedCharter(EstateModel model, string? id) =>
+        id is not null && model.ById.TryGetValue(id, out RecordEnvelope? charter) && charter.Type == "estate" && charter.Supersedes is null ? charter : null;
+
     private RecordEnvelope? ComputeCharter()
     {
         if (FirstEstate is not { } current)
-            return model.OfType("estate").Where(r => !model.SupersededBy.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
+            return Manifest is not null ? null : model.OfType("estate").Where(r => !model.SupersededBy.ContainsKey(r.Id)).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
         var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
         while (model.SupersededBy.TryGetValue(current.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && successor.Type == "estate" &&
             seen.Add(successor.Id) && CharterRevisionCounts(current, successor))
@@ -582,7 +1254,7 @@ internal sealed partial class EstateTrust
             if (!migration.Body.TryGetProperty("migrations", out JsonElement steps) || steps.ValueKind != JsonValueKind.Array ||
                 !steps.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == "record-format-2"))
                 continue;
-            if (migration.By != RootOperator && !model.HasScope(migration.By, Scopes.Administer, migration.AtTime)) continue;
+            if (migration.By != RootOperator && !LoadedAdministers(migration.By, migration.AtTime)) continue;
             if (Verification(migration, Mode.Signatures).HasErrors || !migration.Body.TryGetProperty("anchored", out JsonElement list) || list.ValueKind != JsonValueKind.Array) continue;
             foreach (JsonElement entry in list.EnumerateArray())
             {
@@ -593,6 +1265,18 @@ internal sealed partial class EstateTrust
         }
 
         return anchored;
+    }
+
+    /// <summary>
+    /// Whether a grant its author may write gives a principal administer, unexpired at a time, read as <see cref="EstateModel.HasScope"/>
+    /// reads it (<see cref="AuthorityReplay"/>) from every principal and authority record loaded, under this judgment's root operator: the
+    /// model takes its root operator from this judgment, so it cannot be asked while the judgment is made.
+    /// </summary>
+    private bool LoadedAdministers(string principal, DateTimeOffset at)
+    {
+        loadedAuthority ??= AuthorityReplay.Run(principalRecords, authorityRecords, RootOperator, r => model.Chain(r)[0],
+            id => model.ById.TryGetValue(id, out RecordEnvelope? found) ? found : null);
+        return loadedAuthority.GrantLines.Select(loadedAuthority.Current).OfType<RecordEnvelope>().Any(g => Administers(g, principal, at));
     }
 
     /// <summary>
@@ -674,18 +1358,23 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: one dated before the record it attaches
-    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
+    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: a principal record the principal it
+    /// describes wrote, at any revision, unless that principal is the root operator (<see cref="SelfAuthored"/>); and one dated before the
+    /// record it attaches to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
     /// </summary>
     internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
-        AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+        SelfAuthored(revision) || AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>Whether a principal record was written by the principal it describes, which only the root operator may do.</summary>
+    internal bool SelfAuthored(RecordEnvelope revision) =>
+        revision.Type == "principal" && revision.By != RootOperator && PrincipalIdentity(revision) == revision.By;
 
     /// <summary>
     /// The record a grant or principal revision attaches to in its line: the nearest record below it that counts, skipping any that does
-    /// not, whether unsigned, refused for its date or not counting otherwise. Null for a line's first record, for a revision naming no
-    /// record of its own type and for one with no record below it that counts. So a revision on top of one that does not count is
-    /// compared with, and follows, the line where that one would have joined it. Read only once history is judged, since what counts
-    /// depends on it.
+    /// not, whether unsigned, refused for its date, a principal's own record (<see cref="SelfAuthored"/>) or not counting otherwise. Null
+    /// for a line's first record, for a revision naming no record of its own type and for one with no record below it that counts. So a
+    /// revision on top of one that does not count is compared with, and follows, the line where that one would have joined it. Read only
+    /// once history is judged, since what counts depends on it.
     /// </summary>
     internal RecordEnvelope? AttachedTo(RecordEnvelope revision)
     {
@@ -1029,13 +1718,15 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the
-    /// root operator's first record. A revision the model holds is read through the view of those closings (<see cref="View"/>).
+    /// root operator's first record; never a principal's own record, which counts for nothing in every read (<see cref="SelfAuthored"/>). A
+    /// revision the model holds is read through the view of those closings (<see cref="View"/>).
     /// </summary>
     private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
-        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
+        !SelfAuthored(revision) &&
+        (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
         (revision.Type is "principal" or "authority" && model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision)
             ? StrictVerdict(revision, null) != view.Changed.Contains(revision.Id)
-            : AuthenticBySignaturesWith(revision, bound));
+            : AuthenticBySignaturesWith(revision, bound)));
 
     /// <summary>
     /// Whether the strongest acts refuse a principal or grant revision for its date, against the closings given: it is dated before the
@@ -1290,6 +1981,111 @@ internal sealed partial class EstateTrust
     private bool AuthenticBySignaturesWith(RecordEnvelope record, IReadOnlyList<Closing> bound) =>
         ReferenceEquals(bound, Acting) ? AuthenticBySignatures(record)
             : record.Signatures.Count > 0 && record.DeclaredHash == record.ComputedHash && !VerifyWith(record, Mode.Signatures, bound).HasErrors;
+
+    /// <summary>
+    /// Who acts as the operator for policy authority (<see cref="OperatorReplay"/>): the principal records that count, of which only those
+    /// authentic by signatures widen, and the root operator's own first record; a record by an author who no longer stands is read as
+    /// written only when signed history places it before the revision that took the role away (<see cref="WitnessedBefore"/>).
+    /// </summary>
+    internal OperatorReplay PolicyOperators
+    {
+        get
+        {
+            lock (gate)
+            {
+                return policyOperators ??= ReadPolicyOperators(beforeHistory: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="PolicyOperators"/> with every removal set aside that came before the estate's history checkpoints could place a record
+    /// earlier (<see cref="BeforeHistory"/>): how policy records would stand but for such a removal, which tells them apart from records
+    /// that fail for any other reason.
+    /// </summary>
+    internal OperatorReplay PolicyOperatorsBeforeHistory
+    {
+        get
+        {
+            lock (gate)
+            {
+                return policyOperatorsBeforeHistory ??= ReadPolicyOperators(beforeHistory: true);
+            }
+        }
+    }
+
+    private OperatorReplay ReadPolicyOperators(bool beforeHistory) =>
+        OperatorReplay.Run(principalRecords.Where(Counts), RootOperator, PrincipalIdentity, Authentic,
+            (record, loss) => WitnessedBefore(record, loss) || beforeHistory && BeforeHistory(record));
+
+    /// <summary>
+    /// Whether no history checkpoint could have placed a record before a later revision: the estate has not adopted checkpoints, or its
+    /// adoption witnesses the record, which was written before any checkpoint was.
+    /// </summary>
+    internal bool BeforeHistory(RecordEnvelope record) => !History.Adopted || History.AdoptedAt(record) is not null;
+
+    /// <summary>
+    /// Whether signed history places a record before the revision that took its author's operator role away: a counting checkpoint signed
+    /// by the root operator, or by an operator who held the role when it was written and stands now (<see cref="StandingOperator"/>, read
+    /// against the closings that act), lists the record with its bytes or follows, through its predecessors, a counting checkpoint that
+    /// does; is dated no later than the revision and does not list it; and precedes every counting checkpoint that lists the revision. So
+    /// a checkpoint by anyone else witnesses only through such a checkpoint that follows it before the revision, and one beside the
+    /// revision or after it witnesses nothing for this, whoever follows it later; nor does any in an estate that has not adopted
+    /// checkpoints.
+    /// </summary>
+    internal bool WitnessedBefore(RecordEnvelope record, RecordEnvelope loss)
+    {
+        if (!History.Adopted || !History.Listings.TryGetValue(record.Id, out IReadOnlyList<string>? listing) ||
+            !History.Entries.TryGetValue(record.Id, out WitnessedEntry? entry) || entry.Entry.Hash != record.ComputedHash)
+            return false;
+        IReadOnlyList<string> carrying = History.Listings.GetValueOrDefault(loss.Id) ?? [];
+        return listing.SelectMany(Descendants).Distinct(StringComparer.Ordinal).Any(id => !carrying.Contains(id) &&
+            model.ById.TryGetValue(id, out RecordEnvelope? checkpoint) && string.CompareOrdinal(checkpoint.At, loss.At) <= 0 &&
+            carrying.All(c => Ancestry(c).Contains(id)) && StandingOperator(checkpoint.By, checkpoint.At, Acting));
+
+        // A counting checkpoint and every counting checkpoint that follows it, through hashes that match.
+        HashSet<string> Descendants(string checkpoint)
+        {
+            lock (gate)
+            {
+                if (checkpointDescendants.TryGetValue(checkpoint, out HashSet<string>? known)) return known;
+                checkpointFollowers ??= History.Predecessors.SelectMany(p => p.Value.Select(previous => (Previous: previous, Next: p.Key)))
+                    .ToLookup(x => x.Previous, x => x.Next, StringComparer.Ordinal);
+                var set = new HashSet<string>(StringComparer.Ordinal) { checkpoint };
+                var queue = new Queue<string>([checkpoint]);
+                while (queue.TryDequeue(out string? current))
+                {
+                    foreach (string next in checkpointFollowers[current])
+                    {
+                        if (set.Add(next)) queue.Enqueue(next);
+                    }
+                }
+
+                checkpointDescendants[checkpoint] = set;
+                return set;
+            }
+        }
+
+        HashSet<string> Ancestry(string checkpoint)
+        {
+            lock (gate)
+            {
+                if (checkpointAncestry.TryGetValue(checkpoint, out HashSet<string>? known)) return known;
+                var set = new HashSet<string>(StringComparer.Ordinal) { checkpoint };
+                var queue = new Queue<string>([checkpoint]);
+                while (queue.TryDequeue(out string? current))
+                {
+                    foreach (string previous in History.Predecessors.GetValueOrDefault(current) ?? [])
+                    {
+                        if (set.Add(previous)) queue.Enqueue(previous);
+                    }
+                }
+
+                checkpointAncestry[checkpoint] = set;
+                return set;
+            }
+        }
+    }
 
     /// <summary>Whether a principal record describes a person holding the operator role.</summary>
     private static bool IsOperator(RecordEnvelope? head) =>

@@ -80,6 +80,57 @@ public class HistoryTriggerTests
         finally { Delete(root); }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheFirstDeviceAdmittingItselfIsNamedInTheManifestAsTheFirstAuthority(bool newborn)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-first-authority-" + Ulid.NewUlid().Value);
+        try
+        {
+            (RecordEnvelope op, _) = EstateInitializer.Initialize(root, new EstateInitialization("First", "first", "Name the first authority.", "Operator", "Org", null, "Vericairn/vericairn", new string('a', 40)));
+            using EstateService api = EstateService.Open(root);
+            Assert.Null(api.Session.Load().Manifest!.FirstAuthority);
+            if (!newborn) Ok(api.NewRecord(new NewRecordRequest("work-order", op.Id, PolicyFixture.Element(JsonNode.Parse(HistoryFixture.Order("FIRST-1"))!))));
+            RecordWritten device = Ok(api.DeviceCreate(new(op.Id, "Operator's device", "file")));
+            RecordWritten admitted = Ok(api.DeviceAdmit(new AdmitRequest(device.Id, op.Id, "The first authority.")));
+
+            EstateModel model = api.Session.Load();
+            Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+            Assert.Equal(admitted.Id, model.Manifest!.FirstAuthority);
+            Assert.Equal(admitted.Id, SignatureChecks.FirstAuthority(model, op.Id)?.Id);
+            Assert.Equal(newborn, SignedHistory.Adopted(model));
+
+            // A device admitted afterwards, by the first, leaves the manifest as it is.
+            byte[] manifest = File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath));
+            RecordWritten second = Ok(api.DeviceCreate(new(op.Id, "Operator's second device", "file")));
+            Ok(api.DeviceAdmit(new AdmitRequest(second.Id, op.Id, "A second device.")));
+            Assert.Equal(manifest, File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath)));
+        }
+        finally { Delete(root); }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnUpgradeNamesTheEstatesOnlySelfAdmissionAsItsFirstAuthority(bool adopt)
+    {
+        using var f = new Fixture(adopt);
+        EstateModel before = f.Api.Session.Load();
+        Assert.Null(before.Manifest!.FirstAuthority);
+        string first = SignatureChecks.FirstAuthority(before, f.Records.Estate.OperatorId)!.Id;
+        Publish(f.Records, "0.9.2");
+        (UpgradeResponse? applied, Problem? problem) = f.Api.Upgrade(new UpgradeRequest("0.9.2", f.Records.Estate.OperatorId, false));
+        Assert.True(problem is null, JsonSerializer.Serialize(problem, ProtocolJson.Options));
+        Assert.True(applied!.Applied);
+
+        EstateModel model = f.Api.Session.Load();
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+        Assert.Equal(first, model.Manifest!.FirstAuthority);
+        RecordEnvelope migration = model.ById[applied.Migration!.Id];
+        Assert.Contains(migration.Body.GetProperty("changes").EnumerateArray(), c => c.GetString()!.Contains(first, StringComparison.Ordinal));
+    }
+
     [Fact]
     public void AdoptionIsTheRootOperatorsStepNeverAnAgentsAndItsCheckListsWhatItWouldAnchor()
     {

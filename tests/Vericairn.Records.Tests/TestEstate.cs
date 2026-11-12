@@ -62,13 +62,29 @@ public sealed class TestEstate : IDisposable
         return record.Envelope;
     }
 
+    /// <summary>The admission the manifest names as the estate's first authority, as the runtime names it when the first device admits itself; null for none.</summary>
+    public string? FirstAuthority { get; private set; }
+
+    /// <summary>Names an admission in the manifest as the estate's first authority, or none, keeping the manifest's charter.</summary>
+    public void NameFirstAuthority(string? admission)
+    {
+        FirstAuthority = admission;
+        string path = Path.Combine(Root, EstateLayout.ManifestPath);
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path))!.AsObject();
+        manifest.Remove("firstAuthority");
+        if (admission is not null) manifest["firstAuthority"] = admission;
+        using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
+        File.WriteAllBytes(path, Canonical.CanonicalJson.SerializePrettyUtf8(document.RootElement));
+    }
+
     public void WriteManifest(string estateId, string mode = "source")
     {
         string path = Path.Combine(Root, EstateLayout.ManifestPath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string first = FirstAuthority is null ? "" : $$$""","firstAuthority":"{{{FirstAuthority}}}" """;
         string manifest = mode == "source"
-            ? $$$"""{"estate":"{{{estateId}}}","format":"vericairn.estate-manifest/1","recordFormat":{{{RecordFormat}}},"vericairn":{"commit":"0123456789abcdef0123456789abcdef01234567","mode":"source","repository":"Vericairn/vericairn"}}"""
-            : $$$"""{"estate":"{{{estateId}}}","format":"vericairn.estate-manifest/1","recordFormat":{{{RecordFormat}}},"vericairn":{"mode":"release","repository":"Vericairn/vericairn","version":"0.1.0"}}""";
+            ? $$$"""{"estate":"{{{estateId}}}"{{{first}}},"format":"vericairn.estate-manifest/1","recordFormat":{{{RecordFormat}}},"vericairn":{"commit":"0123456789abcdef0123456789abcdef01234567","mode":"source","repository":"Vericairn/vericairn"}}"""
+            : $$$"""{"estate":"{{{estateId}}}"{{{first}}},"format":"vericairn.estate-manifest/1","recordFormat":{{{RecordFormat}}},"vericairn":{"mode":"release","repository":"Vericairn/vericairn","version":"0.1.0"}}""";
         using JsonDocument document = JsonDocument.Parse(manifest);
         File.WriteAllBytes(path, Canonical.CanonicalJson.SerializePrettyUtf8(document.RootElement));
     }

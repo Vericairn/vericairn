@@ -124,7 +124,10 @@ internal sealed partial class EstateTrust
         proofs.Clear();
         verified.Clear();
         counts.Clear();
+        ForgetAdmissions();
         ForgetStrictViews();
+        policyOperators = null;
+        policyOperatorsBeforeHistory = null;
         anchors = NoAnchors;
         anchorsKnown = false;
 
@@ -394,6 +397,17 @@ internal sealed partial class EstateTrust
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether one of the closings given closed a grant revision without witnessing a record, which the revision then does not authorize; in
+    /// the mode with anchors an anchored record is not closed. What an admission's author is read against while admissions are judged.
+    /// </summary>
+    private bool GrantClosedWithin(RecordEnvelope grant, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode)
+    {
+        if (bound.Count == 0) return false;
+        if (mode == Mode.Anchors && anchorsKnown && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return false;
+        return bound.Any(c => c.Closes(grant) && !Witnesses(c, record));
     }
 
     /// <summary>Whether a closing that acts closed a grant revision without witnessing a record, which the revision then does not authorize.</summary>

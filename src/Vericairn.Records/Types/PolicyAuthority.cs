@@ -34,28 +34,125 @@ internal static class PolicyAuthority
     internal static bool IsPolicyGrant(EstateModel model, RecordEnvelope record) => model.Chain(record).Select(id => model.ById[id]).Any(r =>
         ScopesWithBounds.Any(s => PolicyRecords.Contains(PolicyRecords.Property(r.Body, "scope"), s)));
 
-    internal static bool OperatorAt(EstateModel model, string by, string at)
+    /// <summary>Whether a record's author acts as the operator for policy authority (<see cref="OperatorAt(EstateModel, string, string, RecordEnvelope?)"/>).</summary>
+    internal static bool OperatorAt(EstateModel model, RecordEnvelope record) => OperatorAt(model, record.By, record.At, record);
+
+    /// <summary>Whether a principal acts as the operator for policy authority at a time, with no record to place in signed history.</summary>
+    internal static bool OperatorAt(EstateModel model, string by, string at) => OperatorAt(model, by, at, null);
+
+    /// <summary>
+    /// Set while a record is judged as it would stand had no removal come before the estate's history checkpoints could place the record
+    /// earlier (<see cref="RemovedBeforeHistory"/>), with the removals that reading set aside.
+    /// </summary>
+    [ThreadStatic]
+    private static List<RecordEnvelope>? beforeHistory;
+
+    /// <summary>
+    /// Whether a principal acts as the operator for policy authority at a time: the root operator always; another person when their line
+    /// gives the operator role at that time and still gives it now, as policy authority reads principal records (<see cref="OperatorReplay"/>:
+    /// only signed records widen, a removal keeps counting, and a former operator's appointment counts only where signed history places it
+    /// before the removal). A person who has since lost the role acted as the operator only through a record that signed history places
+    /// before the loss (<see cref="EstateTrust.WitnessedBefore"/>): one that a checkpoint the root operator or a standing operator signed
+    /// before the revision that took the role away lists, or follows a checkpoint listing. So a record dated back into the time a removed
+    /// operator held the role, and written after, authorizes nothing.
+    /// </summary>
+    internal static bool OperatorAt(EstateModel model, string by, string at, RecordEnvelope? record)
     {
         string? root = model.CurrentEstate is { } estate ? EstateModel.BodyString(model.ById[PolicyRecords.Identity(model, estate)], "operator") : null;
-        var checking = new HashSet<string>(StringComparer.Ordinal);
-        return Trusted(by, at);
-
-        bool Trusted(string author, string instant)
+        if (by == root && root is not null) return true;
+        if (!model.ById.TryGetValue(by, out RecordEnvelope? principal) || principal.Type != "principal") return false;
+        string line = model.Chain(principal)[0];
+        EstateTrust trust = model.Trust;
+        List<RecordEnvelope>? setAside = beforeHistory;
+        OperatorReplay operators = setAside is null ? trust.PolicyOperators : trust.PolicyOperatorsBeforeHistory;
+        if (!operators.OperatorAt(line, at)) return false;
+        if (operators.StandingNow.Contains(line))
         {
-            if (!model.ById.TryGetValue(author, out RecordEnvelope? principal) || principal.Type != "principal") return false;
-            string identity = PolicyRecords.Identity(model, principal);
-            List<RecordEnvelope> revisions = model.OfType("principal").Where(p => !checking.Contains(p.Id) && PolicyRecords.Identity(model, p) == identity && string.CompareOrdinal(p.At, instant) <= 0).ToList();
-            List<RecordEnvelope> heads = revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id)).ToList();
-            if (heads.Count != 1 || EstateModel.BodyString(heads[0], "kind") != "human" || !PolicyRecords.Contains(PolicyRecords.Property(heads[0].Body, "roles"), Roles.Operator)) return false;
-            RecordEnvelope head = heads[0];
-            // Only the charter's original operator bootstraps unsigned. An admitted key cannot appoint its own principal.
-            if (head.Id == root && head.By == root && head.Supersedes is null) return true;
-            if (!SignatureChecks.IsAuthentic(model, head)) return false;
-            checking.Add(head.Id);
-            bool trusted = Trusted(head.By, head.At);
-            checking.Remove(head.Id);
-            return trusted;
+            // Set aside, a removal before history can leave a line standing through an appointment by the person who lost the role, which
+            // the reading as it is now sets aside. Such a record rests on that loss, as a record of the person themselves does.
+            if (setAside is null || trust.PolicyOperators.OperatorAt(line, at) && trust.PolicyOperators.StandingNow.Contains(line)) return true;
+            if (record is null || !trust.BeforeHistory(record) || operators.AppointerLoss(line, at, root) is not { } removal) return false;
+            setAside.Add(removal);
+            return true;
         }
+
+        if (record is null || operators.LossAfter(line, at) is not { } loss) return false;
+        if (trust.WitnessedBefore(record, loss)) return true;
+        if (setAside is null || !trust.BeforeHistory(record)) return false;
+        setAside.Add(loss);
+        return true;
+    }
+
+    /// <summary>The policy record types whose authority <see cref="OperatorAt(EstateModel, string, string, RecordEnvelope?)"/> reads.</summary>
+    private static bool IsPolicyRecord(EstateModel model, RecordEnvelope record) =>
+        record.Type is "estate-policy" or "policy-exception" or "writing-exception" or "prompt-preference" or "reconciliation" or "saved-prompt" ||
+        record.Type == "authority" && IsPolicyGrant(model, record);
+
+    /// <summary>
+    /// The policy records whose own validation finds their approval or their authority missing: each counts for nothing, so no policy,
+    /// exception, writing entry, prompt preference, shared prompt or reconciliation takes effect through an act its author could not perform.
+    /// </summary>
+    internal static IReadOnlySet<string> Unauthorized(EstateModel model)
+    {
+        var refused = new HashSet<string>(StringComparer.Ordinal);
+        foreach (RecordEnvelope record in model.CountingRecords.Where(r => r.Type is "estate-policy" or "policy-exception" or "writing-exception" or "prompt-preference" or "reconciliation" or "saved-prompt"))
+        {
+            if (RecordTypeRegistry.Find(record.Type) is not { } type || record.Format < type.SinceFormat) continue;
+            var findings = new FindingList();
+            type.Validate(new ValidationContext(model, record, findings));
+            if (findings.Any(f => f.Severity == Severity.Error && f.Code is "policy.approval" or "policy.authority" or "prompt.authority")) refused.Add(record.Id);
+        }
+
+        return refused;
+    }
+
+    /// <summary>
+    /// The policy records that fail only because an operator role they rest on was taken away before the estate's history checkpoints
+    /// could place them earlier, each with the revisions that took it away: in an estate that has not adopted checkpoints, or for a record
+    /// its adoption witnessed, a record whose own validation finds errors and finds none once such removals are set aside, whether it rests
+    /// on the role of the person who lost it or on an appointment by that person, directly or through another appointee. Each counts for
+    /// nothing and is reported as one warning, policy.operator-removed, rather than as errors, so the removal leaves the estate valid;
+    /// a record written after adoption that no checkpoint places before the removal stays an error. The runtime refuses to write such a
+    /// removal in an estate that has not adopted, and in one that has it writes a checkpoint before it; the warning keeps valid an estate
+    /// holding one written otherwise, such as a removal written with no checkpoint by the root operator or a standing operator after an
+    /// adoption signed by someone else.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> RemovedBeforeHistory(EstateModel model)
+    {
+        var removed = new Dictionary<string, IReadOnlyList<RecordEnvelope>>(StringComparer.Ordinal);
+        string? root = model.RootOperator;
+        foreach (RecordEnvelope record in model.CountingRecords.Where(r => r.By != root && IsPolicyRecord(model, r)))
+        {
+            if (RecordTypeRegistry.Find(record.Type) is not { } type || record.Format < type.SinceFormat) continue;
+            var findings = new FindingList();
+            type.Validate(new ValidationContext(model, record, findings));
+            if (!findings.HasErrors) continue;
+            var losses = new List<RecordEnvelope>();
+            var reading = new FindingList();
+            beforeHistory = losses;
+            try
+            {
+                type.Validate(new ValidationContext(model, record, reading));
+            }
+            finally
+            {
+                beforeHistory = null;
+            }
+
+            if (!reading.HasErrors && losses.Count > 0) removed[record.Id] = [.. losses.DistinctBy(l => l.Id).OrderBy(l => l.Id, StringComparer.Ordinal)];
+        }
+
+        return removed;
+    }
+
+    /// <summary>The warning a policy record that fails only because of a removal before history (<see cref="RemovedBeforeHistory"/>) is reported with.</summary>
+    internal static Finding RemovedWarning(EstateModel model, RecordEnvelope record, IReadOnlyList<RecordEnvelope> losses)
+    {
+        string removals = string.Join("; ", losses.Select(l => $"{model.Chain(l)[0]} lost it by revision {l.Id}"));
+        return new Finding(Severity.Warning, "policy.operator-removed", record.ExpectedPath,
+            $"This {record.Type} record rests on an operator role that was taken away ({removals}) before any history checkpoint the root operator or a " +
+            "standing operator signed placed the record earlier, so it counts for nothing. Such a checkpoint written before a removal keeps such records: " +
+            "adopt history checkpoints before removing a role, and the runtime writes one with each removal; the operator may write the change again.");
     }
 
     internal static void ValidateGrant(ValidationContext context)
@@ -117,17 +214,17 @@ internal static class PolicyAuthority
         {
             if (!body.Has("expires")) body.Error("body.missing", "expires", "Policy grants have an explicit expiry.");
         }
-        if (lifecycle && !OperatorAt(context.Model, context.Record.By, context.Record.At)) context.Error("authority.author", "Only the operator grants or revokes bounded policy authority.");
+        if (lifecycle && !OperatorAt(context.Model, context.Record)) context.Error("authority.author", "Only the operator grants or revokes bounded policy authority.");
     }
 
     internal static RecordEnvelope? Grant(ValidationContext context, BodyReader? reference, string scope, string action, RecordEnvelope subject)
     {
         RecordEnvelope? grant = PolicyRecords.Reference(context, reference, true, "authority");
-        if (OperatorAt(context.Model, context.Record.By, context.Record.At) && reference is null) return null;
+        if (OperatorAt(context.Model, context.Record) && reference is null) return null;
         bool valid = grant is not null && grant.Format >= 3 && EstateModel.BodyString(grant, "grantee") == context.Record.By &&
             string.CompareOrdinal(grant.At, context.Record.At) <= 0 &&
             PolicyRecords.Contains(PolicyRecords.Property(grant.Body, "scope"), scope) && !EstateModel.Expired(grant, context.Record.AtTime) &&
-            EstateModel.BodyString(grant, "expires") is not null && OperatorAt(context.Model, grant.By, grant.At) && SignatureChecks.IsAuthentic(context.Model, grant) &&
+            EstateModel.BodyString(grant, "expires") is not null && OperatorAt(context.Model, grant) && SignatureChecks.IsAuthentic(context.Model, grant) &&
             !context.Model.OfType("authority").Any(r => r.Id != grant.Id && PolicyRecords.Identity(context.Model, r) == PolicyRecords.Identity(context.Model, grant) &&
                 context.Model.Chain(r).Contains(grant.Id, StringComparer.Ordinal) && string.CompareOrdinal(r.At, context.Record.At) <= 0);
         JsonElement bound = grant is null ? default : PolicyRecords.Items(PolicyRecords.Property(grant.Body, "bounds")).FirstOrDefault(b => PolicyRecords.Text(b, "scope") == scope);

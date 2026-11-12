@@ -184,21 +184,25 @@ public class ClosingActsTests
         string builder = f.Estate.BuilderId;
         DateTimeOffset start = f.Estate.Clock;
 
-        // Dated before the builder held administer: today's reading admits through the later grant; read at its own time it does not.
+        // Dated before the builder held administer: today's reading authorizes the principal record through the later grant; read at its
+        // own time it does not. The builder's revocation, dated then too, counts for nothing in either reading (an admission is judged by
+        // its signer's authority at its own time, and administer counts for that only for a person), so it is not listed.
+        RecordEnvelope backdated = f.Estate.Add("principal", builder, Helper, signer: f.BuilderSigner);
         (RecordEnvelope early, RecordEnvelope earlyAdmission) = f.Admitted(f.Estate.OperatorId, "An early device");
-        RecordEnvelope backdated = f.Estate.Add("admission", builder, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked before the grant.", "revoked", RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(1))),
+        RecordEnvelope revocation = f.Estate.Add("admission", builder, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked before the grant.", "revoked", RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(1))),
             early.Reference, supersedes: earlyAdmission.Id, signer: f.BuilderSigner);
         f.Estate.SetClock(start.AddHours(1));
         f.Grant(builder, basis, [Scopes.Administer]);
 
         EstateModel today = f.Load();
         Assert.DoesNotContain(today.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(backdated.ExpectedPath, StringComparison.Ordinal));
+        Assert.False(today.Counts(today.ById[revocation.Id]));
         EstateModel atTime = AtRecordTime(f);
         Assert.True(atTime.AuthorityAtRecordTime);
         Assert.False(today.AuthorityAtRecordTime);
         (RecordEnvelope record, string note) = Assert.Single(AtTimeReading.Changes(today, atTime));
         Assert.Equal(backdated.Id, record.Id);
-        Assert.StartsWith("read at its own time, admission.author: ", note, StringComparison.Ordinal);
+        Assert.StartsWith("read at its own time, principal.author: ", note, StringComparison.Ordinal);
 
         // A model read as today never reads at record time, so nothing differs from itself.
         Assert.Empty(AtTimeReading.Changes(today, f.Load()));
@@ -213,16 +217,16 @@ public class ClosingActsTests
         RecordEnvelope grant = f.Grant(builder, basis, [Scopes.Administer]);
 
         // Written while the builder held administer, which a later narrowing took away: today it fails; at its own time it holds.
-        (RecordEnvelope device, RecordEnvelope admission) = f.Admitted(f.Estate.OperatorId, "A later device");
-        RecordEnvelope undone = f.Estate.Add("admission", builder, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked under the grant.", "revoked", RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(1))),
-            device.Reference, supersedes: admission.Id, signer: f.BuilderSigner);
+        RecordEnvelope undone = f.Estate.Add("principal", builder, Helper, signer: f.BuilderSigner);
         f.Grant(builder, basis, [Scopes.LocalEngineering], supersedes: grant.Id);
 
         (RecordEnvelope record, string note) = Assert.Single(AtTimeReading.Changes(f.Load(), AtRecordTime(f)));
         Assert.Equal(undone.Id, record.Id);
-        Assert.StartsWith("read today, admission.author: ", note, StringComparison.Ordinal);
+        Assert.StartsWith("read today, principal.author: ", note, StringComparison.Ordinal);
         Assert.EndsWith("At its own time this does not hold.", note, StringComparison.Ordinal);
     }
+
+    private const string Helper = """{"kind":"agent","name":"Helper","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""";
 
     private static EstateModel AtRecordTime(HistoryFixture f) => EstateLoader.LoadAtRecordTime(f.Root, EstateLoader.EnumerateRecordFiles(f.Root), EstateLoader.FileObjects(f.Root));
 }

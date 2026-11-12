@@ -250,13 +250,13 @@ public static partial class FlowPosition
     /// Whether a record is an act of a reserved step's holder (design/flow.md § 8): its signatures are authentic, so its author is who it
     /// claims, and that author was a person with the operator role, by an authentic chain of principal revisions, when it was made. A
     /// record's claimed author, an author's role granted later, and an unsigned or altered record never count; a past act of an operator
-    /// whose role was revoked afterwards still does.
+    /// whose role was revoked afterwards still does when signed history places it before the revocation (PolicyAuthority.OperatorAt).
     /// </summary>
     public static bool IsReservedAct(EstateModel model, RecordEnvelope record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(record);
-        return SignatureChecks.IsAuthentic(model, record) && PolicyAuthority.OperatorAt(model, record.By, record.At);
+        return SignatureChecks.IsAuthentic(model, record) && PolicyAuthority.OperatorAt(model, record);
     }
 
     /// <summary>Derives a run's position from the records at a time (due times, watches and backoffs read it); nothing is stored.</summary>

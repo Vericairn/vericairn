@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Model;
+using Vericairn.Records.Text;
 
 namespace Vericairn.Records.Estate;
 
@@ -122,7 +123,9 @@ public static class BlockedTerms
         return count;
     }
 
-    internal static string Normalize(string text) => text.Normalize(NormalizationForm.FormKC).ToLowerInvariant();
+    // Compatibility forms and case, folded by the managed Unicode tables, so a term matches the same in the product's
+    // invariant-globalization build as with ICU.
+    internal static string Normalize(string text) => UnicodeFolding.NfkcCaseFold(text);
 
     private static string? Valid(string? term)
     {

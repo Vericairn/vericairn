@@ -100,11 +100,13 @@ public sealed class PublishedDependencyCommandsTests
             EstateModel model = CommandContext.LoadCopy(root);
             RecordEnvelope original = model.CurrentEstate!;
             RecordEnvelope release = Assert.Single(model.OfType("observation"));
-            byte[] manifest = File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath));
             Dictionary<string, string> records = EstateLoader.EnumerateRecordFiles(root).ToDictionary(file => file.Path, file => ContentHash.Sha256(file.Bytes));
             string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", original.By,
                 "--name", "Operator device", "--custody", "file").Id;
-            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", original.By, "--note", "The first authority.");
+            string first = CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", original.By, "--note", "The first authority.").Id;
+            // The first device admitting itself is named in the manifest as the estate's first authority; nothing else changes it.
+            Assert.Equal(first, CommandContext.LoadCopy(root).Manifest!.FirstAuthority);
+            byte[] manifest = File.ReadAllBytes(Path.Combine(root, EstateLayout.ManifestPath));
 
             RecordEnvelope current = original;
             for (int revision = 1; revision <= 2; revision++)

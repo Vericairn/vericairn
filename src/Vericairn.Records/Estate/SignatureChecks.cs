@@ -56,6 +56,14 @@ public static class SignatureChecks
             RecoveryUse(model, trust, record, findings);
         }
 
+        // An admission that does not count where nothing above says why: one that would unseat what it rests on, and one whose author may not
+        // admit as admissions read authority, which validation may not show when it reads roles and grants as they are now.
+        foreach (Finding finding in trust.AdmissionFindings())
+        {
+            if (finding.Code == "admission.author" && findings.Any(x => x.Code == finding.Code && x.Location == finding.Location)) continue;
+            findings.Add(finding);
+        }
+
         foreach (RecordEnvelope revision in model.Records.Where(r => r.Type == "estate" && r.Supersedes is not null))
         {
             if (model.ById.TryGetValue(revision.Supersedes!, out RecordEnvelope? revised) && revised.Type == "estate" && !trust.CharterRevisionCounts(revised, revision))
@@ -133,19 +141,19 @@ public static class SignatureChecks
     }
 
     /// <summary>
-    /// The estate's first authority: the earliest admission by the root operator of a device that signed that admission itself.
-    /// It is the only self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can
-    /// add records can mint a device for the operator and sign as the operator with it. A recovery device is never the first: an
-    /// admitted device of the operator makes and admits it.
+    /// The estate's first authority: an admission by the root operator of a device that signed that admission itself. It is the only
+    /// self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can add records can mint
+    /// a device for the operator and sign as the operator with it. Once the estate has adopted history checkpoints it is the one they
+    /// witnessed first; before, the one the manifest names (<c>firstAuthority</c>), or the only one when it names none. It is never chosen
+    /// by a stated date or id: several with none named leave the estate without one, which the estate check reports. A recovery device is
+    /// never the first: an admitted device of the operator makes and admits it. Only the root operator has a first authority.
     /// </summary>
     public static RecordEnvelope? FirstAuthority(EstateModel model, string? rootOperator)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (rootOperator is null) return null;
         EstateTrust trust = model.Trust;
-        if (rootOperator == trust.RootOperator) return trust.FirstAuthority;
-        return model.Records.Where(a => a.Type == "admission" && a.By == rootOperator && trust.SelfSigned(a) && !trust.Recovers(a.Subject?.Id))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).FirstOrDefault();
+        return rootOperator == trust.RootOperator ? trust.FirstAuthority : null;
     }
 
     /// <summary>The current admission of a device: the latest admission record about any revision of the device that counts.</summary>
@@ -161,7 +169,7 @@ public static class SignatureChecks
     /// signatures optional, as format 1 has it. Once the estate is at record format 2 an unsigned admission counts only when the signed
     /// migration that moved the estate lists it, or an anchoring history checkpoint does (<see cref="Anchored"/>), whatever format or
     /// date the admission states: a format and a date are what the record's author wrote, and only a signature is something an author
-    /// without an admitted key cannot write. Every other record counts here.
+    /// without an admitted key cannot write. A signed admission counts only when its signatures verify. Every other record counts here.
     /// </summary>
     public static bool Counts(EstateModel model, RecordEnvelope record)
     {

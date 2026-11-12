@@ -88,17 +88,14 @@ public sealed class HarnessQualificationType : IRecordType
         }
     }
 
+    // The author as its line stood just before the record, and the grants as they stood then, each read only from records their authors
+    // may write (EstateModel.Authority): a later grant cannot authorize an earlier act, and withdrawing a grant does not rewrite earlier
+    // authorized acts; a harness qualification itself is withdrawn by its own superseding revocation.
     private static bool AuthorizedWhen(EstateModel model, RecordEnvelope record)
     {
-        RecordEnvelope? latest = model.CurrentPrincipal(record.By);
-        RecordEnvelope? person = latest is null ? null : model.Chain(latest).Select(id => model.ById[id]).LastOrDefault(p => GoalRules.Before(p, record));
+        RecordEnvelope? person = model.PrincipalBefore(record.By, record);
         if (person is null || EstateModel.BodyString(person, "kind") != "human") return false;
-        if (Contains(person, "roles", Roles.Operator)) return true;
-        // A later grant cannot authorize an earlier act. Withdrawing a grant does not rewrite earlier authorized acts;
-        // a harness qualification itself is withdrawn by its own superseding revocation.
-        return model.OfType("authority").Any(grant => EstateModel.BodyString(grant, "grantee") == record.By
-            && Contains(grant, "scope", Scopes.Qualify) && GoalRules.Before(grant, record) && !EstateModel.Expired(grant, record.AtTime)
-            && (!model.SupersededBy.TryGetValue(grant.Id, out string? next) || !GoalRules.Before(model.ById[next], record)));
+        return Contains(person, "roles", Roles.Operator) || model.ScopeBefore(record.By, Scopes.Qualify, record);
     }
 
     private static bool Contains(RecordEnvelope record, string field, string value) => record.Body.TryGetProperty(field, out var items)

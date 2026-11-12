@@ -122,15 +122,15 @@ internal sealed class EventJournal : IDisposable
         "hmac-sha256:" + Convert.ToHexStringLower(HMACSHA256.HashData(naming, Encoding.UTF8.GetBytes(type + "\n" + id)));
 
     /// <summary>
-    /// Opens the journal at a path, or starts a new epoch there. The file is created owner-only; the directory holding it is the live
-    /// store's, which the daemon keeps owner-only too.
+    /// Opens the journal at a path, or starts a new epoch there. The file is created owner-only, and so is the directory holding it, the
+    /// live store's.
     /// </summary>
     public static EventJournal Open(string path, TimeProvider? time = null, int capacity = DefaultCapacity, TimeSpan? retention = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
         path = System.IO.Path.GetFullPath(path);
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        Records.Signing.OwnerOnlyState.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         time ??= TimeProvider.System;
         try
         {

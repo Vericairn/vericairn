@@ -39,8 +39,9 @@ public sealed partial class EstateService
             }
 
             RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, model.Latest(model.ById[standing.Identity]));
+            // Roles and grants are read only from records their authors may write (EstateModel.Authority).
             RecordEnvelope? authority = model.HasRole(by, Roles.Operator) ? model.CurrentPrincipal(by)
-                : model.Current("authority").FirstOrDefault(a => Grants(a, by) && !EstateModel.Expired(a, DateTimeOffset.UtcNow));
+                : model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>().FirstOrDefault(a => Grants(a, by) && !EstateModel.Expired(a, DateTimeOffset.UtcNow));
             return admission is not null && authority is not null
                 ? (new PairingAuthority(by, standing.Identity, admission.Id, authority.Id), null)
                 : (null, "The pairing code's issuing authority is unavailable.");
@@ -72,6 +73,12 @@ public sealed partial class EstateService
         RecordEnvelope currentAuthority = model.Latest(authority);
         if (!model.IsCurrent(currentAdmission) || !model.IsCurrent(currentAuthority)
             || model.Chain(currentAdmission).SkipWhile(id => id != admission.Id).Any(id => EstateModel.BodyString(model.ById[id], "status") != "admitted"))
+        {
+            return Refusal;
+        }
+
+        // The role or grant still stands as read from records their authors may write (EstateModel.Authority).
+        if (authority.Type == "principal" ? !model.HasRole(issuer.Principal, Roles.Operator) : !model.HasScope(issuer.Principal, Scopes.Administer, DateTimeOffset.UtcNow))
         {
             return Refusal;
         }

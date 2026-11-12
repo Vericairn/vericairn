@@ -75,7 +75,7 @@ internal static partial class DutyRecords
         operation.Type == "operation" && operation.AtTime >= due && operation.Subject == subject && subject is not null && EstateModel.BodyString(operation, "status") == "observed-success" &&
         EstateModel.BodyString(operation, "provider") == PolicyRecords.Text(clause, "provider") && EstateModel.BodyString(operation, "action") == PolicyRecords.Text(clause, "action") &&
         EstateModel.BodyString(operation, "action") != OperationType.AgentRun && Time(PolicyRecords.Text(PolicyRecords.Property(operation.Body, "observed"), "at")) is { } observed && observed >= due && observed <= operation.AtTime &&
-        (!(forceOperator || PolicyRecords.Text(clause, "author") == "operator") || PolicyAuthority.OperatorAt(model, operation.By, operation.At));
+        (!(forceOperator || PolicyRecords.Text(clause, "author") == "operator") || PolicyAuthority.OperatorAt(model, operation));
 
     private static bool VerificationPasses(EstateModel model, RecordEnvelope verification, JsonElement clause, JsonElement link, RecordReference? subject, DateTimeOffset due, DateTimeOffset at)
     {

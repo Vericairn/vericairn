@@ -135,15 +135,15 @@ public static class Routing
     }
 
     /// <summary>
-    /// The grant in force at a time that gives a principal a scope, such as publication: the latest current authority record that names
-    /// it the grantee of the scope and has not expired then; null when none does, as for an operator, who holds every reserved action by
-    /// its role.
+    /// The grant in force at a time that gives a principal a scope, such as publication: the latest current authority record, among those
+    /// their authors may write (EstateModel.Authority), that names it the grantee of the scope and has not expired then; null when none
+    /// does, as for an operator, who holds every reserved action by its role.
     /// </summary>
     public static RecordEnvelope? Grant(EstateModel model, string? principal, string scope, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(scope);
-        return principal is null ? null : model.Current("authority")
+        return principal is null ? null : model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>()
             .Where(a => EstateModel.BodyString(a, "grantee") == principal && !EstateModel.Expired(a, at)
                 && a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array
                 && scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope))

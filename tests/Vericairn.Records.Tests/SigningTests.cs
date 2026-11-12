@@ -113,6 +113,8 @@ public class SigningTests : IDisposable
         EstateModel model = estate.Load();
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
         Assert.Equal(root.Id, SignatureChecks.FirstAuthority(model, estate.OperatorId)?.Id);
+        // The runtime names the first authority in the manifest when the first device admits itself.
+        estate.NameFirstAuthority(root.Id);
 
         // Anyone able to add records could mint a device for the operator and admit it with its own key; a second self-admission is refused.
         RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted");
@@ -311,6 +313,7 @@ public class SigningTests : IDisposable
         using var estate = new TestEstate(recordFormat: 2);
         RecordEnvelope first = CreateDevice(estate, estate.OperatorId, "First laptop", extra: FormatTwo);
         RecordEnvelope root = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", first.Reference, signer: Signer(first));
+        estate.NameFirstAuthority(root.Id);
 
         // A device minted for the operator, renamed, then admitted by itself: once in the name of its identity, once in its revision's.
         RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", extra: FormatTwo);

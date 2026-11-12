@@ -37,7 +37,7 @@ internal static class PolicyExceptions
         new PolicyExceptionType().Validate(new ValidationContext(basis.Model, grant, validation));
         if (validation.HasErrors) return false;
         JsonElement delegated = Get(Get(grant.Body, "basis"), "authority");
-        if (delegated.ValueKind == JsonValueKind.Undefined) return PolicyAuthority.OperatorAt(basis.Model, grant.By, grant.At);
+        if (delegated.ValueKind == JsonValueKind.Undefined) return PolicyAuthority.OperatorAt(basis.Model, grant);
         RecordEnvelope authority = Exact(basis.Model, delegated);
         // Authorship was validated above. A delegate additionally needs the same grant still in force at
         // evaluation; renewing or replacing that authority never silently renews the original exception.

@@ -4,6 +4,7 @@
 using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Model;
+using Vericairn.Records.Text;
 
 namespace Vericairn.Records.Estate;
 
@@ -80,12 +81,13 @@ public static class DisclosureHolds
     // A sentence's closing punctuation does not decide whether a quotation of it matches.
     private static string Phrase(string text) => Normalize(text).TrimEnd('.', ',', ';', ':', '!', '?');
 
-    // Compatibility forms, case and runs of whitespace (including line breaks within a wrapped sentence) do not hide a match.
+    // Compatibility forms, case and runs of whitespace (including line breaks within a wrapped sentence) do not hide a match. The
+    // folding is the managed one, so it is the same in the product's invariant-globalization build as with ICU.
     private static string Normalize(string text)
     {
         var builder = new StringBuilder(text.Length);
         bool space = false;
-        foreach (char c in text.Normalize(NormalizationForm.FormKC).ToLowerInvariant())
+        foreach (char c in UnicodeFolding.NfkcCaseFold(text))
         {
             if (char.IsWhiteSpace(c)) { space = builder.Length > 0; continue; }
             if (space) builder.Append(' ');

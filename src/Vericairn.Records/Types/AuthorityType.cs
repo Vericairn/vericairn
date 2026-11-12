@@ -53,7 +53,7 @@ public sealed class AuthorityType : IRecordType
         }
 
         context.RequireReference("basis", basis, "decision");
-        if (!(PolicyAuthority.IsPolicyGrant(context.Model, context.Record) ? PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At) : context.HasRole(context.Record.By, Roles.Operator)))
+        if (!(PolicyAuthority.IsPolicyGrant(context.Model, context.Record) ? PolicyAuthority.OperatorAt(context.Model, context.Record) : context.HasRole(context.Record.By, Roles.Operator)))
         {
             context.Error("authority.author", "Only an operator can grant authority.");
         }

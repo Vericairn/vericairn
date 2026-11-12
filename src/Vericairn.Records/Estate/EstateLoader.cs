@@ -185,6 +185,22 @@ public static class EstateLoader
             foreach (Finding finding in supersession.Where(f => f.Code != "reconcile.successors").Concat(countingSupersession.Where(f => f.Code == "reconcile.successors"))) findings.Add(finding);
             model.ApplyCounting(trust, excluded, countingSupersededBy);
         }
+
+        // A policy record whose approval or authority its own validation finds missing counts for nothing, so that no policy, exception,
+        // writing entry, prompt choice or reconciliation takes effect through an act its author could not perform; nor does a policy
+        // record that fails only because an operator role it rests on was taken away before history checkpoints could place it earlier,
+        // which is reported as one warning instead of errors. Judged once the counting records are known, since authority reads them.
+        // Policy records give no role, and the grants among the latter rest on a role already gone, so one pass settles it.
+        IReadOnlySet<string> unauthorized = Types.PolicyAuthority.Unauthorized(model);
+        IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> removedBeforeHistory = Types.PolicyAuthority.RemovedBeforeHistory(model);
+        if (unauthorized.Count > 0 || removedBeforeHistory.Count > 0)
+        {
+            var withheld = new HashSet<string>(excluded, StringComparer.Ordinal);
+            withheld.UnionWith(unauthorized);
+            withheld.UnionWith(removedBeforeHistory.Keys);
+            model.ApplyCounting(trust, withheld, Successors(records.Where(r => !withheld.Contains(r.Id)).ToList(), byId, new FindingList(), r => trust.AttachedTo(r)?.Id));
+        }
+
         foreach (RecordEnvelope record in records)
         {
             IRecordType? type = RecordTypeRegistry.Find(record.Type);
@@ -201,6 +217,18 @@ public static class EstateLoader
                 continue;
             }
 
+            if (removedBeforeHistory.TryGetValue(record.Id, out IReadOnlyList<RecordEnvelope>? losses))
+            {
+                // Its errors are the removal's: it is reported once, as counting for nothing, with whatever else its checks note.
+                var own = new FindingList();
+                ValidateSubject(model, record, type, own);
+                type.Validate(new ValidationContext(model, record, own));
+                foreach (Finding finding in own.Where(f => f.Severity != Severity.Error)) findings.Add(finding);
+                findings.Add(Types.PolicyAuthority.RemovedWarning(model, record, losses));
+                if (RecordAuthorship.Unresolved(model, record) is Finding unresolved) findings.Add(unresolved);
+                continue;
+            }
+
             ValidateSubject(model, record, type, findings);
             type.Validate(new ValidationContext(model, record, findings));
             // Existing records keep their reading. The write boundary promotes this finding only for proposed records.
@@ -210,6 +238,11 @@ public static class EstateLoader
         model.Manifest = manifest;
         SignatureChecks.Run(model, findings);
         foreach (Finding finding in trust.History.Findings.Concat(trust.ClosingFindings))
+        {
+            findings.Add(finding);
+        }
+
+        foreach (Finding finding in trust.RootFindings)
         {
             findings.Add(finding);
         }

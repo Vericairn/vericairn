@@ -217,13 +217,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             if (!cache.TryGetValue(record.Id, out RecordResponse? response))
             {
                 using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
-                response = new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
+                response = new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, ReportedCurrent(model, record), document.RootElement.Clone());
                 cache.Add(record.Id, response);
             }
             return response;
         }
         return new AttentionDerivation(
-            type => model.Current(type).Select(Response).ToList(),
+            type => ReportedCurrent(model, type).Select(Response).ToList(),
             id => model.ById.TryGetValue(id, out RecordEnvelope? record) ? Response(record) : null,
             progress,
             recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
@@ -312,9 +312,22 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             RecordFile? file = session.LoadedFile(record.ExpectedPath);
             using JsonDocument document = JsonDocument.Parse(file?.Bytes ?? []);
-            return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
+            return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, ReportedCurrent(model, record), document.RootElement.Clone());
         }
     }
+
+    /// <summary>
+    /// Whether a record is current as the API reports it: a principal record only when it is the revision that describes its principal,
+    /// read from the records their authors may write (EstateModel.Authority), so a client reading roles from it reads what the estate
+    /// grants; any other record when it counts and no counting record supersedes it.
+    /// </summary>
+    private static bool ReportedCurrent(EstateModel model, RecordEnvelope record) =>
+        record.Type == "principal" ? model.CurrentPrincipal(record.Id)?.Id == record.Id : model.IsCurrent(record);
+
+    /// <summary>The current records of a type as the API reports them (<see cref="ReportedCurrent(EstateModel, RecordEnvelope)"/>).</summary>
+    private static IEnumerable<RecordEnvelope> ReportedCurrent(EstateModel model, string type) => type == "principal"
+        ? model.OfType("principal").Select(p => model.CurrentPrincipal(p.Id)).OfType<RecordEnvelope>().DistinctBy(p => p.Id)
+        : model.Current(type);
 
     /// <inheritdoc />
     public IReadOnlyList<RecordResponse> Records(string type)
@@ -324,7 +337,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             var rows = new List<RecordResponse>();
-            foreach (RecordEnvelope record in model.Current(type).OrderBy(r => r.Id, StringComparer.Ordinal))
+            foreach (RecordEnvelope record in ReportedCurrent(model, type).OrderBy(r => r.Id, StringComparer.Ordinal))
             {
                 using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
                 rows.Add(new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, true, document.RootElement.Clone()));
@@ -374,6 +387,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         if (request.Type == "history-checkpoint" && (request.At is not null || request.Id is not null))
         {
             return Refuse("A history checkpoint is written at the runtime's time with a fresh identity; it states no earlier time.");
+        }
+
+        // A principal or authority record gives roles and scopes read in time order, so it takes the runtime's fresh time and identity and
+        // is judged against its author's authority now.
+        if (request.Type is "principal" or "authority" && (request.At is not null || request.Id is not null))
+        {
+            return Refuse("Principal and authority records are written at the runtime's time with a fresh identity; they state no earlier time or chosen id.");
         }
 
         if (request.Type is "result" or "review")
@@ -1667,6 +1687,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
             if (model.Manifest!.Line != plan.Line || model.Manifest.Channel != plan.Channel)
                 changes.Add($"followed line/channel changed explicitly from {model.Manifest.Line}/{model.Manifest.Channel} to {plan.Line}/{plan.Channel}");
+            if (model.Manifest.FirstAuthority is null && plan.FirstAuthority is { } firstAuthority)
+                changes.Add($"{EstateLayout.ManifestPath} names admission {firstAuthority}, the root operator's first device admitting itself, as the estate's first authority");
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
             changes.AddRange(regenerated.GroupBy(m => (m.Destination, m.Earlier, m.Current)).OrderBy(g => g.Key.Destination, StringComparer.Ordinal)
@@ -1830,13 +1852,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>The encoded public key of a device that is current and admitted now, or null; what request authentication relies on.</summary>
+    /// <summary>
+    /// The encoded public key of a device that is current and admitted now, or null; what request authentication relies on. Read as
+    /// <see cref="Standing(string)"/> reads, so a revocation counts from the next call on.
+    /// </summary>
     public string? AdmittedDevicePublicKey(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-        lock (gate)
+        EstateModel model = StandingModel();
+        lock (standingJudgment)
         {
-            EstateModel model = session.Load();
             if (!model.ById.TryGetValue(deviceId, out RecordEnvelope? record) || record.Type != "device")
             {
                 return null;
@@ -1849,17 +1874,60 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// A device as request authentication sees it now, by the id of any of its records: its identity, principal, current key,
-    /// permitted profiles and admission (admitted, revoked or not admitted); null when the id names no device. Read afresh from
-    /// the records on every call, so a revocation counts from the next request on.
+    /// permitted profiles and admission (admitted, revoked or not admitted); null when the id names no device. Read from the canonical
+    /// records as they are at the call, so a revocation counts from the next request on, whichever process records it; the records are
+    /// read again only when they have changed, so a request that has proved nothing yet never makes the runtime reload the estate.
     /// </summary>
     public DeviceStanding? Standing(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        EstateModel model = StandingModel();
+        lock (standingJudgment)
+        {
+            return Standing(model, deviceId);
+        }
+    }
+
+    // The model device standing is read from, with the stamp of the records it was read from. A request authenticates before it has
+    // proved anything, so it never reloads the estate: the records are read again only when their stamp changes, which a write here,
+    // another process's write or a pull does. Authentication also precedes read-only submission checks, so the canonical records are
+    // observed without refreshing the live cache or its metadata.
+    private sealed record StandingSource(EstateSession.CanonicalStamp Stamp, EstateModel Model);
+
+    private StandingSource? standingSource;
+    private long standingLoads;
+    // A kept model is shared by concurrent requests and judged by one at a time, as every other model is judged under the gate.
+    private readonly object standingJudgment = new();
+
+    /// <summary>How many times device standing has read the records afresh: once per change to them, never once per request.</summary>
+    internal long StandingLoads => Interlocked.Read(ref standingLoads);
+
+    private EstateModel StandingModel()
+    {
+        // A working tree is stamped without the gate, so a request naming an unchanged estate does not wait for the estate's operations.
+        if (session.Profile == "repository-synced" && Volatile.Read(ref standingSource) is { } kept && kept.Stamp == session.TreeStamp())
+        {
+            return kept.Model;
+        }
+
         lock (gate)
         {
-            // Authentication also precedes read-only submission checks: observe canonical records without
-            // refreshing the live cache or its metadata. Revocations still take effect on the next read.
-            return Standing(session.Read(), deviceId);
+            // The live store is reached under the gate; its stamp is a snapshot generation and costs no read while nothing changed.
+            EstateSession.CanonicalStamp stamp = session.Stamp();
+            if (standingSource is { } current && current.Stamp == stamp)
+            {
+                return current.Model;
+            }
+
+            EstateModel model = EstateLoader.Load(session.Root, session.CanonicalFiles());
+            Interlocked.Increment(ref standingLoads);
+            // Kept only when nothing changed while the records were read, so a kept model is never older than its stamp says.
+            if (session.Stamp() == stamp)
+            {
+                Volatile.Write(ref standingSource, new StandingSource(stamp, model));
+            }
+
+            return model;
         }
     }
 
@@ -2357,6 +2425,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // A revision taking a role away is stored after a history checkpoint, or refused where it would make records fail
+        // (design/signed-history.md § 8). A grant revision that needs a closing is stored after its closing instead, which is such a
+        // checkpoint (OPS-07).
+        if (!session.IsReadOnly && TakesRoleAway(draft, current) && ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is null)
+        {
+            return UnderWriteLock(() => StoreRemovalLocked(draft, signers), WriteOutcome.Fail);
+        }
+
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
         if (record is null)
         {
@@ -2375,10 +2451,47 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
         if (TriggerOf(draft, current, signers) is string trigger)
         {
-            return UnderWriteLock(() => StoreWithCheckpointLocked(record, current, trigger, draft.By), WriteOutcome.Fail);
+            return UnderWriteLock(() => NamingFirstAuthorityLocked(draft, current, StoreWithCheckpointLocked(record, current, trigger, draft.By)), WriteOutcome.Fail);
         }
 
-        return UnderWriteLock(() => StoreAuthoredLocked(record, current), WriteOutcome.Fail);
+        return UnderWriteLock(() => NamingFirstAuthorityLocked(draft, current, StoreAuthoredLocked(record, current)), WriteOutcome.Fail);
+    }
+
+    /// <summary>
+    /// Once the root operator's first device has admitted itself, names that admission in the manifest as the estate's first authority,
+    /// beside the charter estate init named there, so that before the estate adopts history checkpoints no other self-admission displaces
+    /// it, whatever date or id it states. Only an admission the estate now reads as its first authority is named, and a manifest that
+    /// names one already is left as it is. A manifest that cannot be written leaves the admission stored as it is: the estate reads its
+    /// only self-admission as its first authority, and the next upgrade names it. Caller holds the gate and the write lock.
+    /// </summary>
+    private WriteOutcome NamingFirstAuthorityLocked(RecordDraft draft, EstateModel current, WriteOutcome outcome)
+    {
+        if (outcome.Written is not { } written || draft.Type != "admission" || session.IsReadOnly || current.Manifest is not { FirstAuthority: null } ||
+            current.RootOperator is not { } root || draft.By != root || SignatureChecks.FirstAuthority(current, root) is not null)
+            return outcome;
+        try
+        {
+            if (SignatureChecks.FirstAuthority(session.Load(), root)?.Id != written.Id) return outcome;
+            string path = Path.Combine(session.Root, EstateLayout.ManifestPath);
+            byte[] bytes = File.ReadAllBytes(path);
+            byte[] named = EstateManifest.NamingFirstAuthority(bytes, written.Id);
+            if (named.AsSpan().SequenceEqual(bytes)) return outcome;
+            string temporary = path + ".naming";
+            File.Delete(temporary);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(named);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+        {
+            // The admission stands; the estate reads it as its only self-admission until the manifest names it.
+        }
+
+        return outcome;
     }
 
     /// <summary>
@@ -2741,13 +2854,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
             // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
             // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
+            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal: it witnesses only what
+            // was there, and the revision written again is preceded by a checkpoint of its own.
             bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
             bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
             bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
             bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
             global::Vericairn.Records.Estate.Closing? unfollowed = closingAlone
                 ? model.Trust.Closings.FirstOrDefault(c => stored.Any(s => s.Id == c.Record.Id) && model.Counts(c.Record) && !model.Trust.Followed(c)) : null;
-            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || (routing &&
+            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal");
+            bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || removalAlone || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));
             if (moot)
@@ -2851,8 +2967,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, a decision dated after its own record, an acceptance by a principal other than the operator on a review that did
-    /// not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, and a result whose
+    /// themselves, a new admission or revocation that would count for nothing, a decision dated after its own record, an acceptance by a
+    /// principal other than the operator on a review that did not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, and a result whose
     /// output no longer has the bytes it claims. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
@@ -2881,6 +2997,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new admission or revocation that would count for nothing, because it would unseat what its own signature or its
+        // author's authority rests on, or because its author may not admit as admissions read authority, is refused rather than stored;
+        // admissions already in the estate keep these as warnings.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Warning && f.Code is "admission.unseats-support" or "admission.author"
+            && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

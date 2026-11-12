@@ -16,9 +16,12 @@ public sealed class HistoryState
 {
     internal HistoryState(bool adopted, IReadOnlyList<RecordReference> heads, int witnessed, int tail, IReadOnlyList<Finding> findings, bool inventoriesRead,
         IReadOnlySet<string> altered, IReadOnlyDictionary<string, WitnessedEntry> entries, IReadOnlySet<string> acknowledged, IReadOnlySet<string> counting,
-        IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null)
+        IReadOnlyDictionary<string, DateTimeOffset>? adoptionTimes = null, IReadOnlyDictionary<string, IReadOnlyList<string>>? listings = null,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? predecessors = null)
     {
         AdoptionTimes = adoptionTimes ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        Listings = listings ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        Predecessors = predecessors ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         CountingCheckpoints = counting;
         Adopted = adopted;
         Heads = heads;
@@ -69,6 +72,12 @@ public sealed class HistoryState
 
     /// <summary>The earliest time a record of the unwitnessed tail states, or null when the tail is empty: what the interval trigger reads.</summary>
     public string? OldestTailAt { get; internal init; }
+
+    /// <summary>Each witnessed record present with listed bytes, and the counting checkpoints that list it with those bytes.</summary>
+    internal IReadOnlyDictionary<string, IReadOnlyList<string>> Listings { get; }
+
+    /// <summary>Each counting checkpoint and the counting checkpoints it follows through hashes that match.</summary>
+    internal IReadOnlyDictionary<string, IReadOnlyList<string>> Predecessors { get; }
 
     /// <summary>The records an adoption checkpoint witnesses with the bytes present, each with that checkpoint's time.</summary>
     internal IReadOnlyDictionary<string, DateTimeOffset> AdoptionTimes { get; }
@@ -191,6 +200,9 @@ internal sealed class HistoryAnalysis
 
     /// <summary>The anchors of every checkpoint whose author may anchor, as id and hash keys.</summary>
     internal HashSet<string> AnchorKeys { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Whether the estate holds an adoption checkpoint whose author may anchor, judged by signatures alone.</summary>
+    internal bool AdoptionEligible => checkpoints.Any(c => c.Previous.Count == 0 && eligible.Contains(c.Record.Id));
 
     /// <summary>Reads the anchors and acknowledged removals, judged by signatures alone.</summary>
     internal static HistoryAnalysis Anchoring(EstateTrust trust, EstateModel model)
@@ -328,6 +340,7 @@ internal sealed class HistoryAnalysis
         var entries = new Dictionary<string, WitnessedEntry>(StringComparer.Ordinal);
         var inventories = new Dictionary<string, IReadOnlyList<InventoryEntry>>(StringComparer.Ordinal);
         var adoptionTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var listingsByRecord = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
         bool read = objects is not null;
         if (read)
         {
@@ -362,7 +375,11 @@ internal sealed class HistoryAnalysis
                     List<WitnessedEntry> agreeing = [.. standing.Where(v => v.Entry.Hash == present.ComputedHash)];
                     List<WitnessedEntry> disagreeing = [.. standing.Where(v => v.Entry.Hash != present.ComputedHash)];
                     entries[id] = agreeing.Count > 0 ? agreeing[0] : standing[0];
-                    if (agreeing.Count > 0) agreeingListings[id] = agreeing;
+                    if (agreeing.Count > 0)
+                    {
+                        agreeingListings[id] = agreeing;
+                        listingsByRecord[id] = [.. agreeing.Select(v => v.Checkpoint).Distinct(StringComparer.Ordinal)];
+                    }
                     if (disagreeing.Count == 0) continue;
 
                     // Only a listing by an author who may anchor can make a present record that one who may anchor signed, or that is anchored
@@ -441,8 +458,11 @@ internal sealed class HistoryAnalysis
             tail = model.Records.Count;
         }
 
-        return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged,
-            counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal), adoptionTimes) { OldestTailAt = oldest };
+        var countingIds = counting.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<string>> predecessors = counting.ToDictionary(c => c.Record.Id, c => (IReadOnlyList<string>)[.. c.Previous
+            .Where(p => countingIds.Contains(p.Id) && byId[p.Id].Record.ComputedHash == p.Hash).Select(p => p.Id).Distinct(StringComparer.Ordinal)], StringComparer.Ordinal);
+        return new HistoryState(counting.Count > 0, heads, entries.Count, tail, [.. findings], read, altered, entries, acknowledged, countingIds, adoptionTimes,
+            listingsByRecord, predecessors) { OldestTailAt = oldest };
     }
 
     /// <summary>
@@ -593,7 +613,7 @@ public static class SignedHistory
     internal static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(5);
 
     /// <summary>The codes of the history errors that hold release submission and lead status while one stands.</summary>
-    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author"];
+    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author", "history.manifest-root", "history.root-ambiguous", "manifest.first-authority"];
 
     /// <summary>How many records the unwitnessed tail holds when the runtime writes an interval checkpoint (design/signed-history.md § 9).</summary>
     public const int IntervalRecords = 500;

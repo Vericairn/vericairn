@@ -297,14 +297,19 @@ public class HistoryClosingTests
     {
         using var f = new HistoryTriggerTests.Fixture(adopt: false);
         string builder = f.Records.Estate.BuilderId;
-        // The builder revokes a device in a revocation dated before the grant of administer that today's reading lets it rest on.
         DateTimeOffset now = DateTimeOffset.UtcNow;
         f.Records.Estate.SetClock(now.AddHours(-2));
         StoreSigner held = f.Records.AdmitSigner(f.Records.Estate.OperatorId);
         EstateModel model = f.Api.Session.Load();
         RecordEnvelope device = model.ById[held.DeviceId];
         RecordEnvelope admission = SignatureChecks.AdmissionOf(model, device)!;
+        // The builder records a principal, and revokes a device, both dated before the grant of administer that today's reading lets
+        // the principal record rest on.
         f.Records.Estate.SetClock(now.AddHours(-1));
+        RecordEnvelope helper = f.Records.Add("principal", new JsonObject
+        {
+            ["kind"] = "agent", ["name"] = "Helper", ["roles"] = new JsonArray("reviewer"), ["agent"] = new JsonObject { ["vendor"] = "Example", ["product"] = "Example Agent" },
+        }, builder: true);
         RecordEnvelope revocation = f.Records.Add("admission", new JsonObject
         {
             ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Revoked before the grant.",
@@ -312,19 +317,76 @@ public class HistoryClosingTests
         }, builder: true, subject: device.Reference, supersedes: admission.Id);
         f.Records.Estate.SetClock(now.AddMinutes(-30));
         f.Records.Add("authority", Grant(f, builder, Scopes.Administer));
-        Assert.DoesNotContain(f.Api.Session.Load().Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(revocation.ExpectedPath, StringComparison.Ordinal));
+        EstateModel today = f.Api.Session.Load();
+        Assert.DoesNotContain(today.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(helper.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(today.Counts(today.ById[helper.Id]));
+        // An admission or revocation is judged by its signer's authority at its own time, and administer counts for that only for a
+        // person: the agent's revocation counts for nothing, so the device stays admitted, and it is the warning admission.author,
+        // although validation, reading roles and grants as they are now before adoption, finds no fault with its author.
+        Assert.False(today.Counts(today.ById[revocation.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(today, today.ById[device.Id]));
+        Assert.Single(today.Findings, x => x.Code == "admission.author" && x.Severity == Severity.Warning && x.Location == revocation.ExpectedPath);
 
         HistoryCheckpointResponse check = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!;
         HistoryRecordItem changed = Assert.Single(check.AuthorityChanges);
-        Assert.Equal((revocation.Id, "admission"), (changed.Id, changed.Type));
-        Assert.StartsWith("read at its own time, admission.author: ", changed.Note, StringComparison.Ordinal);
+        Assert.Equal((helper.Id, "principal"), (changed.Id, changed.Type));
+        Assert.StartsWith("read at its own time, principal.author: ", changed.Note, StringComparison.Ordinal);
+        // Adoption neither anchors the revocation nor lists it among the readings it keeps: it counts for nothing in either reading.
+        Assert.DoesNotContain(check.Anchored, x => x.Id == revocation.Id);
+        Assert.DoesNotContain(check.AuthorityChanges, x => x.Id == revocation.Id);
 
-        // Adoption keeps the reading each record has then: the revocation still counts once the estate has adopted.
+        // Adoption keeps the reading each record has then: the principal record still holds once the estate has adopted, and the
+        // revocation still counts for nothing.
         f.Adopt();
         EstateModel adopted = f.Api.Session.Load();
         Assert.True(SignedHistory.Adopted(adopted));
-        Assert.DoesNotContain(adopted.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(revocation.ExpectedPath, StringComparison.Ordinal));
-        Assert.False(SignatureChecks.IsAdmitted(adopted, adopted.ById[device.Id]));
+        Assert.DoesNotContain(adopted.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(helper.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(adopted.Counts(adopted.ById[helper.Id]));
+        Assert.False(adopted.Counts(adopted.ById[revocation.Id]));
+        Assert.True(SignatureChecks.IsAdmitted(adopted, adopted.ById[device.Id]));
+    }
+
+    [Fact]
+    public void TheRuntimeRefusesAnAdmissionWhoseAuthorTheAdmissionReadingRefuses()
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        string builder = f.Records.Estate.BuilderId;
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddMinutes(-10));
+        f.Records.Add("authority", Grant(f, builder, Scopes.Administer));
+        WriteOutcome device = f.Api.DeviceCreate(new(builder, "Admitted by the agent", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+
+        // The agent holds administer as validation reads it before adoption, but administer admits only for a person.
+        WriteOutcome admitted = f.Api.DeviceAdmit(new AdmitRequest(device.Written!.Id, builder, "By the agent."));
+        Assert.False(admitted.Ok);
+        Assert.Equal("rejected", admitted.Problem!.Code);
+        Assert.Contains(admitted.Problem.Findings, x => x.Code == "admission.author" && x.Severity == "error");
+        EstateModel model = f.Api.Session.Load();
+        Assert.DoesNotContain(model.OfType("admission"), a => a.Subject?.Id == device.Written.Id);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+    }
+
+    [Fact]
+    public void TheRuntimeRefusesARevocationThatWouldUnseatItsOwnSupport()
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddMinutes(-10));
+        RecordEnvelope person = f.Records.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Estate administrator", ["roles"] = new JsonArray("contributor") });
+        f.Records.Add("authority", Grant(f, person.Id, Scopes.Administer));
+        f.HeldDevice(person.Id);
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope first = SignatureChecks.FirstAuthority(model, f.Records.Estate.OperatorId)!;
+        RecordEnvelope device = model.ById[first.Subject!.Id];
+
+        // Revoked as of the first authority itself, before the grant and the admission the administrator's own device rests on.
+        var body = new JsonObject { ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Revoked.", ["revokedAt"] = first.At };
+        WriteOutcome revoked = f.Api.NewRecord(new NewRecordRequest("admission", person.Id, PolicyFixture.Element(body), $"device:{device.Id}:{device.ComputedHash}", first.Id));
+        Assert.False(revoked.Ok);
+        Assert.Equal("rejected", revoked.Problem!.Code);
+        Assert.Contains(revoked.Problem.Findings, x => x.Code == "admission.unseats-support" && x.Severity == "error");
+        model = f.Api.Session.Load();
+        Assert.DoesNotContain(model.Records, r => r.Type == "admission" && r.Supersedes == first.Id);
+        Assert.True(SignatureChecks.IsAdmitted(model, device));
     }
 
     [Fact]
@@ -669,10 +731,23 @@ public class HistoryClosingTests
         int records = f.Api.Session.Load().Records.Count;
 
         string hourAgo = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(-1));
+        // A grant revision takes the runtime's time, so one stating an earlier time is refused before any closing is prepared.
         WriteOutcome early = f.Api.NewRecord(new NewRecordRequest("authority", op, PolicyFixture.Element(Grant(f, builder, Scopes.LocalEngineering)), Supersedes: grant.Id, At: hourAgo));
         Assert.False(early.Ok);
-        Assert.Contains($"states {hourAgo}, more than five minutes before head checkpoint", early.Problem!.Message, StringComparison.Ordinal);
-        Assert.Contains("Write the grant revision again at the present time", early.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains("Principal and authority records are written at the runtime's time", early.Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal(records, f.Api.Session.Load().Records.Count);
+
+        // A revocation may state its time. The builder's first device was admitted weeks ago, so a revocation stated an hour ago is not
+        // moved up to its admission, and its closing cannot be dated before the head checkpoint.
+        EstateModel before = f.Api.Session.Load();
+        RecordEnvelope first = before.ById[f.Records.BuilderDevice.Id];
+        RecordEnvelope firstAdmission = SignatureChecks.AdmissionOf(before, first)!;
+        var stated = new JsonObject { ["principal"] = builder, ["status"] = "revoked", ["note"] = "Stated an hour ago.", ["revokedAt"] = hourAgo };
+        WriteOutcome earlyRevocation = f.Api.NewRecord(new NewRecordRequest("admission", op, PolicyFixture.Element(stated), Subject: $"device:{first.Id}:{first.ComputedHash}",
+            Supersedes: firstAdmission.Id, At: hourAgo));
+        Assert.False(earlyRevocation.Ok);
+        Assert.Contains($"states {hourAgo}, more than five minutes before head checkpoint", earlyRevocation.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("Write the revocation again at the present time", earlyRevocation.Problem.Message, StringComparison.Ordinal);
         Assert.Equal(records, f.Api.Session.Load().Records.Count);
         WriteOutcome narrowed = f.Api.NewRecord(new NewRecordRequest("authority", op, PolicyFixture.Element(Grant(f, builder, Scopes.LocalEngineering)), Supersedes: grant.Id));
         Assert.True(narrowed.Ok, Describe(narrowed));

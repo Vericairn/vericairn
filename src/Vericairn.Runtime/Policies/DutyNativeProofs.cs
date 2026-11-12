@@ -83,7 +83,7 @@ internal sealed partial class DutyProofEvaluation
         RecordEnvelope first = FirstEvent(operation, Same);
         DateTimeOffset? performed = DutyRecords.Time(Text(Get(first.Body, "observed"), "at"));
         return first.AtTime >= due && performed >= due && performed <= first.AtTime && Authentic(first) &&
-            (!(forceOperator || Text(clause, "author") == "operator") || PolicyAuthority.OperatorAt(Model, first.By, first.At));
+            (!(forceOperator || Text(clause, "author") == "operator") || PolicyAuthority.OperatorAt(Model, first));
     }
 
     private bool Credential(RecordEnvelope[] records, JsonElement clause, DutyOccurrence occurrence, DateTimeOffset at)

@@ -75,18 +75,18 @@ public static partial class SavedPrompts
             context.Error("prompt.signature", "Prompt records and uses require the author's admitted device signature.");
     }
 
-    internal static bool MayWrite(ValidationContext context) => MayWrite(context.Model, context.Record.By, context.Record.AtTime, historical: true);
+    internal static bool MayWrite(ValidationContext context) => MayWrite(context.Model, context.Record.By, context.Record.AtTime, historical: true, context.Record);
 
-    internal static bool MayWrite(EstateModel model, string by, DateTimeOffset at, bool historical = false)
+    internal static bool MayWrite(EstateModel model, string by, DateTimeOffset at, bool historical = false, RecordEnvelope? record = null)
     {
-        if (PolicyAuthority.OperatorAt(model, by, RecordParser.FormatTimestamp(at))) return true;
+        if (PolicyAuthority.OperatorAt(model, by, RecordParser.FormatTimestamp(at), record)) return true;
         return (historical ? model.OfType("authority") : model.Current("authority")).Any(grant => grant.AtTime <= at
             && EstateModel.BodyString(grant, "grantee") == by && !EstateModel.Expired(grant, at)
             && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array
             && scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.ManagePrompts)
             && !PolicyRecords.Items(PolicyRecords.Property(grant.Body, "conditions")).Any()
             && !PolicyRecords.Contains(PolicyRecords.Property(grant.Body, "reserved"), Scopes.ManagePrompts)
-            && PolicyAuthority.OperatorAt(model, grant.By, grant.At) && SignatureChecks.IsAuthentic(model, grant)
+            && PolicyAuthority.OperatorAt(model, grant) && SignatureChecks.IsAuthentic(model, grant)
             // Record timestamps have second precision. A later revocation in that same second cannot invalidate an earlier write.
             // Authoring also checks the current head, so a revoked grant cannot authorize another new write in that second.
             && !model.OfType("authority").Any(next => next.Id != grant.Id && next.AtTime < at

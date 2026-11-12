@@ -3,6 +3,7 @@
 
 using Microsoft.Data.Sqlite;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Runtime.Store;
 
@@ -19,6 +20,8 @@ public sealed class LiveStore : IDisposable
     private readonly string? profile;
     private FileSnapshot? snapshot;
     private long snapshotVersion;
+    // Numbers every snapshot taken in this process, so a snapshot's number says which records it holds whichever store took it.
+    private static long snapshots;
 
     // Deterministic work counters for first-screen regression tests, independent of machine timing.
     internal long FilesRead { get; private set; }
@@ -31,7 +34,14 @@ public sealed class LiveStore : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         Path = System.IO.Path.GetFullPath(databasePath);
         this.profile = profile;
-        if (!readOnly) Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        if (!readOnly)
+        {
+            // Owner-only whichever process creates it, with or without a daemon: the directory, the database and, since SQLite gives
+            // them the database's mode, its -wal and -shm files. Ones an earlier build left wider are narrowed here.
+            OwnerOnlyState.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+            OwnerOnlyState.PrepareDatabase(Path);
+        }
+
         readSnapshot = readOnly && !transient ? new SqliteReadSnapshot(Path) : null;
         connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = transient ? ":memory:" : readSnapshot?.Path ?? Path, Mode = transient ? SqliteOpenMode.Memory : readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
         try
@@ -99,13 +109,14 @@ public sealed class LiveStore : IDisposable
         if (snapshot is null || snapshotVersion != version)
         {
             IReadOnlyList<RecordFile> files = Files();
-            snapshot = new FileSnapshot(files, files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+            snapshot = new FileSnapshot(files, files.ToDictionary(f => f.Path, StringComparer.Ordinal), Interlocked.Increment(ref snapshots));
             snapshotVersion = version;
         }
         return snapshot;
     });
 
-    internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath);
+    /// <summary>The record files held at one moment, numbered by a generation that is new for every snapshot taken and only for a new one.</summary>
+    internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath, long Generation);
 
     /// <summary>Number of record files held.</summary>
     public long Count() => Guard(() =>

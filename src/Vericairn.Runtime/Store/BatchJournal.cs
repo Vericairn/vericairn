@@ -12,6 +12,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Runtime.Store;
@@ -74,7 +75,8 @@ internal sealed class BatchJournal
         ArgumentNullException.ThrowIfNull(records);
         string id = Ulid.NewUlid().Value;
         string directory = Directory(session);
-        System.IO.Directory.CreateDirectory(directory);
+        // A journal can carry generated documents' bytes: it is kept owner-only, as the live store beside it is.
+        OwnerOnlyState.CreateDirectory(directory);
         string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
         List<Entry> entries = [.. records.Select(r => new Entry(r.Envelope.Id, r.Envelope.Type, r.RelativePath))];
         var json = new JsonObject
@@ -93,7 +95,7 @@ internal sealed class BatchJournal
         if (directories is { Count: > 0 }) json["retiredDirectories"] = JsonSerializer.SerializeToNode(directories);
         string file = Path.Combine(directory, id + ".json");
         string pending = file + ".tmp";
-        File.WriteAllText(pending, json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        OwnerOnlyState.WriteAllBytes(pending, Encoding.UTF8.GetBytes(json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n"));
         File.Move(pending, file, overwrite: true);
         return new BatchJournal(file, id, purpose, workOrder, startedAt, entries, outputs, directories);
     }

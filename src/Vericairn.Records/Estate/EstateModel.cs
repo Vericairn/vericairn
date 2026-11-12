@@ -17,7 +17,7 @@ public sealed class EstateModel
     private EstateTrust? judged;
     private bool judging;
     private IReadOnlySet<string> notCounting = new HashSet<string>(StringComparer.Ordinal);
-    private IReadOnlyList<RecordEnvelope>? authorityLines;
+    private AuthorityReplay? authority;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -117,7 +117,7 @@ public sealed class EstateModel
     internal void ApplyCounting(EstateTrust trust, IReadOnlySet<string> excluded, IReadOnlyDictionary<string, string> countingSupersededBy)
     {
         applied = trust;
-        authorityLines = null;
+        authority = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -154,8 +154,11 @@ public sealed class EstateModel
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
 
-    /// <summary>The estate's first charter, the one every later revision supersedes (the lowest id wins when several do; validators flag that).</summary>
-    public RecordEnvelope? FirstEstate => applied is not null ? applied.FirstEstate : RawFirstEstate();
+    /// <summary>
+    /// The estate's first charter, the one every later revision supersedes: the charter the manifest names, never displaced by another that
+    /// supersedes nothing (validators flag that one); without a manifest, the first such charter by id.
+    /// </summary>
+    public RecordEnvelope? FirstEstate => Trust.FirstEstate;
 
     /// <summary>The first charter among every record read, before any is judged: the root of trust.</summary>
     internal RecordEnvelope? RawFirstEstate() => OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
@@ -209,10 +212,16 @@ public sealed class EstateModel
             return null;
         }
 
-        // The newest revision of the line that counts; a line none of whose revisions counts describes no principal.
-        RecordEnvelope latest = Latest(record);
-        return notCounting.Contains(latest.Id) ? null : latest;
+        // The newest revision of the line that counts and that its author may write (Authority); a line with none describes no principal.
+        return Authority.Current(Chain(record)[0]);
     }
+
+    /// <summary>
+    /// Which principal and authority records that count give roles and scopes: read in time order from the root operator, each only when
+    /// its author may write it at that point (<see cref="AuthorityReplay"/>), so no record authorizes itself.
+    /// </summary>
+    internal AuthorityReplay Authority => authority ??= AuthorityReplay.Run(OfType("principal"), OfType("authority"), RootOperator, r => Chain(r)[0],
+        id => ById.TryGetValue(id, out RecordEnvelope? found) ? found : null);
 
     /// <summary>Roles the principal currently holds.</summary>
     public IReadOnlyList<string> RolesOf(string? id)
@@ -279,10 +288,10 @@ public sealed class EstateModel
         if (AuthorityTime(record) is not { } at) return HasScope(id, scope, record.AtTime);
         if (id is null) return false;
         EstateTrust trust = Trust;
-        authorityLines ??= [.. OfType("authority").Select(r => ById[Chain(r)[0]]).DistinctBy(r => r.Id)];
-        foreach (RecordEnvelope first in authorityLines)
+        string time = RecordParser.FormatTimestamp(at);
+        foreach (string line in Authority.GrantLines)
         {
-            if (RevisionAt(first, at) is not { } grant || BodyString(grant, "grantee") != id) continue;
+            if (Authority.At(line, time) is not { } grant || BodyString(grant, "grantee") != id) continue;
             if (grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
                 scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope) &&
                 !Expired(grant, record.AtTime) && !trust.GrantClosedFor(grant, record, anchorsCount: true))
@@ -292,27 +301,36 @@ public sealed class EstateModel
         return false;
     }
 
-    /// <summary>The revision of a line in force at a time: from its first record, each counting successor dated at or before it; null when none counts then.</summary>
-    private RecordEnvelope? RevisionAt(RecordEnvelope record, DateTimeOffset at)
-    {
-        RecordEnvelope current = ById.TryGetValue(Chain(record)[0], out RecordEnvelope? first) ? first : record;
-        if (current.AtTime > at) return null;
-        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
-        while (SupersededBy.TryGetValue(current.Id, out string? next) && ById.TryGetValue(next, out RecordEnvelope? successor) && successor.AtTime <= at && seen.Add(successor.Id))
-        {
-            current = successor;
-        }
+    /// <summary>The revision of a line in force at a time: its latest record that its author may write (Authority) dated at or before it.</summary>
+    private RecordEnvelope? RevisionAt(RecordEnvelope record, DateTimeOffset at) => Authority.At(Chain(record)[0], RecordParser.FormatTimestamp(at));
 
-        return notCounting.Contains(current.Id) ? null : current;
-    }
-
-    /// <summary>True when a current authority record grants the principal the scope, and, at a given time, has not expired by then.</summary>
+    /// <summary>
+    /// True when the latest authority record of a line that its author may write (<see cref="Authority"/>) grants the principal the scope,
+    /// and, at a given time, has not expired by then.
+    /// </summary>
     public bool HasScope(string? id, string scope, DateTimeOffset? asOf = null) =>
-        id is not null && Current("authority").Any(a =>
+        id is not null && Authority.GrantLines.Select(Authority.Current).OfType<RecordEnvelope>().Any(a =>
             a.Body.TryGetProperty("grantee", out JsonElement grantee) && grantee.GetString() == id &&
             a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
             scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope) &&
             (asOf is null || !Expired(a, asOf.Value)));
+
+    /// <summary>
+    /// The principal record describing a principal just before a record, in time order with ids breaking ties: its latest revision that
+    /// its author may write (<see cref="Authority"/>) read before the record; null when none is.
+    /// </summary>
+    internal RecordEnvelope? PrincipalBefore(string? id, RecordEnvelope record) =>
+        id is not null && ById.TryGetValue(id, out RecordEnvelope? principal) && principal.Type == "principal" ? Authority.Before(Chain(principal)[0], record) : null;
+
+    /// <summary>
+    /// True when a grant its author may write (<see cref="Authority"/>), as its line stood just before a record in time order with ids
+    /// breaking ties, gave the principal the scope and had not expired when the record was authored: a later grant authorizes nothing
+    /// earlier, and a revision read after the record withdraws nothing from it.
+    /// </summary>
+    internal bool ScopeBefore(string? id, string scope, RecordEnvelope record) =>
+        id is not null && Authority.GrantLines.Select(line => Authority.Before(line, record)).OfType<RecordEnvelope>().Any(grant =>
+            BodyString(grant, "grantee") == id && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
+            scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope) && !Expired(grant, record.AtTime));
 
     /// <summary>True when a grant states an expiry (record format 2) at or before the time.</summary>
     public static bool Expired(RecordEnvelope grant, DateTimeOffset at)

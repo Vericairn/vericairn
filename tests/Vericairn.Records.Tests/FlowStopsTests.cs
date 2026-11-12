@@ -257,12 +257,49 @@ public class FlowStopsTests
         Assert.False(FlowPosition.IsReservedAct(run.Estate.Load(), early));
         Assert.Equal("stopped", run.Step("accept").State);
 
-        // Their act as an operator counts, and still counts after the role is revoked.
+        // Their act as an operator counts while the role stands. Once it is revoked, an estate without signed history cannot tell that act
+        // from one dated back into the time the role stood, so it no longer counts.
         RecordEnvelope act = run.Estate.Add("work-order", person.Id, Marker("ACCEPTED").ToJsonString(), supersedes: early.Id, signer: signer);
         Assert.Equal("done", run.Step("accept").State);
         run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("contributor") }, supersedes: promoted.Id);
+        Assert.False(FlowPosition.IsReservedAct(run.Estate.Load(), act));
+        Assert.Equal("stopped", run.Step("accept").State);
+    }
+
+    [Fact]
+    public void AnActSignedHistoryPlacesBeforeTheRoleWasRevokedStillCompletesAReservedStep()
+    {
+        using var run = new FlowFixture(options: new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" });
+        ToAcceptance(run);
+        RecordEnvelope person = run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("operator") });
+        Signing.StoreSigner signer = run.Policies.AdmitSigner(person.Id);
+        Checkpoint(run, "adoption");
+        RecordEnvelope act = run.Estate.Add("work-order", person.Id, Marker("ACCEPTED").ToJsonString(), signer: signer);
+        Checkpoint(run, "manual");
+        run.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Second Person", ["roles"] = new JsonArray("contributor") }, supersedes: person.Id);
         Assert.True(FlowPosition.IsReservedAct(run.Estate.Load(), act));
         Assert.Equal("done", run.Step("accept").State);
+
+        // One written after the revocation and dated back into the time the role stood does not.
+        DateTimeOffset resume = run.Estate.Clock;
+        run.Estate.SetClock(act.AtTime);
+        RecordEnvelope dated = run.Estate.Add("work-order", person.Id, Marker("DATED").ToJsonString(), signer: signer);
+        run.Estate.SetClock(resume);
+        Assert.False(FlowPosition.IsReservedAct(run.Estate.Load(), dated));
+    }
+
+    private static void Checkpoint(FlowFixture run, string trigger)
+    {
+        EstateModel model = run.Estate.Load();
+        History.CheckpointDraft draft = History.SignedHistory.Prepare(model, trigger, trigger == "adoption" ? model.Records.Where(r => r.Signatures.Count == 0) : null);
+        foreach (byte[] bytes in draft.Objects)
+        {
+            string path = Path.Combine(run.Estate.Root, EstateLayout.ObjectsDirectory, Hashing.ContentHash.Sha256(bytes)["sha256:".Length..]);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, bytes);
+        }
+
+        run.Estate.Add("history-checkpoint", run.Estate.OperatorId, draft.Body.GetRawText(), signer: run.Policies.OperatorSigner);
     }
 
     [Fact]

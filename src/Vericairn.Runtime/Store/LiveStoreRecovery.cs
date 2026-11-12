@@ -5,6 +5,7 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Runtime.Store;
 
@@ -75,7 +76,7 @@ internal static class LiveStoreRecovery
     internal static FileStream ShareWriterLock(string databasePath)
     {
         string path = WriterLockPath(databasePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(path)!);
         try
         {
             return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
@@ -89,7 +90,7 @@ internal static class LiveStoreRecovery
     private static FileStream? ExclusiveWriterLock(string databasePath)
     {
         string path = WriterLockPath(databasePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(path)!, VericairnHome.Path());
         try
         {
             return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);

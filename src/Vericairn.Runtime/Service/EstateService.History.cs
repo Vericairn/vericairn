@@ -556,9 +556,135 @@ public sealed partial class EstateService
         _ => $"vericairn records new authority --by {by} --supersedes {closes.Id} --body <file>",
     };
 
+    /// <summary>
+    /// Why operator record refuses a revision that takes a role away (<see cref="TakesRoleAway"/>), with the step that writes it, or null
+    /// when it does not: in an estate that has adopted history checkpoints, such a revision is written after a checkpoint, in the same
+    /// batch (<see cref="StoreRemovalLocked"/>), which one signed record carried through a checked merge cannot carry; in one that has
+    /// not, a revision that would make records fail is refused, naming them (<see cref="RemovalRefusal"/>). Caller holds the gate.
+    /// </summary>
+    private (string Message, string NextStep, Problem? Problem)? OperatorRecordRemovalRefusal(RecordDraft draft, EstateModel current, AuthoredRecord? authored)
+    {
+        if (!TakesRoleAway(draft, current)) return null;
+        if (SignedHistory.Adopted(current))
+        {
+            return ("In an estate that has adopted history checkpoints, a revision that takes a role away is written after a history checkpoint, in the same batch, " +
+                "signed on the runtime's machine by the acting principal's device, so what was written under the role before it keeps its reading. An operator record " +
+                $"carries one signed record through a checked merge and cannot carry the checkpoint, so this revision is not recorded through it: write it with {RemovalCommand(draft, "<operator id>")}, " +
+                "which writes the checkpoint and the revision together. Nothing was written.", RemovalCommand(draft, draft.By), null);
+        }
+
+        if (authored is null) return null;
+        return RemovalRefusal(current, authored) is { } refused
+            ? (refused.Message, "Adopt history checkpoints with vericairn estate checkpoint --adopt --check and vericairn estate checkpoint --adopt --expect-plan <plan hash> --by <root operator>, " +
+                $"then write the revision with {RemovalCommand(draft, draft.By)}, which writes a checkpoint before it.", refused)
+            : null;
+    }
+
+    /// <summary>The command that writes a revision taking a role away after a history checkpoint (<see cref="StoreRemovalLocked"/>).</summary>
+    private static string RemovalCommand(RecordDraft draft, string by) => $"vericairn records new {draft.Type} --by {by} --supersedes {draft.Supersedes} --body <file>";
+
     private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", _ => "grant revision" };
 
     private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };
+
+    /// <summary>
+    /// Whether a draft takes a role away (signed history and policy authority, 0.9.2): a principal revision whose line gives the operator
+    /// role and that gives it no more, or a grant revision whose line gives its grantee administer and that gives it no more, each line as
+    /// read from the records their authors may write.
+    /// </summary>
+    private static bool TakesRoleAway(RecordDraft draft, EstateModel model)
+    {
+        if (draft.Type is not ("principal" or "authority") || draft.Supersedes is null || !model.ById.TryGetValue(draft.Supersedes, out RecordEnvelope? previous) ||
+            previous.Type != draft.Type || draft.Body.ValueKind != JsonValueKind.Object)
+            return false;
+        RecordEnvelope? held = model.Authority.Current(model.Chain(previous)[0]);
+        if (held is null) return false;
+        return draft.Type == "principal"
+            ? AuthorityReplay.IsOperator(held) && !(Text(draft.Body, "kind") == "human" && Strings(draft.Body, "roles").Contains(Vericairn.Records.Types.Roles.Operator))
+            : Strings(held.Body, "scope").Contains(Vericairn.Records.Types.Scopes.Administer) &&
+              !(Text(draft.Body, "grantee") == EstateModel.BodyString(held, "grantee") && Strings(draft.Body, "scope").Contains(Vericairn.Records.Types.Scopes.Administer));
+
+        static string? Text(JsonElement body, string name) => body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        static HashSet<string> Strings(JsonElement body, string name) => body.TryGetProperty(name, out JsonElement items) && items.ValueKind == JsonValueKind.Array
+            ? [.. items.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String).Select(i => i.GetString()!)]
+            : [];
+    }
+
+    /// <summary>
+    /// Stores a revision that takes a role away (<see cref="TakesRoleAway"/>). In an estate that has adopted history checkpoints, a
+    /// checkpoint signed by the acting principal's device is written first, in the same batch, over the copy as it is, so what the person
+    /// wrote before the removal stays witnessed before it and keeps its reading (design/signed-history.md § 8); the revision is authored
+    /// after it; a grant revision that needs a closing is stored after its closing instead (<see cref="StoreWithClosingLocked"/>), which
+    /// is such a checkpoint, and does not come here. A revision signed elsewhere is stored alone, since this machine signs nothing for it,
+    /// and the next checkpoint witnesses it. In an estate that has not adopted, nothing places what the person wrote before the removal, so a revision that would make any
+    /// record fail is refused, naming those records (<see cref="RemovalRefusal"/>); one that would make none fail is written alone.
+    /// Caller holds the gate and the write lock.
+    /// </summary>
+    private WriteOutcome StoreRemovalLocked(RecordDraft draft, IReadOnlyList<IRecordSigner>? signers)
+    {
+        EstateModel current = LoadWith([]);
+        if (!SignedHistory.Adopted(current) || signers is not null)
+        {
+            (AuthoredRecord? alone, string? refusal) = AuthorLocked(draft, current, signers);
+            if (alone is null) return EstateServiceValues.Refuse(refusal!);
+            if (!SignedHistory.Adopted(current) && RemovalRefusal(current, alone) is { } refused) return WriteOutcome.Fail(refused);
+            return StoreAuthoredLocked(alone, current);
+        }
+
+        (PreparedCheckpoint? checkpoint, string? skipped) = CheckpointLocked(current, "manual", draft.By);
+        (AuthoredRecord? record, string? why) = AuthorLocked(draft, current);
+        if (record is null)
+        {
+            if (checkpoint is not null) RemoveObjects(checkpoint);
+            return EstateServiceValues.Refuse(why!);
+        }
+
+        if (checkpoint is null)
+        {
+            WriteOutcome outcome = StoreAuthoredLocked(record, current);
+            return skipped is null || outcome.Written is null ? outcome : outcome with { Checkpoint = new TriggeredCheckpoint("manual", null, skipped) };
+        }
+
+        (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherUnderLock([checkpoint.Record, record],
+            "Store a history checkpoint and then the revision that takes a role away, so what was written before the removal keeps its reading.", null, null, null);
+        if (written.Count < 2)
+        {
+            if (written.Count == 0) RemoveObjects(checkpoint);
+            return WriteOutcome.Fail(problem ?? new Problem("refused", "The revision was not written.", []));
+        }
+
+        return new WriteOutcome(written[1], problem) { Checkpoint = new TriggeredCheckpoint("manual", written[0], null) };
+    }
+
+    /// <summary>
+    /// Why a removal is refused in an estate that has not adopted history checkpoints (FIX-111): the records other than the removal that
+    /// would fail with it and do not fail now, each with the findings that say so: an error, such as a decision by the person whose role
+    /// is read as it is now, or policy.operator-removed, a policy record or approval that would count for nothing. Null when none would,
+    /// or when the removal fails on its own, which the write's own judgment reports.
+    /// </summary>
+    private Problem? RemovalRefusal(EstateModel current, AuthoredRecord removal)
+    {
+        static bool Fails(Finding finding) => finding.Severity == Severity.Error || finding.Code == "policy.operator-removed";
+        static string RecordPath(Finding finding) => finding.Location.Split('#')[0];
+        var failing = current.Findings.Where(Fails).Select(RecordPath).ToHashSet(StringComparer.Ordinal);
+        EstateModel proposed = LoadWith([removal]);
+        if (proposed.Findings.Any(f => f.Severity == Severity.Error && RecordPath(f) == removal.RelativePath)) return null;
+        List<Finding> ended = [.. proposed.Findings.Where(f => Fails(f) && RecordPath(f) != removal.RelativePath && !failing.Contains(RecordPath(f)))
+            .OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)];
+        if (ended.Count == 0) return null;
+        var byPath = proposed.Records.ToDictionary(r => r.ExpectedPath, StringComparer.Ordinal);
+        List<string> named = [.. ended.GroupBy(RecordPath, StringComparer.Ordinal).Select(g =>
+            (byPath.TryGetValue(g.Key, out RecordEnvelope? record) ? $"{record.Type} {record.Id}" : g.Key) +
+            $" ({string.Join(", ", g.Select(f => f.Code).Distinct(StringComparer.Ordinal))})")];
+        const int Shown = 20;
+        string list = string.Join("; ", named.Take(Shown)) + (named.Count > Shown ? $"; and {named.Count - Shown} more, each in the findings" : "");
+        return new Problem("refused",
+            $"Not written: this estate has not adopted history checkpoints, so nothing places what was written under the role before this removal, " +
+            $"and {named.Count} {(named.Count == 1 ? "record" : "records")} would fail with it: {list}. Adopt history checkpoints first: " +
+            $"the runtime then writes a checkpoint before the removal, and {(named.Count == 1 ? "this record keeps its" : "these records keep their")} reading.",
+            [.. ended.Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message))]);
+    }
 
     /// <summary>
     /// What a charter revision's checkpoint anchors (design/signed-history.md § 6): a revision moving the charter to required signatures,

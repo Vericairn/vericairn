@@ -190,7 +190,9 @@ public sealed class PromptLibraryTests
         RecordEnvelope grant = writer.Fixture.Add("authority", body);
         RecordWritten prompt = Ok(writer.Api.PromptSave(new(writer.Builder, PolicyFixture.Element(PromptRecordsTests.Definition()))));
         body["scope"] = new JsonArray("local-engineering");
-        Ok(writer.Api.NewRecord(new("authority", writer.Operator, PolicyFixture.Element(body), Supersedes: grant.Id, At: writer.Model.ById[prompt.Id].At)));
+        // The runtime writes authority records at its own time, so the revocation in the prompt's recorded second is added as a file.
+        writer.Fixture.Estate.SetClock(writer.Model.ById[prompt.Id].AtTime);
+        writer.Fixture.Add("authority", body, supersedes: grant.Id);
         Assert.False(writer.Model.Findings.HasErrors, string.Join('\n', writer.Model.Findings));
         int before = writer.Model.Records.Count;
         Assert.False(writer.Api.PromptSave(new(writer.Builder, PolicyFixture.Element(PromptRecordsTests.Definition("after-revocation")))).Ok);
