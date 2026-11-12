@@ -14,6 +14,7 @@ namespace Vericairn.Records.Tests;
 /// <summary>Admissions count from the estate's first authority outward, whatever order the records are read in.</summary>
 public class AdmissionEvaluationTests
 {
+
     [Fact]
     public void AdmissionsThatDoNotLeadBackToTheFirstAuthorityAdmitNobody()
     {
@@ -636,5 +637,63 @@ public class AdmissionEvaluationTests
         Assert.False(model.Counts(model.ById[lateAdmission.Id]));
         Assert.False(SignatureChecks.IsAdmitted(model, late));
         Assert.True(SignatureChecks.IsAdmitted(model, adminDevice));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void TwoDevicesRevokingEachOtherRevokeNothingWhicheverIsWrittenOrNumberedFirst(bool secondFirst, bool firstLower)
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        (RecordEnvelope one, RecordEnvelope oneAdmission) = f.Admitted(f.Estate.OperatorId, "Device one");
+        (RecordEnvelope two, RecordEnvelope twoAdmission) = f.Admitted(f.Estate.OperatorId, "Device two");
+        DateTimeOffset t = f.Estate.Clock;
+        string asOf = RecordParser.FormatTimestamp(t.AddSeconds(5));
+        // Each device revokes the other as of before either revocation was written; the ids are the writer's choice.
+        string low = Vericairn.Records.Identity.Ulid.NewUlid(t.AddSeconds(20)).Value, high = Vericairn.Records.Identity.Ulid.NewUlid(t.AddSeconds(30)).Value;
+        f.Estate.SetClock(t.AddSeconds(10));
+        RecordEnvelope ByOne() => f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "Two revoked by one.", "revoked", asOf), two.Reference,
+            supersedes: twoAdmission.Id, id: firstLower ? low : high, signer: f.Signer(one));
+        RecordEnvelope ByTwo() => f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "One revoked by two.", "revoked", asOf), one.Reference,
+            supersedes: oneAdmission.Id, id: firstLower ? high : low, signer: f.Signer(two));
+        RecordEnvelope byOne, byTwo;
+        if (secondFirst) { byTwo = ByTwo(); byOne = ByOne(); } else { byOne = ByOne(); byTwo = ByTwo(); }
+
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(model.ById[byOne.Id]));
+        Assert.False(model.Counts(model.ById[byTwo.Id]));
+        Assert.True(Reported(model, byOne, "admission.unseats-support"));
+        Assert.True(Reported(model, byTwo, "admission.unseats-support"));
+        Assert.True(SignatureChecks.IsAdmitted(model, one));
+        Assert.True(SignatureChecks.IsAdmitted(model, two));
+    }
+
+    [Fact]
+    public void ManyRevocationsAreJudgedInABoundedNumberOfSteps()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope basis = f.Decision();
+        RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+        // 128 administrators, each revoking the root operator's first device as of shortly before its revocation: the earliest stands and
+        // every later administrator's admission, signed by that device, fails.
+        for (int i = 0; i < 128; i++)
+        {
+            RecordEnvelope admin = f.Estate.Add("principal", f.Estate.OperatorId, """{"kind":"human","name":"Admin","roles":["contributor"]}""", signer: f.OperatorSigner);
+            f.Grant(admin.Id, basis, [Scopes.Administer]);
+            (RecordEnvelope device, _) = f.Admitted(admin.Id, "Admin's laptop");
+            f.Estate.SetClock(f.Estate.Clock.AddSeconds(60));
+            f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked.", "revoked", RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(-30))),
+                f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(device));
+        }
+
+        EstateModel model = f.Load();
+        Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        // Measured at 9 steps and about 50,000 verifications against a set; twice that is the bound.
+        Assert.InRange(model.Trust.JoinSteps, 1, 20);
+        Assert.InRange(model.Trust.SetVerifications, 1, 100_000);
     }
 }

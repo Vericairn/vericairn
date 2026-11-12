@@ -543,8 +543,10 @@ internal sealed partial class EstateTrust
     /// hide each other. Left out are first those that helped and fail by themselves, judged with every admission that failed beside them
     /// left out, such as a revocation that revokes what its own signature or its author's authority rests on; failing those, those that
     /// helped and failed themselves, which unseat one another; and failing those, every admission that failed, each of which another
-    /// admission that stands revoked. A set in which nothing fails is judged again with each admission left out that passes against it,
-    /// one at a time and once each, the others still left out. An admission one of the closings refuses never joins, and the author's
+    /// admission that stands revoked. Once nothing fails, each admission left out that passes against the set is judged again, once:
+    /// with the set alone, the others still left out, and beside each other one that stands alone; those that stand alone and beside
+    /// every such other are restored together, so the outcome never depends on which is read first. An admission one of the closings
+    /// refuses never joins, and the author's
     /// authority is read against the same closings. The result is kept for each set of closings, with the admissions left out that would
     /// otherwise pass (<see cref="Unseating"/>).
     /// </summary>
@@ -581,27 +583,47 @@ internal sealed partial class EstateTrust
             var cleared = new HashSet<string>(StringComparer.Ordinal);
             while (true)
             {
-                HashSet<string> known = Join(start, signed, left);
+                HashSet<string> known = Settle(start, signed, left);
                 Standing found = Against(known);
-                List<RecordEnvelope> failed = [.. signed.Where(a => known.Contains(a.Id) && !Passes(a, known, found))];
-                if (failed.Count > 0)
-                {
-                    left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
-                    continue;
-                }
-
-                // An admission left out that passes against the set may have been left out only beside another that unseated it: each is
-                // judged again once, alone, from the start, with it in and the others still out.
+                // An admission left out that passes against the set may have been left out only beside another that unseated it. Each such
+                // admission not judged so before is judged with the set alone, the others still left out, and then beside each other one
+                // that stands alone; those that stand alone and beside every such other are restored together, so that of two that unseat
+                // each other neither is, whichever is read first.
                 List<RecordEnvelope> passing = [.. signed.Where(a => left.Contains(a.Id) && Passes(a, known, found))];
-                if (passing.FirstOrDefault(a => !cleared.Contains(a.Id)) is { } back)
+                List<RecordEnvelope> fresh = [.. passing.Where(a => !cleared.Contains(a.Id))];
+                cleared.UnionWith(fresh.Select(a => a.Id));
+                List<RecordEnvelope> alone = [.. fresh.Where(a => Without(left, a).Contains(a.Id))];
+                List<RecordEnvelope> restored = [.. alone.Where(a => alone.All(b => ReferenceEquals(a, b) || Without(left, a, b) is var both && both.Contains(a.Id) && both.Contains(b.Id)))];
+                if (restored.Count > 0)
                 {
-                    left.Remove(back.Id);
-                    cleared.Add(back.Id);
+                    left.ExceptWith(restored.Select(a => a.Id));
                     continue;
                 }
 
                 unseating[known] = [.. passing.Select(a => a.Id)];
                 return known;
+            }
+
+            // The admissions that count with the ones given taken out of those left out, judged without restoring any other.
+            HashSet<string> Without(HashSet<string> left, params RecordEnvelope[] restore)
+            {
+                var trial = new HashSet<string>(left, StringComparer.Ordinal);
+                trial.ExceptWith(restore.Select(a => a.Id));
+                return Settle(start, signed, trial);
+            }
+        }
+
+        // Joins and leaves out until no admission of the set fails against it: every signed admission not left out joins as it can, and
+        // a set that holds failing admissions is judged again with more of them left out (above). Adds to the admissions left out.
+        HashSet<string> Settle(HashSet<string> start, List<RecordEnvelope> signed, HashSet<string> left)
+        {
+            while (true)
+            {
+                HashSet<string> known = Join(start, signed, left);
+                Standing found = Against(known);
+                List<RecordEnvelope> failed = [.. signed.Where(a => known.Contains(a.Id) && !Passes(a, known, found))];
+                if (failed.Count == 0) return known;
+                left.UnionWith(LeftOut(known, failed, signed).Select(a => a.Id));
             }
         }
 
@@ -612,6 +634,7 @@ internal sealed partial class EstateTrust
             List<RecordEnvelope> undecided = [.. signed.Where(a => !left.Contains(a.Id))];
             while (true)
             {
+                JoinSteps++;
                 Standing found = Against(known);
                 List<RecordEnvelope> joined = [.. undecided.Where(a => VerifiesAgainst(a, known) && found.MayAdmit(a))];
                 if (joined.Count == 0) return known;
@@ -663,6 +686,12 @@ internal sealed partial class EstateTrust
 
         Standing Against(HashSet<string> counting) => StandingAgainst(counting, bound, mode);
     }
+
+    /// <summary>How many steps of joining admissions every judgment of which admissions count has taken.</summary>
+    internal int JoinSteps { get; private set; }
+
+    /// <summary>How many times a record's signatures were verified against a set of admissions: what the cost of judging admissions grows with.</summary>
+    internal long SetVerifications { get; private set; }
 
     /// <summary>Whether no closing given refuses a record.</summary>
     private static bool Open(EstateTrust trust, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode) => bound.Count == 0 || trust.Refuser(record, bound, mode) is null;
@@ -972,6 +1001,7 @@ internal sealed partial class EstateTrust
     /// <summary>Whether every signature of a record verifies by devices that a set of admissions admits at its time.</summary>
     private bool VerifiesAgainst(RecordEnvelope record, HashSet<string> counting)
     {
+        SetVerifications++;
         var findings = new FindingList();
         for (int i = 0; i < record.Signatures.Count; i++) Verify(record, i, (deviceId, at) => StateFrom(deviceId, at, counting), findings);
         return !findings.HasErrors;
