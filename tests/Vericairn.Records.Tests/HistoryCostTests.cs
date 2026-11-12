@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
@@ -290,6 +291,98 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
             made.Add(byRoot ? f.Close("device", f.BuilderDevice.Id) : f.Close("device", f.BuilderDevice.Id, signers[k].Person.Id, f.Signer(signers[k].Device)));
 
         return made;
+    }
+
+    /// <summary>
+    /// The cost of many closings naming one widely used device (FIX-108): 300 operators whose principal records the root operator's first
+    /// device signed and whose devices it admitted, then 120 rotations of that device's key, each after a closing of the key it replaces.
+    /// Every closing names the device that every principal record's verification reads, and every rotation is read against each closing of
+    /// an earlier key. The load stays within twice the load of the same estate in which only the first rotation follows a closing, plus 50 ms,
+    /// and the memory a loaded model keeps within twice that estate's, plus 8 MiB. That estate holds the same operators and rotations and
+    /// still judges a closing, so the comparison measures what the other 119 closings add; an estate with no closing would skip judging
+    /// closings altogether. The two estates are loaded in turn, three times each, and the fastest load of each is compared.
+    /// </summary>
+    [Fact]
+    public void KeyRotationsOfTheRootOperatorsDeviceStayWithinTwiceItsFirstClosing()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The key rotation cost test runs when {EnvironmentVariable} is 1.");
+        const int Operators = 300;
+        const int Rotations = 120;
+        using HistoryFixture closedEach = new(), closedFirst = new();
+        WriteKeyRotations(closedEach, Operators, Rotations, closeEach: true);
+        WriteKeyRotations(closedFirst, Operators, Rotations, closeEach: false);
+        TimeSpan each = TimeSpan.MaxValue, first = TimeSpan.MaxValue;
+        for (int run = 0; run < 3; run++)
+        {
+            TimeSpan time = TimedLoad(closedFirst, 1);
+            if (time < first) first = time;
+            time = TimedLoad(closedEach, Rotations);
+            if (time < each) each = time;
+        }
+
+        long eachKept = Kept(closedEach), firstKept = Kept(closedFirst);
+        output.WriteLine($"key rotations of the root operator's device, {Rotations:N0} over {Operators:N0} operators: {each.TotalMilliseconds:N0} ms and {eachKept / 1048576.0:N1} MiB kept with a closing before each; {first.TotalMilliseconds:N0} ms and {firstKept / 1048576.0:N1} MiB with a closing before the first only");
+        Assert.True(each <= 2 * first + TimeSpan.FromMilliseconds(50), $"A closing before each rotation: {each.TotalMilliseconds:N0} ms against {first.TotalMilliseconds:N0} ms.");
+        Assert.True(eachKept <= 2 * Math.Max(firstKept, 0) + 8 * 1048576L, $"A closing before each rotation keeps {eachKept / 1048576.0:N1} MiB against {firstKept / 1048576.0:N1} MiB.");
+
+        // One load, checking that the closings written act.
+        static TimeSpan TimedLoad(HistoryFixture f, int closings)
+        {
+            var watch = Stopwatch.StartNew();
+            EstateModel model = f.Load();
+            watch.Stop();
+            Assert.Equal(closings, model.Trust.Closings.Count);
+            return watch.Elapsed;
+        }
+    }
+
+    /// <summary>The memory a loaded model of an estate keeps, measured after full collections around a load that nothing else outlives.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long Kept(HistoryFixture f)
+    {
+        Collect();
+        long before = GC.GetTotalMemory(forceFullCollection: true);
+        EstateModel model = Load(f);
+        Collect();
+        long after = GC.GetTotalMemory(forceFullCollection: true);
+        GC.KeepAlive(model);
+        return after - before;
+
+        static void Collect()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static EstateModel Load(HistoryFixture f) => f.Load();
+    }
+
+    /// <summary>
+    /// Writes, in an adopted estate, operators whose records the root operator's first device signs and whose devices it admits, then
+    /// rotations of that device's key, each after a closing of the key it replaces or, unless <paramref name="closeEach"/>, the first only.
+    /// </summary>
+    private static void WriteKeyRotations(HistoryFixture f, int operators, int rotations, bool closeEach)
+    {
+        for (int i = 0; i < operators; i++)
+        {
+            string name = "Operator " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["operator"]}""", signer: f.OperatorSigner);
+            f.Admitted(person.Id, name + "'s device");
+        }
+
+        f.Require();
+        f.Adopt();
+        RecordEnvelope current = f.OperatorDevice;
+        IRecordSigner signer = f.OperatorSigner;
+        for (int k = 0; k < rotations; k++)
+        {
+            if (closeEach || k == 0) f.Close("key", current.Id, f.Estate.OperatorId, signer);
+            (RecordEnvelope revision, StoreSigner next) = f.Rotate(current, signer, f.OperatorDevice.Id);
+            current = revision;
+            signer = next;
+        }
     }
 
     public void Dispose()
