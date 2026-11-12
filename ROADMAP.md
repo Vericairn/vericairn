@@ -23,18 +23,37 @@ release it patches.
 
 ## 0.9.2 — planned
 
-Remote grows from attention and decisions to supervision: from the phone you ask for running work to be
-paused, cancelled or contained and see the observed result, see the estate's nodes and connections, and hand a
-task to Workbench; Remote notifies you over the local network, reminds you before a supervised window opens,
-handles lost, replaced and shared phones and opens readable records. From Workbench or the phone, a saved
-prompt can be sent to a running agent in one step; it steers the agent without widening what the agent may
-do. A goal can run a declared flow: each step's position, and each required item's provenance, evidence and
-review, comes from the records, agents carry the steps they may take, and each step that waits on a person
-shows its exact command only when it is next. Clients hear what changed through an event stream instead of
-polling. An upgrade replaces an older background runtime, so the estate is served only by the release it
-pins. An agent finds the decisions and documents its brief needs by searching the estate, with every selected
-source pinned and nothing it may not read revealed. Vericairn installs with one command through Homebrew,
-winget or a checked install script.
+A goal can run a declared flow: each step's position comes from the records, each step is routed to its role
+one step per command, and a run stops only where a person holds the role, each reserved step showing its exact
+command only when it is next. The software pack declares the release and estate upgrade flows: the traps of
+earlier releases are checked as preconditions, each step hands on exact outputs that the next step pins, with
+independent review where it matters and failure routes that never lose work, the documentation set assembles
+itself, and 0.9.2's own release runs as a goal. An estate signs its history: checkpoints list every record it
+holds, so a removed, altered or backdated record no longer passes unnoticed, and a revoked device, a replaced
+key or a narrowed grant accounts only for what came before its closing. Clients hear what changed through one
+event stream that each follows from where it left off, instead of polling, and an agent is told when what it
+reads changes. An admitted agent on another machine works an estate over MCP's Streamable HTTP transport, each
+call judged as its API operation for that device. An agent finds the decisions and documents its brief needs
+by searching the estate, with every selected source pinned and nothing it may not read revealed. An upgrade
+replaces an older background runtime, so the estate is served only by the release it pins. Security reports
+reach the operator within minutes and hold a release until they are triaged, an acceptance rests only on
+reviews that passed, and a stopped operator action can be finished. Every distributable is built on .NET SDK
+10.0.404 and embeds .NET and ASP.NET Core runtime 10.0.15.
+
+## 0.9.3 — planned
+
+Remote grows from attention and decisions to supervision: from the phone you steer running work, see the
+estate's nodes and connections and hand a task to Workbench; Remote notifies you over the local network,
+reminds you before a supervised window opens, handles lost, replaced and shared phones and opens readable
+records. From Workbench or the phone, a saved prompt can be sent to a running agent in one step; it steers the
+agent without widening what the agent may do. Paired devices reach the runtime from any network through a
+relay that forwards bytes it cannot read. Agents keep working on a product between releases as standing
+agents, within their sponsor's caps, and every output is a possibility a person adopts. An estate follows the
+GitHub conversations it subscribes to and the reports it files with other projects, a release's advisories are
+drafted from its Security section for you to publish, and every release's bill of materials is checked
+against published advisories. Installers open without warnings on macOS and Windows, Vericairn installs with
+one command through Homebrew, winget or a checked install script, and you can run Vericairn as an always-on
+server for your estates.
 
 ## 0.10.x — planned
 
