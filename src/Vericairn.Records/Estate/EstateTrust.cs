@@ -170,8 +170,10 @@ internal sealed partial class EstateTrust
     /// when, so judged, the estate has adopted checkpoints and they witnessed it first. Added files can arrange that for a
     /// forged charter, so a witnessed charter never displaces the manifest's: the manifest's charter witnessed alone is the first, and
     /// any other witnessed charter, alone or beside it, leaves no charter read as the first and no record counting until the copy is
-    /// settled, so that nothing built from the records that count can take either root. A charter that first appears after adoption is
-    /// never witnessed first. Under each charter the first authority is chosen the same way (<see cref="UnderCharter"/>).
+    /// settled, so that nothing built from the records that count can take either root. A charter is judged witnessed with its own
+    /// first authority, whatever first authority the manifest names for another (<see cref="OwnFirstAuthority"/>). A charter that first
+    /// appears after adoption is never witnessed first. Under each charter the first authority is chosen the same way
+    /// (<see cref="UnderCharter"/>).
     /// </summary>
     internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null)
     {
@@ -181,18 +183,22 @@ internal sealed partial class EstateTrust
         if (objects is null || manifest is null || charters.Count == 0) return chosen;
         if (charters.Count == 1 && ReferenceEquals(charters[0], named)) return chosen;
 
+        // Whether a charter is witnessed is judged with its own first authority: a manifest's firstAuthority that is no candidate under
+        // it, such as one naming another charter's, does not keep it from being witnessed.
         List<EstateTrust> witnessed = [];
         foreach (RecordEnvelope charter in charters)
         {
             EstateTrust trust = ReferenceEquals(charter, named) ? chosen : UnderCharter(model, manifest, objects, files, charter);
-            if (trust.WitnessedFirst(trust.FirstEstate, charters)) witnessed.Add(trust);
+            EstateTrust? judged = manifest.FirstAuthority is { } name && trust.AuthorityCandidates.All(c => c.Id != name)
+                ? OwnFirstAuthority(model, manifest, objects, files, charter, trust.AuthorityCandidates) : trust;
+            if (judged is not null && judged.WitnessedFirst(charter, charters)) witnessed.Add(trust);
         }
 
         // Each charter is judged witnessed under itself, which added files can arrange for a forged one, so witnessed history only
         // confirms the manifest's charter: one witnessed alone and named by the manifest is the first; any other witnessed one leaves
         // the copy unsettled rather than displacing the manifest's.
         if (witnessed.Count == 0) return chosen;
-        if (witnessed.Count == 1 && ReferenceEquals(witnessed[0].FirstEstate, named)) return witnessed[0];
+        if (witnessed.Count == 1 && ReferenceEquals(witnessed[0].FirstEstate, named)) return chosen;
         var unsettled = new EstateTrust(model, manifest, objects, files, null, unsettled: true);
         string ids = string.Join(", ", witnessed.Select(t => t.FirstEstate!.Id));
         unsettled.RootFindings.Add(new Finding(Severity.Error, "history.root-ambiguous", EstateLayout.RecordsDirectory, witnessed.Count > 1
@@ -247,6 +253,20 @@ internal sealed partial class EstateTrust
         }
 
         return unsettled;
+    }
+
+    /// <summary>
+    /// The judgment under a charter with its own first authority, for telling whether the charter is witnessed when the manifest names a
+    /// first authority that is no candidate under it: its only candidate, or the one candidate witnessed first when judged as the first
+    /// authority; null when there is none of either.
+    /// </summary>
+    private static EstateTrust? OwnFirstAuthority(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope charter,
+        IReadOnlyList<RecordEnvelope> candidates)
+    {
+        List<EstateTrust> trusts = [.. candidates.Select(c => new EstateTrust(model, manifest, objects, files, charter, authorityGiven: true, authority: c))];
+        if (trusts.Count == 1) return trusts[0];
+        List<EstateTrust> witnessed = [.. trusts.Where(t => t.WitnessedFirst(t.FirstAuthority, candidates))];
+        return witnessed.Count == 1 ? witnessed[0] : null;
     }
 
     /// <summary>

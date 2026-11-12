@@ -231,4 +231,33 @@ public class FirstAuthorityTests
         Assert.False(SignatureChecks.IsAdmitted(model, device));
         Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
     }
+
+    [Fact]
+    public void AStraySelfAdmissionChangesNothingInAnAdoptedEstateAndOneWithItsOwnAdoptionUnsettlesIt()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-16"), signer: f.OperatorSigner);
+        f.Require();
+        RecordEnvelope first = First(f);
+        f.Estate.NameFirstAuthority(first.Id);
+        f.Adopt();
+        RecordEnvelope device = f.Device(f.Estate.OperatorId, "Stray device");
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "Itself."), device.Reference, signer: f.Signer(device));
+        RecordEnvelope forged = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-17", "Signed by the stray device"), signer: f.Signer(device));
+        EstateModel model = f.Load();
+        Assert.False(model.Trust.Unsettled);
+        Assert.True(model.Counts(real));
+        Assert.False(model.Counts(forged));
+
+        // With an adoption of its own, prepared while the first authority's file is away, it leaves the copy unsettled, never taking it.
+        byte[] bytes = f.Remove(first);
+        f.Checkpoint(signer: f.Signer(device), trigger: "adoption");
+        f.Restore(first, bytes);
+        model = f.Load();
+        Assert.True(model.Trust.Unsettled);
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
+        Assert.False(model.Counts(real));
+        Assert.False(model.Counts(forged));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+    }
 }

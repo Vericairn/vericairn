@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Records.Estate;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
@@ -196,6 +197,42 @@ public class RootCharterTests
         Assert.False(SignatureChecks.IsAdmitted(model, device));
         Assert.False(model.Counts(signed));
         Assert.False(model.Counts(order));
+    }
+
+    [Theory]
+    [InlineData("both")]
+    [InlineData("charter")]
+    [InlineData("none")]
+    public void AForgedHistoryBesideAnAdoptedOneNeverTakesTheRootWhateverTheManifestNames(string edit)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("ROOT-9"), signer: f.OperatorSigner);
+        RecordEnvelope first = SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
+        f.Estate.NameFirstAuthority(first.Id);
+        f.Adopt();
+        // A whole other history: its own operator, device, self-admission, charter and adoption, prepared on a copy holding only it.
+        string mid = Ulid.NewUlid().Value;
+        f.Estate.Add("principal", mid, """{"kind":"human","name":"Other","roles":["operator"]}""", id: mid);
+        RecordEnvelope device = f.Device(mid, "Other's device");
+        RecordEnvelope admission = f.Estate.Add("admission", mid, HistoryFixture.Admission(mid, "Itself."), device.Reference, signer: f.Signer(device));
+        RecordEnvelope charter = f.Estate.Add("estate", mid, $$$"""{"name":"Test Estate","slug":"test-estate","purpose":"Exercise the record format.","operator":"{{{mid}}}","recordFormat":3,"policies":{"signatures":"required","releaseAcceptance":["operator"]}}""", signer: f.Signer(device));
+        RecordEnvelope forged = f.Estate.Add("work-order", mid, HistoryFixture.Order("ROOT-10", "Signed by the other device"), signer: f.Signer(device));
+        var away = f.Load().Records.Where(r => r.By != mid && r.Id != mid).Select(r => (Record: r, Bytes: f.Remove(r))).ToList();
+        f.Estate.NameFirstAuthority(null);
+        f.Estate.WriteManifest(charter.Id);
+        f.Checkpoint(by: mid, signer: f.Signer(device), trigger: "adoption");
+        foreach ((RecordEnvelope record, byte[] bytes) in away) f.Restore(record, bytes);
+        f.Estate.WriteManifest(edit == "none" ? f.Estate.Estate.Id : charter.Id);
+        f.Estate.NameFirstAuthority(edit == "both" ? admission.Id : first.Id);
+
+        EstateModel model = f.Load();
+        Assert.NotEqual(mid, model.RootOperator);
+        Assert.True(model.Trust.Unsettled);
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.False(model.Counts(forged));
+        Assert.False(model.Counts(real));
+        Assert.DoesNotContain(model.Findings, x => x.Message.Contains("restore the manifest", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Another principal, a charter of its own that supersedes nothing with a lower id, and a device it admits itself.</summary>
