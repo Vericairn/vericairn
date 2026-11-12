@@ -3,8 +3,9 @@
 Remote is Vericairn's phone companion for iOS and Android: a client of an estate's runtime on your local network, never a host
 of one and never a separate estate. It uses the same presentation, state language and SDK as Workbench.
 
-This guide describes Remote's pairing, attention, work, decision and policy views (REMOTE-01 to REMOTE-03 and POLICY-05, 0.9.0)
-and the presence key that alone signs a decision on the phone (REMOTE-11). It is a **developer build**: it is not in an app
+This guide describes Remote's pairing, attention, work, decision and policy views, added in 0.9.0 with REMOTE-01 to REMOTE-03
+and POLICY-05, with the estate's history line and the stops of its runs from 0.9.2, and the presence key that alone signs a
+decision on the phone (REMOTE-11). It is a **developer build**: it is not in an app
 store, and no real-device qualification is recorded for it.
 
 ## What this build does
@@ -55,7 +56,7 @@ historical context is labeled, including when the current work view does not est
 
 **Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
 freshness and a preview using the same presentation as Workbench. These settings remain read-only in this step;
-clarifications to running attempts arrive with PROMPT-02, planned for 0.9.2.
+clarifications to running attempts arrive with PROMPT-02, planned for 0.9.3.
 
 ## Decisions and acceptances
 

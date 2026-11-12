@@ -573,15 +573,46 @@ revision to required signatures by one who may anchor, and `interval` once the u
 oldest record is 24 hours old. It writes `closing` before a revocation, a key rotation or a narrowing grant revision, in the
 same batch (below). No field changes; a reader judges every checkpoint the same way, whatever its trigger.
 
-**Records that do not count.** A record that does not count is reported and kept:
-an unsigned record the rule above refuses, an unsigned policy record, checkpoint or
-device revision, an altered witnessed record and a record a closing refuses (below). From 0.9.2 the model's type and
-subject lookups, currency and supersession leave such a record out, in every estate,
-so no rule that admits, authorizes, accepts, clears or holds reads it, and a record
-that does not count supersedes nothing. A record whose subject or body reference
-does not count reports `record.subject-not-counting` or
-`record.reference-not-counting`. A device revision changes its key or name only when its device
-signed it.
+**Records that do not count.** A record that does not count is reported and kept: an unsigned record the rule above refuses, a
+record whose signature does not verify by a device admitted when it was signed, an unsigned policy record, checkpoint or device
+revision, an altered witnessed record and a record a closing refuses (below). From 0.9.2 the model's type and subject lookups,
+currency and supersession leave such a record out, in every estate, so no rule that admits, authorizes, accepts, clears or holds
+reads it, and a record that does not count supersedes nothing. A record whose subject or body reference does not count reports
+`record.subject-not-counting` or `record.reference-not-counting`. A device revision changes its key or name only when its device
+signed it. An admission counts from the estate's first authority outward: a signed admission counts only when its signatures
+verify by a device admitted, at its time, through admissions that count in turn, and its author may admit at its time: the root
+operator, a person holding the operator role or a person holding `administer`. That authority is read from the root operator's
+first principal record and from the principal and grant revisions their authors may write, as the records that give roles read
+them: signed with signatures that verify that way, anchored, or, before adoption, unsigned and dated no later than the charter
+first required signatures; a principal revision by an operator, or by a person holding `administer` for a line whose revision
+they wrote and giving no operator role; a grant revision by an operator; and a revision that takes a role away or narrows a
+grant, written by one who held the operator role earlier; never a principal's own record, nor one dated before the revision
+below it. Each revision follows the nearest such revision below it in its line. A person's line is read as it stood at the
+admission's time, and a grant revision in force then, unexpired then and closed by no closing that does not witness the
+admission; a holder of `administer` is a person only when their line says so read from signed or anchored revisions too. So
+admissions that rest only on one another admit nobody, an agent's admission, even signed with its own admitted key, admits
+nothing, a grant written later or closed before authorizes no admission, and a revision written later restores no earlier
+admission. Where this reading refuses an admission's author, the admission is reported as `admission.author`. An admission whose
+signature does not verify admits and revokes nothing, and one that would unseat what its own signature or its author's authority
+rests on counts for nothing and unseats nothing (`admission.unseats-support`): the admissions are judged again without it, a
+device's revocations together, so copies of one cannot hide each other.
+
+**The first charter.** The root operator is the operator that the first charter names: the charter the manifest's `estate`
+names, which another charter that supersedes nothing never displaces (that one is `estate.multiple`). Witnessed history only
+confirms it: a charter that supersedes nothing is witnessed when, judged under its own operator, the estate has adopted
+checkpoints and the counting checkpoints witnessed it first, with its bytes present. The manifest's charter witnessed alone is
+the first; any other witnessed, alone or beside it, is reported as `history.root-ambiguous` (and, when the manifest's is not
+witnessed, `history.manifest-root`), and the estate then has no root operator and no record counts. A reader without a manifest
+takes the first such charter by id.
+
+**The first authority.** Admissions count outward from the first authority, an admission by the root operator of its own device
+that the device signed, never a recovery device. It is never chosen by its stated date or id. It is the one the manifest's
+`firstAuthority` names, or, when the manifest names none, the only one; a manifest naming an admission that is not one, or
+naming none while there are several, is `manifest.first-authority`, whose message lists each with the device it admits, and
+there is then no first authority, so no signed admission counts until the manifest names the right one. Witnessed history only
+confirms it, as for the first charter: the one the manifest names, witnessed alone, stands; another witnessed, judged with it as
+the first authority, is `history.root-ambiguous`, with no record counting. Every other such self-admission is
+`signature.self-admission`.
 
 ## Closings and authority at a record's time (0.9.2)
 
@@ -675,8 +706,38 @@ the record's own `at`, and not closed by a closing that does not witness the rec
 the record is anchored. A later grant authorizes nothing earlier, and a later narrowing withdraws nothing
 already written. Validators read roles and scopes this way, as do the acceptance, review,
 clearance, declaration, hand-over and step rules that judge one record's author, and the
-rules for who cleared a flow step's review, each at that review's place. Policy authority
-already read its grants at the action's time. The strongest acts read more strictly, as
+rules for who cleared a flow step's review, each at that review's place. Policy authority,
+from 0.9.2, reads its own way. A person other than the root operator acts as the operator for a policy record
+when their line gives the operator role at the record's time and still gives it now. For this, only principal records authentic by
+their signatures give the role, while any revision that takes it away keeps counting, signed or not, whoever of those who held the
+role wrote it and whatever became of its author; and an appointment by a person who no longer stands counts only where signed
+history places it before that person's removal. A person who has lost the role since acted as the operator only through a record
+that signed history places before the loss: a counting history checkpoint signed by the root operator, or by an operator who held
+the role when it was written and stands now as the strongest acts read it, lists the record with its bytes or follows, through the
+checkpoints it names, a counting checkpoint that does; is dated no later than the revision that took the role away and does not
+list it; and precedes every counting checkpoint that lists that revision. So a checkpoint by anyone else places a record before the
+removal only through such a checkpoint that follows it before the removal, and one beside the removal or after it places nothing
+before it, whoever follows it later. A policy, exception or writing record, a prompt preference, a shared prompt or a
+reconciliation whose own validation finds its approval or authority missing (`policy.approval`, `policy.authority`,
+`prompt.authority`) counts for nothing. Where nothing could place a record before a removal that came first, in an estate that has
+not adopted checkpoints, or for a record its adoption checkpoint witnesses when someone else than the root operator or a standing
+operator signed that adoption and no checkpoint by one of them follows it before the removal, a policy record that fails only
+because an operator role it rests on was taken away counts for nothing and is the warning `policy.operator-removed`, not an error,
+so an estate holding such a removal stays valid; so do the policy records of a person whom the removed operator appointed,
+directly or through another appointee. A record written after adoption that no checkpoint places before the removal stays an
+error. The runtime writes a revision that takes away the operator role or `administer` as follows. In an estate that has adopted
+checkpoints, it first writes, in the same batch, a checkpoint signed by the acting operator's device on its machine, which follows
+every checkpoint before it, so what any earlier checkpoint lists keeps its reading: for a grant revision that needs a closing, the
+closing it is written with, and otherwise one of its own, with trigger `manual`, as for a grant revision that OPS-07 does not read
+as narrowing. A removal signed on another device is written alone, apart from a grant revision that needs a closing, which is not
+written from another device. In an estate that has not, it refuses the revision when any record would fail with it, whether the
+record would count for nothing, as a policy record or its approval would, or its checks would find errors, as a decision by the
+person would, since such an estate reads roles as they are now; the refusal names the records and says that adopting checkpoints
+first keeps them. A removal no record fails with is written. `operator record`, which carries one signed record through a checked
+merge, refuses a revision that takes a role away in an estate that has adopted checkpoints, since it cannot carry the checkpoint,
+and names `records new`, which writes the checkpoint and the revision together; in one that has not, it refuses such a revision
+when any record would fail with it, as the runtime does, and names adopting checkpoints and then `records new`. An action stopped
+at its record stage is judged again when it resumes. The strongest acts read more strictly, as
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
@@ -735,14 +796,30 @@ a removal is the warning `history.revision-author`: that no longer counts for an
 closings, and a standing operator should write it again. Other records keep the reading as it
 stood.
 
+In every estate, principal and authority records give roles and scopes only when their authors may write them, read in time
+order, ids breaking ties, from the root operator, each judged by the records accepted before it. A principal record is written by
+an operator or a principal holding `administer`, and one that gives the operator role only by an operator; a principal holding
+`administer` amends only a line whose revision it wrote; a grant is written by an operator. A person who held the operator role
+earlier may still take it away from a line that gives it, or narrow a grant, after losing the role, so a removal keeps counting. A
+principal record written by the principal it describes, at any revision, other than the root operator's, counts for nothing in
+every read, admissions, anchoring and closings included, and a revision on top of it attaches to the nearest record below it that
+counts: it is the error `principal.self-authored` when it would give a role or change the kind of principal, and the same code as
+a warning when it would give nothing the line did not, such as a rename. An agent's or a service's record gives no operator role
+(`principal.operator`). A record that fails these checks stays reported and gives no role or scope, so no record's own validation
+reads a role from that record. Harness qualifications, repository changes, routing, pairing and the records the runtime reports as
+current read roles and grants the same way. Admissions read an author's authority from these records as they stood at the
+admission's time (above). The runtime writes principal and authority records at its own time with a fresh id; `records new`
+refuses `--at` and `--id` for them.
+
 In every estate, a grant or principal revision dated before the record it attaches to counts
 for nothing, whoever signed it. It attaches to the nearest record below it in its line that
 counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
 revision on top of one that does not count is compared with, and follows, the line there, so
 its line has one current record in every read. The strongest acts, which consider only the
 revisions above, compare a revision with the nearest one below it that they consider. A role has no closing; role closings are planned. A former operator's records dated into
-the time the role stood read as it stood, so close and revoke a person's devices when removing
-their role.
+the time the role stood read as it stood, apart from policy authority, which reads them only
+where signed history places them before the removal; close and revoke a person's devices when
+removing their role.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The

@@ -121,8 +121,10 @@ output.
 A work order can carry `"disclosure": "held"`, for example a security fix whose nature must not be public before its release.
 While it is held, a checked push to a repository whose resource records `"visibility": "public"` is refused before anything is
 pushed if the push's commit messages or added lines contain the work order's key as a whole word, or a distinctive phrase of
-its title, intent or scope. Case, Unicode compatibility forms, line wrapping and a sentence's closing punctuation do not hide a
-match. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
+its title, intent or scope. Case, Unicode compatibility forms (full-width letters, ligatures such as `ﬁ`, circled and
+mathematical letters), line wrapping and a sentence's closing punctuation do not hide a match. From 0.9.2 the text is compared
+after Unicode NFKC normalization and full case folding computed by Vericairn itself from pinned Unicode 16.0.0 tables, the same
+on every platform and build. A phrase shorter than 24 characters, or one another current work order also uses, such as a standard closing step,
 is not matched on its own. The check applies whoever authored the commits.
 
 The hold ends when the release that carries the work order (its placement) is recorded as published with its documentation

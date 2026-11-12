@@ -31,11 +31,19 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.9.1. It adds, in `IEstateApi` and over the daemon, `POST /v1/runs/prepare`, which
-prepares a run's workspace alone before the agent starts, and a workspace setup command observed before a
-run's intent (FIX-86), and refuses a new decision or revision dated after its own record (FIX-87); the added
-`IEstateApi` members have default implementations, so existing implementers stay source-compatible, and
-[API compatibility for 0.9.1](api-compatibility-0.9.1.md) lists them. 0.9.0 added, in `IEstateApi` and over
+This document describes 0.9.2. It adds, in `IEstateApi` and over the daemon, the event journal: `GET /v1/events`,
+as server-sent events or a long poll, `GET /v1/events/{key}` (WATCH-05) and `POST /v1/events/select` (MCP-05);
+keyword search and search-selected context, `POST /v1/search`, `/search/index`, `/search/replay`,
+`/context/prepare` and `/context/brief` (CONTEXT-02); security reports' `POST /v1/security-reports/poll` and
+`/triage` (OPS-11); history checkpoints, `POST /v1/history/checkpoints` (OPS-07); and an operator action finished
+after its merge, `GET` and `POST /v1/operator/unfinished` (FIX-89). The daemon serves the Model Context Protocol
+at `/mcp` over Streamable HTTP (MCP-03), a run of a flow adds its position and stops to the goal reads (PROC-05,
+PROC-06 and PROC-10), and records read as signed history decides (ID-05, ID-06 and FIX-108). Each added
+`IEstateApi` member has a default implementation, so existing implementers stay source-compatible, and
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md) lists every change. 0.9.1 added, in `IEstateApi` and
+over the daemon, `POST /v1/runs/prepare`, which prepares a run's workspace alone before the agent starts, and a
+workspace setup command observed before a run's intent (FIX-86), and refusal of a new decision or revision dated
+after its own record (FIX-87), each added member with a default implementation. 0.9.0 added, in `IEstateApi` and over
 the daemon, records prepared by the
 runtime and signed by a paired device or by that principal's presence device (REMOTE-03 and REMOTE-11),
 the estate's basis for an answer (REMOTE-11), each principal's attention and its acknowledgment (REMOTE-02)
@@ -59,13 +67,13 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, and [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds, and [for 0.9.2](api-compatibility-0.9.2.md), for the members and records 0.9.2 changes.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.9.1's packages are
-available on nuget.org, pushed by the package workflow that its publication started.
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.2 package availability
+requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -618,7 +626,13 @@ ahead must correct its clock and sign afresh. There is no clock-skew allowance a
 
 Anything else is answered with `401` and a problem with code `denied`; revoking the device ends access from
 the next request on, with no restart. From 0.6.1 loopback checks the headers' signing time and resolves the device's
-current admitted standing before reading any body, as the local-network profile already does. The body-bound
+current admitted standing before reading any body, as the local-network profile already does. From 0.9.2 that
+standing comes from a model the runtime keeps for the estate's records as they are, and the records are read again
+only when they change: a write by this runtime or another process, or a pull that changes the working tree. A
+request that has proved nothing yet therefore never makes the runtime reload the estate, and for a repository-synced
+estate whose records are unchanged it does not wait for the runtime's other operations. A revocation, key rotation
+or profile withdrawal still counts from the next request. A local-network request without a client certificate is
+refused before standing is read, with the same refusal as before. The body-bound
 signature is verified only after the bounded body read; the headers alone do not prove possession of the key.
 After reading, admission and freshness are checked again, and a loopback key rotation during the read refuses the
 request. A failed header check takes the early-refusal path, with only the bounded discard described below.
