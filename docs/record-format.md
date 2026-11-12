@@ -206,7 +206,7 @@ acknowledgement settles the error and decides nothing else: it lists the witness
 id and hash with a reason, the estate reads on without the record, and a record under that id,
 written again or present with other bytes, is part of the unwitnessed tail and counts by its
 own rules until a checkpoint lists it. An anchor likewise
-exempts the exact bytes it lists from the signature requirement and, except for a device revision, from a closing's refusal; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not. It authenticates nothing: the record's `by` stays a claim, which the rules judging
+exempts the exact bytes it lists from the signature requirement, from a closing's refusal except for a device revision, and from `history.altered` when only authors who may not anchor list other bytes for that id; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not. It authenticates nothing: the record's `by` stays a claim, which the rules judging
 its author check against that principal's roles and grants as for any record, and its `at` is
 read as any counting record's. A device revision a closing refused changes no key or name,
 anchored or not. The runtime refuses an anchor of bytes not present, of a signed record no

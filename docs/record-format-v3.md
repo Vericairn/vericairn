@@ -546,7 +546,7 @@ revision. An unsigned admission also counts when an anchoring checkpoint lists i
 besides the format-2 migration's list. Before adoption the earlier rule holds:
 an unsigned record dated at or before the current required revision counts.
 
-**What an anchor decides.** An anchor exempts the exact bytes it lists from the signature requirement and, except for a device revision, from a closing's refusal; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not.
+**What an anchor decides.** An anchor exempts the exact bytes it lists from the signature requirement, from a closing's refusal except for a device revision, and from `history.altered` when only authors who may not anchor list other bytes for that id; every other rule still judges them, so an unsigned checkpoint, policy record or device revision, or an unsigned revision of a required charter, counts for nothing anchored or not.
 It authenticates nothing: an anchored record's `by` stays its author's claim, and the
 rules that judge its author read that principal's roles and grants as for any record.
 Its `at` is read as any counting record's. A device revision a closing refused changes
