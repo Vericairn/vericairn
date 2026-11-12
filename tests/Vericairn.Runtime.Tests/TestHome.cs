@@ -16,11 +16,15 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 public sealed class TestHome : IDisposable
 {
+    private static int instances;
     private readonly string created;
 
-    /// <summary>Always creates an isolated home before tests can use runtime storage.</summary>
+    /// <summary>Always creates an isolated home before tests can use runtime storage, once per test process: a second home would
+    /// point the process-wide variable elsewhere and delete it under the tests still running.</summary>
     public TestHome()
     {
+        if (Interlocked.Increment(ref instances) > 1)
+            throw new InvalidOperationException("The runtime tests' home is created once, by the assembly fixture; use VericairnHome.Path() instead.");
         created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(created);
         Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, created);

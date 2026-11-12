@@ -13,7 +13,6 @@ public sealed class RunTemporaryDirectoryTests
     [Fact]
     public void EachRunHasItsOwnPrivateTemporaryDirectory()
     {
-        using var home = new TestHome();
         var first = new RunDirectory(Ulid.NewUlid().Value, Ulid.NewUlid().Value);
         var second = new RunDirectory(Ulid.NewUlid().Value, Ulid.NewUlid().Value);
         first.Create();
