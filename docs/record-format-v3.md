@@ -695,12 +695,17 @@ such an answer for the closings that follow it, the adoption and anchoring, and 
 before it is judged without it. So a person whose role the root operator removed, and whose
 device it closed and revoked, can still write, at any time and repeatedly, a removal of an
 operator other than the root operator or a narrowing of an administrator's grant, dated any
-time from their appointment until that device's revocation; every closing that operator or
-administrator wrote that does not follow the root operator's closing then closes nothing, and
-records it alone refused count again. A new closing does not undo it, since it witnesses those
-records, nor does writing the operator's role again. Removing those records does, with an
-anchoring checkpoint that acknowledges their removal when a checkpoint witnesses them, until
-more are written; the root operator's own closings cannot be reopened this way, and role
+time from their appointment until that device's revocation; every closing that does not follow
+the root operator's closing then closes nothing if that operator or administrator wrote it, or
+anyone whose operator role or `administer` rests on that operator's appointments or grants,
+directly or through others', and records it alone refused count again. A new closing does not
+undo it, since it witnesses those records. Removing those records does, with an anchoring
+checkpoint that acknowledges their removal when a checkpoint witnesses them; writing the
+operator's role again gives back the closings of those whose role or `administer` rests on that
+operator's appointments or grants, and the operator's own earlier closings only when it is dated
+after the removal and before them. Either holds only until more such records are written, among
+them a removal on top of the role written again or forking the line below it. The root
+operator's own closings cannot be reopened this way, and role
 closings are planned. Removing an operator's role takes, for these acts, what that
 person appointed, granted and closed; those the person appointed keep the role in ordinary
 reads, and a removal they write still counts for these acts, until the root operator writes
