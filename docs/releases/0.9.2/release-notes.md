@@ -1,6 +1,6 @@
 # Release notes, Vericairn 0.9.2
 
-Prepared by `vericairn docs notes` before the release build, from the estate's records since the end of the notes of 0.9.1 (2026-11-06 22:30 UTC) up to 2026-11-12 14:21 UTC; the records are the source and this page is a rendering. The publication of 0.9.2 is not yet recorded: its commit, workflow run, artifacts by hash and qualified platforms are in the release record the estate writes when the draft is observed and, once published, in the published revision; `limitations-and-platforms.md` of this set states what was known before the build.
+Prepared by `vericairn docs notes` before the release build, from the estate's records since the end of the notes of 0.9.1 (2026-11-06 22:30 UTC) up to 2026-11-12 14:57 UTC; the records are the source and this page is a rendering. The publication of 0.9.2 is not yet recorded: its commit, workflow run, artifacts by hash and qualified platforms are in the release record the estate writes when the draft is observed and, once published, in the published revision; `limitations-and-platforms.md` of this set states what was known before the build.
 
 ## Security
 
@@ -330,6 +330,60 @@ Limitations recorded:
 - The guides describe 0.9.2's development build; the living-document pass at release preparation re-reads them against the release.
 - ROADMAP.md's 0.9.2 entry does not yet mention signed history; the release documentation pass adds it.
 
+### FIX-102: An admission counts only through admitted devices leading back to the root operator
+
+Result 01M783RQ0SH8WH4R7ZS815AXHZ (completed), recorded 2026-11-12 14:49 UTC. Admissions are judged in a grounded fixpoint from the first authority: an admission counts only when its signature verifies against a device admitted at its time and its author is the root operator, a standing operator or a person holding administer, read at its time and bounded by closings. The root charter is the one the manifest names, confirmed by witnessed history once adopted; the first authority is the manifest's new firstAuthority or the only candidate, witnessed history only confirming it; any other witnessed candidate leaves the copy unsettled. A revocation that would unseat its own support, alone or in copies, revokes nothing; mutual revocations are judged together whatever the order or ids; the runtime refuses a new admission that would count for nothing.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+- Before adoption, someone who can add files or edit the manifest can leave a copy unsettled, though never take the root; adopting checkpoints and checking a new copy with estate check --expect answer it.
+- Settling several first-authority candidates means naming one in the manifest by hand; a command for it is a follow-up.
+- Re-judging mutual revocations grows faster than linearly in the number of revoking pairs; only those who may admit can cause it, and a cost test bounds it.
+
+### FIX-104: The Vericairn home and live store are created owner-only without a daemon
+
+Result 01M783SXCMF3CKT8ZJ2PNCM36S (completed), recorded 2026-11-12 14:50 UTC. Every path that creates the Vericairn home, a clone's live store or the search index creates it owner-only; the runtime refuses state another local user owns, including a sudo run against another user's home, and warns once where the file system cannot keep modes.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+- Windows files inherit their directory ACLs; the owner-only rule is enforced on Unix modes.
+
+### FIX-105: Compatibility forms never hide a disclosure-hold or blocked-term match
+
+Result 01M783V3WTYY6J6D7JGPTQPP32 (completed), recorded 2026-11-12 14:50 UTC. Text is folded the same way everywhere it is matched, with compatibility normalization that works under the product's invariant globalization, so compatibility forms of a disclosure-hold key or a blocked term are caught.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+
+### FIX-106: Request authentication reads a device's standing without reloading the estate
+
+Result 01M783WAY1NXG0FEB6YB87119X (completed), recorded 2026-11-12 14:51 UTC. An unauthenticated request no longer makes the runtime reload the estate under its gate: device standing is read from a kept model stamped with the estate's state, rebuilt when the state changes, so a revocation counts from the next request.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+
+### FIX-110: Roles and scopes are read only from records their authors may write
+
+Result 01M783XHY5H9CTPJ8Z8ENTP6ZF (completed), recorded 2026-11-12 14:52 UTC. Principal and authority records grant nothing when their author may not write them: a self-authored revision adds nothing, an erroring record grants nothing, an administer holder cannot make an operator, and the admission reading trusts a removal or narrowing by one who held the operator role earlier, so it only takes authority away.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+
+### FIX-111: Policy authority is read at the runtime's time from operators who still stand
+
+Result 01M783YSBYVV8AGW8PB6FEQH8Y (completed), recorded 2026-11-12 14:52 UTC. Policy records count on the authority of operators who stand at the runtime's time; a stated time carries none past a removal. Removing a role writes a history checkpoint first in an adopted estate, so the person's policies, grants, exceptions and writing entries keep counting through the witness chain; an estate without checkpoints refuses a removal that would make records fail, naming them. operator record refuses role removals, a resumed action included, before anything is signed in an adopted estate; an appointee's records resting on a removal before history are warnings.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+- Until role closings ship, removing a role takes full effect only after the person's devices are closed and revoked; the guides say so.
+
+### FIX-123: One runtime test stops swapping the test process's shared home
+
+Result 01M78400CMZ9QK6J0WW2XAR5P2 (completed), recorded 2026-11-12 14:53 UTC. RunTemporaryDirectoryTests created a second TestHome, which pointed the whole test process's Vericairn home at a new directory and deleted it when the test ended, failing overlapping tests intermittently in full runs (ReleaseDocumentGateTests, OperatorRecordGitTests and others). The test now uses the shared home, and TestHome counts its instances and refuses a second one in a process, naming the shared home to use instead.
+
+Limitations recorded:
+- Built and self-reviewed by the builder session; test-only, so it has no Reviewer security review.
+
 ## Decisions
 
 - **DESIGN-43 accepted: comics** (2026-11-07 00:00 UTC, decision 01M6SMXHZ4STQ0E5SX7Q6QRAP5): The operator accepted DESIGN-43's comics design with all five recommendations of its section 18.
@@ -396,6 +450,8 @@ Limitations recorded:
 - **FIX-123 in 0.9.2: one runtime test stops swapping the test process's shared home** (2026-11-12 12:50 UTC, decision 01M77WZ8X6S30D1S0FWCSH0TGH): The operator took the open ask's recommendation: FIX-123 in 0.9.2.
 - **CI-07 in 0.9.3: main's push run is skipped for a commit the merge queue already tested** (2026-11-12 12:51 UTC, decision 01M77X0FW82AF47GTB07Y24TCD): The operator took the open ask's recommendation: CI-07 in 0.9.3.
 - **0.9.2's held security fixes are pushed as one pull request, then release preparation follows** (2026-11-12 12:54 UTC, decision 01M77X5F35JRQGTB6SMTZQ7353): The operator explicitly authorized pushing 0.9.2's held security fixes, as needed.
+- **A pinned progress discussion in the estate repository, and WATCH-06 in 0.9.3** (2026-11-12 14:21 UTC, decision 01M7824E3CQF5PC9P7X04KXYD7): The operator took the recommendation: a private pinned progress discussion now, a public one after 0.9.2, and WATCH-06 in 0.9.3.
+- **WATCH-06 renders progress through a target adapter; GitHub Discussions is the first** (2026-11-12 14:22 UTC, decision 01M7827BCHFVDY212W7SSBRB12): The operator directed that where progress is rendered is decided by an adapter or provider, with GitHub discussions as this estate's target.
 
 ## Work orders opened or revised
 
@@ -497,8 +553,9 @@ Limitations recorded:
 - **FIX-122** (ordinary): A failed document check's refusal names what failed (work order 01M76QXQVYXFJV0S1BZWESERXY) (revised; replaces 01M76QX4JZHG57MMECZSDRATCC).
 - **REL-092** (ordinary): Release 0.9.2: flows and their stops, events, signed history, MCP over the network, and the fixes placed in it (work order 01M77WZTHDS8BB8JMGMST8C0C0) (revised; replaces 01M6BYGSH6FDQT9JB3ZJVAK0X8, 01M6BYH11X9GWY6YRENT0EBFZW, 01M6CKFV4FNB7GE9DH4GGV8FCY, 01M6CTF27TWT78EFSWVAMTJV3D, 01M6H3QV0DJD0ZZ4GP1P1QHZ2X, 01M6HEHJVA25J8Q5EB9JD3DQ7C, 01M6HMX5E89KNZFFXZGECK0VWQ, 01M6J3DGTXM20XTV2518GMV9RJ, 01M6S9V1SSYZFJ1M6W78DTEQ7J, 01M6SBF0WZPTZJ5E0308W2VAFF, 01M6SW0T0XN1RY6347FV1CD5KV, 01M6SWYNF6RHJRMHG2X0YDAD9K, 01M6T2REGAW713P913FDJ4E0CP, 01M6T4F2527W62V20Y5GA017M2, 01M6T9T9D3DK044SJF9VFD760D, 01M6TADMT565E0589X3X5ZZM7E, 01M6V8K7C9EETTTKB76QZP5F7E, 01M6V8T3HRFA77JPGRGE0VFVH7, 01M6VQYHX7G3S3T323NRXCRNJJ, 01M6VXMAZC6216M8TVEHNC9J7K, 01M6W1YJ8M5E014YPXFQB1EHHJ, 01M6W2K25JGTCS8YGYYG532TBA, 01M6X17KANGWY2JJP3HAXBSA6V, 01M71360137XJ058WYD2NATE6K, 01M760TEBAQRJK1A61VNWHK56C, 01M7662JZ2GZW767Q3P7TF6FXA).
 - **FIX-123** (ordinary): One runtime test stops swapping the test process's shared home (work order 01M77X05E0M9E776VW3PW8KNW7) (revised; replaces 01M77WZHNZR6QNZ8DRT2PX5E78).
-- **REL-093** (ordinary): Release 0.9.3: standing agents, and Remote's intervention, notifications and relay (work order 01M77X11QWHWZRB62CPTGM9MJW) (revised; replaces 01M6CKFBZ21QC0W7P6XC2PSTJF, 01M6CKJ8NSKC6GXKA39WJWZS77, 01M6CTFAZC6Y16Q153W2BNW8RA, 01M6H3REJ4F3MB1PFXX8NXAN4R, 01M6HD38N4TTMF25PT0T3C2QMG, 01M6HEJ6KA18QZJKW0K0RHG98Q, 01M6HWD9KXC6KWT5T811H3EVAZ, 01M6J41V39WZABEC7832B920CX, 01M6T2NG9QHKSH628YZWFR2W3S, 01M6T9V81KSX267P0X3ER6JP5E, 01M6W2H3AHP43MNFHZ6S78H1WB, 01M6WVBZF72H4NHJEG2P2S7TAK, 01M6WZTCR6QEJGGX9WXZNCE76N, 01M75VDSG6Z6FPVK3DA5H9V5GD, 01M75W4AA5362EXP79N8A8SQ0K, 01M75X5XGXFC4SVDV2FRX6AYV0, 01M75YZTYF1KDWKTQ9TAZHDN51, 01M761AAB7K6DZHT66VQSS10G4, 01M76293E13NX5SB8QJP6XRB81, 01M7650BRSBAHN1NHG269BBSB5, 01M76DX523YEDWKJNN15XM23FS, 01M76EHR666NTA01VENF59QGCS, 01M76PYSXTRP4GGG81QP5QV7Q1, 01M76QXDDQ5026WHYGXMNR5NJ5).
 - **CI-07** (ordinary): Main's push run is skipped for a commit the merge queue already tested (work order 01M77X1C8AYGQVQKCZWH81Y5E9) (revised; replaces 01M77X0RRVZ0WEFZACCX6640KS).
+- **REL-093** (ordinary): Release 0.9.3: standing agents, and Remote's intervention, notifications and relay (work order 01M78250VKSNVS6KJX2HP23B48) (revised; replaces 01M6CKFBZ21QC0W7P6XC2PSTJF, 01M6CKJ8NSKC6GXKA39WJWZS77, 01M6CTFAZC6Y16Q153W2BNW8RA, 01M6H3REJ4F3MB1PFXX8NXAN4R, 01M6HD38N4TTMF25PT0T3C2QMG, 01M6HEJ6KA18QZJKW0K0RHG98Q, 01M6HWD9KXC6KWT5T811H3EVAZ, 01M6J41V39WZABEC7832B920CX, 01M6T2NG9QHKSH628YZWFR2W3S, 01M6T9V81KSX267P0X3ER6JP5E, 01M6W2H3AHP43MNFHZ6S78H1WB, 01M6WVBZF72H4NHJEG2P2S7TAK, 01M6WZTCR6QEJGGX9WXZNCE76N, 01M75VDSG6Z6FPVK3DA5H9V5GD, 01M75W4AA5362EXP79N8A8SQ0K, 01M75X5XGXFC4SVDV2FRX6AYV0, 01M75YZTYF1KDWKTQ9TAZHDN51, 01M761AAB7K6DZHT66VQSS10G4, 01M76293E13NX5SB8QJP6XRB81, 01M7650BRSBAHN1NHG269BBSB5, 01M76DX523YEDWKJNN15XM23FS, 01M76EHR666NTA01VENF59QGCS, 01M76PYSXTRP4GGG81QP5QV7Q1, 01M76QXDDQ5026WHYGXMNR5NJ5, 01M77X11QWHWZRB62CPTGM9MJW).
+- **WATCH-06** (ordinary): The estate's progress rendered through a target adapter, GitHub Discussions first (work order 01M7827MAJ2J1W6WBJEWXSY0S7) (revised; replaces 01M7824QM4M0JKNE6RR6Q26XWS, 01M7825C9R84ZV5TDDD4XTVKHY).
 
 ## Milestone and release acceptances
 
@@ -677,6 +734,7 @@ None in this window.
 - Vericairn roadmap revision 119 (`design/roadmap.md`): Revision 119: carries decision 01M76PY8GBB55P2RP1R3220WBV: 0.9.3 adds FIX-121, a near-linear key-closing check that stays exact.
 - Vericairn roadmap revision 120 (`design/roadmap.md`): Revision 120: carries decision 01M76QWVWDDYBH1XZENYK64Q4Z: 0.9.3 adds FIX-122, a failed document check's refusal naming what failed (issue #359).
 - Vericairn roadmap revision 121 (`design/roadmap.md`): Revision 121: Revision 121: FIX-123 in 0.9.2 and CI-07 in 0.9.3
+- Vericairn roadmap revision 122 (`design/roadmap.md`): Revision 122: Revision 122: WATCH-06 in 0.9.3
 
 ## The release itself
 
