@@ -297,13 +297,17 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// The cost of many closings naming one widely used device (FIX-108): 300 operators whose principal records the root operator's first
     /// device signed and whose devices it admitted, then 120 rotations of that device's key, each after a closing of the key it replaces.
     /// Every closing names the device that every principal record's verification reads, and every rotation is read against each closing of
-    /// an earlier key. The load stays within twice the load of the same estate in which only the first rotation follows a closing, plus 50 ms,
-    /// and the memory a loaded model keeps within twice that estate's, plus 8 MiB. That estate holds the same operators and rotations and
-    /// still judges a closing, so the comparison measures what the other 119 closings add; an estate with no closing would skip judging
-    /// closings altogether. The two estates are loaded in turn, three times each, and the fastest load of each is compared.
+    /// an earlier key. It is compared with the same estate in which only the first rotation follows a closing, which holds the same operators
+    /// and rotations and still judges a closing, so the comparison measures what the other 119 closings add; an estate with no closing would
+    /// skip judging closings altogether. The memory a loaded model keeps stays within twice that estate's, plus 8 MiB, and the load within
+    /// ten times its load, plus 150 ms. Each rotation is still checked against every earlier closed key by verifying its signatures under
+    /// that key, about 14,000 verifications, which took the load to about six times the first-only estate's on macOS; the bound leaves room
+    /// for slower verification elsewhere, and still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict was
+    /// kept under the closings it read (about thirteen times the first-only estate's load). The two estates are loaded in turn, three times
+    /// each, and the fastest load of each is compared.
     /// </summary>
     [Fact]
-    public void KeyRotationsOfTheRootOperatorsDeviceStayWithinTwiceItsFirstClosing()
+    public void KeyRotationsOfTheRootOperatorsDeviceStayWithinTenTimesItsFirstClosing()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The key rotation cost test runs when {EnvironmentVariable} is 1.");
         const int Operators = 300;
@@ -322,7 +326,7 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
 
         long eachKept = Kept(closedEach), firstKept = Kept(closedFirst);
         output.WriteLine($"key rotations of the root operator's device, {Rotations:N0} over {Operators:N0} operators: {each.TotalMilliseconds:N0} ms and {eachKept / 1048576.0:N1} MiB kept with a closing before each; {first.TotalMilliseconds:N0} ms and {firstKept / 1048576.0:N1} MiB with a closing before the first only");
-        Assert.True(each <= 2 * first + TimeSpan.FromMilliseconds(50), $"A closing before each rotation: {each.TotalMilliseconds:N0} ms against {first.TotalMilliseconds:N0} ms.");
+        Assert.True(each <= 10 * first + TimeSpan.FromMilliseconds(150), $"A closing before each rotation: {each.TotalMilliseconds:N0} ms against {first.TotalMilliseconds:N0} ms.");
         Assert.True(eachKept <= 2 * Math.Max(firstKept, 0) + 8 * 1048576L, $"A closing before each rotation keeps {eachKept / 1048576.0:N1} MiB against {firstKept / 1048576.0:N1} MiB.");
 
         // One load, checking that the closings written act.
