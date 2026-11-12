@@ -54,7 +54,7 @@ public class RootCharterTests
     }
 
     [Fact]
-    public void AnAdoptedEstateKeepsTheWitnessedCharterWhenTheManifestNamesAnother()
+    public void AnAdoptedEstateWhoseManifestNamesAnotherCharterReadsUnsettled()
     {
         using var f = new HistoryFixture();
         RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("ROOT-3"), signer: f.OperatorSigner);
@@ -64,17 +64,27 @@ public class RootCharterTests
         RecordEnvelope signed = f.Estate.Add("work-order", other.Id, HistoryFixture.Order("ROOT-4", "Signed by the other device"), signer: f.Signer(device));
         f.Estate.WriteManifest(charter.Id);
 
+        // A charter witnessed only under itself never displaces the manifest's, nor does the manifest's unwitnessed charter take the root:
+        // the copy reads unsettled, and no message advises either charter.
         EstateModel model = f.Load();
-        Assert.Equal(f.Estate.Estate.Id, model.FirstEstate!.Id);
-        Assert.Equal(f.Estate.OperatorId, model.RootOperator);
+        Assert.Null(model.FirstEstate);
+        Assert.Null(model.RootOperator);
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
         Finding finding = Assert.Single(model.Findings, x => x.Code == "history.manifest-root");
         Assert.Equal(Severity.Error, finding.Severity);
-        Assert.Contains(f.Estate.Estate.Id, finding.Message, StringComparison.Ordinal);
-        Assert.True(SignatureChecks.IsAuthentic(model, order));
-        Assert.True(model.Counts(order));
+        Assert.DoesNotContain("restore", finding.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(model.Counts(order));
         Assert.False(SignatureChecks.IsAdmitted(model, device));
         Assert.False(model.Counts(signed));
         Assert.False(model.Counts(charter));
+
+        // Restoring the manifest settles it.
+        f.Estate.WriteManifest(f.Estate.Estate.Id);
+        model = f.Load();
+        Assert.Equal(f.Estate.Estate.Id, model.FirstEstate!.Id);
+        Assert.True(model.Counts(order));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.manifest-root" or "history.root-ambiguous");
     }
 
     [Fact]
@@ -86,12 +96,18 @@ public class RootCharterTests
         (_, RecordEnvelope charter, RecordEnvelope device) = Another(f);
         f.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 13, 0, 0, TimeSpan.Zero));
         f.Checkpoint();
-        f.Estate.WriteManifest(charter.Id);
 
         EstateModel model = f.Load();
         Assert.Equal(f.Estate.Estate.Id, model.FirstEstate!.Id);
         Assert.Equal(f.Estate.OperatorId, model.RootOperator);
-        Assert.Contains("history.manifest-root", HistoryFixture.Codes(model));
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.manifest-root" or "history.root-ambiguous");
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+
+        // A manifest naming it does not make it the first either.
+        f.Estate.WriteManifest(charter.Id);
+        model = f.Load();
+        Assert.NotEqual(charter.Id, model.FirstEstate?.Id);
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
         Assert.False(SignatureChecks.IsAdmitted(model, device));
     }
 
@@ -145,17 +161,41 @@ public class RootCharterTests
         using var f = new HistoryFixture();
         f.Require();
         f.Adopt();
-        (RecordEnvelope other, RecordEnvelope charter, RecordEnvelope device) = Another(f);
-        f.Estate.WriteManifest(charter.Id);
+        (RecordEnvelope other, _, RecordEnvelope device) = Another(f);
         f.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 13, 0, 0, TimeSpan.Zero));
         f.Checkpoint(by: other.Id, signer: f.Signer(device), trigger: "adoption");
 
         EstateModel model = f.Load();
         Assert.Equal(f.Estate.Estate.Id, model.FirstEstate!.Id);
         Assert.Equal(f.Estate.OperatorId, model.RootOperator);
-        Assert.Contains("history.manifest-root", HistoryFixture.Codes(model));
-        Assert.DoesNotContain("history.root-ambiguous", HistoryFixture.Codes(model));
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.manifest-root" or "history.root-ambiguous");
         Assert.False(SignatureChecks.IsAdmitted(model, device));
+    }
+
+    [Fact]
+    public void AnAddedCharterWithItsOwnAdoptionNeverTakesTheRootOfAnEstateThatHasNotAdopted()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope order = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("ROOT-7"), signer: f.OperatorSigner);
+        f.Require();
+        (RecordEnvelope other, RecordEnvelope charter, RecordEnvelope device) = Another(f);
+        RecordEnvelope signed = f.Estate.Add("work-order", other.Id, HistoryFixture.Order("ROOT-8", "Signed by the other device"), signer: f.Signer(device));
+        // An adoption under the other charter, prepared while the manifest's charter is away so that it never lists it.
+        byte[] first = f.Remove(f.Estate.Estate);
+        f.Estate.WriteManifest(charter.Id);
+        f.Estate.SetClock(new DateTimeOffset(2026, 10, 14, 13, 0, 0, TimeSpan.Zero));
+        f.Checkpoint(by: other.Id, signer: f.Signer(device), trigger: "adoption");
+        f.Restore(f.Estate.Estate, first);
+        f.Estate.WriteManifest(f.Estate.Estate.Id);
+
+        EstateModel model = f.Load();
+        Assert.NotEqual(other.Id, model.RootOperator);
+        Assert.Null(model.FirstEstate);
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
+        Assert.DoesNotContain(model.Findings, x => x.Message.Contains("restore the manifest's estate to " + charter.Id, StringComparison.Ordinal));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.False(model.Counts(signed));
+        Assert.False(model.Counts(order));
     }
 
     /// <summary>Another principal, a charter of its own that supersedes nothing with a lower id, and a device it admits itself.</summary>

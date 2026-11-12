@@ -27,26 +27,40 @@ public class FirstAuthorityTests
 
     private static RecordEnvelope First(HistoryFixture f) => SignatureChecks.FirstAuthority(f.Load(), f.Estate.OperatorId)!;
 
-    [Fact]
-    public void AnEarlierSelfAdmissionNeverDisplacesTheWitnessedFirstAuthority()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnEarlierSelfAdmissionNeverDisplacesTheWitnessedFirstAuthority(bool named)
     {
         using var f = new HistoryFixture();
         RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-1"), signer: f.OperatorSigner);
         f.Require();
         RecordEnvelope first = First(f);
+        if (named) f.Estate.NameFirstAuthority(first.Id);
         f.Adopt();
         (RecordEnvelope device, RecordEnvelope admission, RecordEnvelope forged) = Earlier(f, "FA-2");
 
         EstateModel model = f.Load();
-        Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
-        Assert.True(model.Trust.Adopted);
-        Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
         Assert.False(SignatureChecks.IsAdmitted(model, device));
-        Assert.True(model.Counts(real));
         Assert.False(model.Counts(forged));
-        Assert.Contains(model.Findings, x => x.Code == "signature.self-admission" && x.Location.StartsWith(admission.ExpectedPath, StringComparison.Ordinal));
         Assert.DoesNotContain("history.manifest-root", HistoryFixture.Codes(model));
-        Assert.DoesNotContain("manifest.first-authority", HistoryFixture.Codes(model));
+        Assert.DoesNotContain("history.root-ambiguous", HistoryFixture.Codes(model));
+        if (named)
+        {
+            Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+            Assert.True(model.Trust.Adopted);
+            Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+            Assert.True(model.Counts(real));
+            Assert.Contains(model.Findings, x => x.Code == "signature.self-admission" && x.Location.StartsWith(admission.ExpectedPath, StringComparison.Ordinal));
+            Assert.DoesNotContain("manifest.first-authority", HistoryFixture.Codes(model));
+        }
+        else
+        {
+            // With none named, the witnessed one is not chosen either: a forged history could be what witnesses it.
+            Assert.Null(SignatureChecks.FirstAuthority(model, model.RootOperator));
+            Assert.Contains("manifest.first-authority", HistoryFixture.Codes(model));
+            Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        }
     }
 
     [Fact]
@@ -85,6 +99,8 @@ public class FirstAuthorityTests
         Assert.Equal(EstateLayout.ManifestPath, finding.Location);
         Assert.Contains(first.Id, finding.Message, StringComparison.Ordinal);
         Assert.Contains(admission.Id, finding.Message, StringComparison.Ordinal);
+        Assert.Contains(f.OperatorDevice.Id, finding.Message, StringComparison.Ordinal);
+        Assert.Contains(device.Id + " \"Earlier device\"", finding.Message, StringComparison.Ordinal);
         Assert.False(SignatureChecks.IsAdmitted(model, device));
         Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
         Assert.False(model.Counts(forged));
@@ -113,7 +129,7 @@ public class FirstAuthorityTests
     }
 
     [Fact]
-    public void AnAdoptedEstateKeepsTheWitnessedFirstAuthorityWhenTheManifestNamesAnother()
+    public void AnAdoptedEstateWhoseManifestNamesAnotherFirstAuthorityReadsUnsettled()
     {
         using var f = new HistoryFixture();
         RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-8"), signer: f.OperatorSigner);
@@ -124,15 +140,67 @@ public class FirstAuthorityTests
         f.Estate.NameFirstAuthority(admission.Id);
 
         EstateModel model = f.Load();
-        Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+        Assert.Null(SignatureChecks.FirstAuthority(model, model.RootOperator));
+        Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
         Finding finding = Assert.Single(model.Findings, x => x.Code == "history.manifest-root");
         Assert.Equal(EstateLayout.ManifestPath, finding.Location);
-        Assert.Contains(first.Id, finding.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("manifest.first-authority", HistoryFixture.Codes(model));
-        Assert.True(model.Trust.Adopted);
+        Assert.DoesNotContain("restore", finding.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.False(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
+        Assert.False(model.Counts(real));
+        Assert.False(model.Counts(forged));
+
+        f.Estate.NameFirstAuthority(first.Id);
+        model = f.Load();
+        Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
         Assert.True(model.Counts(real));
         Assert.False(model.Counts(forged));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AnAddedSelfAdmissionWithItsOwnAdoptionNeverTakesAnEstateThatHasNotAdopted(bool named)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-12"), signer: f.OperatorSigner);
+        f.Require();
+        RecordEnvelope first = First(f);
+        if (named) f.Estate.NameFirstAuthority(first.Id);
+        (RecordEnvelope device, RecordEnvelope admission, RecordEnvelope forged) = Earlier(f, "FA-13");
+        // An adoption under the earlier device, prepared while the first authority's file is away so that it never lists it.
+        byte[] bytes = f.Remove(first);
+        f.Estate.NameFirstAuthority(null);
+        f.Checkpoint(signer: f.Signer(device), trigger: "adoption");
+        f.Restore(first, bytes);
+        if (named) f.Estate.NameFirstAuthority(first.Id);
+
+        EstateModel model = f.Load();
+        Assert.NotEqual(admission.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.False(model.Counts(forged));
+        Assert.DoesNotContain(model.Findings, x => x.Message.Contains("firstAuthority to " + admission.Id, StringComparison.Ordinal));
+        Assert.Contains(named ? "history.root-ambiguous" : "manifest.first-authority", HistoryFixture.Codes(model));
+    }
+
+    [Fact]
+    public void TheEstatesOwnAdoptionSettlesTheFirstAuthorityItsManifestNames()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-14"), signer: f.OperatorSigner);
+        f.Require();
+        RecordEnvelope first = First(f);
+        f.Estate.NameFirstAuthority(first.Id);
+        // Another self-admission present when the estate adopts: the adoption lists both, the manifest names the first.
+        (RecordEnvelope device, _, RecordEnvelope forged) = Earlier(f, "FA-15");
+        f.Adopt();
+        EstateModel model = f.Load();
+        Assert.True(model.Trust.Adopted);
+        Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+        Assert.True(model.Counts(real));
+        Assert.False(model.Counts(forged));
+        Assert.False(SignatureChecks.IsAdmitted(model, device));
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.manifest-root" or "history.root-ambiguous" or "manifest.first-authority");
     }
 
     [Fact]
@@ -142,13 +210,16 @@ public class FirstAuthorityTests
         RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("FA-10"), signer: f.OperatorSigner);
         f.Require();
         RecordEnvelope first = First(f);
+        f.Estate.NameFirstAuthority(first.Id);
         f.Adopt();
         (RecordEnvelope device, _, RecordEnvelope forged) = Earlier(f, "FA-11");
 
         // A second adoption under the earlier device, prepared while the first authority's file is away so that it never lists it.
         byte[] bytes = f.Remove(first);
+        f.Estate.NameFirstAuthority(null);
         f.Checkpoint(signer: f.Signer(device), trigger: "adoption");
         f.Restore(first, bytes);
+        f.Estate.NameFirstAuthority(first.Id);
 
         EstateModel model = f.Load();
         Assert.Contains("history.root-ambiguous", HistoryFixture.Codes(model));
