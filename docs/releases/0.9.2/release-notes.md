@@ -1,6 +1,6 @@
 # Release notes, Vericairn 0.9.2
 
-Prepared by `vericairn docs notes` before the release build, from the estate's records since the end of the notes of 0.9.1 (2026-11-06 22:30 UTC) up to 2026-11-12 14:57 UTC; the records are the source and this page is a rendering. The publication of 0.9.2 is not yet recorded: its commit, workflow run, artifacts by hash and qualified platforms are in the release record the estate writes when the draft is observed and, once published, in the published revision; `limitations-and-platforms.md` of this set states what was known before the build.
+Prepared by `vericairn docs notes` before the release build, from the estate's records since the end of the notes of 0.9.1 (2026-11-06 22:30 UTC) up to 2026-11-12 15:21 UTC; the records are the source and this page is a rendering. The publication of 0.9.2 is not yet recorded: its commit, workflow run, artifacts by hash and qualified platforms are in the release record the estate writes when the draft is observed and, once published, in the published revision; `limitations-and-platforms.md` of this set states what was known before the build.
 
 ## Security
 
@@ -330,16 +330,6 @@ Limitations recorded:
 - The guides describe 0.9.2's development build; the living-document pass at release preparation re-reads them against the release.
 - ROADMAP.md's 0.9.2 entry does not yet mention signed history; the release documentation pass adds it.
 
-### FIX-102: An admission counts only through admitted devices leading back to the root operator
-
-Result 01M783RQ0SH8WH4R7ZS815AXHZ (completed), recorded 2026-11-12 14:49 UTC. Admissions are judged in a grounded fixpoint from the first authority: an admission counts only when its signature verifies against a device admitted at its time and its author is the root operator, a standing operator or a person holding administer, read at its time and bounded by closings. The root charter is the one the manifest names, confirmed by witnessed history once adopted; the first authority is the manifest's new firstAuthority or the only candidate, witnessed history only confirming it; any other witnessed candidate leaves the copy unsettled. A revocation that would unseat its own support, alone or in copies, revokes nothing; mutual revocations are judged together whatever the order or ids; the runtime refuses a new admission that would count for nothing.
-
-Limitations recorded:
-- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
-- Before adoption, someone who can add files or edit the manifest can leave a copy unsettled, though never take the root; adopting checkpoints and checking a new copy with estate check --expect answer it.
-- Settling several first-authority candidates means naming one in the manifest by hand; a command for it is a follow-up.
-- Re-judging mutual revocations grows faster than linearly in the number of revoking pairs; only those who may admit can cause it, and a cost test bounds it.
-
 ### FIX-104: The Vericairn home and live store are created owner-only without a daemon
 
 Result 01M783SXCMF3CKT8ZJ2PNCM36S (completed), recorded 2026-11-12 14:50 UTC. Every path that creates the Vericairn home, a clone's live store or the search index creates it owner-only; the runtime refuses state another local user owns, including a sudo run against another user's home, and warns once where the file system cannot keep modes.
@@ -383,6 +373,16 @@ Result 01M78400CMZ9QK6J0WW2XAR5P2 (completed), recorded 2026-11-12 14:53 UTC. Ru
 
 Limitations recorded:
 - Built and self-reviewed by the builder session; test-only, so it has no Reviewer security review.
+
+### FIX-102: An admission counts only through admitted devices leading back to the root operator
+
+Result 01M785BXDP6VYHG7EX66BAEBZR (completed), recorded 2026-11-12 15:17 UTC. Admissions are judged in a grounded fixpoint from the first authority: an admission counts only when its signature verifies against a device admitted at its time and its author is the root operator, a standing operator or a person holding administer, read at its time and bounded by closings. The root charter is the one the manifest names, confirmed by witnessed history once adopted; the first authority is the manifest's new firstAuthority or the only candidate, witnessed history only confirming it; any other witnessed candidate leaves the copy unsettled. A revocation that would unseat its own support, alone or in copies, revokes nothing; mutual revocations are judged together whatever the order or ids; the runtime refuses a new admission that would count for nothing.
+
+Limitations recorded:
+- Built by builder subagents under the no-disclosure rule and self-reviewed by the builder session after the Reviewer's focused sessions; the Reviewer's review of 0.9.2's candidate covers it again.
+- Records someone adds, with forged history of their own, never take the root operator or first authority, adopted or not; they can leave a copy unsettled until they are removed. Before adoption the manifest names the root of trust and is not signed, so a copy whose records and manifest can both be edited can be pointed at another root, which the estate check reports; adopting checkpoints and checking a new copy with estate check --expect answer it.
+- Settling several first-authority candidates means naming one in the manifest by hand; a command for it is a follow-up.
+- Re-judging mutual revocations grows faster than linearly in the number of revoking pairs; only those who may admit can cause it, and a cost test bounds it.
 
 ## Decisions
 
@@ -452,6 +452,8 @@ Limitations recorded:
 - **0.9.2's held security fixes are pushed as one pull request, then release preparation follows** (2026-11-12 12:54 UTC, decision 01M77X5F35JRQGTB6SMTZQ7353): The operator explicitly authorized pushing 0.9.2's held security fixes, as needed.
 - **A pinned progress discussion in the estate repository, and WATCH-06 in 0.9.3** (2026-11-12 14:21 UTC, decision 01M7824E3CQF5PC9P7X04KXYD7): The operator took the recommendation: a private pinned progress discussion now, a public one after 0.9.2, and WATCH-06 in 0.9.3.
 - **WATCH-06 renders progress through a target adapter; GitHub Discussions is the first** (2026-11-12 14:22 UTC, decision 01M7827BCHFVDY212W7SSBRB12): The operator directed that where progress is rendered is decided by an adapter or provider, with GitHub discussions as this estate's target.
+- **WATCH-06's triggers are configurable, read from the event journal, with defaults** (2026-11-12 15:06 UTC, decision 01M784PSWP4N4J9EKZQ3PN6X8G): The operator took the recommendation: which events refresh a progress target and which add a comment are configurable, with defaults.
+- **DIST-26 for the first 0.10.x release: server packaging around the same distributable** (2026-11-12 15:13 UTC, decision 01M7854GAD7P3J8T89C3VNBF99): The operator took the recommendation: the server stays in the vericairn distributable, and DIST-26 wraps it in a container image and Linux packages for the first 0.10.x release.
 
 ## Work orders opened or revised
 
@@ -555,7 +557,8 @@ Limitations recorded:
 - **FIX-123** (ordinary): One runtime test stops swapping the test process's shared home (work order 01M77X05E0M9E776VW3PW8KNW7) (revised; replaces 01M77WZHNZR6QNZ8DRT2PX5E78).
 - **CI-07** (ordinary): Main's push run is skipped for a commit the merge queue already tested (work order 01M77X1C8AYGQVQKCZWH81Y5E9) (revised; replaces 01M77X0RRVZ0WEFZACCX6640KS).
 - **REL-093** (ordinary): Release 0.9.3: standing agents, and Remote's intervention, notifications and relay (work order 01M78250VKSNVS6KJX2HP23B48) (revised; replaces 01M6CKFBZ21QC0W7P6XC2PSTJF, 01M6CKJ8NSKC6GXKA39WJWZS77, 01M6CTFAZC6Y16Q153W2BNW8RA, 01M6H3REJ4F3MB1PFXX8NXAN4R, 01M6HD38N4TTMF25PT0T3C2QMG, 01M6HEJ6KA18QZJKW0K0RHG98Q, 01M6HWD9KXC6KWT5T811H3EVAZ, 01M6J41V39WZABEC7832B920CX, 01M6T2NG9QHKSH628YZWFR2W3S, 01M6T9V81KSX267P0X3ER6JP5E, 01M6W2H3AHP43MNFHZ6S78H1WB, 01M6WVBZF72H4NHJEG2P2S7TAK, 01M6WZTCR6QEJGGX9WXZNCE76N, 01M75VDSG6Z6FPVK3DA5H9V5GD, 01M75W4AA5362EXP79N8A8SQ0K, 01M75X5XGXFC4SVDV2FRX6AYV0, 01M75YZTYF1KDWKTQ9TAZHDN51, 01M761AAB7K6DZHT66VQSS10G4, 01M76293E13NX5SB8QJP6XRB81, 01M7650BRSBAHN1NHG269BBSB5, 01M76DX523YEDWKJNN15XM23FS, 01M76EHR666NTA01VENF59QGCS, 01M76PYSXTRP4GGG81QP5QV7Q1, 01M76QXDDQ5026WHYGXMNR5NJ5, 01M77X11QWHWZRB62CPTGM9MJW).
-- **WATCH-06** (ordinary): The estate's progress rendered through a target adapter, GitHub Discussions first (work order 01M7827MAJ2J1W6WBJEWXSY0S7) (revised; replaces 01M7824QM4M0JKNE6RR6Q26XWS, 01M7825C9R84ZV5TDDD4XTVKHY).
+- **WATCH-06** (ordinary): The estate's progress rendered through a target adapter, GitHub Discussions first (work order 01M784Q2NQE3GCVY3MFPK4K0AY) (revised; replaces 01M7824QM4M0JKNE6RR6Q26XWS, 01M7825C9R84ZV5TDDD4XTVKHY, 01M7827MAJ2J1W6WBJEWXSY0S7).
+- **DIST-26** (ordinary): Server packaging around the same distributable: a container image and Linux packages (work order 01M78552332KCNXBX4ND4FXCFZ) (revised; replaces 01M7854S5ZCBRZV5GR21Q3WH7G).
 
 ## Milestone and release acceptances
 
@@ -735,6 +738,8 @@ None in this window.
 - Vericairn roadmap revision 120 (`design/roadmap.md`): Revision 120: carries decision 01M76QWVWDDYBH1XZENYK64Q4Z: 0.9.3 adds FIX-122, a failed document check's refusal naming what failed (issue #359).
 - Vericairn roadmap revision 121 (`design/roadmap.md`): Revision 121: Revision 121: FIX-123 in 0.9.2 and CI-07 in 0.9.3
 - Vericairn roadmap revision 122 (`design/roadmap.md`): Revision 122: Revision 122: WATCH-06 in 0.9.3
+- Vericairn roadmap revision 123 (`design/roadmap.md`): Revision 123: Revision 123: WATCH-06's configurable triggers
+- Vericairn roadmap revision 124 (`design/roadmap.md`): Revision 124: Revision 124: DIST-26 for the first 0.10.x release
 
 ## The release itself
 
