@@ -347,6 +347,49 @@ public class HistoryClosingTests
     }
 
     [Fact]
+    public void TheRuntimeRefusesAnAdmissionWhoseAuthorTheAdmissionReadingRefuses()
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        string builder = f.Records.Estate.BuilderId;
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddMinutes(-10));
+        f.Records.Add("authority", Grant(f, builder, Scopes.Administer));
+        WriteOutcome device = f.Api.DeviceCreate(new(builder, "Admitted by the agent", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+
+        // The agent holds administer as validation reads it before adoption, but administer admits only for a person.
+        WriteOutcome admitted = f.Api.DeviceAdmit(new AdmitRequest(device.Written!.Id, builder, "By the agent."));
+        Assert.False(admitted.Ok);
+        Assert.Equal("rejected", admitted.Problem!.Code);
+        Assert.Contains(admitted.Problem.Findings, x => x.Code == "admission.author" && x.Severity == "error");
+        EstateModel model = f.Api.Session.Load();
+        Assert.DoesNotContain(model.OfType("admission"), a => a.Subject?.Id == device.Written.Id);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
+    }
+
+    [Fact]
+    public void TheRuntimeRefusesARevocationThatWouldUnseatItsOwnSupport()
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddMinutes(-10));
+        RecordEnvelope person = f.Records.Add("principal", new JsonObject { ["kind"] = "human", ["name"] = "Estate administrator", ["roles"] = new JsonArray("contributor") });
+        f.Records.Add("authority", Grant(f, person.Id, Scopes.Administer));
+        f.HeldDevice(person.Id);
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope first = SignatureChecks.FirstAuthority(model, f.Records.Estate.OperatorId)!;
+        RecordEnvelope device = model.ById[first.Subject!.Id];
+
+        // Revoked as of the first authority itself, before the grant and the admission the administrator's own device rests on.
+        var body = new JsonObject { ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Revoked.", ["revokedAt"] = first.At };
+        WriteOutcome revoked = f.Api.NewRecord(new NewRecordRequest("admission", person.Id, PolicyFixture.Element(body), $"device:{device.Id}:{device.ComputedHash}", first.Id));
+        Assert.False(revoked.Ok);
+        Assert.Equal("rejected", revoked.Problem!.Code);
+        Assert.Contains(revoked.Problem.Findings, x => x.Code == "admission.unseats-support" && x.Severity == "error");
+        model = f.Api.Session.Load();
+        Assert.DoesNotContain(model.Records, r => r.Type == "admission" && r.Supersedes == first.Id);
+        Assert.True(SignatureChecks.IsAdmitted(model, device));
+    }
+
+    [Fact]
     public void APersonHoldingAdministerAdoptsInsteadOfTheRootOperator()
     {
         using var f = new HistoryTriggerTests.Fixture(adopt: false);

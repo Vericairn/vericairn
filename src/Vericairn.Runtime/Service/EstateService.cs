@@ -2967,8 +2967,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, a decision dated after its own record, an acceptance by a principal other than the operator on a review that did
-    /// not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, and a result whose
+    /// themselves, a new admission or revocation that would count for nothing, a decision dated after its own record, an acceptance by a
+    /// principal other than the operator on a review that did not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, and a result whose
     /// output no longer has the bytes it claims. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
@@ -2997,6 +2997,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (Finding finding in model.Findings.Where(f => f.Code == DecisionType.RecordTimeCode
             && records.Any(r => f.Location == r.RelativePath + "#body.decidedAt")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.2, a new admission or revocation that would count for nothing, because it would unseat what its own signature or its
+        // author's authority rests on, or because its author may not admit as admissions read authority, is refused rather than stored;
+        // admissions already in the estate keep these as warnings.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Warning && f.Code is "admission.unseats-support" or "admission.author"
+            && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }
