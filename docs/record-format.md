@@ -298,8 +298,8 @@ adopted history checkpoints.
   signatures, by comparison with the current charter revision, and which key and admission a
   signature verifies against. Roles and grants are read as before 0.9.2, apart from the rule
   above and the records that do not count.
-- **After adoption**, `at` decides neither alone. An unsigned record counts only when anchored,
-  whatever its date. A signature still verifies against the key and admission of the stated
+- **After adoption**, `at` decides neither alone. Under required signatures an unsigned record
+  counts only when anchored, whatever its date. A signature still verifies against the key and admission of the stated
   time, but once a closing of that device or key acts, a record signed with it that the closing
   does not witness counts for nothing, whatever its date, until anchored. Roles and grants are read as they stood at the stated time, or at the
   adoption for a record it witnesses, bounded by grant closings; anchoring, acknowledging a
