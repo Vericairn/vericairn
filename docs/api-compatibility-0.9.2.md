@@ -592,7 +592,7 @@ nothing, such a device revision changes no key or name and leaves the device's l
 until anchored; an anchoring checkpoint may now list a signed record a closing refuses, and `SignedHistory.AuthoringRefusal`
 refuses an anchor of a signed record no closing refuses and of a device revision a closing refused. An operator's recovery
 device may sign a device closing; any other checkpoint it signs is still `signature.recovery-scope`. The checkpoint type's descriptions of `closes` and `anchored`
-change within `vericairn.records/readers/8`, which has not shipped.
+change within `vericairn.records/readers/8`, which 0.9.2 introduces, so no published reader's descriptions change.
 
 New findings: `history.after-closing` and `history.closing-author`, errors that status lists first and that hold release
 submission, and the warnings `history.closing-unfollowed`, `history.dated-after-witness` and `history.closing-missing`.
@@ -846,8 +846,9 @@ line. Anchoring, acknowledging a
 removal, rooting an adoption and signing a device's or a grant's closing read a grant or principal revision as written when the
 root operator wrote it, or an operator who held the role at its time and still holds it; as a removal when its author had been
 given the role by then but had lost it or no longer holds it; and not at all when its author had never been given it
-([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). A revision read as a removal takes away
-only the operator role or `administer`. Each closing's author is read against the closings before it in checkpoint order and
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). A revision read as a removal reads as
+written, except that it gives no operator role or `administer`, and that on top of a revision read below it, it describes a
+human only where that revision does too. Each closing's author is read against the closings before it in checkpoint order and
 never against that closing, and the adoption checkpoint against the closings that act, so a revision a closing refuses no longer
 takes the standing of a later closing's author or unroots the adoption. Removing an operator's role therefore takes, for those
 acts, what that person appointed, granted and closed. Other records keep reading roles and grants as they stood at their time.
