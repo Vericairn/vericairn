@@ -50,7 +50,6 @@ internal sealed partial class EstateTrust
     private bool closingsKnown;
     private bool grantClosings;
     private Dictionary<string, List<(string Checkpoint, string Hash)>>? listings;
-    private readonly Dictionary<(string Revision, string Previous), bool> revisionRefusals = [];
 
     /// <summary>The closings that act, in checkpoint order.</summary>
     internal IReadOnlyList<Closing> Closings => closings;
@@ -301,48 +300,25 @@ internal sealed partial class EstateTrust
 
     /// <summary>
     /// Whether a closing that acts refuses a device revision: its device is closed, or it is signed with a closed key and is not the
-    /// rotation replacing it, and the closing does not witness it. Read without proofs, since proofs read the device's line, and kept once
-    /// the closings that act are known, since nothing else it reads changes.
+    /// rotation replacing it, and the closing does not witness it. Read without proofs, since proofs read the device's line.
     /// </summary>
     private bool RevisionRefused(RecordEnvelope revision, RecordEnvelope previous)
     {
         if (!closingsKnown || closings.Count == 0) return false;
-        lock (gate)
+        string identity = IdentityOf(previous);
+        byte[]? digest = null;
+        foreach (Closing closing in closings)
         {
-            if (revisionRefusals.TryGetValue((revision.Id, previous.Id), out bool known)) return known;
-            bool value = Judge();
-            if (model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision)) revisionRefusals[(revision.Id, previous.Id)] = value;
-            return value;
-        }
-
-        bool Judge()
-        {
-            string identity = IdentityOf(previous);
-            byte[]? digest = null;
-            string?[]? keys = null;
-            foreach (Closing closing in closings)
+            if (closing.Identity != identity || Witnesses(closing, revision)) continue;
+            if (closing.Kind == "device") return true;
+            if (closing.Kind == "key" && revision.Id != closing.Rotation)
             {
-                if (closing.Identity != identity || Witnesses(closing, revision)) continue;
-                if (closing.Kind == "device") return true;
-                if (closing.Kind == "key" && revision.Id != closing.Rotation)
-                {
-                    // A signature is read as made with the key, of the device's previous key and the revision's own, that it verifies with, as a
-                    // proof reads the key of every other record's signature; one that verifies with neither is checked against the closed key.
-                    digest ??= RecordSigning.Digest(revision.ComputedHash);
-                    keys ??= [.. revision.Signatures.Select(s => SigningKey(s.Signature))];
-                    for (int i = 0; i < keys.Length; i++)
-                    {
-                        if (keys[i] is { } key ? key == closing.Key : VerifiesWith(closing.Key!, revision.ComputedHash, digest, revision.Signatures[i].Signature)) return true;
-                    }
-                }
+                digest ??= RecordSigning.Digest(revision.ComputedHash);
+                if (revision.Signatures.Any(s => RecordSigning.Verify(closing.Key!, digest, s.Signature))) return true;
             }
-
-            return false;
-
-            string? SigningKey(string signature) =>
-                new[] { EstateModel.BodyString(previous, "publicKey"), EstateModel.BodyString(revision, "publicKey") }
-                    .FirstOrDefault(key => key is not null && VerifiesWith(key, revision.ComputedHash, digest!, signature));
         }
+
+        return false;
     }
 
     /// <summary>

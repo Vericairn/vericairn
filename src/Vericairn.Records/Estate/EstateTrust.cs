@@ -302,8 +302,8 @@ internal sealed partial class EstateTrust
             foreach (RecordSignature signature in revision.Signatures)
             {
                 if (signature.Algorithm != RecordSigning.Algorithm || !model.ById.TryGetValue(signature.Device, out RecordEnvelope? named) || named.Type != "device" || IdentityOf(named) != identity) return false;
-                bool withBefore = before is not null && VerifiesWith(before, revision.ComputedHash, digest, signature.Signature);
-                bool withAfter = after is not null && VerifiesWith(after, revision.ComputedHash, digest, signature.Signature);
+                bool withBefore = before is not null && RecordSigning.Verify(before, digest, signature.Signature);
+                bool withAfter = after is not null && RecordSigning.Verify(after, digest, signature.Signature);
                 if (!withBefore && !withAfter) return false;
                 byBefore |= withBefore;
                 byAfter |= withAfter;
