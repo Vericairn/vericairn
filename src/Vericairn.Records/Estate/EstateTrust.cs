@@ -17,7 +17,8 @@ namespace Vericairn.Records.Estate;
 /// </summary>
 /// <remarks>
 /// Everything here reads the records as loaded, never the model's counting indexes, so the judgment cannot depend on itself. The root
-/// operator is read from the first charter, and admissions count from the root operator's first self-signed admission outward. Signatures
+/// operator is read from the first charter, and admissions count outward from the first authority, the root operator's self-signed
+/// admission that witnessed history or the manifest names, never the earliest by date. Signatures
 /// are judged in two modes: without anchors, where an admission counts only when signed by a device whose own admission rests on
 /// signatures, which is the mode anchors and acknowledged removals are judged in, so that nothing they anchor can be what makes them count;
 /// and with anchors, where an unsigned admission also counts when the format-2 migration or an anchoring checkpoint lists it. Closings are
@@ -70,7 +71,7 @@ internal sealed partial class EstateTrust
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? firstCharter,
-        bool unsettled = false)
+        bool unsettled = false, bool authorityGiven = false, RecordEnvelope? authority = null)
     {
         this.model = model;
         Manifest = manifest;
@@ -85,8 +86,9 @@ internal sealed partial class EstateTrust
         FirstEstate = firstCharter;
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
-        FirstAuthority = model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).FirstOrDefault();
+        AuthorityCandidates = [.. model.OfType("admission").Where(r => r.By == RootOperator && RootOperator is not null && SelfSigned(r) && !Recovers(r.Subject?.Id))
+            .OrderBy(a => a.Id, StringComparer.Ordinal)];
+        FirstAuthority = authorityGiven ? authority : FirstAuthorityByManifest();
 
         // Closings come first: each is judged against the closings before it in checkpoint order, with the format-2 migration's anchors
         // as they stand before any closing, and then every judgment is made afresh with the closings that act (design/signed-history.md § 8).
@@ -121,8 +123,14 @@ internal sealed partial class EstateTrust
     /// <summary>The root operator the first charter names.</summary>
     internal string? RootOperator { get; }
 
-    /// <summary>The root operator's first self-signed admission.</summary>
+    /// <summary>
+    /// The estate's first authority: the root operator's admission of its own device, signed by that device, from which every admission
+    /// counts. Never chosen by a stated date or id (<see cref="Build"/>, <see cref="FirstAuthorityByManifest"/>).
+    /// </summary>
     internal RecordEnvelope? FirstAuthority { get; }
+
+    /// <summary>Every admission that could be the first authority: by the root operator, of a device that signed it, not a recovery device; by id.</summary>
+    internal IReadOnlyList<RecordEnvelope> AuthorityCandidates { get; }
 
     /// <summary>Unsigned admissions the signed format-2 migration lists, as id and hash keys.</summary>
     internal IReadOnlySet<string> MigrationAnchors { get; }
@@ -145,7 +153,7 @@ internal sealed partial class EstateTrust
     /// <summary>The errors about which charter is the estate's first, reported with the history findings.</summary>
     internal List<Finding> RootFindings { get; } = [];
 
-    /// <summary>Whether witnessed history names more than one first charter, so that no record counts until the copy is settled.</summary>
+    /// <summary>Whether witnessed history names more than one first charter or first authority, so that no record counts until the copy is settled.</summary>
     internal bool Unsettled { get; }
 
     /// <summary>
@@ -155,12 +163,13 @@ internal sealed partial class EstateTrust
     /// witnessed first, judged under that charter's root operator. A manifest that names another charter is then an error and changes
     /// nothing, and a charter that first appears after adoption never becomes the first. When more than one charter is so witnessed,
     /// each under its own root operator, no charter is read as the first and no record counts until the copy is settled, so that nothing
-    /// built from the records that count can take either root.
+    /// built from the records that count can take either root. Under each charter the first authority is chosen the same way
+    /// (<see cref="UnderCharter"/>).
     /// </summary>
     internal static EstateTrust Build(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects = null, IReadOnlySet<string>? files = null)
     {
         RecordEnvelope? named = manifest is null ? model.RawFirstEstate() : NamedCharter(model, manifest.Estate);
-        var chosen = new EstateTrust(model, manifest, objects, files, named);
+        EstateTrust chosen = UnderCharter(model, manifest, objects, files, named);
         List<RecordEnvelope> charters = [.. model.OfType("estate").Where(r => r.Supersedes is null).OrderBy(r => r.Id, StringComparer.Ordinal)];
         if (objects is null || manifest is null || charters.Count == 0) return chosen;
         if (charters.Count == 1 && ReferenceEquals(charters[0], named)) return chosen;
@@ -168,8 +177,8 @@ internal sealed partial class EstateTrust
         List<EstateTrust> witnessed = [];
         foreach (RecordEnvelope charter in charters)
         {
-            EstateTrust trust = ReferenceEquals(charter, named) ? chosen : new EstateTrust(model, manifest, objects, files, charter);
-            if (trust.WitnessedFirst(charters)) witnessed.Add(trust);
+            EstateTrust trust = ReferenceEquals(charter, named) ? chosen : UnderCharter(model, manifest, objects, files, charter);
+            if (trust.WitnessedFirst(trust.FirstEstate, charters)) witnessed.Add(trust);
         }
 
         if (witnessed.Count == 0) return chosen;
@@ -192,19 +201,88 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether this judgment's estate has adopted checkpoints and its counting checkpoints witnessed its first charter, with the bytes
-    /// present, before any other charter that supersedes nothing.
+    /// The judgment under a first charter, with its first authority chosen. Once the estate has adopted checkpoints, the first authority is
+    /// the root operator's self-admission that its counting checkpoints witnessed first, judged under that admission as the first authority,
+    /// as the first charter is (<see cref="Build"/>): the manifest naming another is an error and changes nothing, and two self-admissions
+    /// each witnessed first under itself leave the copy unsettled, so that no record counts. When none is so witnessed, or the model has no
+    /// objects or no manifest to judge history with, the manifest decides (<see cref="FirstAuthorityByManifest"/>). Nothing extra is judged
+    /// when the estate holds one such admission and the manifest names it or none.
     /// </summary>
-    private bool WitnessedFirst(IReadOnlyList<RecordEnvelope> charters)
+    private static EstateTrust UnderCharter(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files, RecordEnvelope? charter)
     {
-        if (!Adopted || FirstEstate is not { } first) return false;
-        List<(string Charter, string Checkpoint)> seen = [.. charters
+        var byManifest = new EstateTrust(model, manifest, objects, files, charter);
+        IReadOnlyList<RecordEnvelope> candidates = byManifest.AuthorityCandidates;
+        if (objects is null || manifest is null || candidates.Count == 0) return byManifest;
+        if (candidates.Count == 1 && (manifest.FirstAuthority is null || manifest.FirstAuthority == candidates[0].Id)) return byManifest;
+
+        List<EstateTrust> witnessed = [];
+        foreach (RecordEnvelope candidate in candidates)
+        {
+            EstateTrust trust = ReferenceEquals(candidate, byManifest.FirstAuthority) ? byManifest
+                : new EstateTrust(model, manifest, objects, files, charter, authorityGiven: true, authority: candidate);
+            if (trust.WitnessedFirst(trust.FirstAuthority, candidates)) witnessed.Add(trust);
+        }
+
+        if (witnessed.Count == 0) return byManifest;
+        if (witnessed.Count > 1)
+        {
+            var unsettled = new EstateTrust(model, manifest, objects, files, charter, unsettled: true, authorityGiven: true);
+            unsettled.RootFindings.Add(new Finding(Severity.Error, "history.root-ambiguous", EstateLayout.RecordsDirectory,
+                $"History checkpoints that count, each set under its own first authority, witness different admissions of the root operator's own devices first: {string.Join(", ", witnessed.Select(t => t.FirstAuthority!.Id))}. No record counts until one set is removed; compare this copy with a head known elsewhere (estate check --expect) to tell which history belongs."));
+            return unsettled;
+        }
+
+        EstateTrust root = witnessed[0];
+        if (manifest.FirstAuthority is { } named && named != root.FirstAuthority!.Id)
+        {
+            root.RootFindings.Add(new Finding(Severity.Error, "history.manifest-root", EstateLayout.ManifestPath,
+                $"The manifest names {named} as the estate's first authority, and its history checkpoints witnessed admission {root.FirstAuthority.Id} first. Witnessed history decides, so admissions count from {root.FirstAuthority.Id}; restore the manifest's firstAuthority to {root.FirstAuthority.Id}."));
+        }
+
+        return root;
+    }
+
+    /// <summary>
+    /// The first authority read without history: the self-admission of the root operator's device that the manifest names, which no other
+    /// displaces; or, when the manifest names none, the only one. A manifest naming an admission that is not such a self-admission, or
+    /// naming none while there are several, is an error and there is no first authority, so no signed admission counts: a first authority
+    /// is never chosen by its stated date or id.
+    /// </summary>
+    private RecordEnvelope? FirstAuthorityByManifest()
+    {
+        string candidates = AuthorityCandidates.Count == 0 ? "the estate holds none" : "the estate holds " + string.Join(", ", AuthorityCandidates.Select(c => c.Id));
+        if (Manifest?.FirstAuthority is { } named)
+        {
+            RecordEnvelope? match = AuthorityCandidates.FirstOrDefault(c => c.Id == named);
+            if (match is null)
+            {
+                RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
+                    $"The manifest names {named} as the estate's first authority, and that is not an admission by the root operator of its own device, signed by that device ({candidates}). No admission counts from a first authority until the manifest's firstAuthority names one that is."));
+            }
+
+            return match;
+        }
+
+        if (AuthorityCandidates.Count <= 1) return AuthorityCandidates.Count == 0 ? null : AuthorityCandidates[0];
+        RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
+            $"The root operator's devices admitted themselves more than once ({string.Join(", ", AuthorityCandidates.Select(c => c.Id))}), and the manifest names none of them as the estate's first authority. A first authority is never chosen by its date or id, so no admission counts from one until the manifest's firstAuthority names the admission that is."));
+        return null;
+    }
+
+    /// <summary>
+    /// Whether this judgment's estate has adopted checkpoints and its counting checkpoints witnessed a record, with the bytes present,
+    /// before any of its rivals: the charters that supersede nothing, or the self-admissions that could be the first authority.
+    /// </summary>
+    private bool WitnessedFirst(RecordEnvelope? record, IReadOnlyList<RecordEnvelope> rivals)
+    {
+        if (!Adopted || record is null) return false;
+        List<(string Id, string Checkpoint)> seen = [.. rivals
             .Where(c => History.Entries.TryGetValue(c.Id, out WitnessedEntry? entry) && entry.Entry.Hash == c.ComputedHash)
             .Select(c => (c.Id, History.Entries[c.Id].Checkpoint))];
-        int index = seen.FindIndex(s => s.Charter == first.Id);
+        int index = seen.FindIndex(s => s.Id == record.Id);
         if (index < 0) return false;
         string earliest = seen[index].Checkpoint;
-        return seen.All(s => s.Charter == first.Id || string.CompareOrdinal(s.Checkpoint, earliest) > 0);
+        return seen.All(s => s.Id == record.Id || string.CompareOrdinal(s.Checkpoint, earliest) > 0);
     }
 
     /// <summary>The records that do not count, each with the reason the loader reports it under.</summary>

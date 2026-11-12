@@ -1687,6 +1687,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
             if (model.Manifest!.Line != plan.Line || model.Manifest.Channel != plan.Channel)
                 changes.Add($"followed line/channel changed explicitly from {model.Manifest.Line}/{model.Manifest.Channel} to {plan.Line}/{plan.Channel}");
+            if (model.Manifest.FirstAuthority is null && plan.FirstAuthority is { } firstAuthority)
+                changes.Add($"{EstateLayout.ManifestPath} names admission {firstAuthority}, the root operator's first device admitting itself, as the estate's first authority");
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             changes.AddRange(context.Staged.Keys.Order(StringComparer.Ordinal).Select(relative => $"{relative} written by the migrations"));
             changes.AddRange(regenerated.GroupBy(m => (m.Destination, m.Earlier, m.Current)).OrderBy(g => g.Key.Destination, StringComparer.Ordinal)
@@ -2449,10 +2451,47 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // A write that sets off a history checkpoint stores it in the same batch (design/signed-history.md § 9; OPS-07).
         if (TriggerOf(draft, current, signers) is string trigger)
         {
-            return UnderWriteLock(() => StoreWithCheckpointLocked(record, current, trigger, draft.By), WriteOutcome.Fail);
+            return UnderWriteLock(() => NamingFirstAuthorityLocked(draft, current, StoreWithCheckpointLocked(record, current, trigger, draft.By)), WriteOutcome.Fail);
         }
 
-        return UnderWriteLock(() => StoreAuthoredLocked(record, current), WriteOutcome.Fail);
+        return UnderWriteLock(() => NamingFirstAuthorityLocked(draft, current, StoreAuthoredLocked(record, current)), WriteOutcome.Fail);
+    }
+
+    /// <summary>
+    /// Once the root operator's first device has admitted itself, names that admission in the manifest as the estate's first authority,
+    /// beside the charter estate init named there, so that before the estate adopts history checkpoints no other self-admission displaces
+    /// it, whatever date or id it states. Only an admission the estate now reads as its first authority is named, and a manifest that
+    /// names one already is left as it is. A manifest that cannot be written leaves the admission stored as it is: the estate reads its
+    /// only self-admission as its first authority, and the next upgrade names it. Caller holds the gate and the write lock.
+    /// </summary>
+    private WriteOutcome NamingFirstAuthorityLocked(RecordDraft draft, EstateModel current, WriteOutcome outcome)
+    {
+        if (outcome.Written is not { } written || draft.Type != "admission" || session.IsReadOnly || current.Manifest is not { FirstAuthority: null } ||
+            current.RootOperator is not { } root || draft.By != root || SignatureChecks.FirstAuthority(current, root) is not null)
+            return outcome;
+        try
+        {
+            if (SignatureChecks.FirstAuthority(session.Load(), root)?.Id != written.Id) return outcome;
+            string path = Path.Combine(session.Root, EstateLayout.ManifestPath);
+            byte[] bytes = File.ReadAllBytes(path);
+            byte[] named = EstateManifest.NamingFirstAuthority(bytes, written.Id);
+            if (named.AsSpan().SequenceEqual(bytes)) return outcome;
+            string temporary = path + ".naming";
+            File.Delete(temporary);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(named);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+        {
+            // The admission stands; the estate reads it as its only self-admission until the manifest names it.
+        }
+
+        return outcome;
     }
 
     /// <summary>

@@ -83,6 +83,13 @@ public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, 
 
     /// <summary>The followed channel after the upgrade.</summary>
     public string Channel { get; init; } = "stable";
+
+    /// <summary>
+    /// The estate's first authority the manifest names after the upgrade: the one it names already, or, when it names none, the admission
+    /// the estate reads as its first authority, which is its only self-admission of the root operator's device or the one its history
+    /// checkpoints witnessed first; null when there is none.
+    /// </summary>
+    public string? FirstAuthority { get; init; }
 }
 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
@@ -218,7 +225,11 @@ public static class EstateUpgrade
             : [];
         string fromPin = manifest.Mode == "source" && manifest.Line == "current" && manifest.Channel == "stable"
             ? $"source {manifest.Repository}@{manifest.Commit}" : manifest.Describe();
-        return new UpgradePlan(fromPin, $"release {version}" + EstateManifest.FollowingSuffix(line, channel), manifest.RecordFormat, toFormat, steps, release, artifacts, anchored) { Line = line, Channel = channel };
+        // The manifest names the first authority beside the charter from 0.9.2, so that no other self-admission displaces it before the
+        // estate adopts history checkpoints; an estate that names none gets the one it reads, never one chosen among several by date.
+        string? firstAuthority = manifest.FirstAuthority ?? SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id;
+        return new UpgradePlan(fromPin, $"release {version}" + EstateManifest.FollowingSuffix(line, channel), manifest.RecordFormat, toFormat, steps, release, artifacts, anchored)
+            { Line = line, Channel = channel, FirstAuthority = firstAuthority };
     }
 
     private sealed class Restore : IDisposable
@@ -272,7 +283,7 @@ public static class EstateUpgrade
     public static bool IsDistributable(string name, string version, string platform) =>
         name == $"vericairn-{version}-{platform}.zip" || name == $"vericairn-{version}-{platform}.tar.gz";
 
-    /// <summary>The manifest bytes after the upgrade: release mode, the version, and the artifact hashes.</summary>
+    /// <summary>The manifest bytes after the upgrade: release mode, the version, the artifact hashes, and the first authority.</summary>
     public static byte[] ManifestAfter(EstateManifest current, UpgradePlan plan)
     {
         ArgumentNullException.ThrowIfNull(current);
@@ -298,6 +309,7 @@ public static class EstateUpgrade
                 ["artifacts"] = artifacts,
             },
         };
+        if ((current.FirstAuthority ?? plan.FirstAuthority) is { } firstAuthority) manifest["firstAuthority"] = firstAuthority;
         if (VericairnReleaseObservation.Is(plan.Release))
             manifest["vericairn"]!["release"] = new JsonObject { ["type"] = "observation", ["id"] = plan.Release.Id, ["hash"] = plan.Release.ComputedHash };
         if (plan.Line != "current") manifest["vericairn"]!["line"] = plan.Line;

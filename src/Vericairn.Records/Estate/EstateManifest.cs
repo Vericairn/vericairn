@@ -22,6 +22,12 @@ public sealed partial class EstateManifest
     /// <summary>Record format version.</summary>
     public required long RecordFormat { get; init; }
 
+    /// <summary>
+    /// The estate's first authority: the root operator's admission of its first device, signed by that device, named beside the charter
+    /// so that no other admission of that kind displaces it, whatever its date or id; null when the manifest names none.
+    /// </summary>
+    public string? FirstAuthority { get; init; }
+
     /// <summary>Storage profile: repository-synced (records in a git repository) or local-only (records in this machine's live store).</summary>
     public required string Profile { get; init; }
 
@@ -120,6 +126,7 @@ public sealed partial class EstateManifest
             }
 
             string? estate = reader.Ulid("estate", true);
+            string? firstAuthority = reader.Ulid("firstAuthority", false);
 
             // An estate a later release moved to a newer format is refused whole, never misread by an older build.
             if (element.TryGetProperty("recordFormat", out JsonElement declaredFormat) && declaredFormat.ValueKind == JsonValueKind.Number && declaredFormat.TryGetInt64(out long declared) && declared > Model.RecordFormats.Latest)
@@ -183,8 +190,24 @@ public sealed partial class EstateManifest
                 return null;
             }
 
-            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts, Release = release, Line = line, Channel = channel };
+            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, FirstAuthority = firstAuthority, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts, Release = release, Line = line, Channel = channel };
         }
+    }
+
+    /// <summary>
+    /// The manifest's bytes with its first authority named: the same manifest, in canonical pretty form, with <c>firstAuthority</c> set to
+    /// the admission given. A manifest that already names one keeps it.
+    /// </summary>
+    public static byte[] NamingFirstAuthority(byte[] manifestBytes, string admission)
+    {
+        ArgumentNullException.ThrowIfNull(manifestBytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(admission);
+        if (System.Text.Json.Nodes.JsonNode.Parse(manifestBytes) is not System.Text.Json.Nodes.JsonObject manifest)
+            throw new InvalidOperationException("The manifest is not a JSON object.");
+        if (manifest["firstAuthority"] is not null) return manifestBytes;
+        manifest["firstAuthority"] = admission;
+        using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
+        return CanonicalJson.SerializePrettyUtf8(document.RootElement);
     }
 
     [System.Text.RegularExpressions.GeneratedRegex("^[0-9a-f]{40}$")]

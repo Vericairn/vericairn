@@ -133,19 +133,19 @@ public static class SignatureChecks
     }
 
     /// <summary>
-    /// The estate's first authority: the earliest admission by the root operator of a device that signed that admission itself.
-    /// It is the only self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can
-    /// add records can mint a device for the operator and sign as the operator with it. A recovery device is never the first: an
-    /// admitted device of the operator makes and admits it.
+    /// The estate's first authority: an admission by the root operator of a device that signed that admission itself. It is the only
+    /// self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can add records can mint
+    /// a device for the operator and sign as the operator with it. Once the estate has adopted history checkpoints it is the one they
+    /// witnessed first; before, the one the manifest names (<c>firstAuthority</c>), or the only one when it names none. It is never chosen
+    /// by a stated date or id: several with none named leave the estate without one, which the estate check reports. A recovery device is
+    /// never the first: an admitted device of the operator makes and admits it. Only the root operator has a first authority.
     /// </summary>
     public static RecordEnvelope? FirstAuthority(EstateModel model, string? rootOperator)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (rootOperator is null) return null;
         EstateTrust trust = model.Trust;
-        if (rootOperator == trust.RootOperator) return trust.FirstAuthority;
-        return model.Records.Where(a => a.Type == "admission" && a.By == rootOperator && trust.SelfSigned(a) && !trust.Recovers(a.Subject?.Id))
-            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).FirstOrDefault();
+        return rootOperator == trust.RootOperator ? trust.FirstAuthority : null;
     }
 
     /// <summary>The current admission of a device: the latest admission record about any revision of the device that counts.</summary>

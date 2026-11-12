@@ -610,7 +610,7 @@ public static class SignedHistory
     internal static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(5);
 
     /// <summary>The codes of the history errors that hold release submission and lead status while one stands.</summary>
-    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author", "history.manifest-root", "history.root-ambiguous"];
+    internal static readonly IReadOnlyList<string> ProblemCodes = ["history.removed", "history.altered", "history.checkpoint-missing", "history.checkpoint-invalid", "history.anchor-author", "history.adoption-author", "history.unanchored", "history.after-closing", "history.closing-author", "history.manifest-root", "history.root-ambiguous", "manifest.first-authority"];
 
     /// <summary>How many records the unwitnessed tail holds when the runtime writes an interval checkpoint (design/signed-history.md § 9).</summary>
     public const int IntervalRecords = 500;
