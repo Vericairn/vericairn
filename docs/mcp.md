@@ -341,7 +341,7 @@ contracts; a companion does not replace required original evidence.
 
 ## Running it
 
-After 0.9.2 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+0.9.2 is published and its NuGet publication workflow published `dotnet-vc` at 0.9.2. With the .NET 10 SDK installed:
 
 ```sh
 dotnet tool install --global dotnet-vc --version 0.9.2

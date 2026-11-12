@@ -72,8 +72,8 @@ The runtime explicitly composes admission, dispatch and release coordination beh
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.9.2 package availability
-requires operator publication and a successful package workflow.
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.2's packages are
+available on nuget.org, pushed by the package workflow that its publication started.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document

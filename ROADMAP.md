@@ -4,41 +4,27 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.9.1 — current published release
+## 0.9.2 — current published release
 
-0.9.1 follows 0.9.0 as a security patch. Every distributable is built on .NET SDK 10.0.403 and embeds .NET and
-ASP.NET Core runtime 10.0.14, replacing the 10.0.11 that 0.9.0 embedded, and a worker run gives Vericairn's MCP
-server its temporary directory explicitly, never the run's own, as the release notes' Security section
-describes. A worker run can prepare its workspace before the agent starts, with setup commands configured on the
-worker's machine; a decision cannot be dated after its own record; the bill of materials names the release's
-version; and policy evaluation reads historical repository content in batches, so estates that record
-maintenance duties keep fast writes and checks. Everything 0.9.0 brought remains: Remote, the phone companion
-for iOS and Android, as a developer build you make from source; release lines, channels and cadence; the
-disclosure hold and blocked terms; requested progress; the support bundle; generated revision lines; the
-optional local efficiency adapter, disabled by default; the guides for the three ways to run Vericairn and for
-LangGraph, CrewAI and AutoGen agents; and the public example estate. Its
-[release notes](docs/releases/0.9.1/release-notes.md) and [documentation set](docs/releases/0.9.1/README.md)
-describe what shipped and its limits, and [0.9.0's](docs/releases/0.9.0/release-notes.md) describe the
-release it patches.
-
-## 0.9.2 — planned
-
-A goal can run a declared flow: each step's position comes from the records, each step is routed to its role
-one step per command, and a run stops only where a person holds the role, each reserved step showing its exact
-command only when it is next. The software pack declares the release and estate upgrade flows: the traps of
-earlier releases are checked as preconditions, each step hands on exact outputs that the next step pins, with
-independent review where it matters and failure routes that never lose work, the documentation set assembles
-itself, and 0.9.2's own release runs as a goal. An estate signs its history: checkpoints list every record it
-holds, so a removed, altered or backdated record no longer passes unnoticed, and a revoked device, a replaced
-key or a narrowed grant accounts only for what came before its closing. Clients hear what changed through one
-event stream that each follows from where it left off, instead of polling, and an agent is told when what it
+0.9.2 follows 0.9.1. A goal can run a declared flow: each step's position, hand-offs and reviews come from the
+records, each step is routed to its role one step per command, and a run stops where a person holds the role, a
+reserved step showing its exact command only when it is next. The software pack declares the release and estate
+upgrade flows, and the build tooling assembles, freezes and indexes a release's documentation set. An estate
+signs its history: checkpoints witness every record it holds, so a removed, altered or backdated record no longer
+passes unnoticed, and closings bound what a revoked device, a replaced key or a narrowed grant still accounts for.
+Clients follow one event journal from where they left off instead of polling, and an agent is told when what it
 reads changes. An admitted agent on another machine works an estate over MCP's Streamable HTTP transport, each
-call judged as its API operation for that device. An agent finds the decisions and documents its brief needs
-by searching the estate, with every selected source pinned and nothing it may not read revealed. An upgrade
-replaces an older background runtime, so the estate is served only by the release it pins. Security reports
-reach the operator within minutes and hold a release until they are triaged, an acceptance rests only on
+call judged as its API operation for that device, and keyword search selects the decisions and documents an
+agent's brief needs, with every selected source pinned and nothing it may not read revealed. An upgrade replaces
+an older background runtime, security reports hold a release until they are triaged, an acceptance rests only on
 reviews that passed, and a stopped operator action can be finished. Every distributable is built on .NET SDK
-10.0.404 and embeds .NET and ASP.NET Core runtime 10.0.15.
+10.0.404 and embeds .NET and ASP.NET Core runtime 10.0.15, and 0.9.2 hardens how admissions and an estate's root
+of trust are read, which records give roles and scopes, policy authority after an operator role is removed,
+per-user state on Linux, held-term and blocked-term matching and request authentication, as the release notes'
+Security section describes. A flow's exchange steps are shown stopped, not executed, and Community moves a run
+one step per command. Everything 0.9.1 brought remains, with Remote still a developer build you make from source.
+Its [release notes](docs/releases/0.9.2/release-notes.md) and [documentation set](docs/releases/0.9.2/README.md)
+describe what shipped and its limits.
 
 ## 0.9.3 — planned
 

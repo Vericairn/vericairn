@@ -4,7 +4,7 @@ The 0.9.2 workflow builds self-contained distributables per platform: no separat
 
 The archives install `vericairn`. Introduced in published 0.7.1, the NuGet tool installs `dotnet-vc`, canonically invoked as `dotnet vc`; the two command lines take the same estate arguments. Workbench is installed by direct download only (section 3). The SDK is a separate NuGet package (section 9). Remote, the phone companion, has no distributable: it is a developer build made from source, as [Remote](remote.md#building-from-source) describes.
 
-Use the 0.9.2 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
+0.9.2 was published on November 12, 2026; use its archives from the release page. Its Trusted Publishing workflow published all eight NuGet packages at 0.9.2; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
 
 0.9.2 is the release after 0.9.1. A goal can run a declared flow: a template of kind `flow` whose steps are
 routed to their roles one step per command, with each step's position, hand-offs and reviews derived from the
@@ -214,8 +214,10 @@ From 0.9.2 the upgrade also names the estate's first authority in the manifest's
 operator's admission of its own first device, when the manifest names none, and the migration's changes say so.
 Releases before 0.9.2 refuse a manifest that carries it, so upgrade every clone that reads or writes the estate.
 An estate whose manifest names none while it holds more than one such self-admission is refused, as any estate
-with errors is, until you name your first device's in the manifest by hand
-([the first authority](operator-guide.md#3-principals-devices-and-admission)).
+with errors is. Name your first device's self-admission in the manifest's `firstAuthority` by hand, and remove
+every other self-admission of the root operator's device from the copy: naming the first makes your devices'
+admissions count again, but each other one still reads `signature.self-admission`, an error, and the upgrade
+refuses until it is gone ([the first authority](operator-guide.md#3-principals-devices-and-admission)).
 
 The command uses a recorded Vericairn release when one exists. Otherwise it anonymously
 reads the target's GitHub release, its tag and `SHA256SUMS`, downloads this machine's platform archive
@@ -558,10 +560,11 @@ From 0.8.2, the tool package carries both `DotnetTool` and `McpServer` package t
 Its embedded `.mcp/server.json` describes `io.github.Vericairn/vericairn` for the
 [official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
 package publication; from 0.9.2 the registry listing follows the release's publication through
-the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)). These are publication targets,
-not evidence that either listing is already live.
+the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)), which listed
+0.9.2 when it was published. For each later release these are publication targets, not evidence that its listing is
+live.
 
-After 0.9.2 is published, a client with the .NET 10 SDK can start the server without
+With 0.9.2 published, a client with the .NET 10 SDK can start the server without
 installing a global tool:
 
 ```sh
