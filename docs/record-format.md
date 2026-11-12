@@ -142,8 +142,8 @@ and does not authenticate it. Authorship is authenticated only by a signature fr
 that principal at the record's time. A charter with `policies.signatures: required` makes that signature
 mandatory for every record dated after the current charter revision, so a copy without an admitted
 device key is read-only. Once an estate has adopted history checkpoints, an unsigned record counts under
-that charter only when anchored, whatever date it states, and a signed record counts only where no
-closing refuses it ([below](#history-checkpoints-092)). The author rule changes no admission, policy or signature check.
+that charter only when anchored, whatever date it states, and a closing can refuse a signed record
+whatever its date ([below](#history-checkpoints-092)). The author rule changes no admission, policy or signature check.
 
 ## Settling operations that share an identity (0.9.2)
 
@@ -299,17 +299,18 @@ adopted history checkpoints.
   signature verifies against. Roles and grants are read as before 0.9.2, apart from the rule
   above and the records that do not count.
 - **After adoption**, `at` decides neither alone. Under required signatures an unsigned record
-  counts only when anchored, whatever its date. A signature still verifies against the key and admission of the stated
-  time, but once a closing of that device or key acts, a record signed with it that the closing
-  does not witness counts for nothing, whatever its date, until anchored. Roles and grants are read as they stood at the stated time, or at the
-  adoption for a record it witnesses, bounded by grant closings; anchoring, acknowledging a
-  removal, rooting an adoption and signing a device's or a grant's closing also need the role or
-  grant to still stand (above). A checkpoint questions a signed record dated more than five
-  minutes after it, as a warning, and refuses nothing. No checkpoint questions an earlier date:
-  a signed record in the unwitnessed tail may state a time before the newest checkpoint, and is
-  read at that time unless a closing refuses it. A revocation, rotation or narrowing stated more
-  than five minutes before the newest record its closing would witness, or before the head
-  checkpoint, is refused. A role has no closing; role closings are planned.
+  counts only when anchored, whatever its date. A signature still verifies against the key and
+  admission of the stated time, but once a closing of that device or key acts, a record signed
+  with it that the closing does not witness counts for nothing, whatever its date, until
+  anchored. Roles and grants are read as they stood at the stated time, or at the adoption for a
+  record it witnesses, bounded by grant closings; anchoring, acknowledging a removal, rooting an
+  adoption and signing a device's or a grant's closing also need the role or grant to still
+  stand (above). A checkpoint questions a signed record dated more than five minutes after it,
+  as a warning, and refuses nothing. No checkpoint questions an earlier date: a signed record in
+  the unwitnessed tail may state a time before the newest checkpoint, and is read at that time
+  unless a closing refuses it. A revocation, rotation or narrowing stated more than five minutes
+  before the newest record its closing would witness, or before the head checkpoint, is refused.
+  A role has no closing; role closings are planned.
 
 ## Published Vericairn dependency observations (0.8.3)
 
