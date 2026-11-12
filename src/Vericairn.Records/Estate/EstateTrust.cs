@@ -633,7 +633,9 @@ internal sealed partial class EstateTrust
     /// <summary>
     /// The findings about admissions that do not count where nothing else says why: one left out because it would unseat what it rests on
     /// (<c>admission.unseats-support</c>), and a signed admission whose signatures verify by devices admitted at its time but whose author
-    /// may not admit then as admissions read authority (<c>admission.author</c>), which the model's own reading may not show.
+    /// may not admit then as admissions read authority (<c>admission.author</c>), which the model's own reading may not show. Each is a
+    /// warning, as a policy record that counts for nothing only because of what came after it is: the admission admits and revokes
+    /// nothing, the estate stays valid, and one who may writes it again.
     /// </summary>
     internal IEnumerable<Finding> AdmissionFindings()
     {
@@ -649,12 +651,12 @@ internal sealed partial class EstateTrust
                 string kind = EstateModel.BodyString(admission, "status") == "revoked" ? "revocation" : "admission";
                 if (left.Contains(admission.Id))
                 {
-                    findings.Add(new Finding(Severity.Error, "admission.unseats-support", admission.ExpectedPath,
+                    findings.Add(new Finding(Severity.Warning, "admission.unseats-support", admission.ExpectedPath,
                         $"This {kind} counts for nothing: counting it would unseat what its own signature or its author's authority rests on, directly or through another admission or revocation that would unseat it in turn. One that does not count admits and revokes nothing, so what it would have unseated is read without it. Write it again from a device whose admission does not rest on what it revokes, or as of a time after the admissions it rests on."));
                 }
                 else if (VerifiesAgainst(admission, counting) && !found.MayAdmit(admission))
                 {
-                    findings.Add(new Finding(Severity.Error, "admission.author", admission.ExpectedPath,
+                    findings.Add(new Finding(Severity.Warning, "admission.author", admission.ExpectedPath,
                         $"This {kind} admits and revokes nothing: devices are admitted by an operator or a person holding the 'administer' scope, read as they stood at its time from the root operator's own record and from principal and grant records that rest on signatures, an anchor or, before the estate adopted history checkpoints, the charter's signature rule at their time; {admission.By} held neither then by that reading. Admit or revoke again as one who may now."));
                 }
             }

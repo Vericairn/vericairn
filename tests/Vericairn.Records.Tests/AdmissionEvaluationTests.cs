@@ -296,6 +296,7 @@ public class AdmissionEvaluationTests
         RecordEnvelope revocation = f.Estate.Add("admission", admin.Id, HistoryFixture.Admission(f.Estate.OperatorId, "Revoked.", "revoked", first.At), f.OperatorDevice.Reference, supersedes: first.Id, signer: f.Signer(adminDevice));
         EstateModel model = f.Load();
         Assert.False(model.Counts(model.ById[revocation.Id]));
+        Assert.Equal(Severity.Warning, Assert.Single(model.Findings, x => x.Code == "admission.unseats-support").Severity);
         Assert.True(Reported(model, revocation, "admission.unseats-support"));
         Assert.True(SignatureChecks.IsAdmitted(model, f.OperatorDevice));
         Assert.True(SignatureChecks.IsAdmitted(model, f.BuilderDevice));
@@ -500,7 +501,8 @@ public class AdmissionEvaluationTests
         Assert.True(model.HasRole(second.Id, Roles.Operator));
         Assert.False(model.Counts(model.ById[earlyAdmission.Id]));
         Assert.False(SignatureChecks.IsAdmitted(model, early));
-        Assert.Single(model.Findings, x => x.Code == "admission.author" && x.Location == earlyAdmission.ExpectedPath);
+        Assert.Equal(Severity.Warning, Assert.Single(model.Findings, x => x.Code == "admission.author" && x.Location == earlyAdmission.ExpectedPath).Severity);
+        Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
         Assert.True(model.Counts(model.ById[lateAdmission.Id]));
         Assert.True(SignatureChecks.IsAdmitted(model, late));
         Assert.False(Reported(model, lateAdmission, "admission.author"));

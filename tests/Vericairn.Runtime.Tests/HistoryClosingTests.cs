@@ -321,9 +321,11 @@ public class HistoryClosingTests
         Assert.DoesNotContain(today.Findings, x => x.Severity == Severity.Error && x.Location.StartsWith(helper.ExpectedPath, StringComparison.Ordinal));
         Assert.True(today.Counts(today.ById[helper.Id]));
         // An admission or revocation is judged by its signer's authority at its own time, and administer counts for that only for a
-        // person: the agent's revocation counts for nothing, so the device stays admitted.
+        // person: the agent's revocation counts for nothing, so the device stays admitted, and it is the warning admission.author,
+        // although validation, reading roles and grants as they are now before adoption, finds no fault with its author.
         Assert.False(today.Counts(today.ById[revocation.Id]));
         Assert.True(SignatureChecks.IsAdmitted(today, today.ById[device.Id]));
+        Assert.Single(today.Findings, x => x.Code == "admission.author" && x.Severity == Severity.Warning && x.Location == revocation.ExpectedPath);
 
         HistoryCheckpointResponse check = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!;
         HistoryRecordItem changed = Assert.Single(check.AuthorityChanges);
