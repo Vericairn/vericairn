@@ -388,6 +388,51 @@ public class PolicyAuthorityTimeTests
         Assert.Contains(model.Findings, e => e.Code == "policy.operator-removed" && e.Message.Contains(o.Id, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The policy records of someone a removed operator appointed, directly or through another appointee, rest on that removal in an
+    /// estate that has not adopted history checkpoints, as the removed operator's own do: each counts for nothing and is the warning
+    /// naming the removal, not errors. Records that read roles as they are now still fail, the appointment among them.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void ThePolicyRecordsOfARemovedOperatorsAppointeeRestOnTheRemovalBeforeHistory(int depth)
+    {
+        using var f = new PolicyFixture();
+        Require(f);
+        RecordEnvelope o1 = f.Add("principal", Person("O1", "operator"));
+        StoreSigner appointer = f.AdmitSigner(o1.Id);
+        RecordEnvelope appointee = o1;
+        StoreSigner signer = appointer;
+        for (int level = 1; level <= depth; level++)
+        {
+            f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+            appointee = f.Estate.Add("principal", appointee.Id, Person("O" + (level + 1), "operator").ToJsonString(), signer: signer);
+            signer = f.AdmitSigner(appointee.Id);
+        }
+
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope policy = Declare(f, appointee.Id, signer, "appointee-policy");
+        RecordEnvelope writing = OperatorWriting(f, appointee.Id, signer);
+        EstateModel before = f.Estate.Load();
+        Assert.False(before.Findings.HasErrors, string.Join('\n', before.Findings.Where(e => e.Severity == Severity.Error)));
+        Assert.True(before.Counts(before.ById[policy.Id]));
+
+        f.Estate.SetClock(f.Estate.Clock.AddMinutes(1));
+        RecordEnvelope removal = f.Add("principal", Person("O1", "contributor"), supersedes: o1.Id);
+        EstateModel model = f.Estate.Load();
+        foreach (RecordEnvelope ended in new[] { policy, writing })
+        {
+            Assert.True(Warned(model, ended), ended.Type);
+            Assert.Contains(model.Findings, e => e.Code == "policy.operator-removed" && e.Location == ended.ExpectedPath &&
+                e.Message.Contains($"{o1.Id} lost it by revision {removal.Id}", StringComparison.Ordinal));
+            Assert.DoesNotContain(model.Findings, e => e.Severity == Severity.Error && e.Location.StartsWith(ended.ExpectedPath, StringComparison.Ordinal));
+            Assert.False(model.Counts(model.ById[ended.Id]), ended.Type);
+        }
+
+        Assert.Contains(model.Findings, e => e.Severity == Severity.Error && e.Code == "principal.author");
+    }
+
     [Fact]
     public void AnEstatePromptChoiceWhoseAuthorityFailsCountsForNothing()
     {

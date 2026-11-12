@@ -53,6 +53,37 @@ internal sealed class OperatorReplay
             ? read.FirstOrDefault(r => string.CompareOrdinal(r.Record.At, at) > 0 && !r.Operator).Record
             : null;
 
+    /// <summary>
+    /// The loss a line's operator role at a time rests on through its appointment: the record that took the role away, after the record
+    /// that gave the line the role then, from that record's author, or, while that author still holds it, from the author of the record
+    /// that gave the author theirs, and so on up to the root operator. Null when no appointer lost it.
+    /// </summary>
+    internal RecordEnvelope? AppointerLoss(string line, string at, string? root)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (seen.Add(line) && GivenAt(line, at) is { } given && given.By != root)
+        {
+            if (LossAfter(given.By, given.At) is { } loss) return loss;
+            (line, at) = (given.By, given.At);
+        }
+
+        return null;
+    }
+
+    /// <summary>The record that gave a line the operator role it holds at a time: the first of the latest run of records read up to it that give it.</summary>
+    private RecordEnvelope? GivenAt(string line, string at)
+    {
+        if (!lines.TryGetValue(line, out List<(RecordEnvelope Record, bool Operator)>? read)) return null;
+        RecordEnvelope? given = null;
+        foreach ((RecordEnvelope record, bool holds) in read)
+        {
+            if (string.CompareOrdinal(record.At, at) > 0) break;
+            given = holds ? given ?? record : null;
+        }
+
+        return given;
+    }
+
     /// <summary>Reads the principal records (see the class summary).</summary>
     internal static OperatorReplay Run(IEnumerable<RecordEnvelope> principals, string? root, Func<RecordEnvelope, string> lineOf, Func<RecordEnvelope, bool> mayWiden,
         Func<RecordEnvelope, RecordEnvelope, bool> retain)

@@ -66,7 +66,16 @@ internal static class PolicyAuthority
         List<RecordEnvelope>? setAside = beforeHistory;
         OperatorReplay operators = setAside is null ? trust.PolicyOperators : trust.PolicyOperatorsBeforeHistory;
         if (!operators.OperatorAt(line, at)) return false;
-        if (operators.StandingNow.Contains(line)) return true;
+        if (operators.StandingNow.Contains(line))
+        {
+            // Set aside, a removal before history can leave a line standing through an appointment by the person who lost the role, which
+            // the reading as it is now sets aside. Such a record rests on that loss, as a record of the person themselves does.
+            if (setAside is null || trust.PolicyOperators.OperatorAt(line, at) && trust.PolicyOperators.StandingNow.Contains(line)) return true;
+            if (record is null || !trust.BeforeHistory(record) || operators.AppointerLoss(line, at, root) is not { } removal) return false;
+            setAside.Add(removal);
+            return true;
+        }
+
         if (record is null || operators.LossAfter(line, at) is not { } loss) return false;
         if (trust.WitnessedBefore(record, loss)) return true;
         if (setAside is null || !trust.BeforeHistory(record)) return false;
@@ -100,7 +109,8 @@ internal static class PolicyAuthority
     /// <summary>
     /// The policy records that fail only because an operator role they rest on was taken away before the estate's history checkpoints
     /// could place them earlier, each with the revisions that took it away: in an estate that has not adopted checkpoints, or for a record
-    /// its adoption witnessed, a record whose own validation finds errors and finds none once such removals are set aside. Each counts for
+    /// its adoption witnessed, a record whose own validation finds errors and finds none once such removals are set aside, whether it rests
+    /// on the role of the person who lost it or on an appointment by that person, directly or through another appointee. Each counts for
     /// nothing and is reported as one warning, policy.operator-removed, rather than as errors, so the removal leaves the estate valid;
     /// a record written after adoption that no checkpoint places before the removal stays an error. The runtime refuses to write such a
     /// removal in an estate that has not adopted, and in one that has it writes a checkpoint before it; the warning keeps valid an estate
