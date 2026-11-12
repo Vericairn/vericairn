@@ -51,5 +51,7 @@
   "frameworks/crewai.md",
   "frameworks/autogen.md",
   "api-compatibility-0.9.0.md",
-  "api-compatibility-0.9.1.md"
+  "api-compatibility-0.9.1.md",
+  "large-artifacts.md",
+  "api-compatibility-0.9.2.md"
 ]
