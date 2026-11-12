@@ -210,7 +210,9 @@ revision and every revision of its line dated at or before it. Only someone who 
 the act signs it: an operator, a person holding `administer` or an operator's recovery device
 for a device, the device itself for its own key, and an operator for a grant. For a device
 or a grant, the signer's role or `administer` grant must stand at the closing's time and
-still stand, closed by no closing before it. Another author's closing is
+still stand, closed by no closing before it, read against the closings before it in
+checkpoint order and never against the closing itself; the adoption checkpoint is judged
+against the closings that act. Another author's closing is
 `history.closing-author` and closes nothing, though it still witnesses what it lists.
 
 From a closing on, a record signed by that device or with that key, or written by the
@@ -235,9 +237,25 @@ and a later narrowing withdraws nothing already written. A record the adoption c
 witnesses keeps the reading it had then, read at the adoption's time. Anchoring, acknowledging
 a removal, rooting an adoption and signing a device's or a grant's closing read more
 strictly, as before: the role or grant must still stand, so a later narrowing withdraws those
-powers for every checkpoint. A role has no closing, so close and revoke a person's devices
-when removing their operator role or `administer` grant. Status and policy
-evaluation take their recorded time from the records that count.
+powers for every checkpoint. They read a grant or principal revision as written when the root
+operator wrote it, or an operator who held the role at its time and still holds it; as a
+removal, whatever it says, when its author had been given the role by then but had lost it or
+no longer holds it; and not at all when its author had never been given the role. A revision
+read as a removal reads as written, except that it gives no operator role or `administer`, and
+that on top of a revision read below it, it describes a human only where that revision does
+too: so one saying the person is not human takes that away, and one with no revision read
+below it, such as the first record of a person's line, describes a human when it says so. The
+role is given by the root operator or by someone given it earlier, so a circle of appointments
+gives nothing. A revision a closing
+refuses is not read for anchoring, for the adoption or for the closings that follow that
+closing. Removing an operator's role therefore takes, for those acts, what that person
+appointed, granted and closed, and the warning `history.revision-author` names each grant or
+appointment it takes; other records keep reading roles and grants as they stood. In every
+read, a grant or principal revision counts for nothing when it is dated before the nearest
+record below it in its line that counts; a record below that does not count is skipped, and a
+revision on top of one follows the line there. A role has no closing; role closings are planned. Close and revoke a person's devices when removing their operator
+role or `administer` grant. Status and policy evaluation take their recorded time from the
+records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
 warning `history.dated-after-witness`. In every estate, the runtime refuses a stated time

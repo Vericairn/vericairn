@@ -43,12 +43,21 @@ internal sealed partial class EstateTrust
     private readonly Dictionary<string, IReadOnlyList<RecordEnvelope>> deviceChains = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> deviceRevisions = new(StringComparer.Ordinal);
     private readonly Dictionary<(string Record, int Index), SignatureProof> proofs = [];
+    private readonly Dictionary<(string Key, string Hash, string Signature), bool> keyVerdicts = [];
     private readonly IReadOnlyDictionary<string, string> rawSupersededBy;
     private bool anchorsKnown;
     private readonly Dictionary<(string Id, Mode Mode), FindingList> verified = [];
     private readonly Dictionary<string, bool> counts = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, bool> trustedOperators = new(StringComparer.Ordinal);
-    private readonly HashSet<string> checkingOperators = new(StringComparer.Ordinal);
+    private readonly List<RecordEnvelope> principalRecords;
+    private readonly List<RecordEnvelope> authorityRecords;
+    private readonly Dictionary<string, RecordEnvelope?> attached = new(StringComparer.Ordinal);
+    private readonly Dictionary<IReadOnlyList<Closing>, StrictView> strictViews = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<HashSet<string>, StrictView> strictViewsByChange = new(HashSet<string>.CreateSetComparer());
+    private readonly Dictionary<(string Revision, string Refused), bool> strictVerdicts = [];
+    private readonly Dictionary<string, int[]> strictRefusals = new(StringComparer.Ordinal);
+    private StrictIndex? strictIndex;
+    private StrictView? strictNone;
+    private List<RecordEnvelope>? principalsInOrder;
     private IReadOnlySet<string> anchors = NoAnchors;
 
     private EstateTrust(EstateModel model, EstateManifest? manifest, Func<string, byte[]?>? objects, IReadOnlySet<string>? files)
@@ -60,6 +69,8 @@ internal sealed partial class EstateTrust
         admissionsBySubject = model.OfType("admission").Where(r => r.Subject is not null).ToLookup(r => r.Subject!.Id, StringComparer.Ordinal);
         successors = TrustTypes.SelectMany(model.OfType).Where(r => r.Supersedes is not null).ToLookup(r => r.Supersedes!, StringComparer.Ordinal);
         rawSupersededBy = model.SupersededBy;
+        principalRecords = [.. model.OfType("principal")];
+        authorityRecords = [.. model.OfType("authority")];
         FirstEstate = model.RawFirstEstate();
         RootOperator = FirstEstate is { } first ? EstateModel.BodyString(first, "operator") : null;
         Format = manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
@@ -82,6 +93,9 @@ internal sealed partial class EstateTrust
         History = analysis.Complete(objects, files);
         closingFindings.AddRange(Unfollowed());
         closingFindings.AddRange(Unclosed());
+        closingFindings.AddRange(RevisionsReadAsRemovals());
+        SettleStrictViews();
+        ReleaseClosedKeys();
     }
 
     /// <summary>The manifest this judgment read the record format from.</summary>
@@ -151,6 +165,8 @@ internal sealed partial class EstateTrust
         bool Judge(RecordEnvelope r)
         {
             if (History.Altered.Contains(r.Id)) return false;
+            // A grant or principal revision dated before the record below it in its line counts for nothing.
+            if (RefusedAuthorityRevision(r)) return false;
             if (r.Type == "admission") return AdmissionCounts(r, Mode.Anchors);
             if (r.Type == "history-checkpoint") return History.CountingCheckpoints.Contains(r.Id);
             // A revision of a required charter that the root operator did not sign changes nothing (FIX-79), so it does not count.
@@ -287,8 +303,8 @@ internal sealed partial class EstateTrust
             foreach (RecordSignature signature in revision.Signatures)
             {
                 if (signature.Algorithm != RecordSigning.Algorithm || !model.ById.TryGetValue(signature.Device, out RecordEnvelope? named) || named.Type != "device" || IdentityOf(named) != identity) return false;
-                bool withBefore = before is not null && RecordSigning.Verify(before, digest, signature.Signature);
-                bool withAfter = after is not null && RecordSigning.Verify(after, digest, signature.Signature);
+                bool withBefore = before is not null && VerifiesWith(before, revision.ComputedHash, digest, signature.Signature);
+                bool withAfter = after is not null && VerifiesWith(after, revision.ComputedHash, digest, signature.Signature);
                 if (!withBefore && !withAfter) return false;
                 byBefore |= withBefore;
                 byAfter |= withAfter;
@@ -443,12 +459,12 @@ internal sealed partial class EstateTrust
         }
 
         byte[] digest = RecordSigning.Digest(record.ComputedHash);
-        string? verifying = keys.FirstOrDefault(key => key is not null && RecordSigning.Verify(key, digest, signature.Signature));
+        string? verifying = keys.FirstOrDefault(key => key is not null && VerifiesWith(key, record.ComputedHash, digest, signature.Signature));
         if (verifying is null)
         {
             // A key the device held at another time names the revision, so a key used after its rotation, or a rotation dated
             // earlier than it was made, reads as what it is.
-            string? other = ownRecord ? null : chain.FirstOrDefault(r => EstateModel.BodyString(r, "publicKey") is string key && !keys.Contains(key) && RecordSigning.Verify(key, digest, signature.Signature))?.Id;
+            string? other = ownRecord ? null : chain.FirstOrDefault(r => EstateModel.BodyString(r, "publicKey") is string key && !keys.Contains(key) && VerifiesWith(key, record.ComputedHash, digest, signature.Signature))?.Id;
             return other is not null
                 ? new(new Finding(Severity.Error, "signature.key-time", location, $"The signature by device {identity} verifies only with the key of its revision {other}, which was not the device's key at this record's time {record.At}."), identity, signature.Device, ownRecord, false)
                 : new(new Finding(Severity.Error, "signature.invalid", location, $"The signature by device {identity} does not verify against the record's content hash with the key the device held when it was authored."), identity, signature.Device, ownRecord, false);
@@ -461,6 +477,21 @@ internal sealed partial class EstateTrust
         bool selfAdmission = record.Type == "admission" && record.By == RootOperator && record.Subject?.Id is { } subject &&
             model.ById.TryGetValue(subject, out RecordEnvelope? admitted) && admitted.Type == "device" && IdentityOf(admitted) == identity;
         return new(null, identity, signature.Device, ownRecord, selfAdmission, verifying);
+    }
+
+    /// <summary>
+    /// Whether a signature over a content hash verifies with a key. The answer depends on nothing else, so it is kept when judgments are
+    /// made afresh after closings: the proofs that read it depend on device lines, which closings change, but the arithmetic does not.
+    /// </summary>
+    private bool VerifiesWith(string key, string hash, byte[] digest, string signature)
+    {
+        lock (gate)
+        {
+            if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
+            bool value = RecordSigning.Verify(key, digest, signature);
+            keyVerdicts[(key, hash, signature)] = value;
+            return value;
+        }
     }
 
     private void Verify(RecordEnvelope record, int index, Func<string, string, SignatureChecks.AdmissionState> state, FindingList findings)
@@ -570,50 +601,51 @@ internal sealed partial class EstateTrust
     /// never an agent; and the checkpoint signed by devices whose own admissions rest on signatures, none of them a recovery device. The
     /// same test tells whether any other record was signed by one who may anchor.
     /// </summary>
-    internal bool MayAnchor(RecordEnvelope checkpoint)
+    internal bool MayAnchor(RecordEnvelope checkpoint) => MayAnchor(checkpoint, Acting);
+
+    /// <summary>Whether the author of a checkpoint may anchor, reading authority against the closings given.</summary>
+    private bool MayAnchor(RecordEnvelope checkpoint, IReadOnlyList<Closing> bound)
     {
         if (!AuthenticBySignatures(checkpoint) || checkpoint.Signatures.Any(s => Recovers(s.Device))) return false;
         if (checkpoint.By == RootOperator && RootOperator is not null) return true;
-        return StandingAdministrator(checkpoint, Acting);
+        return StandingAdministrator(checkpoint, bound);
     }
-
-    /// <summary>The time after every record: what a role or grant reads as at it is what stands now.</summary>
-    private const string Now = "9999-12-31T23:59:59Z";
 
     /// <summary>
     /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
-    /// always; otherwise a person whose role, through revisions that rest on signatures, stood at the record's time and still stands, so a
-    /// later revision taking it away withdraws the power for every checkpoint.
+    /// always; otherwise a person who stands now and whose line, as those acts read it against the closings given, gives the role at the
+    /// record's time (<see cref="ReadStrictly"/>), so a later revision taking it away withdraws the power for every checkpoint.
     /// </summary>
-    private bool StandingOperator(string principal, string at) =>
-        principal == RootOperator && RootOperator is not null || TrustedOperator(principal, at) && TrustedOperator(principal, Now);
+    private bool StandingOperator(string principal, string at, IReadOnlyList<Closing> bound) =>
+        principal == RootOperator && RootOperator is not null || ReadStrictly(bound).Standing.Contains(principal) && StrictHead(principal, at, bound) is { Operator: true };
 
     /// <summary>
     /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
-    /// adoption and signing a device's closing. A grant revision that rests on signatures and was written by a trusted operator stood at
-    /// the record's time, dated at or before it, unexpired then and replaced by no such revision by then; every such revision that has
-    /// replaced it since, whatever its date, still gives the author administer, unexpired at the record's time; and no closing among those
-    /// given closed a revision of that grant's line without witnessing the record. So a later narrowing, revocation or closing withdraws
-    /// these powers for every checkpoint, as before signed history; only other records read a grant purely as it stood.
+    /// adoption and signing a device's closing. The author's line, as those acts read it, describes a person at the record's time; a grant
+    /// revision they read as written (<see cref="GrantClass"/>) stood at the record's time, dated at or before it, unexpired then and
+    /// followed by no revision they read by then; every revision they read that has followed it since, whatever its date, still gives the
+    /// author administer as written, unexpired at the record's time; and no closing among those given closed a revision of that grant's
+    /// line without witnessing the record. So a later narrowing, revocation or closing withdraws these powers for every checkpoint, as
+    /// before signed history, and so does a revision read as a removal; only other records read a grant purely as it stood.
     /// </summary>
     private bool StandingAdministrator(RecordEnvelope record, IReadOnlyList<Closing> bound)
     {
-        if (PrincipalAt(record.By, record.At) is not { } person || EstateModel.BodyString(person, "kind") != "human") return false;
+        if (StrictHead(record.By, record.At, bound) is not { Human: true }) return false;
         DateTimeOffset at = record.AtTime;
-        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && TrustedRevision(grant) &&
-            !successors[grant.Id].Any(s => s.Type == "authority" && string.CompareOrdinal(s.At, record.At) <= 0 && TrustedRevision(s)) &&
+        return model.OfType("authority").Any(grant => Administers(grant, record.By, at) && string.CompareOrdinal(grant.At, record.At) <= 0 && GrantClass(grant, bound) == StrictClass.Written &&
+            !StrictSuccessors(grant, bound).Any(s => string.CompareOrdinal(s.At, record.At) <= 0) &&
             Still(grant) && !bound.Any(c => c.Kind == "grant" && c.Line == LineOf(grant) && !Witnesses(c, record)));
 
-        // Every trusted revision replacing the grant since still gives administer, unexpired at the record's time.
+        // Every revision read that has followed the grant since still gives administer as written, unexpired at the record's time.
         bool Still(RecordEnvelope grant)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
             var queue = new Queue<RecordEnvelope>([grant]);
             while (queue.TryDequeue(out RecordEnvelope? current))
             {
-                foreach (RecordEnvelope next in successors[current.Id].Where(s => s.Type == "authority" && seen.Add(s.Id) && TrustedRevision(s)))
+                foreach (RecordEnvelope next in StrictSuccessors(current, bound).Where(s => seen.Add(s.Id)))
                 {
-                    if (!Administers(next, record.By, at)) return false;
+                    if (GrantClass(next, bound) != StrictClass.Written || !Administers(next, record.By, at)) return false;
                     queue.Enqueue(next);
                 }
             }
@@ -624,8 +656,12 @@ internal sealed partial class EstateTrust
 
     /// <summary>Whether a grant revision gives a principal administer, unexpired at a time.</summary>
     private static bool Administers(RecordEnvelope grant, string principal, DateTimeOffset at) =>
-        EstateModel.BodyString(grant, "grantee") == principal && grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
-        scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer) && !EstateModel.Expired(grant, at);
+        EstateModel.BodyString(grant, "grantee") == principal && GivesAdminister(grant) && !EstateModel.Expired(grant, at);
+
+    /// <summary>Whether a grant revision's scope includes administer, whoever it names and whenever it expires.</summary>
+    private static bool GivesAdminister(RecordEnvelope grant) =>
+        grant.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
+        scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == Scopes.Administer);
 
     /// <summary>The line of an authority revision: the id of its first record.</summary>
     internal string LineOf(RecordEnvelope grant)
@@ -638,7 +674,73 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor"/> that does not depend on a
+    /// Whether a grant or principal revision counts for nothing in every read, whoever signed it: one dated before the record it attaches
+    /// to (<see cref="AttachedTo"/>), the nearest record below it in its line that counts.
+    /// </summary>
+    internal bool RefusedAuthorityRevision(RecordEnvelope revision) =>
+        AttachedTo(revision) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>
+    /// The record a grant or principal revision attaches to in its line: the nearest record below it that counts, skipping any that does
+    /// not, whether unsigned, refused for its date or not counting otherwise. Null for a line's first record, for a revision naming no
+    /// record of its own type and for one with no record below it that counts. So a revision on top of one that does not count is
+    /// compared with, and follows, the line where that one would have joined it. Read only once history is judged, since what counts
+    /// depends on it.
+    /// </summary>
+    internal RecordEnvelope? AttachedTo(RecordEnvelope revision)
+    {
+        if (revision.Type is not ("principal" or "authority")) return null;
+        lock (gate)
+        {
+            bool loaded = model.ById.TryGetValue(revision.Id, out RecordEnvelope? same) && ReferenceEquals(same, revision);
+            if (loaded && attached.TryGetValue(revision.Id, out RecordEnvelope? known)) return known;
+            // Walk down to a record whose attachment is known or that supersedes nothing of its type, then settle each one on the way up,
+            // so that whether the record below counts is judged once its own attachment is known.
+            var pending = new Stack<RecordEnvelope>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            RecordEnvelope? current = revision;
+            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && attached.ContainsKey(current.Id)))
+            {
+                pending.Push(current);
+                current = Below(current);
+            }
+
+            RecordEnvelope? result = null;
+            while (pending.TryPop(out RecordEnvelope? next))
+            {
+                RecordEnvelope? previous = Below(next);
+                // A record seen twice closes a cycle of supersession; it is taken as it is.
+                result = previous is null ? null
+                    : !attached.TryGetValue(previous.Id, out RecordEnvelope? under) || Counts(previous) ? previous
+                    : under;
+                if (!ReferenceEquals(next, revision) || loaded) attached[next.Id] = result;
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>The record a grant or principal revision names as the one it supersedes, when that is a record of its own type.</summary>
+    private RecordEnvelope? Below(RecordEnvelope record) =>
+        record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == record.Type ? previous : null;
+
+    /// <summary>The counting revisions that follow a grant or principal revision (<see cref="AttachedTo"/>): its successors, and through one that does not count, that one's.</summary>
+    internal IEnumerable<RecordEnvelope> AttachedSuccessors(RecordEnvelope revision)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+        var queue = new Queue<string>([revision.Id]);
+        while (queue.TryDequeue(out string? id))
+        {
+            foreach (RecordEnvelope next in successors[id].Where(s => s.Type == revision.Type && seen.Add(s.Id)))
+            {
+                if (Counts(next)) yield return next;
+                else queue.Enqueue(next.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a principal may anchor in a checkpoint written at a time, the part of <see cref="MayAnchor(RecordEnvelope)"/> that does not depend on a
     /// signature: the root operator, or a person holding administer that still stands (<see cref="StandingAdministrator"/>), judged for a
     /// checkpoint no closing witnesses yet. What the runtime checks before it signs an adoption or a charter revision's anchors.
     /// </summary>
@@ -651,42 +753,548 @@ internal sealed partial class EstateTrust
         return StandingAdministrator(probe, Acting);
     }
 
-    /// <summary>Whether a revision rests on signatures and was written by a trusted operator, or is the root operator's own first record.</summary>
-    private bool TrustedRevision(RecordEnvelope revision) =>
-        (revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null) ||
-        (AuthenticBySignatures(revision) && TrustedOperator(revision.By, revision.At));
-
-    /// <summary>
-    /// The principal record that describes a principal at a time: among the revisions of its line dated at or before the time that rest on
-    /// signatures and were written by a trusted operator, the single one no other of them supersedes. Revisions anyone else wrote, signed
-    /// or not, are not read.
-    /// </summary>
-    private RecordEnvelope? PrincipalAt(string principal, string at)
+    /// <summary>How the strongest acts read a principal or authority revision, by its author at the revision's time.</summary>
+    private enum StrictClass
     {
-        List<RecordEnvelope> revisions = model.OfType("principal")
-            .Where(p => PrincipalIdentity(p) == principal && string.CompareOrdinal(p.At, at) <= 0 && TrustedRevision(p)).ToList();
-        List<RecordEnvelope> heads = revisions.Where(p => !revisions.Any(n => n.Supersedes == p.Id)).ToList();
-        return heads.Count == 1 ? heads[0] : null;
+        /// <summary>
+        /// Not read, and the line stays as it was: not authentic by signatures, dated before the record it attaches to, or written by a
+        /// person who had never been given the operator role by then.
+        /// </summary>
+        Unread,
+
+        /// <summary>Read as written: by the root operator, or by a person who held the operator role at its time and stands now.</summary>
+        Written,
+
+        /// <summary>
+        /// Read as a removal whatever it says: by a person given the operator role by then who had lost it by then or does not stand now.
+        /// From it on the line gives no operator role or administer until a revision read as written follows it.
+        /// </summary>
+        Removal,
     }
 
-    /// <summary>Whether a principal is the root operator, or held the operator role at a time through revisions that rest on signatures.</summary>
-    private bool TrustedOperator(string principal, string at)
+    /// <summary>The principal revisions the strongest acts consider, how they read each, and who stands now (<see cref="ReadStrictly"/>).</summary>
+    private sealed class StrictReading
     {
-        if (principal == RootOperator && RootOperator is not null) return true;
-        string key = principal + " " + at;
+        /// <summary>Principal revisions authentic by signatures and not refused, and the root operator's first record, in time order, ids breaking ties.</summary>
+        public required List<RecordEnvelope> Revisions { get; init; }
+
+        /// <summary>Each revision's place in <see cref="Revisions"/>.</summary>
+        public required Dictionary<string, int> Index { get; init; }
+
+        /// <summary>For each revision read, the place of the nearest revision read below it in its line, or -1.</summary>
+        public required int[] Below { get; init; }
+
+        /// <summary>How each revision is read.</summary>
+        public required StrictClass[] Classes { get; init; }
+
+        /// <summary>Each person's revisions read, by place, in order.</summary>
+        public required Dictionary<string, List<int>> Lines { get; init; }
+
+        /// <summary>The time each person was first given the operator role, the root operator aside.</summary>
+        public required Dictionary<string, string> GivenAt { get; init; }
+
+        /// <summary>Who stands now: the root operator and every person whose line gives the operator role at the end.</summary>
+        public required HashSet<string> Standing { get; init; }
+    }
+
+    /// <summary>
+    /// How the strongest acts read principal lines against the closings given. The revisions considered are authentic by signatures with
+    /// those closings, so none they refuse, and not refused for their date against the nearest revision below them considered, with the
+    /// root operator's first record. A person has been given the operator role by a time when a revision considered of their line
+    /// dated by then gives it and was written by the root operator or by a person given the role by an earlier revision, taken in time
+    /// order, ids breaking ties, removals aside; so the role reaches a person only from the root operator, through earlier revisions, and a
+    /// circle of appointments gives nothing. Walking every line in that order, a revision is read as written when its author is the root
+    /// operator, or stands now and held the role as their line stood before this revision; read as a removal, whatever it says, when its
+    /// author had been given the role but had lost it by then or does not stand now; and not read at all, leaving the line as it was, when
+    /// its author had never been given the role. Who stands now is the least set holding the root operator and every person whose line
+    /// gives the role at the end when only members of the set give: built up from the root operator alone, one pass per level of
+    /// appointment, until nothing is added. Grants do not count towards it. So a removal keeps counting after its author is removed, a
+    /// revision by one never given the role changes nothing, and two operators other than the root operator who remove each other both
+    /// lose these acts, closings included, until the root operator settles it. The reading depends on the closings only through which
+    /// revisions verify against them, so it is made once for each view (<see cref="View"/>) and shared by every set of closings reaching it.
+    /// </summary>
+    private StrictReading ReadStrictly(IReadOnlyList<Closing> bound)
+    {
         lock (gate)
         {
-            if (trustedOperators.TryGetValue(key, out bool known)) return known;
-            if (!checkingOperators.Add(key)) return false;
-            RecordEnvelope? head = PrincipalAt(principal, at);
-            bool value = head is not null && EstateModel.BodyString(head, "kind") == "human" &&
-                head.Body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array &&
-                roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
-            checkingOperators.Remove(key);
-            trustedOperators[key] = value;
+            StrictView view = View(bound);
+            if (view.Reading is { } known) return known;
+            string? root = RootOperator;
+            principalsInOrder ??= [.. principalRecords.OrderBy(p => p.At, StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal)];
+            List<RecordEnvelope> revisions = [.. principalsInOrder.Where(p => Considered(p, bound, view) && !StrictlyRefused(p, bound, view))];
+            int count = revisions.Count;
+            var index = new Dictionary<string, int>(count, StringComparer.Ordinal);
+            for (int i = 0; i < count; i++) index[revisions[i].Id] = i;
+            var persons = new Dictionary<string, int>(StringComparer.Ordinal);
+            int[] line = new int[count];
+            int[] author = new int[count];
+            bool[] gives = new bool[count];
+            for (int i = 0; i < count; i++)
+            {
+                line[i] = Person(PrincipalIdentity(revisions[i]));
+                gives[i] = IsOperator(revisions[i]);
+            }
+
+            for (int i = 0; i < count; i++) author[i] = persons.TryGetValue(revisions[i].By, out int a) ? a : -1;
+
+            // Given by then, in time order: a revision gives the role only when its author was given it by an earlier one.
+            var classes = new StrictClass[count];
+            var givenAt = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (int i = 0; i < count; i++)
+            {
+                if (revisions[i].By != root && !givenAt.ContainsKey(revisions[i].By)) continue;
+                classes[i] = StrictClass.Removal;
+                if (gives[i]) givenAt.TryAdd(PrincipalIdentity(revisions[i]), revisions[i].At);
+            }
+
+            // Each revision read follows the nearest revision read below it in its line; one not read leaves the line as it was.
+            int[] below = new int[count];
+            for (int i = 0; i < count; i++) below[i] = classes[i] == StrictClass.Unread ? -1 : NearestRead(revisions[i]);
+
+            var standing = new bool[persons.Count];
+            if (root is not null && persons.TryGetValue(root, out int rootPerson)) standing[rootPerson] = true;
+            var heads = new List<int>[persons.Count];
+            for (int p = 0; p < heads.Length; p++) heads[p] = [];
+            bool[] followed = new bool[count];
+            while (true)
+            {
+                foreach (List<int> h in heads) h.Clear();
+                Array.Clear(followed);
+                for (int i = 0; i < count; i++)
+                {
+                    if (classes[i] == StrictClass.Unread) continue;
+                    // The author is read as their line stands before this revision in time order.
+                    classes[i] = revisions[i].By == root || author[i] >= 0 && standing[author[i]] && Gives(author[i]) ? StrictClass.Written : StrictClass.Removal;
+                    if (below[i] >= 0)
+                    {
+                        followed[below[i]] = true;
+                        heads[line[i]].Remove(below[i]);
+                    }
+
+                    if (!followed[i]) heads[line[i]].Add(i);
+                }
+
+                bool added = false;
+                for (int p = 0; p < standing.Length; p++)
+                {
+                    if (standing[p] || !Gives(p)) continue;
+                    standing[p] = true;
+                    added = true;
+                }
+
+                if (!added) break;
+            }
+
+            var lines = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            for (int i = 0; i < count; i++)
+            {
+                if (classes[i] == StrictClass.Unread) continue;
+                string person = PrincipalIdentity(revisions[i]);
+                if (!lines.TryGetValue(person, out List<int>? read)) lines[person] = read = [];
+                read.Add(i);
+            }
+
+            var now = new HashSet<string>(persons.Where(p => standing[p.Value]).Select(p => p.Key), StringComparer.Ordinal);
+            if (root is not null) now.Add(root);
+            var reading = new StrictReading { Revisions = revisions, Index = index, Below = below, Classes = classes, Lines = lines, GivenAt = givenAt, Standing = now };
+            view.Reading = reading;
+            return reading;
+
+            int Person(string id)
+            {
+                if (!persons.TryGetValue(id, out int p)) persons[id] = p = persons.Count;
+                return p;
+            }
+
+            bool Gives(int person) => heads[person].Count == 1 && classes[heads[person][0]] == StrictClass.Written && gives[heads[person][0]];
+
+            int NearestRead(RecordEnvelope revision)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal) { revision.Id };
+                RecordEnvelope current = revision;
+                while (current.Supersedes is not null && model.ById.TryGetValue(current.Supersedes, out RecordEnvelope? previous) && previous.Type == "principal" && seen.Add(previous.Id))
+                {
+                    if (index.TryGetValue(previous.Id, out int k) && classes[k] != StrictClass.Unread) return k;
+                    current = previous;
+                }
+
+                return -1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The principal record describing a person at a time as the strongest acts read it: among the revisions of its line they read dated
+    /// at or before the time, the single one no other of them follows; null when there is none or more than one. It gives the operator
+    /// role only when read as written; read as a removal it keeps the person's kind and other roles as written, except that it describes a
+    /// human only where the revision read below it did, so it takes away and never gives (<see cref="DescribesHuman"/>).
+    /// </summary>
+    private (bool Human, bool Operator)? StrictHead(string principal, string at, IReadOnlyList<Closing> bound)
+    {
+        StrictReading reading = ReadStrictly(bound);
+        if (!reading.Lines.TryGetValue(principal, out List<int>? line)) return null;
+        var followed = new HashSet<int>();
+        int last = -1;
+        foreach (int k in line)
+        {
+            if (string.CompareOrdinal(reading.Revisions[k].At, at) > 0) break;
+            last++;
+            if (reading.Below[k] >= 0) followed.Add(reading.Below[k]);
+        }
+
+        List<int> heads = [.. line.Take(last + 1).Where(k => !followed.Contains(k))];
+        if (heads.Count != 1) return null;
+        int head = heads[0];
+        return (DescribesHuman(reading, head), reading.Classes[head] == StrictClass.Written && IsOperator(reading.Revisions[head]));
+    }
+
+    /// <summary>
+    /// Whether a principal revision the strongest acts read describes a human: it says so, and so does each revision read below it down
+    /// to one read as written or the line's first, so that a revision read as a removal never makes a person human.
+    /// </summary>
+    private static bool DescribesHuman(StrictReading reading, int revision)
+    {
+        for (int k = revision; ; k = reading.Below[k])
+        {
+            if (EstateModel.BodyString(reading.Revisions[k], "kind") != "human") return false;
+            if (reading.Classes[k] == StrictClass.Written || reading.Below[k] < 0) return true;
+        }
+    }
+
+    /// <summary>
+    /// How the strongest acts read a grant revision, by its author at its time (<see cref="StrictClass"/>): not read unless authentic by
+    /// signatures and not refused for its date; as written by the root operator, or by a person who stands now and held the operator role
+    /// at its time as those acts read it; as a removal by a person given the role by then who had lost it or does not stand now.
+    /// </summary>
+    private StrictClass GrantClass(RecordEnvelope grant, IReadOnlyList<Closing> bound)
+    {
+        lock (gate)
+        {
+            StrictView view = View(bound);
+            if (view.GrantClasses.TryGetValue(grant.Id, out StrictClass known)) return known;
+            StrictClass value = Judge(view);
+            view.GrantClasses[grant.Id] = value;
+            return value;
+        }
+
+        StrictClass Judge(StrictView view)
+        {
+            if (!Considered(grant, bound, view) || StrictlyRefused(grant, bound, view)) return StrictClass.Unread;
+            if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
+            StrictReading reading = ReadStrictly(bound);
+            if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
+            return reading.GivenAt.TryGetValue(grant.By, out string? given) && string.CompareOrdinal(given, grant.At) <= 0 ? StrictClass.Removal : StrictClass.Unread;
+        }
+    }
+
+    /// <summary>The grant revisions the strongest acts read that follow a grant revision: its successors, through any they do not read.</summary>
+    private IEnumerable<RecordEnvelope> StrictSuccessors(RecordEnvelope grant, IReadOnlyList<Closing> bound)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal) { grant.Id };
+        var queue = new Queue<string>([grant.Id]);
+        while (queue.TryDequeue(out string? id))
+        {
+            foreach (RecordEnvelope next in successors[id].Where(s => s.Type == "authority" && seen.Add(s.Id)))
+            {
+                if (GrantClass(next, bound) == StrictClass.Unread) queue.Enqueue(next.Id);
+                else yield return next;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A warning, in an estate holding a checkpoint, for each principal or grant revision that counts and that the strongest acts read as a
+    /// removal where that reading differs from the ordinary one in what those acts use: a principal revision giving the operator role or
+    /// describing a human they do not read as one, and a grant revision giving administer. Anchoring and closings no longer rest on it.
+    /// </summary>
+    private IEnumerable<Finding> RevisionsReadAsRemovals()
+    {
+        string? root = RootOperator;
+        if (!model.OfType("history-checkpoint").Any()) yield break;
+        StrictReading reading = ReadStrictly(Acting);
+        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "principal" or "authority" && r.By != root))
+        {
+            string? gives;
+            if (record.Type == "principal")
+            {
+                if (!reading.Index.TryGetValue(record.Id, out int k) || reading.Classes[k] != StrictClass.Removal) continue;
+                gives = IsOperator(record) ? "gives the operator role" : EstateModel.BodyString(record, "kind") == "human" && !DescribesHuman(reading, k) ? "describes a human" : null;
+            }
+            else gives = GivesAdminister(record) && GrantClass(record, Acting) == StrictClass.Removal ? "gives administer" : null;
+            if (gives is null || !Counts(record)) continue;
+            yield return new Finding(Severity.Warning, "history.revision-author", record.ExpectedPath,
+                $"This {record.Type} revision {gives}, but that no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
+        }
+    }
+
+    /// <summary>
+    /// Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the
+    /// root operator's first record. A revision the model holds is read through the view of those closings (<see cref="View"/>).
+    /// </summary>
+    private bool Considered(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
+        revision.Type == "principal" && revision.Id == RootOperator && revision.By == RootOperator && revision.Supersedes is null ||
+        (revision.Type is "principal" or "authority" && model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) && ReferenceEquals(loaded, revision)
+            ? StrictVerdict(revision, null) != view.Changed.Contains(revision.Id)
+            : AuthenticBySignaturesWith(revision, bound));
+
+    /// <summary>
+    /// Whether the strongest acts refuse a principal or grant revision for its date, against the closings given: it is dated before the
+    /// nearest revision below it in its line that they consider and do not refuse (<see cref="StrictBelow"/>). Rule 1 as they read it.
+    /// </summary>
+    private bool StrictlyRefused(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view) =>
+        StrictBelow(revision, bound, view) is { } below && string.CompareOrdinal(revision.At, below.At) < 0;
+
+    /// <summary>The nearest revision below a principal or grant revision in its line that the strongest acts consider and do not refuse for its date, against the closings given.</summary>
+    private RecordEnvelope? StrictBelow(RecordEnvelope revision, IReadOnlyList<Closing> bound, StrictView view)
+    {
+        lock (gate)
+        {
+            Dictionary<string, RecordEnvelope?> known = view.Below;
+            if (known.TryGetValue(revision.Id, out RecordEnvelope? settled)) return settled;
+            var pending = new Stack<RecordEnvelope>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            RecordEnvelope? current = revision;
+            while (current is not null && seen.Add(current.Id) && !(!ReferenceEquals(current, revision) && known.ContainsKey(current.Id)))
+            {
+                pending.Push(current);
+                current = Below(current);
+            }
+
+            RecordEnvelope? result = null;
+            while (pending.TryPop(out RecordEnvelope? next))
+            {
+                RecordEnvelope? previous = Below(next);
+                // A record seen twice closes a cycle of supersession; it is taken as it is.
+                result = previous is null ? null
+                    : !known.TryGetValue(previous.Id, out RecordEnvelope? under) ? previous
+                    : Considered(previous, bound, view) && (under is null || string.CompareOrdinal(previous.At, under.At) >= 0) ? previous : under;
+                known[next.Id] = result;
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// What the strongest acts read against a set of closings. It depends on the closings only through which principal and grant revisions
+    /// verify by signatures alone against them, so one view serves every set of closings that leaves the same revisions verifying.
+    /// </summary>
+    private sealed class StrictView
+    {
+        /// <summary>The principal and grant revisions the model holds whose verdict by signatures alone differs from their verdict with no closings, by id.</summary>
+        public required HashSet<string> Changed { get; init; }
+
+        /// <summary>The reading of principal lines (<see cref="ReadStrictly"/>), once made.</summary>
+        public StrictReading? Reading { get; set; }
+
+        /// <summary>How each grant revision is read (<see cref="GrantClass"/>), by id.</summary>
+        public Dictionary<string, StrictClass> GrantClasses { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>For each principal or grant revision, the nearest revision below it considered and not refused for its date (<see cref="StrictBelow"/>), by id.</summary>
+        public Dictionary<string, RecordEnvelope?> Below { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// What the verdicts by signatures alone of the principal and grant revisions the model holds read of the closings. A closing refuses a
+    /// record or not by itself, whatever other closings there are (<see cref="Refuses"/>), and a revision's verification reads closings only
+    /// through whether one refuses the revision or an admission about a device that signed it. So a set of closings matters to a verdict
+    /// only through which of those records it refuses.
+    /// </summary>
+    private sealed class StrictIndex
+    {
+        /// <summary>The records the verifications read, each once, by number.</summary>
+        public required List<RecordEnvelope> Records { get; init; }
+
+        /// <summary>For each principal or grant revision the model holds, by id: the numbers of the records its verification reads, in order.</summary>
+        public required Dictionary<string, int[]> Reads { get; init; }
+
+        /// <summary>For each record read, by number: the revisions whose verification reads it.</summary>
+        public required List<List<RecordEnvelope>> Readers { get; init; }
+
+        /// <summary>For each device identity: the numbers of the records read that a device of that identity signed, the only ones a closing naming it can refuse.</summary>
+        public required Dictionary<string, List<int>> SignedBy { get; init; }
+    }
+
+    /// <summary>
+    /// The view of the strongest acts against the closings given. It reads which of the records the verifications read (<see cref="StrictIndex"/>)
+    /// a closing among them refuses, each closing's refusals found once (<see cref="Refusals"/>), judges again only the revisions that read
+    /// one of those records, each verdict kept by the records refused (<see cref="StrictVerdict"/>), and shares one view among all the sets of
+    /// closings that change the same verdicts, so a closing that refuses nothing a verdict reads keeps the view, and the reading, of none.
+    /// </summary>
+    private StrictView View(IReadOnlyList<Closing> bound)
+    {
+        lock (gate)
+        {
+            if (strictViews.TryGetValue(bound, out StrictView? known)) return known;
+            Dictionary<int, Closing>? refusers = null;
+            foreach (Closing closing in bound)
+            {
+                foreach (int record in Refusals(closing))
+                {
+                    refusers ??= [];
+                    refusers.TryAdd(record, closing);
+                }
+            }
+
+            StrictView view = None();
+            if (refusers is not null)
+            {
+                StrictIndex index = Index();
+                var changed = new HashSet<string>(StringComparer.Ordinal);
+                var judged = new HashSet<RecordEnvelope>(ReferenceEqualityComparer.Instance);
+                foreach (int record in refusers.Keys)
+                {
+                    foreach (RecordEnvelope revision in index.Readers[record])
+                    {
+                        if (judged.Add(revision) && StrictVerdict(revision, refusers) != StrictVerdict(revision, null)) changed.Add(revision.Id);
+                    }
+                }
+
+                if (changed.Count > 0)
+                {
+                    if (!strictViewsByChange.TryGetValue(changed, out StrictView? shared)) strictViewsByChange[changed] = shared = new StrictView { Changed = changed };
+                    view = shared;
+                }
+            }
+
+            strictViews[bound] = view;
+            return view;
+        }
+    }
+
+    /// <summary>The view with no closings, which no verdict differs from.</summary>
+    private StrictView None() => strictNone ??= new StrictView { Changed = new HashSet<string>(StringComparer.Ordinal) };
+
+    /// <summary>The records the verifications read that a closing refuses by itself, by number, found once for each closing.</summary>
+    private int[] Refusals(Closing closing)
+    {
+        lock (gate)
+        {
+            if (strictRefusals.TryGetValue(closing.Record.Id, out int[]? known)) return known;
+            int[] refused = [];
+            if (closing.Kind != "grant" && closing.Identity is { } identity && Index() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
+                refused = [.. signed.Where(record => Refuses(closing, index.Records[record]))];
+            strictRefusals[closing.Record.Id] = refused;
+            return refused;
+        }
+    }
+
+    /// <summary>Builds what the verdicts by signatures alone read (<see cref="StrictIndex"/>) once.</summary>
+    private StrictIndex Index()
+    {
+        lock (gate)
+        {
+            if (strictIndex is not null) return strictIndex;
+            var records = new List<RecordEnvelope>();
+            var numbers = new Dictionary<RecordEnvelope, int>(ReferenceEqualityComparer.Instance);
+            var reads = new Dictionary<string, int[]>(StringComparer.Ordinal);
+            var readers = new List<List<RecordEnvelope>>();
+            var signedBy = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            var admissions = new Dictionary<string, RecordEnvelope[]>(StringComparer.Ordinal);
+            foreach (RecordEnvelope revision in principalRecords.Concat(authorityRecords))
+            {
+                if (!model.ById.TryGetValue(revision.Id, out RecordEnvelope? loaded) || !ReferenceEquals(loaded, revision) || reads.ContainsKey(revision.Id)) continue;
+                // The revision itself, which a closing may refuse, and every admission about each device that signed it, whose refusal changes
+                // whether that device was admitted at the revision's time.
+                var read = new SortedSet<int> { Number(revision) };
+                for (int i = 0; i < revision.Signatures.Count; i++)
+                {
+                    string named = Proof(revision, i).Named;
+                    if (!admissions.TryGetValue(named, out RecordEnvelope[]? about)) admissions[named] = about = [.. AdmissionsAbout(named)];
+                    foreach (RecordEnvelope admission in about) read.Add(Number(admission));
+                }
+
+                reads[revision.Id] = [.. read];
+                foreach (int record in read) readers[record].Add(revision);
+            }
+
+            strictIndex = new StrictIndex { Records = records, Reads = reads, Readers = readers, SignedBy = signedBy };
+            return strictIndex;
+
+            int Number(RecordEnvelope record)
+            {
+                if (numbers.TryGetValue(record, out int number)) return number;
+                number = records.Count;
+                numbers[record] = number;
+                records.Add(record);
+                readers.Add([]);
+                var identities = new HashSet<string>(StringComparer.Ordinal);
+                for (int j = 0; j < record.Signatures.Count; j++)
+                {
+                    string identity = Proof(record, j).Identity;
+                    if (!identities.Add(identity)) continue;
+                    if (!signedBy.TryGetValue(identity, out List<int>? signed)) signedBy[identity] = signed = [];
+                    signed.Add(number);
+                }
+
+                return number;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a principal or grant revision the model holds verifies by signatures alone, against no closings when <paramref name="refusers"/>
+    /// is null, and otherwise against closings refusing the records given, each by the closing named. It is kept by the records its
+    /// verification reads that are refused, which is all the verdict depends on, and judged against one refusing closing for each.
+    /// </summary>
+    private bool StrictVerdict(RecordEnvelope revision, Dictionary<int, Closing>? refusers)
+    {
+        lock (gate)
+        {
+            var refused = new List<int>();
+            var closings = new List<Closing>();
+            if (refusers is not null)
+            {
+                foreach (int record in Index().Reads[revision.Id])
+                {
+                    if (!refusers.TryGetValue(record, out Closing? closing)) continue;
+                    refused.Add(record);
+                    if (!closings.Contains(closing)) closings.Add(closing);
+                }
+            }
+
+            (string, string) key = (revision.Id, string.Join(",", refused));
+            if (strictVerdicts.TryGetValue(key, out bool known)) return known;
+            bool value = AuthenticBySignaturesWith(revision, closings.Count == 0 ? NoClosings : closings);
+            strictVerdicts[key] = value;
             return value;
         }
     }
+
+    /// <summary>Forgets every view, verdict and reading of the strongest acts, which read proofs and closings that are judged afresh.</summary>
+    private void ForgetStrictViews()
+    {
+        strictViews.Clear();
+        strictViewsByChange.Clear();
+        strictVerdicts.Clear();
+        strictRefusals.Clear();
+        strictIndex = null;
+        strictNone = null;
+    }
+
+    /// <summary>
+    /// Keeps, once the estate is judged, only the view of the closings that act, which every later read uses, and releases what was kept
+    /// to build it and the views of the sets of closings each closing was judged against.
+    /// </summary>
+    private void SettleStrictViews()
+    {
+        lock (gate)
+        {
+            bool known = strictViews.TryGetValue(Acting, out StrictView? acting);
+            ForgetStrictViews();
+            if (known) strictViews[Acting] = acting!;
+        }
+    }
+
+    /// <summary>Whether every signature of a record verifies by signatures alone against the closings given.</summary>
+    private bool AuthenticBySignaturesWith(RecordEnvelope record, IReadOnlyList<Closing> bound) =>
+        ReferenceEquals(bound, Acting) ? AuthenticBySignatures(record)
+            : record.Signatures.Count > 0 && record.DeclaredHash == record.ComputedHash && !VerifyWith(record, Mode.Signatures, bound).HasErrors;
+
+    /// <summary>Whether a principal record describes a person holding the operator role.</summary>
+    private static bool IsOperator(RecordEnvelope? head) =>
+        head is not null && EstateModel.BodyString(head, "kind") == "human" && head.Body.TryGetProperty("roles", out JsonElement roles) &&
+        roles.ValueKind == JsonValueKind.Array && roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
 
     private string PrincipalIdentity(RecordEnvelope principal)
     {

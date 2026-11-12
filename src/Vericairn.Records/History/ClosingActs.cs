@@ -32,8 +32,11 @@ internal static class ClosingActs
 
     /// <summary>
     /// What the closing before a record names, when the record is such an act: <c>device</c> and the device record a revocation names;
-    /// <c>key</c> and the device revision whose key a revision replaces; <c>grant</c> and the authority revision a revision narrows.
-    /// Null for any other record.
+    /// <c>key</c> and the device revision whose key a revision replaces; <c>grant</c> and the authority revision a revision replaces and
+    /// narrows. A grant revision replaces the nearest record below it in its line that counts (<see cref="EstateTrust.AttachedTo"/>):
+    /// the one it supersedes when that counts, otherwise the one that record attaches to, and with none below it that counts it narrows
+    /// nothing. A device revision needs no such reading, since it counts only on top of one that counts: a rotation that counts replaces
+    /// a key its device held. Null for any other record.
     /// </summary>
     internal static (string Kind, string Id)? For(EstateModel model, RecordEnvelope record)
     {
@@ -42,7 +45,14 @@ internal static class ClosingActs
     }
 
     /// <inheritdoc cref="For(EstateModel, RecordEnvelope)"/>
-    internal static (string Kind, string Id)? For(EstateModel model, string type, JsonElement body, RecordReference? subject, string? supersedes)
+    internal static (string Kind, string Id)? For(EstateModel model, string type, JsonElement body, RecordReference? subject, string? supersedes) =>
+        For(model, null, type, body, subject, supersedes);
+
+    /// <summary>
+    /// <inheritdoc cref="For(EstateModel, RecordEnvelope)"/> What counts is read from <paramref name="trust"/>, the model's judgment
+    /// when null: the judgment passes itself while it is still being made.
+    /// </summary>
+    internal static (string Kind, string Id)? For(EstateModel model, EstateTrust? trust, string type, JsonElement body, RecordReference? subject, string? supersedes)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (supersedes is null || body.ValueKind != JsonValueKind.Object || !model.ById.TryGetValue(supersedes, out RecordEnvelope? previous) || previous.Type != type) return null;
@@ -55,7 +65,9 @@ internal static class ClosingActs
             case "device":
                 return Text(body, "publicKey") is { } key && key != EstateModel.BodyString(previous, "publicKey") ? ("key", previous.Id) : null;
             case "authority":
-                return Narrows(previous.Body, body) ? ("grant", previous.Id) : null;
+                trust ??= model.Trust;
+                RecordEnvelope? replaced = trust.Counts(previous) ? previous : trust.AttachedTo(previous);
+                return replaced is not null && Narrows(replaced.Body, body) ? ("grant", replaced.Id) : null;
             default:
                 return null;
         }

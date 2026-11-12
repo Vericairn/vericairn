@@ -592,7 +592,13 @@ against the closings before it in that order; and when its author may perform th
 device or a grant that power reads as before signed history: the signer's operator role or
 `administer` grant stood at the closing's time and still stands, no trusted revision having
 since narrowed, revoked or removed it and no closing before this one having closed that
-grant's line, and a recovery device signs only for an operator. The checkpoints between it and the adoption need not count,
+grant's line, and a recovery device signs only for an operator. That power is read against
+the closings before this one, never against this closing itself, since its author chooses
+what it witnesses. Whether a checkpoint following no other may anchor is read against the
+closings that act, and those act only when reached from such a checkpoint, so the two are
+settled together: from every such checkpoint that verifies, the closings reached are judged,
+each such checkpoint whose author may not anchor with those closings acting is dropped, and
+this is repeated until none is. The checkpoints between it and the adoption need not count,
 since a closing acts by itself. One whose author may not perform the act is
 `history.closing-author`, as is one that verifies only without the closings before it,
 because one of them closed its signer's device or key or refused that device's admission; it
@@ -636,6 +642,11 @@ device, key or grant revision no closing that acts names, is the warning `histor
 it arrived without its closing, so what its target signs with an earlier date still counts. A
 closing that names the target, written later, ends it.
 
+A grant revision is compared with, and its closing names, the revision it replaces: the one it
+supersedes when that counts, otherwise the nearest revision below it in its line that counts,
+the record it follows there; with none below it that counts, it narrows nothing. A key closing
+needs no such reading, since a device revision counts only on top of one that counts.
+
 **Authority as it stood.** In an adopted estate, the roles and grants a record's rules read
 are read at its authority time: its own `at`, or, for a record the adoption checkpoint
 witnesses with its present bytes, the adoption's `at`, so that such a record keeps the
@@ -651,9 +662,69 @@ already read its grants at the action's time. The strongest acts read more stric
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. A role has no closing: a former operator's
-records dated into the time the role stood read as it stood, so close and revoke a person's
-devices when removing their role.
+withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) those acts read grant and
+principal revisions as follows. The revisions considered are those authentic by their
+signatures against the closings in force for the act, so none such a closing refuses, and not
+refused for their date against the nearest revision below them considered (below), with the
+root operator's first record. The closings in force are, for a closing, those before it in
+checkpoint order, and for the adoption checkpoint, anchoring and every other read, those
+that act. A
+person has been given the operator role by a time when a revision considered of their line,
+dated by then, gives it and was written by the root operator or by a person given the role by
+an earlier revision, taken in time order, ids breaking ties; removals do not count here. Taking
+every line in that order, a revision is read as written when its author is the root operator,
+or stands now and held the role as their line stood before the revision; as a removal,
+whatever it says, when its author had been given the role by then but had lost it or does not
+stand now, after which the line gives no operator role or `administer` until a revision read
+as written follows it; and not at all when its author had never been given the role, which
+leaves the line as it was: a revision follows the nearest revision below it that is read. A
+line describes a person at a time by the single revision read, dated by then, that no other
+follows; a revision read as a removal reads as written, except that it gives no operator role
+or `administer`, and that on top of a revision read below it, it describes a human only where
+that revision does too: so one saying the person is not human takes that away, and one with no
+revision read below it, such as a line's first record, describes a human when it says so. Who
+stands now is the least set holding the root operator and every person whose line gives the
+operator role at the end when only members of the set give, built up from the root operator;
+grants do not count towards it. So a removal keeps counting after its author is removed, a
+revision by one never given the role changes nothing, a circle of appointments gives nothing,
+and two operators other than the root operator who remove each other both lose these acts,
+closings of each other's devices included, until the root operator settles it. Since a
+closing is never read against itself, an operator's closing of another's device does not
+settle a removal of its author answered after it; a closing by the root operator refuses
+such an answer for the closings that follow it, the adoption and anchoring, and a closing
+before it is judged without it. So a person whose role the root operator removed, and whose
+device it closed and revoked, can still write, at any time and repeatedly, a removal of an
+operator other than the root operator or a narrowing of an administrator's grant, dated any
+time from their appointment until that device's revocation; every closing that does not follow
+the root operator's closing then closes nothing if that operator or administrator wrote it, or
+anyone whose operator role or `administer` rests on that operator's appointments or grants,
+directly or through others', and records it alone refused count again. A new closing does not
+undo it, since it witnesses those records. Removing those records does, with an anchoring
+checkpoint that acknowledges their removal when a checkpoint witnesses them; writing the
+operator's role again gives back the closings of those whose role or `administer` rests on that
+operator's appointments or grants, and the operator's own earlier closings only when it is dated
+after the removal and before them. Either holds only until more such records are written, among
+them a removal on top of the role written again or forking the line below it. The root
+operator's own closings cannot be reopened this way, and role
+closings are planned. Removing an operator's role takes, for these acts, what that
+person appointed, granted and closed; those the person appointed keep the role in ordinary
+reads, and a removal they write still counts for these acts, until the root operator writes
+their appointments again or closes their devices, after which what they sign with a closed
+device counts for nothing. In an estate holding a history checkpoint,
+each grant revision giving `administer`, and each principal revision giving the operator role
+or describing a human these acts do not read as one, that counts but that these acts read as
+a removal is the warning `history.revision-author`: that no longer counts for anchoring and
+closings, and a standing operator should write it again. Other records keep the reading as it
+stood.
+
+In every estate, a grant or principal revision dated before the record it attaches to counts
+for nothing, whoever signed it. It attaches to the nearest record below it in its line that
+counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
+revision on top of one that does not count is compared with, and follows, the line there, so
+its line has one current record in every read. The strongest acts, which consider only the
+revisions above, compare a revision with the nearest one below it that they consider. A role has no closing; role closings are planned. A former operator's records dated into
+the time the role stood read as it stood, so close and revoke a person's devices when removing
+their role.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The

@@ -147,6 +147,39 @@ public class HistoryClosingTests
         Assert.Equal("closing", expires.Checkpoint!.Trigger);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ANarrowingOnTopOfAGrantRevisionThatDoesNotCountIsJudgedWithTheClosingOfTheGrantItReplaces(bool unsignedBelow)
+    {
+        using var f = new HistoryTriggerTests.Fixture(adopt: false);
+        string op = f.Records.Estate.OperatorId, builder = f.Records.Estate.BuilderId;
+        RecordEnvelope grant = f.Records.Add("authority", Grant(f, builder, Scopes.LocalEngineering, Scopes.AcceptWork));
+        if (unsignedBelow)
+        {
+            JsonObject required = Charter(f, "Exercise the record format.");
+            required["policies"]!["signatures"] = "required";
+            f.Records.Add("estate", required, supersedes: f.Records.Estate.Estate.Id);
+        }
+
+        f.Adopt();
+        // Unsigned, or dated before the grant it supersedes: it counts for nothing, and its error holds every write until it is settled.
+        if (!unsignedBelow) f.Records.Estate.SetClock(grant.AtTime.AddMinutes(-5));
+        RecordEnvelope below = f.Records.Add("authority", Grant(f, builder, Scopes.LocalEngineering), supersedes: grant.Id, sign: !unsignedBelow);
+        EstateModel model = f.Api.Session.Load();
+        Assert.False(model.Counts(model.ById[below.Id]));
+        int checkpoints = Checkpoints(f).Count;
+
+        // Compared with the revision below it, it changes nothing; compared with the grant it replaces, it drops a scope. So it is written
+        // after a closing of that grant, and the batch is judged with it.
+        WriteOutcome narrowed = f.Api.NewRecord(new NewRecordRequest("authority", op, PolicyFixture.Element(Grant(f, builder, Scopes.LocalEngineering)), Supersedes: below.Id));
+        Assert.False(narrowed.Ok);
+        Assert.Contains($"a checkpoint closing grant {grant.Id},", narrowed.Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("The act and its closing were judged together, and neither was written.", narrowed.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains(narrowed.Problem.Findings, x => x.Location == below.ExpectedPath);
+        Assert.Equal(checkpoints, Checkpoints(f).Count);
+    }
+
     [Fact]
     public void AnEstateThatHasNotAdoptedRotatesNarrowsAndRevokesWithoutAClosing()
     {

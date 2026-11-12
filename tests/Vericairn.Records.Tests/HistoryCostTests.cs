@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
@@ -151,6 +152,241 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         Assert.Single(adoptionRecord.Envelope.Signatures);
         Assert.Equal(Records / PerCheckpoint, checkpointBytes.Count);
         Assert.True(checkpointBytes.Average() < 2048, $"Checkpoints average {checkpointBytes.Average():N0} bytes.");
+    }
+
+    /// <summary>
+    /// The cost of how the strongest acts read principal lines (FIX-108): a chain of 800 appointments, each appointee holding a device and
+    /// appointing the next, and a flat set of 1,600 appointments by one operator, each loaded while that operator stands and after the root
+    /// operator removes its role. Each load stays within twice the load of the same estate whose appointments the root operator wrote,
+    /// where those reads settle in one pass.
+    /// </summary>
+    [Theory]
+    [InlineData(800, true)]
+    [InlineData(1600, false)]
+    public void StrictAuthorityReadsStayWithinTwiceAnEstateOfTheRootOperatorsAppointments(int count, bool chain)
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The appointment cost test runs when {EnvironmentVariable} is 1.");
+        (TimeSpan rootStanding, TimeSpan rootRemoved) = Appointments(count, chain, byRoot: true);
+        (TimeSpan standing, TimeSpan removed) = Appointments(count, chain, byRoot: false);
+        output.WriteLine($"strict authority reads, {count:N0} appointments {(chain ? "in a chain" : "by one operator")}: {standing.TotalMilliseconds:N0} ms standing and {removed.TotalMilliseconds:N0} ms after its base is removed; {rootStanding.TotalMilliseconds:N0} ms and {rootRemoved.TotalMilliseconds:N0} ms when the root operator wrote them");
+        Assert.True(standing <= 2 * rootStanding + TimeSpan.FromMilliseconds(50), $"Standing: {standing.TotalMilliseconds:N0} ms against {rootStanding.TotalMilliseconds:N0} ms.");
+        Assert.True(removed <= 2 * rootRemoved + TimeSpan.FromMilliseconds(50), $"Removed: {removed.TotalMilliseconds:N0} ms against {rootRemoved.TotalMilliseconds:N0} ms.");
+    }
+
+    /// <summary>
+    /// Loads an adopted estate in which a second operator, or the root operator when <paramref name="byRoot"/>, writes the appointments,
+    /// once while the second operator stands and once after the root operator removes its role; returns the faster of two loads each time.
+    /// </summary>
+    private static (TimeSpan Standing, TimeSpan Removed) Appointments(int count, bool chain, bool byRoot)
+    {
+        static string Person(string name, string role) => $$"""{"kind":"human","name":"{{name}}","roles":["{{role}}"]}""";
+        using var f = new HistoryFixture();
+        RecordEnvelope second = f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "operator"), signer: f.OperatorSigner);
+        (RecordEnvelope secondDevice, _) = f.Admitted(second.Id, "The second operator's device");
+        f.Require();
+        f.Adopt();
+        RecordEnvelope author = second;
+        RecordEnvelope authorDevice = secondDevice;
+        for (int i = 0; i < count; i++)
+        {
+            string name = "Appointee " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope next = byRoot
+                ? f.Estate.Add("principal", f.Estate.OperatorId, Person(name, "operator"), signer: f.OperatorSigner)
+                : f.Estate.Add("principal", author.Id, Person(name, "operator"), signer: f.Signer(authorDevice));
+            if (!chain) continue;
+            (authorDevice, _) = f.Admitted(next.Id, name + "'s device");
+            author = next;
+        }
+
+        RecordEnvelope bySecond = f.Close("device", f.BuilderDevice.Id, second.Id, f.Signer(secondDevice));
+        RecordEnvelope byLast = f.Close("device", f.BuilderDevice.Id, author.Id, f.Signer(authorDevice));
+        TimeSpan standing = Fastest(f, model =>
+        {
+            Assert.Contains(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
+            Assert.Contains(model.Trust.Closings, c => c.Record.Id == byLast.Id);
+        });
+        f.Estate.Add("principal", f.Estate.OperatorId, Person("Second operator", "reviewer"), supersedes: second.Id, signer: f.OperatorSigner);
+        TimeSpan removed = Fastest(f, model =>
+        {
+            Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == bySecond.Id);
+            Assert.Equal(byRoot && chain, model.Trust.Closings.Any(c => c.Record.Id == byLast.Id));
+        });
+        return (standing, removed);
+
+        static TimeSpan Fastest(HistoryFixture f, Action<EstateModel> check)
+        {
+            TimeSpan best = TimeSpan.MaxValue;
+            for (int run = 0; run < 2; run++)
+            {
+                var watch = Stopwatch.StartNew();
+                EstateModel model = f.Load();
+                watch.Stop();
+                check(model);
+                if (watch.Elapsed < best) best = watch.Elapsed;
+            }
+
+            return best;
+        }
+    }
+
+    /// <summary>
+    /// The cost of judging a chain of device closings by operators other than the root operator (FIX-108): 300 operators, each with a
+    /// device, and 180 closings, each following the one before it and signed by a different operator, so that each is judged against the
+    /// closings before it and reads principal lines as the strongest acts do. The load stays within twice the load of the same chain of
+    /// closings by the root operator, whose closings need no such reading, plus 50 ms. The two estates are loaded in turn, three times
+    /// each, and the fastest load of each is compared, so that a pause on the machine does not weigh on one of them alone.
+    /// </summary>
+    [Fact]
+    public void ChainedClosingsByOperatorsStayWithinTwiceTheRootOperatorsChain()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The chained closings cost test runs when {EnvironmentVariable} is 1.");
+        const int Operators = 300;
+        const int Closings = 180;
+        using HistoryFixture rootChain = new(), operatorChain = new();
+        IReadOnlyList<RecordEnvelope> rootClosings = WriteChainedClosings(rootChain, Operators, Closings, byRoot: true);
+        IReadOnlyList<RecordEnvelope> operatorClosings = WriteChainedClosings(operatorChain, Operators, Closings, byRoot: false);
+        TimeSpan byRoot = TimeSpan.MaxValue, byOperators = TimeSpan.MaxValue;
+        for (int run = 0; run < 3; run++)
+        {
+            TimeSpan root = TimedLoad(rootChain, rootClosings);
+            if (root < byRoot) byRoot = root;
+            TimeSpan operators = TimedLoad(operatorChain, operatorClosings);
+            if (operators < byOperators) byOperators = operators;
+        }
+
+        output.WriteLine($"chained closings, {Closings:N0} over {Operators:N0} operators: {byOperators.TotalMilliseconds:N0} ms when each is by another operator; {byRoot.TotalMilliseconds:N0} ms when the root operator wrote them");
+        Assert.True(byOperators <= 2 * byRoot + TimeSpan.FromMilliseconds(50), $"Closings by operators: {byOperators.TotalMilliseconds:N0} ms against {byRoot.TotalMilliseconds:N0} ms.");
+
+        // One load, checking that every closing written acts.
+        static TimeSpan TimedLoad(HistoryFixture f, IReadOnlyList<RecordEnvelope> closings)
+        {
+            var watch = Stopwatch.StartNew();
+            EstateModel model = f.Load();
+            watch.Stop();
+            var acting = model.Trust.Closings.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+            Assert.All(closings, closing => Assert.Contains(closing.Id, acting));
+            return watch.Elapsed;
+        }
+    }
+
+    /// <summary>
+    /// Writes, in an adopted estate, operators each holding a device and a chain of closings of the builder's device, each by the next
+    /// operator or, when <paramref name="byRoot"/>, by the root operator; returns the closings.
+    /// </summary>
+    private static List<RecordEnvelope> WriteChainedClosings(HistoryFixture f, int operators, int closings, bool byRoot)
+    {
+        var signers = new List<(RecordEnvelope Person, RecordEnvelope Device)>();
+        for (int i = 0; i < operators; i++)
+        {
+            string name = "Operator " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["operator"]}""", signer: f.OperatorSigner);
+            (RecordEnvelope device, _) = f.Admitted(person.Id, name + "'s device");
+            signers.Add((person, device));
+        }
+
+        f.Require();
+        f.Adopt();
+        var made = new List<RecordEnvelope>();
+        for (int k = 0; k < closings; k++)
+            made.Add(byRoot ? f.Close("device", f.BuilderDevice.Id) : f.Close("device", f.BuilderDevice.Id, signers[k].Person.Id, f.Signer(signers[k].Device)));
+
+        return made;
+    }
+
+    /// <summary>
+    /// The cost of many closings naming one widely used device (FIX-108): 300 operators whose principal records the root operator's first
+    /// device signed and whose devices it admitted, then 120 rotations of that device's key, each after a closing of the key it replaces.
+    /// Every closing names the device that every principal record's verification reads, and every rotation is read against each closing of
+    /// an earlier key. It is compared with the same estate in which only the first rotation follows a closing, which holds the same operators
+    /// and rotations and still judges a closing, so the comparison measures what the other 119 closings add; an estate with no closing would
+    /// skip judging closings altogether. The memory a loaded model keeps stays within twice that estate's, plus 8 MiB, and the load within
+    /// ten times its load, plus 150 ms. Each rotation is still checked against every earlier closed key by verifying its signatures under
+    /// that key, about 14,000 verifications, which took the load to about six times the first-only estate's on macOS; the bound leaves room
+    /// for slower verification elsewhere, and still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict was
+    /// kept under the closings it read (about thirteen times the first-only estate's load). The two estates are loaded in turn, three times
+    /// each, and the fastest load of each is compared.
+    /// </summary>
+    [Fact]
+    public void KeyRotationsOfTheRootOperatorsDeviceStayWithinTenTimesItsFirstClosing()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The key rotation cost test runs when {EnvironmentVariable} is 1.");
+        const int Operators = 300;
+        const int Rotations = 120;
+        using HistoryFixture closedEach = new(), closedFirst = new();
+        WriteKeyRotations(closedEach, Operators, Rotations, closeEach: true);
+        WriteKeyRotations(closedFirst, Operators, Rotations, closeEach: false);
+        TimeSpan each = TimeSpan.MaxValue, first = TimeSpan.MaxValue;
+        for (int run = 0; run < 3; run++)
+        {
+            TimeSpan time = TimedLoad(closedFirst, 1);
+            if (time < first) first = time;
+            time = TimedLoad(closedEach, Rotations);
+            if (time < each) each = time;
+        }
+
+        long eachKept = Kept(closedEach), firstKept = Kept(closedFirst);
+        output.WriteLine($"key rotations of the root operator's device, {Rotations:N0} over {Operators:N0} operators: {each.TotalMilliseconds:N0} ms and {eachKept / 1048576.0:N1} MiB kept with a closing before each; {first.TotalMilliseconds:N0} ms and {firstKept / 1048576.0:N1} MiB with a closing before the first only");
+        Assert.True(each <= 10 * first + TimeSpan.FromMilliseconds(150), $"A closing before each rotation: {each.TotalMilliseconds:N0} ms against {first.TotalMilliseconds:N0} ms.");
+        Assert.True(eachKept <= 2 * Math.Max(firstKept, 0) + 8 * 1048576L, $"A closing before each rotation keeps {eachKept / 1048576.0:N1} MiB against {firstKept / 1048576.0:N1} MiB.");
+
+        // One load, checking that the closings written act.
+        static TimeSpan TimedLoad(HistoryFixture f, int closings)
+        {
+            var watch = Stopwatch.StartNew();
+            EstateModel model = f.Load();
+            watch.Stop();
+            Assert.Equal(closings, model.Trust.Closings.Count);
+            return watch.Elapsed;
+        }
+    }
+
+    /// <summary>The memory a loaded model of an estate keeps, measured after full collections around a load that nothing else outlives.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static long Kept(HistoryFixture f)
+    {
+        Collect();
+        long before = GC.GetTotalMemory(forceFullCollection: true);
+        EstateModel model = Load(f);
+        Collect();
+        long after = GC.GetTotalMemory(forceFullCollection: true);
+        GC.KeepAlive(model);
+        return after - before;
+
+        static void Collect()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static EstateModel Load(HistoryFixture f) => f.Load();
+    }
+
+    /// <summary>
+    /// Writes, in an adopted estate, operators whose records the root operator's first device signs and whose devices it admits, then
+    /// rotations of that device's key, each after a closing of the key it replaces or, unless <paramref name="closeEach"/>, the first only.
+    /// </summary>
+    private static void WriteKeyRotations(HistoryFixture f, int operators, int rotations, bool closeEach)
+    {
+        for (int i = 0; i < operators; i++)
+        {
+            string name = "Operator " + i.ToString(CultureInfo.InvariantCulture);
+            RecordEnvelope person = f.Estate.Add("principal", f.Estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["operator"]}""", signer: f.OperatorSigner);
+            f.Admitted(person.Id, name + "'s device");
+        }
+
+        f.Require();
+        f.Adopt();
+        RecordEnvelope current = f.OperatorDevice;
+        IRecordSigner signer = f.OperatorSigner;
+        for (int k = 0; k < rotations; k++)
+        {
+            if (closeEach || k == 0) f.Close("key", current.Id, f.Estate.OperatorId, signer);
+            (RecordEnvelope revision, StoreSigner next) = f.Rotate(current, signer, f.OperatorDevice.Id);
+            current = revision;
+            signer = next;
+        }
     }
 
     public void Dispose()

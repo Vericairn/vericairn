@@ -101,20 +101,61 @@ public static class RecordSigning
     /// <summary>Verifies a signature over a digest with an encoded public key.</summary>
     public static bool Verify(string encodedPublicKey, ReadOnlySpan<byte> digest, string encodedSignature)
     {
-        if (!IsPublicKey(encodedPublicKey) || !IsSignature(encodedSignature))
+        using ImportedKey key = ImportedKey.Import(encodedPublicKey);
+        return key.Verify(digest, encodedSignature);
+    }
+
+    /// <summary>
+    /// A public key imported once, which verifies signatures as <see cref="RecordSigning.Verify"/> does, since that is how it verifies: nothing
+    /// when the text is not a usable P-256 key, when the signature is not 64 bytes, or when the platform rejects the key or the signature.
+    /// </summary>
+    internal sealed class ImportedKey : IDisposable
+    {
+        private readonly ECDsa? key;
+
+        private ImportedKey(ECDsa? key) => this.key = key;
+
+        /// <summary>Imports an encoded public key; one that is not usable verifies nothing.</summary>
+        internal static ImportedKey Import(string encodedPublicKey)
         {
-            return false;
+            if (!IsPublicKey(encodedPublicKey))
+            {
+                return new(null);
+            }
+
+            ECDsa? key = null;
+            try
+            {
+                key = ECDsa.Create();
+                key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(encodedPublicKey), out _);
+                return new(key);
+            }
+            catch (CryptographicException)
+            {
+                key?.Dispose();
+                return new(null);
+            }
         }
 
-        try
+        /// <summary>Verifies a signature over a digest.</summary>
+        internal bool Verify(ReadOnlySpan<byte> digest, string encodedSignature)
         {
-            using ECDsa key = ECDsa.Create();
-            key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(encodedPublicKey), out _);
-            return key.VerifyHash(digest, Base64Url.DecodeFromChars(encodedSignature), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            if (key is null || !IsSignature(encodedSignature))
+            {
+                return false;
+            }
+
+            try
+            {
+                return key.VerifyHash(digest, Base64Url.DecodeFromChars(encodedSignature), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            }
+            catch (CryptographicException)
+            {
+                return false;
+            }
         }
-        catch (CryptographicException)
-        {
-            return false;
-        }
+
+        /// <inheritdoc />
+        public void Dispose() => key?.Dispose();
     }
 }
