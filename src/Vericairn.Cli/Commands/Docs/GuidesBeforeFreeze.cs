@@ -9,9 +9,10 @@ namespace Vericairn.Cli;
 /// <summary>
 /// The documentation pass before freezing (the estate's design/release-procedure.md § 7, step docs-before-freeze): the version-tracking
 /// guides a release's documentation set declares, read as they stand, for two traps. A prior-version token is a version of one of the
-/// releases before this one standing as the current release outside a history section or label, as 0.8.4's guides named 0.8.3 and its
-/// notes-window sentence 0.8.2. Preparation wording is what only a set still being prepared says, such as notes that are a placeholder,
-/// as 0.7.0's set did. The check reads text; it never judges whether a sentence is true, and it changes nothing.
+/// releases before this one named as the current release, as 0.8.4's guides named 0.8.3 and its notes-window sentence 0.8.2; one in a
+/// history section or a label, or named as a source or predecessor, such as an upgrade's --from or "follows 0.9.1's recorded end",
+/// passes. Preparation wording is what only a set still being prepared says, such as notes that are a placeholder, as 0.7.0's set did.
+/// Each finding names the rule it matched. The check reads text; it never judges whether a sentence is true, and it changes nothing.
 /// </summary>
 internal static partial class GuidesBeforeFreeze
 {
@@ -30,11 +31,40 @@ internal static partial class GuidesBeforeFreeze
     /// <summary>The largest guide read; a larger file is refused rather than read in part.</summary>
     internal const long MaximumBytes = 8 * 1024 * 1024;
 
-    /// <summary>Words that, just before a version, say the sentence is about that release in the past.</summary>
+    /// <summary>
+    /// Words that, just before a version, say the sentence is about that release in the past or name it as a source or predecessor: "since
+    /// 0.9.1", "follows 0.9.1's recorded end", "replaces 0.9.0".
+    /// </summary>
     private static readonly string[] HistoricalMarkers =
     [
         "from", "since", "in", "until", "before", "after", "through", "during", "fixed in", "added in", "introduced in", "removed in", "earlier than", "older than", "up to",
+        "follows", "succeeds", "replaces", "supersedes",
     ];
+
+    /// <summary>The rule a prior-version finding matched: a word such as current or latest, or a target such as --to, names it current.</summary>
+    internal const string CurrentClaimRule = "current-claim";
+
+    /// <summary>The rule a prior-version finding matched: it names that release's install, download, package or tag.</summary>
+    internal const string ReleaseArtifactRule = "release-artifact";
+
+    /// <summary>The rule a prior-version finding matched: a mention outside a history section and a label that names no source or predecessor.</summary>
+    internal const string CurrentMentionRule = "current-mention";
+
+    /// <summary>The rule a preparation finding matched: wording only a set still being prepared uses.</summary>
+    internal const string PreparationPhraseRule = "preparation-phrase";
+
+    /// <summary>The rule a preparation finding matched: a marker of unfinished work, TODO or TBD.</summary>
+    internal const string UnfinishedMarkerRule = "unfinished-marker";
+
+    /// <summary>What a rule finds, in words.</summary>
+    internal static string Describe(string rule) => rule switch
+    {
+        CurrentClaimRule => "a word such as current or latest, or a target such as --to, names it the current release",
+        ReleaseArtifactRule => "it names that release's install, download, package or tag",
+        CurrentMentionRule => "it stands outside a history section and a label, and names no source or predecessor",
+        PreparationPhraseRule => "wording only a set still being prepared uses",
+        _ => "a marker of unfinished work",
+    };
 
     /// <summary>One location a check found.</summary>
     /// <param name="Check">The verification method of the check that found it.</param>
@@ -42,12 +72,13 @@ internal static partial class GuidesBeforeFreeze
     /// <param name="Line">The line, from 1.</param>
     /// <param name="Found">The token or phrase.</param>
     /// <param name="Text">The line, trimmed and shortened.</param>
-    internal sealed record Finding(string Check, string Path, int Line, string Found, string Text)
+    /// <param name="Rule">The rule it matched, such as current-claim or preparation-phrase.</param>
+    internal sealed record Finding(string Check, string Path, int Line, string Found, string Text, string Rule)
     {
-        /// <summary>The location and what was found, in words.</summary>
+        /// <summary>The location, what was found and the rule it matched, in words.</summary>
         public override string ToString() => Check == PriorVersionMethod
-            ? $"{Path}:{Line}: prior-version token {Found} outside a history section: {Text}"
-            : $"{Path}:{Line}: preparation wording '{Found}': {Text}";
+            ? $"{Path}:{Line}: prior-version token {Found} named as the current release ({Rule}: {Describe(Rule)}): {Text}"
+            : $"{Path}:{Line}: preparation wording '{Found}' ({Rule}: {Describe(Rule)}): {Text}";
     }
 
     /// <summary>What the pass read and found.</summary>
@@ -162,9 +193,9 @@ internal static partial class GuidesBeforeFreeze
                 sections.Add((level, IsHistoryHeading(heading.Groups["title"].Value)));
             }
 
-            foreach (Match phrase in Preparation().Matches(line).Concat(Unfinished().Matches(line)))
+            foreach ((Match phrase, string rule) in Preparation().Matches(line).Select(m => (m, PreparationPhraseRule)).Concat(Unfinished().Matches(line).Select(m => (m, UnfinishedMarkerRule))))
             {
-                yield return new Finding(PreparationMethod, path, index + 1, phrase.Value, Shorten(line));
+                yield return new Finding(PreparationMethod, path, index + 1, phrase.Value, Shorten(line), rule);
             }
 
             if (sections.Any(s => s.History) || RevisionLine().IsMatch(line))
@@ -178,7 +209,7 @@ internal static partial class GuidesBeforeFreeze
                 {
                     if (!Historical(line, token))
                     {
-                        yield return new Finding(PriorVersionMethod, path, index + 1, version, Shorten(line));
+                        yield return new Finding(PriorVersionMethod, path, index + 1, version, Shorten(line), CurrentRule(line, token));
                     }
                 }
             }
@@ -202,11 +233,18 @@ internal static partial class GuidesBeforeFreeze
     }
 
     /// <summary>
-    /// Whether a token stands as history rather than as the current release: inside a parenthesized label such as "(0.9.1)" or "(FIX-90,
-    /// 0.9.1)", just after a word such as "From" or "fixed in", just before "or earlier", or part of the name of a versioned page or set.
+    /// Whether a token stands as history, a source or a predecessor rather than as the current release: inside a parenthesized label such
+    /// as "(0.9.1)" or "(FIX-90, 0.9.1)", the value of a source option such as an upgrade's --from, just after a word such as "From",
+    /// "fixed in" or "follows", just before "or earlier", or part of the name of a versioned page or set.
     /// </summary>
     private static bool Historical(string line, Match token)
     {
+        // A source or an earlier release a command reads: "upgrade --from 0.9.1", "--previous 0.9.0".
+        if (SourceOption().IsMatch(line[..token.Index]))
+        {
+            return true;
+        }
+
         // A release label in parentheses: "(0.9.1)", "(FIX-90, 0.9.1)" or "(from 0.9.1)", and nothing else inside them, so that
         // "(the current release, 0.9.1)" is read as a claim.
         int open = line.LastIndexOf('(', token.Index);
@@ -236,7 +274,8 @@ internal static partial class GuidesBeforeFreeze
             }
         }
 
-        if (HistoricalMarkers.Any(m => before == m || before.EndsWith(" " + m, StringComparison.Ordinal) || before.EndsWith("(" + m, StringComparison.Ordinal)))
+        // A marker counts as a word of its own: after a space, a parenthesis or a quotation mark, as in "follows 0.9.1's recorded end".
+        if (HistoricalMarkers.Any(m => before.EndsWith(m, StringComparison.Ordinal) && (before.Length == m.Length || !char.IsLetterOrDigit(before[^(m.Length + 1)]) && before[^(m.Length + 1)] is not ('-' or '_'))))
         {
             return true;
         }
@@ -250,6 +289,22 @@ internal static partial class GuidesBeforeFreeze
         // The name of a versioned page or set, or a link's text naming one: [for 0.9.0](api-compatibility-0.9.0.md).
         return after.StartsWith(".md", StringComparison.Ordinal) || after.StartsWith("/readme", StringComparison.Ordinal) || after.StartsWith("](", StringComparison.Ordinal)
             || line[..token.Index].EndsWith("api-compatibility-", StringComparison.Ordinal) || line[..token.Index].EndsWith("releases/", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rule by which a token not standing as history names its release as the current one: a word such as current or latest, or a
+    /// target such as --to; the release's install, download, package or tag; or else a plain mention.
+    /// </summary>
+    private static string CurrentRule(string line, Match token)
+    {
+        string before = line[..token.Index];
+        string after = line[(token.Index + token.Length)..];
+        if (CurrentBefore().IsMatch(before) || CurrentAfter().IsMatch(after))
+        {
+            return CurrentClaimRule;
+        }
+
+        return ArtifactBefore().IsMatch(before) || ArtifactAfter().IsMatch(after) || InstallWords().IsMatch(line) ? ReleaseArtifactRule : CurrentMentionRule;
     }
 
     /// <summary>Words between a marker and its version that leave the marker standing: "From Vericairn 0.9.1", "since release 0.8.3".</summary>
@@ -276,6 +331,28 @@ internal static partial class GuidesBeforeFreeze
 
     [GeneratedRegex(@"^(?<head>.*?)(?:v?\d+\.\d+\.\d+(?:'s)?\s*(?:,|\bor\b|\band\b)\s*)+$")]
     private static partial Regex ListTail();
+
+    // The value of an option that names a source or an earlier release: --from 0.9.1, --from=0.9.1, --previous 0.9.0.
+    [GeneratedRegex(@"--(?:from|previous)(?:=|\s+)$", RegexOptions.CultureInvariant)]
+    private static partial Regex SourceOption();
+
+    // A word that names the release current, or a target: "the current release, 0.9.1", "latest version 0.9.1", "--to 0.9.1", "upgrade to 0.9.1".
+    [GeneratedRegex(@"(?:\b(?:current|latest|newest)\b[^.;:]{0,40}|--to(?:=|\s+)|\b(?:upgrade|upgrades|upgraded|upgrading|update|updates|move|moves)\s+to\s+(?:vericairn\s+|release\s+|version\s+)?)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CurrentBefore();
+
+    // A sentence that goes on to call it current: "0.9.1 is the current release", "the 0.9.1 command line is current", "0.9.1 (latest)".
+    [GeneratedRegex(@"^(?:[^.;:]{0,40}\b(?:is|are|stays|remains)\s+(?:the\s+)?(?:current|latest|newest)\b|\s*\((?:current|latest|newest)\))", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CurrentAfter();
+
+    // Part of an install, a package or a tag: "--version 0.9.1", "vericairn-0.9.1-osx-arm64", "Records.0.9.1.nupkg", ".../tag/v0.9.1", "@0.9.1".
+    [GeneratedRegex(@"(?:--version(?:=|\s+)|/tag/|/download/|@|[A-Za-z][-_.])$", RegexOptions.CultureInvariant)]
+    private static partial Regex ArtifactBefore();
+
+    [GeneratedRegex(@"^(?:[-_][A-Za-z<]|\.(?:nupkg|zip|tar|tgz|gz|msi|pkg|dmg|exe|deb|rpm)\b)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ArtifactAfter();
+
+    [GeneratedRegex(@"\b(?:install(?:s|ed|ing)?|download(?:s|ed|ing)?|unpack(?:s|ed|ing)?|add\s+package|tool\s+update)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex InstallWords();
 
     [GeneratedRegex(@"^\s*Revision \d+[,.]")]
     private static partial Regex RevisionLine();

@@ -208,6 +208,17 @@ review as its basis, states that the operator closed it with `operator close`, a
 according to who authored the result. These acceptances judge results; release acceptance remains
 a separate operator judgment.
 
+From 0.9.3 (FIX-128), an ordinary work order whose current result an acceptance names, as
+`operator close` records it, reads as `accepted`: in status, goal predicates and flows, required
+attention, the progress report and Workbench. Its current result is the newest current result of
+any of its assignments, the one `operator close` lists. Ordinary work closed with `operator close`
+since 0.8.4 therefore now reads as accepted, where it read `planned` or its latest work status
+before; no record changes. An acceptance of an earlier result, of an earlier revision of the result,
+or one recorded before a change to the work order other than its placement reads `accepted (earlier
+revision)`, as an acceptance of an earlier work-order revision does. A work order an acceptance of
+its current revision accepts reads as it did, and a milestone is still accepted only by your
+acceptance of the milestone itself.
+
 To preserve a listing while inspecting it, save its JSON and supply it with the selection:
 
 ```sh

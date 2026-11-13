@@ -13,6 +13,10 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 25, November 13, 2026. `docs pass --before` passes an earlier release named as a source or predecessor and names the rule each location matched, in the development build.
+
+Revision 24, November 13, 2026. `goal propose --flow` binds the subject an extension flow inherits from its base, in the development build.
+
 Revision 23, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
 
 Revision 22, November 12, 2026. Name the summary-only correction in `docs pin`'s overview and refusals, in the development build.
@@ -390,7 +394,9 @@ one: its plan names the flow's exact pin, read from the templates the runtime of
 `--subject name=value` binds each field of the flow's subject by its kind: a record field by its id or `type:id`, a list field
 as comma-separated instance names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a
 flow option, `step.<key>=on|off` for an optional step or `item.<step>.<item>=on|off` for an optional item, and
-`--until <step>` names the step the run ends at.
+`--until <step>` names the step the run ends at. From 0.9.3 (FIX-127), `--subject` reads the subject of the flow resolved with
+every base it extends, the subject the goal's validation and `goal show` read, so a run of an extension, which declares no
+subject of its own, binds each field of its base's; before, it refused every field of an extension.
 
 ```sh
 vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \
@@ -781,6 +787,15 @@ a plain file, `docs/` beside `docs/releases/documents.json` by default (`--guide
   `api-compatibility-0.9.1.md`, is read for preparation wording only;
 - preparation wording, such as notes that are a placeholder, `under preparation`, `not yet rendered`, `pre-build`,
   `the builder must`, `TODO` or `TBD`.
+
+From 0.9.3 (FIX-125), a mention of an earlier release counts only where it names that release as the current one. A mention
+as a source or predecessor passes: the value of `--from` or `--previous`, as in `docs notes --from 0.9.1`, and a token just
+after `follows`, `succeeds`, `replaces` or `supersedes`, as in "follows 0.9.1's recorded end", besides those after `since`
+or `after`, in a history section and in a label. Each location names the rule it matched: `current-claim`, where a word such
+as `current` or `latest`, or a target such as `--to`, names it the current release; `release-artifact`, where it names that
+release's install, download, package or tag; `current-mention`, any other mention outside a history section and a label;
+and, for preparation wording, `preparation-phrase` or `unfinished-marker`. `--json` gives it as each finding's `rule`, and a
+recorded verification quotes it with each location.
 
 ```sh
 vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --product <product>

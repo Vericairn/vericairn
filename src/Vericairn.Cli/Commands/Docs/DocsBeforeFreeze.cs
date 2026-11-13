@@ -132,7 +132,7 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
             context.Output.WriteLine(JsonSerializer.Serialize(new
             {
                 version, prior, guides = label, read = scan.Read, history = scan.History, skipped = scan.Skipped, commit,
-                checks = Methods.Select(m => new { method = m, outcome = scan.Of(m).Count == 0 ? "passed" : "failed", findings = scan.Of(m).Select(f => new { path = f.Path, line = f.Line, found = f.Found, text = f.Text }) }),
+                checks = Methods.Select(m => new { method = m, outcome = scan.Of(m).Count == 0 ? "passed" : "failed", findings = scan.Of(m).Select(f => new { path = f.Path, line = f.Line, found = f.Found, rule = f.Rule, text = f.Text }) }),
                 recorded = written,
             }, ProtocolJson.Options));
         }
@@ -184,7 +184,7 @@ internal sealed partial class DocsBeforeFreeze(CommandContext context)
         string Quoted(GuidesBeforeFreeze.Finding finding) => PortableText.Of(finding.ToString(), guides);
         IReadOnlyList<GuidesBeforeFreeze.Finding> found = scan.Of(method);
         string what = method == GuidesBeforeFreeze.PriorVersionMethod
-            ? $"no token of {(prior.Count == 0 ? "an earlier release" : string.Join(", ", prior))} outside history sections and labels"
+            ? $"no mention of {(prior.Count == 0 ? "an earlier release" : string.Join(", ", prior))} as the current release"
             : "no preparation wording";
         string summary = found.Count == 0
             ? $"Passed at {commit[..12]}: {what} in {scan.Read.Count + scan.History.Count} guides of the {version} set."

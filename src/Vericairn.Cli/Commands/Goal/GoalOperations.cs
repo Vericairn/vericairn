@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Types;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
+using Vericairn.Records.Templates;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
 
@@ -192,7 +193,17 @@ internal sealed class GoalOperations(CommandContext context)
         }
 
         TemplateDto flow = flows[0];
-        Dictionary<string, (string Type, string? RecordType)> fields = flow.Definition.TryGetProperty("subject", out JsonElement declared) && declared.TryGetProperty("fields", out JsonElement named) && named.ValueKind == JsonValueKind.Array
+        JsonElement declared;
+        try
+        {
+            declared = ResolvedSubject(templates.Templates, flow);
+        }
+        catch (Exception error) when (error is InvalidOperationException or JsonException)
+        {
+            return $"--flow {proposal.Flow} does not resolve with every base it extends: {error.Message}";
+        }
+
+        Dictionary<string, (string Type, string? RecordType)> fields = declared.ValueKind == JsonValueKind.Object && declared.TryGetProperty("fields", out JsonElement named) && named.ValueKind == JsonValueKind.Array
             ? named.EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!, f => (f.GetProperty("type").GetString()!, f.TryGetProperty("recordType", out JsonElement type) ? type.GetString() : null), StringComparer.Ordinal)
             : new Dictionary<string, (string Type, string? RecordType)>(StringComparer.Ordinal);
         var subject = new Json.JsonObject();
@@ -245,6 +256,15 @@ internal sealed class GoalOperations(CommandContext context)
         body["plan"]!["flow"] = run;
         return null;
     }
+
+    /// <summary>
+    /// The subject a run of a flow binds: the flow resolved with every base it extends, as the goal's validation and its view read it, so
+    /// an extension binds the subject it inherits. Each base is read by its exact pin from this build's own templates or from those the
+    /// runtime offers.
+    /// </summary>
+    private static JsonElement ResolvedSubject(IReadOnlyList<TemplateDto> offered, TemplateDto flow) =>
+        FlowDefinition.Resolve(TemplateDefinition.Read(flow.Definition), pin => TemplateCatalog.Resolve(pin, offered
+            .Where(t => t.Pin.Id == pin.Id && t.Pin.Version == pin.Version && t.Pin.Hash == pin.Hash).Select(t => TemplateDefinition.Read(t.Definition)))).Subject;
 
     /// <summary>Activates, pauses, resumes or stops a goal.</summary>
     public int GoalAction(string root, string action, string goal, string by, string? note, bool json) => context.WithApi(root, api =>

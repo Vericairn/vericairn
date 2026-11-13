@@ -130,6 +130,55 @@ public class FlowCliJourneyTests
         }
     }
 
+    [Fact]
+    public void AnExtensionFlowBindsTheSubjectItInheritsThroughGoalPropose()
+    {
+        string root = CliHarness.TempDirectory("extension-flow-run");
+        string scratch = CliHarness.TempDirectory("extension-flow-run-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Releases.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            File.Copy(ReleaseFlowFixture.FirstPartyPath, Path.Combine(root, "docs", "templates", "vericairn-first-party-release-1.0.0.json"));
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", ReleaseLineFixture.ProductBody().ToJsonString())).Id;
+            string carrier = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "carrier.json",
+                """{"key":"REL-1","kind":"ordinary","title":"Release 1.2.0","intent":"Release the product.","scope":["release"],"exitQuestion":"Is 1.2.0 released?","inputs":[],"deliverables":["the release"]}""")).Id;
+            string[] propose = ["goal", "propose", "--by", op, "--title", "Release 1.2.0", "--objective", "Release the product.", "--done", $$"""{"type":"acceptance","subject":"{{carrier}}"}""",
+                "--work-order", carrier, "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=2",
+                "--subject", "carrier=" + carrier, "--subject", "product=" + product, "--subject", "version=1.2.0", "--subject", "repository=Example/example"];
+
+            // The extension declares no subject of its own: it binds every field of the base's, and a field neither declares is refused.
+            Refused(root, "--subject is name=value with a field of the flow's subject (carrier, product, version, repository): 'channel=beta'",
+                [.. propose, "--flow", "vericairn.first-party/release@1.0.0", "--subject", "channel=beta"]);
+            string extension = CliHarness.Ok(["--estate", root, "--json", .. propose, "--flow", "vericairn.first-party/release@1.0.0"]).Id;
+
+            // The base binds as it did, to the same subject.
+            string baseRun = CliHarness.Ok(["--estate", root, "--json", .. propose, "--flow", "vericairn.software/release@1.0.0"]).Id;
+            JsonElement extensionRun = CliHarness.Ok("--estate", root, "records", "show", extension).Json.GetProperty("body").GetProperty("plan").GetProperty("flow");
+            JsonElement baseFlow = CliHarness.Ok("--estate", root, "records", "show", baseRun).Json.GetProperty("body").GetProperty("plan").GetProperty("flow");
+            Assert.Equal("vericairn.first-party/release", extensionRun.GetProperty("pin").GetProperty("id").GetString());
+            Assert.Equal("vericairn.software/release", baseFlow.GetProperty("pin").GetProperty("id").GetString());
+            JsonElement subject = extensionRun.GetProperty("subject");
+            Assert.Equal(["carrier", "product", "repository", "version"], subject.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal(("work-order", carrier), (subject.GetProperty("carrier").GetProperty("type").GetString(), subject.GetProperty("carrier").GetProperty("id").GetString()));
+            Assert.Equal(("product", product), (subject.GetProperty("product").GetProperty("type").GetString(), subject.GetProperty("product").GetProperty("id").GetString()));
+            Assert.Equal(("1.2.0", "Example/example"), (subject.GetProperty("version").GetString(), subject.GetProperty("repository").GetString()));
+            Assert.Equal(baseFlow.GetProperty("subject").GetRawText(), subject.GetRawText());
+
+            // Validation and the goal view read the same resolved subject: the run is valid and shows the extension's chain.
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", extension, "--by", op);
+            JsonElement shown = CliHarness.Ok("--estate", root, "--json", "goal", "show", extension).Json.GetProperty("flow");
+            Assert.Equal(["vericairn.software/release", "vericairn.first-party/release"], shown.GetProperty("chain").EnumerateArray().Select(c => c.GetProperty("id").GetString()!).ToArray());
+            Assert.Contains(shown.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == "nuget");
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     /// <summary>The person's attempt and completed result on a step's assignment, naming its output by hash; returns the result's receipt.</summary>
     private static JsonElement Carry(string root, string scratch, string by, string assignment, string output, string? media, char hash)
     {

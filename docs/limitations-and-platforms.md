@@ -165,12 +165,14 @@ nuget.org availability or account-holder qualification claim.
   upgrade's runtime step replaces an older daemon. `goal show` lists them as traps with their `check`. The upgrade flow's
   `runtime` step reads what `estate verify` recorded on the machine that ran it; another machine is verified there.
 - `docs pass --before` finds tokens and phrases; it never judges whether a sentence is true. A version standing as history
-  outside a history section, a release label or a marker such as `From`, `in` or `or earlier` is reported, and a claim worded
-  as history, such as "From 0.9.1 the current release is…", is not; mark a history section with `<!-- vericairn:history -->`
-  under its heading. It reads only the declared documents the guides directory holds, through no link. The flow's
-  `security-section` trap holds the set only while an ask about the carrier still waits, open or notified; it proves no
-  approval. It cannot tell whether a release needs a section, what the deciding decision says, or whether an ask was withdrawn
-  instead of answered, and a set frozen with none asked, or after one was withdrawn, passes it.
+  outside a history section, a release label or a marker such as `From`, `in`, `follows`, `--from` or `or earlier` is
+  reported, and a claim worded as history, such as "From 0.9.1 the current release is…", is not; mark a history section with
+  `<!-- vericairn:history -->` under its heading. From 0.9.3 each location names the rule it matched, and `current-mention`,
+  a mention no other rule explains, is reported because the pass cannot tell it from a claim. It reads only the declared
+  documents the guides directory holds, through no link. The flow's `security-section` trap holds the set only while an ask
+  about the carrier still waits, open or notified; it proves no approval. It cannot tell whether a release needs a section,
+  what the deciding decision says, or whether an ask was withdrawn instead of answered, and a set frozen with none asked, or
+  after one was withdrawn, passes it.
 - A corrective version after a withdrawal is a revision of the run's goal naming the new version; the run then derives afresh
   from `docs-before-freeze`. The release flow's `gate` step does not itself look for the history checkpoint with trigger
   `release` that `release submit` writes before its own admission check in an estate that adopted checkpoints; the submission
