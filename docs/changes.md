@@ -175,36 +175,47 @@ references, including refusals.
 From 0.9.3, `changes merge` merges into a target branch that requires a merge
 queue by enqueueing the change, where it refused the repository before. The
 observation of the pull request before the merge also records whether its target
-branch requires a merge queue and the pull request's place in it, as the target
-facts `mergeQueue`, `queue`, `queueHead` and, when the host gives one,
-`queueReason`. The same authority, the same required checks at the exact head and
-the same scanned push admit the change. A requirement that cannot be observed
-completely, or a pull request already in the queue, refuses the merge before
-anything is requested.
+branch requires a merge queue and the pull request's place in it, as target
+facts: `mergeQueue`, `queue` (`absent`, `queued`, `unmergeable`, `failed` or
+`removed`), `queueHead`, the pull request's own head read with that place, and,
+when the host gives them, `queueGroup`, the commit of the merge group the queue
+built, `queueReason` and `queueRemovedAt` for its latest removal. The same
+authority, the same required checks at the exact head and the same scanned push
+admit the change. A requirement that cannot be observed completely, or a pull
+request already in the queue, refuses the merge before anything is requested.
 
 The merge then records the queue as its route, with the target fact
 `mergeQueue` set to `required`, and its dispatch is the enqueue request at the
 pinned head: GitHub's `enqueuePullRequest` with `expectedHeadOid`, through `gh`,
-so a head that moved is never enqueued and nothing merges at once. An observation confirms the pull
-request in the queue at that head, and the command answers with `status`
-`dispatched`, `checkStatus` `queued` and `ok` false. A lost or unconfirmed
-receipt leaves the merge `uncertain`.
+so a head that moved is never enqueued and nothing merges at once. An
+observation confirms the change's place: the pull request has an entry in the
+queue, and its own head, read with the entry and again from the pull request,
+is the pinned head. The entry's group commit is recorded beside it and never
+taken for the head, and the host may name none before it builds a group. The
+command then answers with `status` `dispatched`, `checkStatus` `queued` and
+`ok` false. A lost or unconfirmed receipt leaves the merge `uncertain`.
 
 `changes observe --operation <merge-id>` records the queue's outcome against the
-same merge, each time in a new observation of the pull request and its place:
+same merge, each time in a new observation that reads the change's place in the
+queue first and its pull request after it, so a merge between the two reads
+shows as merged, never as an open change out of the queue:
 
-- merged: the merge is `observed-success` at its merge commit, the commit the
-  queue's group tested and moved the branch to, and its target run is observed
-  as below;
+- merged: the merge is `observed-success` at its merge commit, and its target
+  run is observed as below;
 - still queued at the pinned head: the merge stays `dispatched`, with
   `checkStatus` `queued`; observe it again later;
-- failed, when the queue found the change cannot merge, as on failed checks or a
-  conflict, or removed, when it left the queue unmerged otherwise, once its place
-  there was confirmed: the merge is a `known-failure` whose summary says which,
-  with the host's reason token; a retry needs `--reconciliation`, fresh checks
-  and a scanned push, and enqueues the same pinned head again;
-- anything else, such as a change out of the queue whose place there was never
-  confirmed: the merge stays `uncertain`. It is never retried until a later
+- not merged, on the host's positive evidence about this attempt: the entry
+  still listed as unable to merge at the pinned head, a removal from the queue
+  that the host dates after this attempt's dispatch (`failed` for a failure such
+  as of checks or a conflict, `removed` otherwise), the pull request closed, or
+  its head moved from the pinned head. The merge is a `known-failure` whose
+  summary says which, with the host's reason token. A retry needs
+  `--reconciliation`, fresh checks and a scanned push, and enqueues the same
+  pinned head again; if the pull request reads merged at the pinned head by
+  then, the retry records that merge instead, sending nothing;
+- anything else, such as a change out of the queue with no removal dated after
+  its dispatch while its pull request does not yet read merged, or with only an
+  earlier removal: the merge is `uncertain`. It is never retried until a later
   observation settles it or the operator's `--cancel` reconciles it, as for any
   uncertain effect.
 
@@ -214,12 +225,25 @@ branch no longer requires one; push a new head to merge it directly.
 For a merge the queue made, the target observation reads the queue's runs of
 exactly the merge commit (event `merge_group`, on the queue's read-only branch
 for the target) as well as the branch's push runs of that commit, and never a
-newer commit's run. A check the push run skipped counts when a check of the same
-name passed at the same commit, as when Vericairn's own push run skips a commit
-its queue run passed. Every other check must pass, and every required check must
-be present. `operator record` waits for the queue within `--wait-seconds` as it
-waits for checks, and its unfinished action shows the stage `merge-queued` while
-the change waits.
+newer commit's run. A queue that merges changes in groups runs only a group's
+head: a merge commit inside a group has no run of its own. Its target
+observation then reads the runs of the group that landed it, by that group's
+exact head commit, recorded as `queueGroup`: GitHub's provider finds the merge
+queue's push to the branch whose range holds the merge commit, among the latest
+twenty, and takes the commit after it. When that group cannot be established,
+the commit's own empty inventory stands and the target checks stay pending;
+observe again, or settle the target run on the host. A check the push run
+skipped counts when a check of the same name passed at the same commit, as when
+Vericairn's own push run skips a commit its queue run passed. Every other check
+must pass, and every required check must be present.
+
+`operator record` waits for the queue within `--wait-seconds` as it waits for
+checks, observing a change whose outcome is still unconfirmed again in the same
+way. Its unfinished action shows the stage `merge-queued` once the change's
+place in the queue is confirmed, and `merge-uncertain` before then. When a
+queued merge stops unmerged or unconfirmed, its next step names `changes
+observe --operation <merge-id>`, and a rerun with `--reconciliation` observes
+the queued merge again before any retry.
 
 ## Interruption and retry
 

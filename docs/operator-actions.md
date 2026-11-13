@@ -328,7 +328,7 @@ vericairn operator unfinished --finish --by <operator-id>
 The first command reads the clone's checkpoint and records and writes nothing. It shows the action's
 record id, type and subject, branch, head, pull request and stage (`prepared`, `recorded`, `committed`,
 `pushed`, `opened`, `merge-failed`, `merge-uncertain`, from 0.9.3 `merge-queued` while the change waits
-in a required merge queue, or `merged`), the merge commit and latest target
+in a required merge queue with its place there confirmed, or `merged`), the merge commit and latest target
 check verdict, and what finishing it needs. For an action that has not merged, that is the original
 `operator record` command, to be run with the body of its stored record (`vericairn records show
 <record-id>`) and, after a known failure, `--reconciliation`. `--finish` finishes a merged action once

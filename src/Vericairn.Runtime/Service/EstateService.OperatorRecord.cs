@@ -256,12 +256,25 @@ public sealed partial class EstateService
 
             // A confirmed merge is only observed again. Neither waiting nor a rerun can send that mutation a second time.
             RecordEnvelope? priorMerge = Prior("change-merge", pullRequest);
-            if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is not ("known-failure" or "canceled"))
+            // A queued merge settled unmerged is observed again before any retry: the queue may have merged it since (CODE-71).
+            bool queuedAgain = false;
+            if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is "known-failure" or "canceled" && QueuedMerge(priorMerge))
             {
                 stage = "merge";
                 Guard();
                 change = ChangesObserve(new(priorMerge.Id, request.By));
-                if (change.Status != "observed-success" && change.CheckStatus != "queued") return Stopped(change);
+                queuedAgain = change.Status == "observed-success" || change.CheckStatus == "queued";
+            }
+            if (queuedAgain)
+            {
+                // The queued merge observed again is merged or back in the queue: nothing is checked or merged again.
+            }
+            else if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is not ("known-failure" or "canceled"))
+            {
+                stage = "merge";
+                Guard();
+                change = ChangesObserve(new(priorMerge.Id, request.By));
+                if (change.Status != "observed-success" && change.CheckStatus != "queued" && !QueuedUnsettled(change)) return Stopped(change);
             }
             else
             {
@@ -284,13 +297,16 @@ public sealed partial class EstateService
                 Guard();
                 change = Step("change-merge", pullRequest, reconciliation => ChangesMerge(new(checkpoint.Product, pullRequest, head, request.By, reconciliation)));
             }
-            // Where the target branch requires a merge queue, the merge waits there; its place is observed again until the queue settles it (CODE-71).
+            // Where the target branch requires a merge queue, the merge waits there; its place is observed again until the queue settles it,
+            // as is a queued merge whose outcome is not yet confirmed, such as one just out of the queue whose pull request does not yet
+            // read merged (CODE-71).
             var queueWatch = Stopwatch.StartNew();
-            while (!change.Ok && change.CheckStatus == "queued" && change.Operation is not null)
+            while (!change.Ok && (change.CheckStatus == "queued" || QueuedUnsettled(change)) && change.Operation is not null)
             {
-                if (!Pause(queueWatch)) return Answer("waiting", change.Message, false, "Wait for the merge queue, then " + resume, change);
+                if (!Pause(queueWatch))
+                    return change.CheckStatus == "queued" ? Answer("waiting", change.Message, false, "Wait for the merge queue, then " + resume, change) : Stopped(change);
                 Guard();
-                ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "pull-request"), "the change still waits in the merge queue, so it is observed again");
+                ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "pull-request"), "the change is still settling in the merge queue, so it is observed again");
                 change = ChangesObserve(new(change.Operation.Id, request.By));
             }
             stage = "target-checks";
@@ -370,9 +386,19 @@ public sealed partial class EstateService
         OperatorRecordResponse Stopped(ChangeResponse latest)
         {
             string next = latest.Operation is null ? "Resolve the refusal and " + resume
+                : latest.Status is "known-failure" or "canceled" && QueuedMergeOperation(latest.Operation)
+                    ? $"Observe the queued merge with vericairn changes observe --operation {latest.Operation.Id} --by {request.By}, which records it if the queue merged it since; otherwise resolve the known failure, then {resume} --reconciliation <explanation>"
                 : latest.Status is "known-failure" or "canceled" ? "Resolve the known failure, then " + resume + " --reconciliation <explanation>"
                 : $"vericairn changes observe --operation {latest.Operation.Id} --by {request.By}; after reconciling the original effect, {resume}";
             return Answer("stopped", latest.Message, false, next, latest);
+        }
+
+        // A queued merge whose outcome is still unconfirmed: recorded uncertain, not yet failed or merged.
+        bool QueuedUnsettled(ChangeResponse latest) => latest.Status == "uncertain" && latest.Operation is not null && QueuedMergeOperation(latest.Operation);
+
+        bool QueuedMergeOperation(RecordWritten operation)
+        {
+            lock (gate) return session.Load().ById.TryGetValue(operation.Id, out RecordEnvelope? record) && EstateModel.BodyString(record, "action") == "change-merge" && QueuedMerge(record);
         }
 
         // This action's own receipts, those of the finished action it follows, whose receipts may still be uncommitted, and the earlier
@@ -586,7 +612,7 @@ public sealed partial class EstateService
         string? status = merge is null ? null : EstateModel.BodyString(merge, "status");
         string stage = push is null || EstateModel.BodyString(push, "status") != "observed-success" ? "committed" : pull is null ? "pushed"
             : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed"
-            : status == "dispatched" && QueuedMerge(merge) ? "merge-queued" : "merge-uncertain";
+            : status == "dispatched" && QueuedMerge(merge) && QueuedConfirmed(model, merge, checkpoint.Head) ? "merge-queued" : "merge-uncertain";
         if (stage != "merged") return new(identity, checkpoint, record, stage, pull, merge);
         HashSet<string> revisions = model.Chain(merge!).ToHashSet(StringComparer.Ordinal);
         RecordEnvelope? target = model.Current("operation").Where(o => EstateModel.BodyString(o, "action") == "change-observe"
@@ -600,6 +626,11 @@ public sealed partial class EstateService
             && ChangeText(o.Body.GetProperty("target"), field) == value).OrderBy(o => o.At, StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
+    // The commit whose runs judge a queued merge's target observation: the group head that landed its merge commit, when the observation
+    // names one, else the merge commit itself (CODE-71).
+    private static string? QueueGate(JsonElement observed, string? commit) =>
+        ChangeText(observed, "queueGroup") is string group && Patterns.Commit.IsMatch(group) ? group : commit;
+
     // A recorded target-run observation's verdict, by the rules the merge observation applies: passed, failed, pending or uncertain.
     private static string TargetVerdict(RecordEnvelope merge, RecordEnvelope observation)
     {
@@ -612,10 +643,12 @@ public sealed partial class EstateService
             ? names.EnumerateArray().Select(n => n.GetString()).OfType<string>().ToArray() : [];
         bool exact = commit is not null && ChangeText(observed, "observedHead") == commit && ChangeText(observed, "observedTarget") == ChangeText(merged, "target")
             && ChangeText(observed, "complete") == "true";
-        if (exact && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(commit!, required, checks, true) : ChangeGate.Refusals(commit!, required, checks, true)).Count == 0) return "passed";
-        if (exact && checks.Any(c => c.Head == commit && c.Status == "completed"
+        // A commit a merge queue landed inside a group is judged by the runs of that group's head (CODE-71).
+        string? gate = QueuedMerge(merge) ? QueueGate(observed, commit) : commit;
+        if (exact && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(gate!, required, checks, true) : ChangeGate.Refusals(gate!, required, checks, true)).Count == 0) return "passed";
+        if (exact && checks.Any(c => c.Head == gate && c.Status == "completed"
             && c.Conclusion is "failure" or "cancelled" or "timed_out" or "action_required" or "stale" or "startup_failure")) return "failed";
-        return !exact || checks.Any(c => c.Head != commit || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
+        return !exact || checks.Any(c => c.Head != gate || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
     }
 
     // Names the action by its record id, type and subject, and where it stopped.
@@ -668,6 +701,8 @@ public sealed partial class EstateService
             ? OperatorResume(new(type, by, default, progress.Subject, progress.Record?.Supersedes, progress.Checkpoint.Product))
             : "the original vericairn operator record command";
         string body = progress.Record is null ? "its original JSON body" : $"the body of its stored record (vericairn records show {progress.Checkpoint.Id})";
+        if (progress.Stage == "merge-failed" && progress.Merge is not null && QueuedMerge(progress.Merge))
+            return $"Observe the queued merge with vericairn changes observe --operation {progress.Merge.Id} --by {by}, which records it if the queue merged it since; otherwise resolve the failure, then rerun {resume} with {body} and --reconciliation <explanation>, which observes it again first.";
         return progress.Stage == "merge-failed"
             ? $"Resolve the merge failure, then rerun {resume} with {body} and --reconciliation <explanation>."
             : $"Rerun {resume} with {body} to resume it.";
@@ -753,7 +788,7 @@ public sealed partial class EstateService
             && ChangeText(observed, "operation") == merge.Id && ChangeText(observed, "observation") == "target-run"
             && ChangeText(observed, "complete") == "true" && ChangeText(observed, "observedHead") == completed.MergeCommit
             && ChangeText(observed, "observedTarget") == configuration.Target
-            && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(completed.MergeCommit, configuration.Required,
+            && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(QueueGate(observed, completed.MergeCommit)!, configuration.Required,
                 JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)
             : ChangeGate.Refusals(completed.MergeCommit, configuration.Required,
                 JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)).Count == 0;

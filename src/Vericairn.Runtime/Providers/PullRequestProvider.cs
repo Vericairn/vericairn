@@ -11,7 +11,14 @@ public sealed record PullRequestObservation(string Number, string Branch, string
     string? MergeCommit, IReadOnlyList<ChangeCheck> Checks, bool Complete = true);
 
 /// <summary>The target branch's push runs at the exact merge commit, including their jobs.</summary>
-public sealed record TargetObservation(string Branch, string Head, IReadOnlyList<ChangeCheck> Checks, bool Complete = true);
+public sealed record TargetObservation(string Branch, string Head, IReadOnlyList<ChangeCheck> Checks, bool Complete = true)
+{
+    /// <summary>
+    /// For a commit a merge queue landed inside a group of changes without a run of its own: the head commit of the group that
+    /// landed it, the commit the queue moved the branch to, whose runs <see cref="Checks"/> then are (CODE-71). Null otherwise.
+    /// </summary>
+    public string? Group { get; init; }
+}
 
 /// <summary>The provider's receipt. Missing identities remain uncertain until observed.</summary>
 public sealed record ChangeReceipt(string? PullRequest = null, string? MergeCommit = null);
@@ -23,16 +30,22 @@ public sealed record ChangeReceipt(string? PullRequest = null, string? MergeComm
 /// <param name="Required">The target branch requires merging through its merge queue.</param>
 /// <param name="State">
 /// <c>absent</c> when the pull request is not in the queue and the host reports no removal; <c>queued</c> while it waits or its group
-/// runs; <c>failed</c> when the queue found it cannot merge, as on failed checks or a conflict; <c>removed</c> when it left the queue
-/// unmerged otherwise.
+/// runs; <c>unmergeable</c> while it is still listed but the queue found it cannot merge; <c>failed</c> when the queue took it out for a
+/// failure, as of checks or a conflict; <c>removed</c> when it left the queue unmerged otherwise.
 /// </param>
-/// <param name="Head">The pull-request head its queue entry holds, while it has one.</param>
+/// <param name="Head">The pull request's own head commit, read together with its place in the queue; never the queue's group commit.</param>
 /// <param name="Reason">The host's reason for its latest removal from the queue, as a short upper-case token, when the host gives one.</param>
 /// <param name="Complete">False when the host could not be observed completely.</param>
 public sealed record MergeQueueObservation(bool Required, string State, string? Head = null, string? Reason = null, bool Complete = true)
 {
     /// <summary>The states a pull request can have in a merge queue.</summary>
-    public static readonly IReadOnlyList<string> States = ["absent", "queued", "failed", "removed"];
+    public static readonly IReadOnlyList<string> States = ["absent", "queued", "unmergeable", "failed", "removed"];
+
+    /// <summary>The head commit of the merge group the queue built for the pull request, when it has built one; it is not the pull request's head.</summary>
+    public string? Group { get; init; }
+
+    /// <summary>When the host recorded the latest removal from the queue that <see cref="State"/> reports, when it says.</summary>
+    public DateTimeOffset? RemovedAt { get; init; }
 }
 
 /// <summary>
@@ -80,9 +93,10 @@ public interface IPullRequestProvider
         throw new ProviderRefusedException("This pull-request provider cannot enqueue into a merge queue; nothing was requested.");
 
     /// <summary>
-    /// Observes the runs of exactly the commit a merge queue moved the target branch to: the queue's own runs of that commit (event
-    /// merge_group) as well as the branch's push runs, never a newer commit's run. A provider that does not override this reads the
-    /// push runs alone.
+    /// Observes the runs of exactly the commit a merge queue merged: the queue's own runs of that commit (event merge_group) as well as
+    /// the branch's push runs, never a newer commit's run. A commit the queue landed inside a group has no run of its own; then the
+    /// runs are those of the group's head commit, the commit the queue moved the branch to, named as <see cref="TargetObservation.Group"/>,
+    /// or none when that group cannot be established. A provider that does not override this reads the push runs alone.
     /// </summary>
     TargetObservation ObserveQueuedTarget(string destination, string branch, string commit) => ObserveTarget(destination, branch, commit);
 }
@@ -184,7 +198,11 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
     /// <inheritdoc />
     public MergeQueueObservation ObserveQueue(string destination, string number)
     {
-        lock (gate) return queue.GetValueOrDefault(destination + "#" + number) is { } place ? place with { Required = QueueRequired } : new(QueueRequired, "absent");
+        lock (gate)
+        {
+            string? head = pulls.GetValueOrDefault(destination + "#" + number)?.Head;
+            return queue.GetValueOrDefault(destination + "#" + number) is { } place ? place with { Required = QueueRequired, Head = head } : new(QueueRequired, "absent", head);
+        }
     }
 
     /// <inheritdoc />
@@ -196,24 +214,27 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
             if (!QueueRequired) throw new ProviderRefusedException("The target branch has no merge queue; nothing was enqueued.");
             if (pull is null || pull.State != "open" || pull.Head != head)
                 throw new ProviderRefusedException("The pull request is absent, closed or its head moved.");
-            if (queue.GetValueOrDefault(destination + "#" + number) is { State: "queued" })
+            if (queue.GetValueOrDefault(destination + "#" + number) is { State: "queued" or "unmergeable" })
                 throw new ProviderRefusedException("The pull request is already in the merge queue.");
-            queue[destination + "#" + number] = new(true, "queued", head);
+            // As a host reports it, the entry's group commit is the commit the queue would move the branch to, not the pull request's head.
+            queue[destination + "#" + number] = new(true, "queued", head) { Group = MergeCommit };
             Effects++;
             return new(number);
         }
     }
 
     /// <summary>
-    /// Settles a queued pull request as its merge queue would (CODE-71): <c>merged</c> merges it at <see cref="MergeCommit"/>, the commit
-    /// the queue's group tested; <c>failed</c> or <c>removed</c> takes it out of the queue unmerged, with an optional host reason.
+    /// Settles a queued pull request as its merge queue would (CODE-71): <c>merged</c> merges it at <see cref="MergeCommit"/>;
+    /// <c>unmergeable</c> keeps it listed as unable to merge; <c>failed</c> or <c>removed</c> takes it out unmerged, with an optional host
+    /// reason, the removal dated <paramref name="at"/> or now; <c>absent</c> takes it out with no removal reported, as a host shows a
+    /// change it has just merged before its pull request reads merged.
     /// </summary>
-    public void SettleQueue(string destination, string number, string outcome, string? reason = null)
+    public void SettleQueue(string destination, string number, string outcome, string? reason = null, DateTimeOffset? at = null)
     {
         lock (gate)
         {
             string key = destination + "#" + number;
-            if (queue.GetValueOrDefault(key) is not { State: "queued" or "failed" }) throw new InvalidOperationException("The pull request is not in the merge queue.");
+            if (queue.GetValueOrDefault(key) is not { State: "queued" or "unmergeable" } place) throw new InvalidOperationException("The pull request is not in the merge queue.");
             PullRequestObservation pull = pulls[key];
             switch (outcome)
             {
@@ -222,13 +243,16 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
                     queue.Remove(key);
                     break;
                 case "unmergeable":
-                    queue[key] = new(true, "failed", pull.Head);
+                    queue[key] = place with { State = "unmergeable" };
                     break;
                 case "failed" or "removed":
-                    queue[key] = new(true, outcome, null, reason);
+                    queue[key] = new(true, outcome, null, reason) { RemovedAt = at ?? DateTimeOffset.UtcNow };
+                    break;
+                case "absent":
+                    queue.Remove(key);
                     break;
                 default:
-                    throw new ArgumentException("A merge queue merges, finds unmergeable, fails or removes a pull request.", nameof(outcome));
+                    throw new ArgumentException("A merge queue merges, finds unmergeable, fails or removes a pull request, or drops it unreported.", nameof(outcome));
             }
         }
     }

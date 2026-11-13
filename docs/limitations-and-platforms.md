@@ -732,9 +732,12 @@ and with it the merge; there is no per-estate allowance, so a change refused for
 not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
 check successful at the expected head; forks are unsupported. From 0.9.3 a required merge
 queue is entered with the pinned head, and its outcome is read from the pull request and
-its place in the queue; a change that leaves the queue before its place was observed
-leaves the merge uncertain until it is reconciled, and the GitHub provider tells a failure
-from a removal by the host's latest removal reason.
+its place in the queue. A change out of the queue with no removal the host dates after
+its dispatch leaves the merge uncertain until it is reconciled; the GitHub provider tells
+a failure from a removal by the host's latest removal reason, compared with a local
+dispatch time, so a clock far from the host's leaves more merges uncertain. A merge commit
+inside a queue's group is judged by the group that landed it only when the provider finds
+that group among the queue's latest twenty pushes; otherwise its target checks stay pending.
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
 or publication authority is inferred from a check result.

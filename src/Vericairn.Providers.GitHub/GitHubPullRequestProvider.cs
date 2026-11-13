@@ -29,13 +29,18 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
          "Observes once per request; pending runs require another observation. An unconfirmed merge remains uncertain.",
          "Where the target branch requires a merge queue, enqueues the pinned head and observes the queue's outcome and its merge_group run of the merge commit."], Locations: ["github"]);
 
-    // The pull request's node, head, and its target branch's merge queue with the pull request's entry in it.
+    // The pull request's node and own head, and its target branch's merge queue with the pull request's entry in it. The entry's head
+    // commit is the commit of the merge group the queue built, not the pull request's head, and is null before a group is built.
     private const string QueueQuery = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number)"
         + "{id number headRefOid isMergeQueueEnabled mergeQueueEntry{state headCommit{oid}}}}}";
 
-    // The pull request's latest removal from a merge queue, read only when it has no entry; an unreadable answer gives no reason.
+    // The pull request's latest removal from a merge queue, with when it happened, read only when it has no entry; an unreadable
+    // answer gives no removal.
     private const string RemovalQuery = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number)"
-        + "{timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{reason}}}}}}";
+        + "{timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{...on RemovedFromMergeQueueEvent{createdAt reason}}}}}}";
+
+    // The pushes a merge queue made to a branch, newest first, read to find the group that landed a commit; at most this many are read.
+    private const int LandingPushes = 20;
 
     // Enqueues the pull request only while its head is the expected one.
     private const string EnqueueMutation = "mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{state}}}";
@@ -157,22 +162,31 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
         {
             JsonElement pull = PullRequestNode(document);
             bool required = pull.GetProperty("isMergeQueueEnabled").GetBoolean();
+            // The place is the pull request's own: its head is read with the entry, never taken from the entry's group commit.
+            string head = Text(pull, "headRefOid");
+            Commit(head);
             JsonElement entry = pull.GetProperty("mergeQueueEntry");
             if (entry.ValueKind == JsonValueKind.Object)
             {
-                string head = entry.GetProperty("headCommit").GetProperty("oid").GetString() ?? string.Empty;
-                Commit(head);
+                string? group = null;
+                if (entry.TryGetProperty("headCommit", out JsonElement built) && built.ValueKind == JsonValueKind.Object)
+                {
+                    group = built.GetProperty("oid").GetString() ?? string.Empty;
+                    Commit(group);
+                }
+                else if (built.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)) throw new InvalidOperationException("The merge group commit is unreadable.");
                 return Text(entry, "state") switch
                 {
-                    "QUEUED" or "AWAITING_CHECKS" or "MERGEABLE" or "LOCKED" => new(required, "queued", head),
-                    "UNMERGEABLE" => new(required, "failed", head),
-                    _ => new(required, "queued", head, Complete: false),
+                    "QUEUED" or "AWAITING_CHECKS" or "MERGEABLE" or "LOCKED" => new(required, "queued", head) { Group = group },
+                    "UNMERGEABLE" => new(required, "unmergeable", head) { Group = group },
+                    _ => new(required, "queued", head, Complete: false) { Group = group },
                 };
             }
             if (entry.ValueKind != JsonValueKind.Null) throw new InvalidOperationException("The merge queue entry is unreadable.");
-            if (!required) return new(false, "absent");
-            string? reason = Removal(destination, n);
-            return reason is null ? new(required, "absent") : new(required, FailureReasons.Contains(reason) ? "failed" : "removed", Reason: reason);
+            if (!required) return new(false, "absent", head);
+            (string Reason, DateTimeOffset? At)? removal = Removal(destination, n);
+            return removal is not { } removed ? new(required, "absent", head)
+                : new(required, FailureReasons.Contains(removed.Reason) ? "failed" : "removed", head, removed.Reason) { RemovedAt = removed.At };
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
@@ -211,6 +225,18 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
     /// <inheritdoc />
     public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
     {
+        TargetObservation exact = QueuedRuns(destination, branch, commit);
+        if (!exact.Complete || exact.Checks.Count > 0) return exact;
+        // A commit landed inside a group has no run of its own: the runs that count are those of the group that landed it, read by that
+        // group's exact head commit. When that group cannot be established, the commit's own empty inventory stands, and stays pending.
+        if (LandingGroup(destination, branch, commit) is not string group || group == commit) return exact;
+        TargetObservation landed = QueuedRuns(destination, branch, group);
+        return new(branch, commit, landed.Checks, landed.Complete) { Group = group };
+    }
+
+    // The branch's push runs and the queue's merge_group runs of exactly one commit, with their jobs.
+    private TargetObservation QueuedRuns(string destination, string branch, string commit)
+    {
         TargetObservation pushed = ObserveTarget(destination, branch, commit);
         if (!pushed.Complete) return pushed;
         List<ChangeCheck> checks = [.. pushed.Checks];
@@ -236,21 +262,60 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
         }
     }
 
-    // The latest removal's reason as an upper-case token, or null when there is none or it cannot be read.
-    private string? Removal(string destination, long number)
+    // The latest removal's reason as an upper-case token, with when the host recorded it, or null when there is none or it cannot be read.
+    private (string Reason, DateTimeOffset? At)? Removal(string destination, long number)
     {
         try
         {
             using JsonDocument document = Read(Graph(destination, number, RemovalQuery));
             JsonElement nodes = PullRequestNode(document).GetProperty("timelineItems").GetProperty("nodes");
             if (nodes.ValueKind != JsonValueKind.Array || nodes.GetArrayLength() == 0) return null;
-            string reason = Text(nodes[nodes.GetArrayLength() - 1], "reason").Trim().ToUpperInvariant().Replace(' ', '_').Replace('-', '_');
-            return reason.Length is > 0 and <= 64 && reason.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && char.IsAsciiLetter(reason[0]) ? reason : "UNKNOWN";
+            JsonElement latest = nodes[nodes.GetArrayLength() - 1];
+            string reason = Text(latest, "reason").Trim().ToUpperInvariant().Replace(' ', '_').Replace('-', '_');
+            DateTimeOffset? at = DateTimeOffset.TryParse(Text(latest, "createdAt"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset parsed)
+                ? parsed : null;
+            return (reason.Length is > 0 and <= 64 && reason.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && char.IsAsciiLetter(reason[0]) ? reason : "UNKNOWN", at);
         }
         catch (Exception exception) when (exception is ProviderRefusedException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
             return null;
         }
+    }
+
+    // The head commit of the group that landed a commit on the branch: the merge queue's push to the branch whose range holds it, the
+    // commit after that push being the group's head. Null when no such push is found among the latest ones or any read fails.
+    private string? LandingGroup(string destination, string branch, string commit)
+    {
+        try
+        {
+            using JsonDocument pushes = Read("api", $"repos/{destination}/activity?ref={Uri.EscapeDataString("refs/heads/" + branch)}&activity_type=merge_queue_merge&per_page={LandingPushes}");
+            if (pushes.RootElement.ValueKind != JsonValueKind.Array) return null;
+            foreach (JsonElement push in pushes.RootElement.EnumerateArray().Take(LandingPushes))
+            {
+                string before = Text(push, "before"), after = Text(push, "after");
+                if (Text(push, "ref") != "refs/heads/" + branch || !Patterns.Commit.IsMatch(before) || !Patterns.Commit.IsMatch(after)) return null;
+                if (after == commit) return after;
+                if (Contains(destination, after, commit) && !Contains(destination, before, commit)) return after;
+            }
+            return null;
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
+        {
+            return null;
+        }
+    }
+
+    // Whether a commit's history holds another commit, as the host compares them.
+    private bool Contains(string destination, string head, string commit)
+    {
+        ProcessResult result = Invoke(["api", $"repos/{destination}/compare/{commit}...{head}", "--jq", ".status"]);
+        if (result.Outcome != ProcessOutcome.Exited || result.ExitCode != 0) throw new ProviderRefusedException("The host could not compare the commits.");
+        return result.StandardOutput.Trim() switch
+        {
+            "ahead" or "identical" => true,
+            "behind" or "diverged" => false,
+            _ => throw new ProviderRefusedException("The host's comparison was unreadable."),
+        };
     }
 
     private static string[] Graph(string destination, long number, string query)
