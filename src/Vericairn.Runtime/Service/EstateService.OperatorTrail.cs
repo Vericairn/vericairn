@@ -99,13 +99,13 @@ public sealed partial class EstateService
     }
 
     // The settled trails of this clone's completed actions, each with the paths the working tree still holds untracked; empty when there
-    // are none or the adapter cannot say which are untracked. Caller holds the gate.
-    private List<(OperatorCheckpoint Checkpoint, IReadOnlyList<string> Untracked)> UntrackedTrailsLocked(IRecordCommitAdapter adapter)
+    // are none or the adapter cannot say which are untracked. It reads the model the caller already loaded, never loading another, since a
+    // load reads and judges every record. Caller holds the gate.
+    private List<(OperatorCheckpoint Checkpoint, IReadOnlyList<string> Untracked)> UntrackedTrailsLocked(IRecordCommitAdapter adapter, EstateModel model)
     {
         List<(OperatorCheckpoint, IReadOnlyList<string>)> trails = [];
         List<(string Identity, OperatorCheckpoint Checkpoint)> completed = CompletedActionsLocked();
         if (completed.Count == 0) return trails;
-        EstateModel model = session.Load();
         var index = new TrailIndex(model);
         List<(OperatorCheckpoint Checkpoint, HashSet<string> Paths)> settled = [.. completed.Select(c => (c.Checkpoint, OperatorTrail(model, index, c.Checkpoint))).Where(t => t.Item2.Count > 0)];
         HashSet<string> all = [.. settled.SelectMany(t => t.Paths)];
@@ -123,9 +123,8 @@ public sealed partial class EstateService
     private Dictionary<string, string> UncommittedTrailLocked(IRecordCommitAdapter adapter)
     {
         var carried = new Dictionary<string, string>(StringComparer.Ordinal);
-        List<(OperatorCheckpoint Checkpoint, IReadOnlyList<string> Untracked)> trails = UntrackedTrailsLocked(adapter);
+        List<(OperatorCheckpoint Checkpoint, IReadOnlyList<string> Untracked)> trails = UntrackedTrailsLocked(adapter, session.Load());
         if (trails.Count == 0) return carried;
-        session.Load();
         foreach (string path in trails.SelectMany(t => t.Untracked).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
         {
             RecordFile file = session.LoadedFile(path) ?? session.Files().Single(f => f.Path == path);
@@ -143,7 +142,7 @@ public sealed partial class EstateService
     {
         var findings = new FindingList();
         if (session.Profile != "repository-synced" || Providers.RecordCommitAdapter is not { } adapter) return findings;
-        foreach ((OperatorCheckpoint checkpoint, IReadOnlyList<string> untracked) in UntrackedTrailsLocked(adapter))
+        foreach ((OperatorCheckpoint checkpoint, IReadOnlyList<string> untracked) in UntrackedTrailsLocked(adapter, model))
         {
             RecordEnvelope? record = model.ById.TryGetValue(checkpoint.Id, out RecordEnvelope? found) && found.ComputedHash == checkpoint.Hash ? found : null;
             string type = record?.Type ?? checkpoint.Type ?? "record";
