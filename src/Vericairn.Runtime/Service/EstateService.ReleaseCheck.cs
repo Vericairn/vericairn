@@ -26,6 +26,17 @@ public sealed partial class EstateService
         return findings;
     }
 
+    // The identity of the author's admitted device whose key this machine holds, which would sign the draft, found without invoking
+    // Sign or presence (FIX-130); under device signing nothing on this machine signs. Release evidence is written only when one would.
+    // A held key is found by its presence in the key store, so a key that is held but fails to sign is not detected here.
+    private (string? Device, string? Refusal) HeldSigner(RecordDraft draft, EstateModel model)
+    {
+        if (requestDevice.Value is { Closed: false, Signing: not null })
+            return (null, "A device-signed request is signed by its own device only; nothing on the runtime's machine signs its record.");
+        string? refusal = ResolveSigner(model, draft, out IRecordSigner? signer);
+        return (refusal is null ? signer?.DeviceId : null, refusal);
+    }
+
     // The proposal exists only in memory. Signature availability is checked without invoking Sign or presence.
     // Actual writes still run AuthorLocked and the complete signed-record validation under the same gate.
     private List<FindingDto> CheckReleaseRecord(RecordDraft draft, EstateModel model)

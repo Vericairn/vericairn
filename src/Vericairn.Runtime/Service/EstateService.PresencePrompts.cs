@@ -214,7 +214,10 @@ public sealed partial class EstateService
     internal static PresenceSignature OperationSignature(string? action, string? status, string key, string? observation = null) =>
         new("operation", key, OperationPurpose(action, status, observation));
 
-    /// <summary>A trial signature, made only to prove the device can still sign, which is never stored.</summary>
+    /// <summary>
+    /// A trial signature, made only to prove the device can still sign, which is never stored. It belongs only where no signed record
+    /// precedes an effect: where one does, that record's signature is the proof, and no release step makes a trial (FIX-130).
+    /// </summary>
     internal static PresenceSignature TrialSignature(string key, string why) => new("operation", key, PresenceCounter.TrialPurpose + why);
 
     private static string OperationPurpose(string? action, string? status, string? observation) => (action, status) switch
