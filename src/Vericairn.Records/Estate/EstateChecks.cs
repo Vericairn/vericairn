@@ -37,7 +37,7 @@ public static partial class EstateChecks
         foreach (string entry in entries)
         {
             string name = Path.GetFileName(entry);
-            if (!EstateLayout.AllowedTopLevel.Contains(name))
+            if (!EstateLayout.AllowedTopLevel.Contains(name) && !(EstateLayout.OwnerInstructionFiles.Contains(name) && File.Exists(entry)))
             {
                 findings.Error("layout.unexpected", name, "Not an allowed top-level entry of an estate repository. Scratch, builds and tooling live outside the repository.");
             }

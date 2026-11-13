@@ -166,6 +166,53 @@ public class EstateChecksTests
     }
 
     [Fact]
+    public void TheOwnersAgentInstructionFilesAreAllowedAtTheRootAndScannedAsText()
+    {
+        // CODE-70 (decision 01M75VAP1SRTZGN118WNNWG8SP, issue #346): agent tools look for their instructions where they start.
+        using var estate = new TestEstate();
+        estate.WriteFile("AGENTS.md", "# Working in this estate\n\nRead [the generated orientation](docs/vericairn-orientation/AGENTS.md).\n");
+        estate.WriteFile("CLAUDE.md", "Read `AGENTS.md`.\n");
+        estate.WriteFile("GEMINI.md", "Read `AGENTS.md`.\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Assert.False(checks.HasErrors, string.Join("\n", checks));
+        Assert.Empty(checks);
+
+        // Owner-written, they are still checked as README.md is.
+        File.WriteAllBytes(Path.Combine(estate.Root, "AGENTS.md"), [0xff]);
+        estate.WriteFile("GEMINI.md", "Read `AGENTS.md`.\r\n");
+        checks = EstateChecks.Run(estate.Load());
+        Assert.Contains(checks, f => f.Code == "layout.encoding" && f.Location == "AGENTS.md");
+        Assert.Contains(checks, f => f.Code == "layout.line-endings" && f.Location == "GEMINI.md");
+        Assert.DoesNotContain(checks, f => f.Code == "layout.unexpected");
+    }
+
+    [Theory]
+    [InlineData("CURRENT.md")]
+    [InlineData("AGENTS.override.md")]
+    [InlineData("agents.md")]
+    [InlineData("Claude.md")]
+    [InlineData("AGENTS.txt")]
+    [InlineData("AGENTS")]
+    public void EveryOtherRootEntryStaysUnexpected(string name)
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile(name, "Instructions.\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Assert.Contains(checks, f => f.Code == "layout.unexpected" && f.Location == name);
+    }
+
+    [Fact]
+    public void AnInstructionFileNameIsAllowedOnlyForAFileAtTheRoot()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile("CLAUDE.md/notes.md", "A directory, not the owner's file.\n");
+        estate.WriteFile("docs/AGENTS.md", "Owner instructions kept in docs, as before.\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Finding unexpected = Assert.Single(checks, f => f.Code == "layout.unexpected");
+        Assert.Equal("CLAUDE.md", unexpected.Location);
+    }
+
+    [Fact]
     public void AMailmapAtTheRootIsGitMetadataBesideGitattributes()
     {
         // A .mailmap shows one author in git's own views of the history; like .gitattributes it is allowed at the root and scanned as text.

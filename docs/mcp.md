@@ -350,6 +350,42 @@ dotnet vc --estate <estate root> mcp serve --as <principal id>
 
 Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp serve --as <principal id>`. Other harnesses use executable `dotnet` with `vc` as the first argument, followed by the arguments above. The self-contained archives still use executable `vericairn` with no `vc` argument. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`). Generic worker dispatch is refused because it cannot establish a complete inventory. Diagnostics go to standard error; the output stream carries only protocol messages. `dotnet vc mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `dotnet vc status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
 
+## Owner instructions at the estate root (0.9.3)
+
+Agent tools look for their instructions in the repository they start in. From 0.9.3 an estate's root may hold the
+owner's own `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, each a file of exactly that name. They are owner-written: no estate
+operation reads them and Vericairn never writes them. `estate check` scans them as text, as it scans `README.md`, and
+every other unexpected entry at the root, a differently cased `agents.md` or an `AGENTS.override.md` among them, stays
+`layout.unexpected`.
+
+`mcp orientation` writes its generated files only into the directory `--out` names and refuses an estate's root, any
+directory holding `estate/manifest.json` however the path names it, so the owner's files there are never overwritten.
+`--check` compares the copies in a directory byte for byte, as before. The generated orientation keeps a directory of
+its own, and the owner's files point to it:
+
+```sh
+vericairn mcp orientation --out docs/vericairn-orientation
+vericairn mcp orientation --out docs/vericairn-orientation --check
+```
+
+The owner's `AGENTS.md` at the root, for example:
+
+```markdown
+# Working in this estate
+
+These are the owner's instructions for agents working in this estate. Read them first, then read
+[the generated orientation](docs/vericairn-orientation/AGENTS.md), which says how the estate works
+and how to reach it. Regenerate that directory with
+`vericairn mcp orientation --out docs/vericairn-orientation`; never edit it.
+
+- The owner's own instructions follow here.
+```
+
+The owner's `CLAUDE.md` and `GEMINI.md` at the root can say only "Read `AGENTS.md`." An agent tool started at the root
+reads the owner's instructions first, and they lead it to the generated orientation, which stays byte-exact in its own
+directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from the root `README.md`; that arrangement
+still works.
+
 ## Qualification
 
 The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) has two test paths: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing in the three-platform workflow, and a different peer, `tests/mcp-peer/mcp_peer.py`, a Python script driving the built binary end to end over the real stream framing (`python3 -I tests/mcp-peer/mcp_peer.py artifacts/bin/Vericairn.Cli/release/vericairn.dll <estate root>`; the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, otherwise the first work order the estate's status lists, and is skipped in an estate without work orders, the output saying which; the command line's tests run the peer against fresh estates wherever Python 3 is on the path). Every agent harness is a non-claim in the orientation file's matrix until the estate qualifies it: a `qualification` record (available from record format 2) about the release the session used, whose profile is `<harness> over MCP` with the harness named as the matrix names it (for example `Claude Code over MCP`) and whose evidence is the recorded observation of the session. The harness's row then shows the outcome of its latest current qualification and the version of the release it is for, and a harness the matrix does not list by default gets a row of its own. Regenerate the files after a qualification is recorded; `--check` names the copies it leaves out of date. An estate at record format 1 holds no qualification records, so its matrix stays all non-claims. From 0.9.2 the matrix has two more columns, for the profiles `<harness> over MCP notifications` and `<harness> over MCP events_read`, where the harness's version may follow its name ([Subscriptions and notifications](#subscriptions-and-notifications-092)).

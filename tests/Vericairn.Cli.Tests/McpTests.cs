@@ -457,6 +457,57 @@ public class McpTests
     }
 
     [Fact]
+    public void OrientationRefusesTheEstateRootAndKeepsItsOwnDirectoryByteExact()
+    {
+        // CODE-70 (decision 01M75VAP1SRTZGN118WNNWG8SP, issue #346): the owner's instruction files at the root are never written.
+        string root = CliHarness.TempDirectory("mcp-orientation-owner");
+        string elsewhere = CliHarness.TempDirectory("mcp-orientation-owner-elsewhere");
+        try
+        {
+            CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example Estate", "--slug", "example", "--purpose", "Orientation.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
+            var owner = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["AGENTS.md"] = "# Working in this estate\n\nThe owner's instructions come first. Then read [the generated orientation](docs/vericairn-orientation/AGENTS.md); regenerate it, never edit it.\n",
+                ["CLAUDE.md"] = "Read `AGENTS.md`.\n",
+                ["GEMINI.md"] = "Read `AGENTS.md`.\n",
+            };
+            foreach ((string name, string text) in owner) File.WriteAllText(Path.Combine(root, name), text);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+
+            // However the path names the root, nothing is written there.
+            foreach (string named in new[] { root, Path.Combine(root, "."), Path.Combine(root, "docs", "..") })
+            {
+                CliHarness.Outcome refused = CliHarness.Run("--estate", root, "mcp", "orientation", "--out", named);
+                Assert.True(refused.Code != 0, refused.Out + refused.Err);
+                Assert.Contains("is an estate root", refused.Err, StringComparison.Ordinal);
+                Assert.Contains("Nothing was written", refused.Err, StringComparison.Ordinal);
+                foreach ((string name, string text) in owner) Assert.Equal(text, File.ReadAllText(Path.Combine(root, name)));
+            }
+
+            // The comparison is unchanged: at the root it finds the owner's files differ from the generated ones, and writes nothing.
+            CliHarness.Outcome compared = CliHarness.Run("--estate", root, "--json", "mcp", "orientation", "--out", root, "--check");
+            Assert.Equal(1, compared.Code);
+            Assert.Equal(["orientation.stale AGENTS.md", "orientation.stale CLAUDE.md", "orientation.stale GEMINI.md"],
+                compared.Json.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("Code").GetString() + " " + f.GetProperty("Location").GetString()));
+            foreach ((string name, string text) in owner) Assert.Equal(text, File.ReadAllText(Path.Combine(root, name)));
+
+            // In a directory of its own the orientation is written as before, byte for byte what it is anywhere else, and current.
+            string own = Path.Combine(root, "docs", "vericairn-orientation");
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", own);
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", elsewhere);
+            foreach (string name in owner.Keys)
+                Assert.Equal(File.ReadAllBytes(Path.Combine(elsewhere, name)), File.ReadAllBytes(Path.Combine(own, name)));
+            Assert.Contains(": current", CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", own, "--check").Out, StringComparison.Ordinal);
+            foreach ((string name, string text) in owner) Assert.Equal(text, File.ReadAllText(Path.Combine(root, name)));
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, elsewhere);
+        }
+    }
+
+    [Fact]
     public void TheRepositorysOrientationFilesAreCurrent()
     {
         // The committed files describe the Vericairn estate. Everything in them but the estate's name and the agent matrix comes from
