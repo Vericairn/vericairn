@@ -303,9 +303,11 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// ten times its load, plus 150 ms. Since FIX-121 the key-closing check recovers the keys of each rotation's two signatures once and
     /// compares every earlier closed key with them, rather than verifying the signatures under each earlier closed key, about 14,000
     /// verifications that took the load to 8.5 to 9 times the first-only estate's on macOS: both estates recover the same 238 signatures and
-    /// verify none under a closed key, which the test asserts. What the other 119 closings still add, about four times the first-only
-    /// estate's load on macOS, is mostly judging each closing against the closings before it, which judges which admissions count once for
-    /// each of those sets of closings. The bound still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict
+    /// verify none under a closed key, which the test asserts. What the other 119 closings then still added, about four times the
+    /// first-only estate's load on macOS, was mostly judging each closing against the closings before it, which judged which admissions
+    /// count once for each of those sets of closings. Since FIX-131 that judgment is kept by the records the closings refuse and the grant
+    /// closings among them, and these closings refuse none of the records it reads, so it is made once for all of them: the load is about
+    /// 1.3 times the first-only estate's on macOS. The bound still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict
     /// was kept under the closings it read (about thirteen times the first-only estate's load). The two estates are loaded in turn, three
     /// times each, and the fastest load of each is compared.
     /// </summary>

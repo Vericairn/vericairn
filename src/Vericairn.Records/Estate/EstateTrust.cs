@@ -37,6 +37,8 @@ internal sealed partial class EstateTrust
 
     private static readonly IReadOnlySet<string> NoAnchors = new HashSet<string>(StringComparer.Ordinal);
     private static readonly string[] TrustTypes = ["admission", "device", "authority", "principal"];
+    private static readonly AsyncLocal<bool> ByClosingIds = new();
+    private static readonly AsyncLocal<bool> Audited = new();
 
     private readonly object gate = new();
     private readonly EstateModel model;
@@ -50,6 +52,10 @@ internal sealed partial class EstateTrust
     private readonly HashSet<string>?[] admittedActing = new HashSet<string>?[2];
     private readonly Dictionary<string, HashSet<string>>[] admittedByClosings = [new(StringComparer.Ordinal), new(StringComparer.Ordinal)];
     private readonly Dictionary<HashSet<string>, HashSet<string>> unseating = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, int[]> admissionRefusals = new(StringComparer.Ordinal);
+    private readonly bool admissionsByClosingIds = ByClosingIds.Value;
+    private readonly bool admissionsAudited = Audited.Value;
+    private AdmissionIndex? admissionIndex;
     private RecordEnvelope? requiredSince;
     private bool requiredSinceKnown;
     private bool adoptionEligible;
@@ -547,8 +553,10 @@ internal sealed partial class EstateTrust
     /// with the set alone, the others still left out, and beside each other one that stands alone; those that stand alone and beside
     /// every such other are restored together, so the outcome never depends on which is read first. An admission one of the closings
     /// refuses never joins, and the author's
-    /// authority is read against the same closings. The result is kept for each set of closings, with the admissions left out that would
-    /// otherwise pass (<see cref="Unseating"/>).
+    /// authority is read against the same closings. The result is kept, with the admissions left out that would otherwise pass
+    /// (<see cref="Unseating"/>), by what it reads of the closings (<see cref="AdmissionKey"/>): the records they refuse and the grant
+    /// closings among them (FIX-131), so the sets of closings each closing is judged against, which differ in closings that refuse none
+    /// of those records, share one judgment rather than making one each.
     /// </summary>
     private HashSet<string> CountingAdmissions(Mode mode, IReadOnlyList<Closing> bound)
     {
@@ -557,11 +565,18 @@ internal sealed partial class EstateTrust
             if (mode == Mode.Anchors && !anchorsKnown) throw new InvalidOperationException("Admissions with anchors are judged before every anchor is known.");
             bool acting = ReferenceEquals(bound, Acting);
             if (acting && admittedActing[(int)mode] is { } settled) return settled;
-            string key = bound.Count == 0 ? "" : string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+            string key = AdmissionKey(bound);
             if (!admittedByClosings[(int)mode].TryGetValue(key, out HashSet<string>? judged))
             {
+                AdmissionJudgments++;
                 judged = Judge();
                 admittedByClosings[(int)mode][key] = judged;
+            }
+            else if (admissionsAudited)
+            {
+                // A test's check that the judgment kept is the one these closings give when judged afresh.
+                AdmissionAudits++;
+                if (!judged.SetEquals(Judge())) AdmissionAuditMismatches++;
             }
 
             if (acting) admittedActing[(int)mode] = judged;
@@ -692,6 +707,119 @@ internal sealed partial class EstateTrust
 
     /// <summary>How many times a record's signatures were verified against a set of admissions: what the cost of judging admissions grows with.</summary>
     internal long SetVerifications { get; private set; }
+
+    /// <summary>How many times which admissions count was judged, for a mode and what a set of closings reads (<see cref="AdmissionKey"/>).</summary>
+    internal long AdmissionJudgments { get; private set; }
+
+    /// <summary>How many kept judgments of which admissions count a test's audit judged afresh (<see cref="AuditAdmissionsForTests"/>).</summary>
+    internal long AdmissionAudits { get; private set; }
+
+    /// <summary>How many kept judgments of which admissions count differed from judging their closings afresh; zero unless the key reads too little.</summary>
+    internal long AdmissionAuditMismatches { get; private set; }
+
+    /// <summary>
+    /// Set only by tests: a judgment built in this asynchronous flow keeps which admissions count under the ids of the closings, as it did
+    /// before FIX-131, so each set of closings is judged on its own; the oracle the key by refused records is compared with. False in use.
+    /// </summary>
+    internal static bool AdmissionsKeyedByClosingIdsForTests
+    {
+        get => ByClosingIds.Value;
+        set => ByClosingIds.Value = value;
+    }
+
+    /// <summary>
+    /// Set only by tests: a judgment built in this asynchronous flow judges afresh, against the closings asked with, every set of admissions
+    /// it would answer from what it kept, and counts those that differ (<see cref="AdmissionAuditMismatches"/>). False in use.
+    /// </summary>
+    internal static bool AuditAdmissionsForTests
+    {
+        get => Audited.Value;
+        set => Audited.Value = value;
+    }
+
+    /// <summary>
+    /// What judging which admissions count reads of a set of closings (FIX-131). It reads them in two places only: whether one refuses an
+    /// admission, or a principal or grant revision that gives an author authority (<see cref="Open"/>), and whether a grant closing closed
+    /// a revision of a grant an author relies on without witnessing the admission (<see cref="GrantClosedWithin"/>). A closing refuses a
+    /// record or not by itself, whatever other closings there are (<see cref="Refuses"/>), and a grant closing refuses no record. So two
+    /// sets of closings that refuse the same of those records and hold the same grant closings give the same judgment, whatever other
+    /// closings each holds, and the judgment is kept under the records refused, by number, and the grant closings' ids. Which records a
+    /// closing refuses is found once for each closing (<see cref="AdmissionRefusals"/>). A set refusing none of them and holding no grant
+    /// closing reads as no closings.
+    /// </summary>
+    private string AdmissionKey(IReadOnlyList<Closing> bound)
+    {
+        if (bound.Count == 0) return "";
+        if (admissionsByClosingIds) return string.Join(",", bound.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+        var refused = new SortedSet<int>();
+        var grants = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (Closing closing in bound)
+        {
+            if (closing.Kind == "grant") grants.Add(closing.Record.Id);
+            else refused.UnionWith(AdmissionRefusals(closing));
+        }
+
+        return refused.Count == 0 && grants.Count == 0 ? "" : string.Join(",", refused) + ";" + string.Join(",", grants);
+    }
+
+    /// <summary>
+    /// The records judging which admissions count asks a closing about (<see cref="AdmissionKey"/>): every admission, principal and grant
+    /// revision the model holds, and the first authority, each once by number; and for each device identity, the numbers of those a device
+    /// of that identity signed, the only ones a closing naming it can refuse.
+    /// </summary>
+    private sealed class AdmissionIndex
+    {
+        /// <summary>The records, by number.</summary>
+        public required List<RecordEnvelope> Records { get; init; }
+
+        /// <summary>For each device identity, the numbers of the records a device of that identity signed.</summary>
+        public required Dictionary<string, List<int>> SignedBy { get; init; }
+    }
+
+    /// <summary>Builds the records judging admissions asks closings about (<see cref="AdmissionIndex"/>) once, until proofs are judged afresh.</summary>
+    private AdmissionIndex AdmissionsAsked()
+    {
+        lock (gate)
+        {
+            if (admissionIndex is not null) return admissionIndex;
+            var records = new List<RecordEnvelope>();
+            var seen = new HashSet<RecordEnvelope>(ReferenceEqualityComparer.Instance);
+            var signedBy = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            IEnumerable<RecordEnvelope> asked = admissionRecords.Concat(principalRecords).Concat(authorityRecords);
+            if (FirstAuthority is { } first) asked = asked.Append(first);
+            foreach (RecordEnvelope record in asked)
+            {
+                if (!seen.Add(record)) continue;
+                int number = records.Count;
+                records.Add(record);
+                var identities = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < record.Signatures.Count; i++)
+                {
+                    string identity = Proof(record, i).Identity;
+                    if (!identities.Add(identity)) continue;
+                    if (!signedBy.TryGetValue(identity, out List<int>? signed)) signedBy[identity] = signed = [];
+                    signed.Add(number);
+                }
+            }
+
+            admissionIndex = new AdmissionIndex { Records = records, SignedBy = signedBy };
+            return admissionIndex;
+        }
+    }
+
+    /// <summary>The records judging admissions asks about that a closing refuses by itself, by number, found once for each closing (<see cref="AdmissionKey"/>).</summary>
+    private int[] AdmissionRefusals(Closing closing)
+    {
+        lock (gate)
+        {
+            if (admissionRefusals.TryGetValue(closing.Record.Id, out int[]? known)) return known;
+            int[] refused = [];
+            if (closing.Kind != "grant" && closing.Identity is { } identity && AdmissionsAsked() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
+                refused = [.. signed.Where(record => Refuses(closing, index.Records[record]))];
+            admissionRefusals[closing.Record.Id] = refused;
+            return refused;
+        }
+    }
 
     /// <summary>Whether no closing given refuses a record.</summary>
     private static bool Open(EstateTrust trust, RecordEnvelope record, IReadOnlyList<Closing> bound, Mode mode) => bound.Count == 0 || trust.Refuser(record, bound, mode) is null;
@@ -1007,12 +1135,17 @@ internal sealed partial class EstateTrust
         return !findings.HasErrors;
     }
 
-    /// <summary>Forgets which admissions count, which reads proofs, anchors and closings that are judged afresh.</summary>
+    /// <summary>
+    /// Forgets which admissions count, and which records each closing refuses, which read proofs, anchors and closings that are judged
+    /// afresh.
+    /// </summary>
     private void ForgetAdmissions()
     {
         Array.Clear(admittedActing);
         foreach (Dictionary<string, HashSet<string>> judged in admittedByClosings) judged.Clear();
         unseating.Clear();
+        admissionRefusals.Clear();
+        admissionIndex = null;
     }
 
     /// <summary>The admission state of a device at a time, from the admissions about its line that count in the mode.</summary>
