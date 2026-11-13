@@ -21,7 +21,7 @@ public sealed partial class EstateService
         if (RequestDeviceRefusal(model) is { } denied) return new(null, null, denied);
         RecordEnvelope? declaration = TemplateDocument(model, request.Path);
         if (declaration is null || EstateModel.BodyString(declaration, "repository") is not null)
-            return new(null, null, new("refused", "Template rendering requires an existing estate template instance.", []));
+            return new(null, null, new("refused", $"Template rendering requires an existing estate template instance or a converted revision history, and {request.Path} is neither. " + SummaryCorrection, []));
         try
         {
             if (TemplateRenderingRefusal(model, declaration) is { } ownership) return new(null, null, ownership);
@@ -60,6 +60,9 @@ public sealed partial class EstateService
             return new(null, null, new("refused", "The complete template output could not be prepared from its existing markers and sources; no pin was stored.", []));
         }
     }
+
+    // Where a refused pin of unchanged bytes points: the record route that corrects a whole-file revision's metadata alone.
+    internal const string SummaryCorrection = "To correct only the summary of a whole-file document whose bytes are unchanged, record its successor with records new document-revision: the same path, title, hash, bytes and media type, the next revision, the corrected summary and --supersedes naming the current pin; the living-documents guide gives the recipe.";
 
     private static Problem? TemplateRenderingRefusal(EstateModel model, RecordEnvelope declaration)
     {

@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 22, November 12, 2026. Name the summary-only correction in `docs pin`'s overview and refusals, in the development build.
+
 Revision 21, November 12, 2026. Add `doctor --json`, JSON from `version`, `records describe`, `records hash`, `records format` and `recover compare`, and the commands that refuse `--json`, in the development build.
 
 Revision 20, November 12, 2026. Describe 0.9.2's command additions as released commands rather than development builds.
@@ -165,7 +167,7 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 | `--summary <text>` | Required. What this revision is or changes. |
 | `--title <text>` | Override the title. Otherwise carry the current pin's title; a first pin uses the file name without its extension. |
 | `--expected <id>` | Require this exact record id to be the current pin for the path. An old, unrelated or unknown id refuses the write. |
-| `--render-template` | Default false. Refresh existing template regions, or a converted revision history even when authored bytes are unchanged, in the pin's recoverable batch. Also admits root `README.md` template instances in format 3. |
+| `--render-template` | Default false. Refresh existing template regions, or a converted revision history even when authored bytes are unchanged, in the pin's recoverable batch. Also admits root `README.md` template instances in format 3. A plain whole-file document has neither, and the option is refused for it. |
 | `--convert-revisions` | Default false. In format 3, convert a Markdown document's opening revision lines to a generated history. Every existing line must match one distinct revision record. |
 | `--decision <id>` | The exact decision record carried by this revision, when one applies; rendered as `carries decision` in a generated line. |
 | `--json` | Print the record receipt as `{"path":"records/document-revision/...","id":"...","hash":"sha256:..."}`. The hash identifies the record; its body holds the document's byte hash. |
@@ -174,7 +176,7 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 
 Existing whole-file pins keep their behavior: the first pin is revision 1 and each later pin increments the current revision and supersedes that record. SHA-256 and byte count cover the exact file, including line endings and any byte-order mark. Media type follows the file extension: Markdown, plain text, JSON, YAML, HTML, XML, CSV, PDF, SVG, PNG and JPEG are recognized; other extensions use `application/octet-stream`.
 
-By default, unchanged bytes refuse even if the title or summary differs. Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
+By default, unchanged bytes refuse even if the title or summary differs. From 0.9.3 (FIX-120), that refusal and the refusal of `--render-template` for a plain whole-file document name the summary-only correction: a successor written with `records new document-revision` that pins the same path, hash and size ([living documents](living-documents.md#correcting-a-revisions-summary)). Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
 
 For whole-file pins, two branches pinning the same predecessor still form a fork. `estate check` and `docs pin` identify both pins and the predecessor; a `reconciliation` keeps one successor and withdraws the others before pinning combined bytes. Converted histories instead order all revision records by recorded time and then id, and derive distinct ordinals from that order. Their `revision` integer is advisory. The latest record in this order is the current pin; all records and their actual predecessors remain in history.
 

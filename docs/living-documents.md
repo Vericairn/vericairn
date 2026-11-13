@@ -135,6 +135,54 @@ authored body; generated history can be rendered from the records. The Git adapt
 can retrieve those same hashed bytes from local history, while old whole-file pins
 still retrieve their exact complete files.
 
+## Correcting a revision's summary
+
+A revision's summary is part of its signed record, so a mistake in it is corrected
+by a successor record, never by editing the record. The document's bytes stay as
+they are. `docs pin` refuses unchanged bytes for a whole-file document, and its
+`--render-template` refreshes only an estate template instance or a converted
+revision history; from 0.9.3 both refusals name this route.
+
+For a whole-file document, write the successor yourself:
+
+1. Read the current pin. `docs pin` with the unchanged bytes is refused and names
+   it (`current pin <pin id>`); `records show` prints it.
+2. Check the file against it: its SHA-256 (`shasum -a 256 docs/guide.md`, or
+   `Get-FileHash docs/guide.md` in PowerShell, written as `sha256:` and the
+   lower-case digest), its byte count (`wc -c < docs/guide.md`) and its path all
+   match the pin.
+3. Write the successor's body with the pin's own `path`, `title`, `hash`, `bytes`
+   and `mediaType`, the next `revision` and the corrected `summary`, and record it
+   with `--supersedes` naming the current pin.
+
+```sh
+vericairn docs pin docs/guide.md --by <author id> --summary "Corrected summary."
+vericairn --json records show <current pin id>
+vericairn records new document-revision --by <author id> --body successor.json --supersedes <current pin id>
+```
+
+```json
+{"path": "docs/guide.md", "title": "Guide", "hash": "sha256:<the pin's hash>", "bytes": 1234,
+ "mediaType": "text/markdown", "revision": 3, "summary": "Corrected summary."}
+```
+
+The original record keeps its bytes and signatures; the successor supersedes it.
+A successor of any pin but the current one forks the document and is refused with
+`document.multiple`. From 0.9.3, a successor whose `hash` or `bytes` differ from
+the file it names is refused with `document.pin-content`. Either refusal writes
+nothing. For a converted history or a template instance, `docs pin <path> --by
+<author id> --summary "Corrected summary." --render-template` records the
+correction with the authored bytes unchanged and regenerates the history line.
+
+A correction does not rewrite what was found in the record it corrects. From 0.9.3
+(FIX-120), `estate check` reports a finding on a superseded record, such as
+`writing.spacing` in its summary, as historical: the finding keeps its code,
+severity and location, and its message names the record that supersedes it.
+Every occurrence stays reported, and history is scanned in full. A finding on the
+current record is reported as before, so a new mistake in the correction is never
+hidden by the historical one. A writing exception is for an intentional token, not
+for an accidental spelling since corrected.
+
 ## Template sections (0.8.4)
 
 [Templates](templates.md) add exact version pins and per-section states to authored
