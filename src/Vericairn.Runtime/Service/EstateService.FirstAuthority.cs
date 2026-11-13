@@ -39,10 +39,10 @@ public sealed partial class EstateService
                 return Refused("Name the first authority by --device or by --admission, not both.");
             if (!names && request.ExpectPlan is not null)
                 return Refused("--expect-plan names a change: pass it with the --device or --admission its check was shown for.");
-            if (ReadManifest() is not { } manifest)
-                return Refused("This estate's manifest (estate/manifest.json) cannot be read; nothing was changed.");
+            // The root operator and the first authority are read from the manifest, so one that does not read cleanly lists and names nothing.
+            if (ManifestRefusal(ReadManifest(), out byte[] manifest) is { } unread) return Refused(unread);
 
-            FirstAuthorityReading reading = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), session.ObjectReader);
+            FirstAuthorityReading reading = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), manifest, session.ObjectReader);
             if (!names) return (Response(reading, null, null, applied: false, []), null);
 
             EstateModel model = session.Load();
@@ -61,36 +61,58 @@ public sealed partial class EstateService
             if (request.ExpectPlan is null)
                 return Refused("Read the change with vericairn estate first-authority --check and the same --device or --admission, then pass the plan hash it prints with --expect-plan, so that what is written is what you read. Nothing was changed.");
             if (!SamePlan(request.ExpectPlan, plan))
-                return Refused("The estate no longer reads as the check you named: its manifest, its candidates or what its history witnesses changed since, or the hash is another change's. Read vericairn estate first-authority --check again. Nothing was changed.");
+                return Refused("The estate no longer reads as the check you named: its manifest, its root operator or any candidate's evidence the check showed changed since, or the hash is another change's. Read vericairn estate first-authority --check again. Nothing was changed.");
             if (session.IsReadOnly) return Refused("This copy is opened read-only; nothing was changed.");
 
             return UnderWriteLock(() =>
             {
                 // Judged again under the working tree's write lock, from the files and the manifest as they are now.
-                if (ReadManifest() is not { } current) return Refused("This estate's manifest (estate/manifest.json) cannot be read; nothing was changed.");
-                FirstAuthorityReading now = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), session.ObjectReader);
+                if (ManifestRefusal(ReadManifest(), out byte[] current) is { } changed) return Refused(changed);
+                FirstAuthorityReading now = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), current, session.ObjectReader);
                 (FirstAuthorityEvidence? again, string? refused) = Target(session.Load(), now, request);
                 if (again is null) return Refused(refused!);
                 if (Refusal(now, again) is { } stopped) return Refused(stopped);
                 if (!SamePlan(request.ExpectPlan, PlanHash(current, now, again)))
                     return Refused("Another writer changed the estate since the check you named; nothing was changed. Read vericairn estate first-authority --check again.");
+                byte[] written;
                 try
                 {
-                    WriteManifest(EstateManifest.WithFirstAuthority(current, again.Admission.Id));
+                    written = EstateManifest.WithFirstAuthority(current, again.Admission.Id);
+                    WriteManifest(written);
                 }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or ArgumentException)
                 {
                     return Refused("The manifest could not be written: " + exception.Message);
                 }
 
-                FirstAuthorityReading after = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), session.ObjectReader);
-                List<FindingDto> remaining = [.. session.Load().Findings.Sorted().Where(f => f.Severity == Severity.Error && RootOfTrustCodes.Contains(f.Code))
+                // What remains for the operator: every error about the root of trust, and every error the estate now reports on the admission named.
+                FirstAuthorityReading after = EstateTrust.ReadFirstAuthority(session.Root, session.Files(), written, session.ObjectReader);
+                string path = again.Admission.ExpectedPath;
+                List<FindingDto> remaining = [.. session.Load().Findings.Sorted()
+                    .Where(f => f.Severity == Severity.Error && (RootOfTrustCodes.Contains(f.Code) || f.Location.StartsWith(path, StringComparison.Ordinal)))
                     .Select(f => new FindingDto("error", f.Code, f.Location, f.Message))];
                 return (Response(after, change, plan, applied: true, remaining), null);
             }, problem => ((FirstAuthorityResponse?)null, (Problem?)problem));
         }
 
         static (FirstAuthorityResponse?, Problem?) Refused(string message) => (null, new Problem("refused", message, []));
+    }
+
+    /// <summary>
+    /// Why the manifest's bytes cannot be read from, or null with the bytes: missing, unreadable, or not parsing without findings, such
+    /// as a key it does not know, a key twice or a form that is not canonical. The estate's first charter, and so its root operator, are
+    /// read from the manifest, and a model read without one falls back to the charter with the lowest id, so nothing is listed or named
+    /// from a manifest that does not read cleanly.
+    /// </summary>
+    private static string? ManifestRefusal(byte[]? bytes, out byte[] manifest)
+    {
+        manifest = bytes ?? [];
+        if (bytes is null) return "This estate's manifest (estate/manifest.json) cannot be read. Nothing was listed or changed.";
+        var findings = new FindingList();
+        EstateManifest? parsed = EstateManifest.Parse(bytes, findings);
+        if (parsed is not null && findings.Count == 0) return null;
+        string why = findings.Count == 0 ? "it does not parse" : string.Join("; ", findings.Select(f => f.Code + ": " + f.Message));
+        return $"This estate's manifest (estate/manifest.json) does not read cleanly ({why}). The estate's root operator and first authority are read from it, so this command lists and names nothing until it does: restore it, then run vericairn estate check. Nothing was listed or changed.";
     }
 
     /// <summary>The manifest's bytes, or null when it cannot be read.</summary>
@@ -129,7 +151,7 @@ public sealed partial class EstateService
     private static (FirstAuthorityEvidence? Target, string? Refusal) Target(EstateModel model, FirstAuthorityReading reading, FirstAuthorityRequest request)
     {
         if (reading.RootOperator is null)
-            return (null, "This copy reads no first charter, so it has no root operator whose device could be named; " + (reading.Unsettled ? Unsettled : "its manifest names no charter that is here.") + " Nothing was changed.");
+            return (null, "This copy reads no first charter, so it has no root operator whose device could be named. " + (reading.Unsettled ? Unsettled : "Its manifest names no charter that is here.") + " Nothing was changed.");
         if (reading.Unsettled) return (null, Unsettled + " Nothing was changed.");
         string candidates = reading.Candidates.Count == 0 ? "the estate holds none" : "the candidates are " + string.Join(", ", reading.Candidates.Select(c => c.Admission.Id));
         if (request.Admission is { } id)
@@ -175,6 +197,9 @@ public sealed partial class EstateService
         string id = target.Admission.Id;
         if (target.Principal != reading.RootOperator)
             return $"Admission {id} admits device {target.Identity} of {target.Principal ?? "no principal"}, and the first authority is one of the root operator's own devices ({reading.RootOperator}). Nothing was changed.";
+        // A signature that names the device without verifying under its key is one anyone able to add a file can write.
+        if (target.SignatureProblem is { } problem)
+            return $"Admission {id}'s signature does not verify, read as the first authority, as the estate verifies every signature ({problem}): naming it would make a self-admission its device never signed the estate's first authority. Remove its record file from the copy. Nothing was changed.";
         if (reading.FirstAuthority is { } working && (reading.Adopted || reading.Named == working.Id))
         {
             string settledBy = reading.Named == working.Id ? "the manifest names it" + (reading.Adopted ? " and the estate's history checkpoints confirm it" : string.Empty) : "the estate's adopted history settles it";
@@ -189,20 +214,19 @@ public sealed partial class EstateService
         return null;
     }
 
-    /// <summary>The hash of a change and of what it was judged from: the manifest's bytes, the target and every candidate as read.</summary>
+    /// <summary>
+    /// The hash of a change and of everything it was judged from and shows: the manifest's bytes, the target, and the response the check
+    /// prints for it, with the root operator, what the manifest names and the estate reads, the findings and every candidate's evidence,
+    /// whether it is nameable and whether its signature verifies.
+    /// </summary>
     private static string PlanHash(byte[] manifest, FirstAuthorityReading reading, FirstAuthorityEvidence target)
     {
+        var change = new FirstAuthorityChange(EstateLayout.ManifestPath, reading.Named, target.Admission.Id);
         var text = new StringBuilder();
-        text.Append("vericairn.first-authority-plan/1\n");
+        text.Append("vericairn.first-authority-plan/2\n");
         text.Append("manifest ").Append(ContentHash.Sha256(manifest)).Append('\n');
         text.Append("name ").Append(target.Admission.Id).Append(' ').Append(target.Admission.ComputedHash).Append('\n');
-        text.Append("reads ").Append(reading.FirstAuthority?.Id ?? "none").Append(reading.Adopted ? " adopted" : string.Empty).Append('\n');
-        foreach (FirstAuthorityEvidence candidate in reading.Candidates)
-        {
-            text.Append("candidate ").Append(candidate.Admission.Id).Append(' ').Append(candidate.Admission.ComputedHash)
-                .Append(candidate.WitnessedFirst ? " witnessed" : string.Empty).Append(candidate.Revoked ? " revoked" : string.Empty).Append('\n');
-        }
-
+        text.Append(JsonSerializer.Serialize(Response(reading, change, null, applied: false, []), ProtocolJson.Options));
         return ContentHash.Sha256(Encoding.UTF8.GetBytes(text.ToString()));
     }
 
@@ -225,6 +249,6 @@ public sealed partial class EstateService
         string? Field(string name) => c.Device is null ? null : EstateModel.BodyString(c.Device, name);
         return new FirstAuthorityCandidate(c.Admission.Id, c.Admission.ComputedHash, c.Admission.At, c.Admission.ExpectedPath, c.Device?.Id, Field("name"), Field("platform"),
             Field("custody"), Field("presence"), c.Principal, refusal is null, refusal?.Replace(" Nothing was changed.", string.Empty, StringComparison.Ordinal), c.Named, c.Reads,
-            c.WitnessedFirst, c.Revoked, c.Admits, c.RecordsSigned);
+            c.WitnessedFirst, c.Revoked, c.Admits, c.RecordsSigned, c.SignatureProblem is null, c.SignatureProblem);
     }
 }

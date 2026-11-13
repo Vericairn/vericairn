@@ -901,19 +901,27 @@ The listing names the root operator, what the manifest names, the first authorit
 device with its name, platform, custody, presence and principal, and the time the admission states, which is a claim and never
 evidence of order. It says whether the manifest names it and whether the estate reads it, and, judged as the first authority,
 whether history checkpoints witnessed it before every other candidate, whether its device stands revoked, how many other devices
-an admission that counts admits and how many records its device signed. Each line ends `nameable` or `not nameable:` with why.
+an admission that counts admits and how many records its device signed. It says whether the admission's own signature verifies, as
+the estate verifies every signature: under its device's key at its stated time, over the hash its content has. A self-admission is
+listed when its signature names a device of the line it admits, whether or not that signature verifies, so one that does not
+verify is shown with the finding that says why. Each candidate ends `nameable` or `not nameable:` with why.
 
 `--device` names a device by its id or any revision of its line; `--admission` names the self-admission itself, which a device
 that admitted itself more than once needs. With `--check` the command prints the change,
 `change: estate/manifest.json firstAuthority <before or (none)> -> <admission>`, and `plan: sha256:<hash>`, the hash of the change,
-the manifest's bytes and every candidate as read, and writes nothing. `--expect-plan <hash> --by <root operator id>` writes it:
-refused unless `--by` is the root operator the first charter names and the estate still reads as that check read it. It writes
-only `firstAuthority`, through a file beside the manifest moved into place, and prints `changed:` with each error about the root of
-trust that remains. Each remaining `signature.self-admission` is another self-admission still in the copy: remove its record file
-yourself and commit it with `estate/manifest.json`; the command removes nothing.
+the manifest's bytes and everything the check shows: the root operator, what the manifest names and the estate reads, the findings
+and each candidate's evidence, its signature's verification among it. It writes nothing. `--expect-plan <hash> --by <root operator
+id>` writes it: refused unless `--by` is the root operator the first charter names and the estate still reads as that check read
+it. It writes only `firstAuthority`, through a file beside the manifest moved into place, and prints `changed:` with each error that
+remains about the root of trust and each error the estate reports on the admission named. Each remaining
+`signature.self-admission` is another self-admission still in the copy: remove its record file yourself and commit it with
+`estate/manifest.json`; the command removes nothing.
 
-It names only an admission by the root operator of one of the root operator's own devices, signed by that device. A device of an
-agent or another person, a recovery device, a device with no such admission and any other record are refused, each with why. A
+It names only an admission by the root operator of one of the root operator's own devices whose signature by that device
+verifies. A self-admission whose signature does not verify, which anyone able to add a file can write, a device of an agent or
+another person, a recovery device, a device with no such admission and any other record are refused, each with why. The root
+operator is read from the manifest's charter, so the command lists and names nothing while `estate/manifest.json` does not parse
+without findings, such as a key it does not know, a key twice or a form that is not canonical; restore it first. A
 revoked device stays nameable, and the listing shows it revoked: the first device admitting itself is the root, revoked or not.
 It refuses, writing nothing, when the estate's first authority already works, because the manifest names it or the estate's adopted
 history settles it, since it never moves a working first authority; when the copy reads unsettled; and when history checkpoints

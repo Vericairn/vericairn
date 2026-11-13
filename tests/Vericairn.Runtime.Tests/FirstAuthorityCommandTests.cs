@@ -216,6 +216,25 @@ public sealed class FirstAuthorityCommandTests
         Assert.Equal(stray.Id, f.Load().Manifest!.FirstAuthority);
     }
 
+    [Fact]
+    public void AnAdoptedEstateWhoseManifestNamesANonCandidateIsRefusedAndTheOperatorsEditRepairsIt()
+    {
+        using var f = new HistoryFixture();
+        f.Require();
+        RecordEnvelope first = FirstAuthority(f);
+        f.Adopt();
+        f.Estate.NameFirstAuthority(f.BuilderAdmission.Id);
+        using EstateService api = EstateService.Open(f.Root);
+        Assert.True(Ok(api.FirstAuthority(new FirstAuthorityRequest())).Unsettled);
+        Assert.Contains("reads unsettled", Refused(api.FirstAuthority(new FirstAuthorityRequest(Admission: first.Id, Check: true))), StringComparison.Ordinal);
+
+        // The repair the upgrade guide gives for this case: the operator's own edit of firstAuthority back to the witnessed self-admission.
+        f.Estate.NameFirstAuthority(first.Id);
+        EstateModel model = f.Load();
+        Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+        Assert.False(model.Trust.Unsettled);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -408,6 +427,139 @@ public sealed class FirstAuthorityCommandTests
         Assert.Equal(first.Id, model.Manifest!.FirstAuthority);
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
         Assert.False(SignatureChecks.IsAdmitted(model, device));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASelfAdmissionWhoseSignatureDoesNotVerifyIsNeverNamed(bool statedEarlier)
+    {
+        // An admission of the root operator's real first device whose signature names that device but was made with an unrelated key:
+        // anyone able to add a file can write one, stated later than the genuine self-admission or earlier.
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("CFA-7"), signer: f.OperatorSigner);
+        f.Require();
+        RecordEnvelope first = FirstAuthority(f);
+        string keys = Path.Combine(Path.GetTempPath(), "vericairn-first-authority-forged-" + Records.Identity.Ulid.NewUlid().Value);
+        try
+        {
+            var store = new FileKeyStore(keys);
+            string unrelated = Records.Identity.Ulid.NewUlid().Value;
+            store.Create(unrelated);
+            DateTimeOffset resume = f.Estate.Clock;
+            f.Estate.SetClock(statedEarlier ? Early : resume.AddDays(30));
+            RecordEnvelope forged = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "The first authority."), f.OperatorDevice.Reference,
+                signer: new StoreSigner(store, unrelated, f.OperatorDevice.Id));
+            f.Estate.SetClock(resume);
+            using EstateService api = EstateService.Open(f.Root);
+            byte[] before = Manifest(f);
+
+            FirstAuthorityResponse listed = Ok(api.FirstAuthority(new FirstAuthorityRequest()));
+            FirstAuthorityCandidate bad = listed.Candidates.Single(c => c.Admission == forged.Id);
+            FirstAuthorityCandidate good = listed.Candidates.Single(c => c.Admission == first.Id);
+            Assert.False(bad.SignatureVerifies);
+            Assert.StartsWith("signature.invalid: ", bad.SignatureProblem, StringComparison.Ordinal);
+            Assert.False(bad.Nameable);
+            Assert.Contains("signature does not verify", bad.NotNameable, StringComparison.Ordinal);
+            Assert.True(good.SignatureVerifies);
+            Assert.Null(good.SignatureProblem);
+            Assert.True(good.Nameable);
+
+            string refusal = Refused(api.FirstAuthority(new FirstAuthorityRequest(Admission: forged.Id, Check: true)));
+            Assert.Contains("signature does not verify", refusal, StringComparison.Ordinal);
+            Assert.Contains("signature.invalid", refusal, StringComparison.Ordinal);
+            Assert.Contains("name one with --admission", Refused(api.FirstAuthority(new FirstAuthorityRequest(Device: f.OperatorDevice.Id, Check: true))), StringComparison.Ordinal);
+            Assert.Equal(before, Manifest(f));
+
+            // The genuine one is named; nothing remains on it, and the estate reads it with the operator's records counting.
+            string plan = Ok(api.FirstAuthority(new FirstAuthorityRequest(Admission: first.Id, Check: true))).PlanHash!;
+            FirstAuthorityResponse named = Ok(api.FirstAuthority(new FirstAuthorityRequest(f.Estate.OperatorId, Admission: first.Id, ExpectPlan: plan)));
+            Assert.DoesNotContain(named.Remaining, x => x.Location.StartsWith(first.ExpectedPath, StringComparison.Ordinal));
+            EstateModel model = f.Load();
+            Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+            Assert.True(model.Counts(model.ById[real.Id]));
+            Assert.Contains(model.Findings, x => x.Code == "signature.invalid" && x.Location.StartsWith(forged.ExpectedPath, StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(keys)) Directory.Delete(keys, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("unknown-key")]
+    [InlineData("duplicate-first-authority")]
+    [InlineData("not-json")]
+    [InlineData("not-canonical")]
+    public void AManifestThatDoesNotReadCleanlyListsAndNamesNothing(string how)
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope first = FirstAuthority(f);
+        (_, RecordEnvelope stray) = Earlier(f);
+        // A charter with a lower id than the estate's, its own operator and two self-admissions of that operator's devices: what a model
+        // read without the manifest would fall back to.
+        const string forgedOperator = "01ARZ3NDEKTSV4RRFFQ69G5FA0";
+        f.Estate.Add("principal", forgedOperator, """{"kind":"human","name":"Another Operator","roles":["operator"]}""", id: forgedOperator);
+        f.Estate.Add("estate", forgedOperator, $$$"""{"name":"Test Estate","slug":"test-estate","purpose":"Another root.","operator":"{{{forgedOperator}}}","recordFormat":3,"policies":{"signatures":"optional","releaseAcceptance":["operator"]}}""", id: "01ARZ3NDEKTSV4RRFFQ69G5FA1");
+        RecordEnvelope d1 = f.Device(forgedOperator, "Another one"), d2 = f.Device(forgedOperator, "Another two");
+        RecordEnvelope a1 = f.Estate.Add("admission", forgedOperator, HistoryFixture.Admission(forgedOperator, "Itself."), d1.Reference, signer: f.Signer(d1));
+        f.Estate.Add("admission", forgedOperator, HistoryFixture.Admission(forgedOperator, "Itself."), d2.Reference, signer: f.Signer(d2));
+        // The service is open before the manifest changes, as a running daemon is.
+        using EstateService api = EstateService.Open(f.Root);
+        Assert.Equal(f.Estate.OperatorId, Ok(api.FirstAuthority(new FirstAuthorityRequest())).RootOperator);
+        string plan = Ok(api.FirstAuthority(new FirstAuthorityRequest(Admission: first.Id, Check: true))).PlanHash!;
+        string path = Path.Combine(f.Root, EstateLayout.ManifestPath);
+        string text = File.ReadAllText(path);
+        int brace = text.IndexOf('{', StringComparison.Ordinal) + 1;
+        text = how switch
+        {
+            "unknown-key" => text[..brace] + "\n  \"note\": \"x\"," + text[brace..],
+            "duplicate-first-authority" => text[..brace] + "\n  \"firstAuthority\": \"" + stray.Id + "\",\n  \"firstAuthority\": \"" + first.Id + "\"," + text[brace..],
+            "not-json" => text + "}}",
+            _ => text + "\n",
+        };
+        File.WriteAllText(path, text);
+        byte[] before = File.ReadAllBytes(path);
+
+        Assert.Contains("does not read cleanly", Refused(api.FirstAuthority(new FirstAuthorityRequest())), StringComparison.Ordinal);
+        Assert.Contains("does not read cleanly", Refused(api.FirstAuthority(new FirstAuthorityRequest(Admission: a1.Id, Check: true))), StringComparison.Ordinal);
+        Assert.Contains("does not read cleanly", Refused(api.FirstAuthority(new FirstAuthorityRequest(forgedOperator, Admission: a1.Id, ExpectPlan: plan))), StringComparison.Ordinal);
+        Assert.Contains("does not read cleanly", Refused(api.FirstAuthority(new FirstAuthorityRequest(f.Estate.OperatorId, Admission: first.Id, ExpectPlan: plan))), StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ThePlanBindsEveryCandidatesEvidence()
+    {
+        using var f = new HistoryFixture();
+        RecordEnvelope first = FirstAuthority(f);
+        (RecordEnvelope device, RecordEnvelope stray) = Earlier(f, order: false);
+        using EstateService api = EstateService.Open(f.Root);
+        string Plan() => Ok(api.FirstAuthority(new FirstAuthorityRequest(Admission: first.Id, Check: true))).PlanHash!;
+        string Stale(string plan) => Refused(api.FirstAuthority(new FirstAuthorityRequest(f.Estate.OperatorId, Admission: first.Id, ExpectPlan: plan)));
+
+        // The stray device admits another device: its admits changes.
+        string plan = Plan();
+        RecordEnvelope other = f.Device(f.Estate.OperatorId, "Resting on the stray");
+        f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "By the stray."), other.Reference, signer: f.Signer(device));
+        Assert.Equal(1, Ok(api.FirstAuthority(new FirstAuthorityRequest())).Candidates.Single(c => c.Admission == stray.Id).Admits);
+        Assert.Contains("no longer reads as the check", Stale(plan), StringComparison.Ordinal);
+
+        // It signs a record: its recordsSigned changes.
+        plan = Plan();
+        f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("CFA-8"), signer: f.Signer(device));
+        Assert.Contains("no longer reads as the check", Stale(plan), StringComparison.Ordinal);
+
+        // It is revoked, read as the first authority: its revoked changes.
+        plan = Plan();
+        RecordEnvelope strayAdmission = f.Load().ById[stray.Id];
+        f.Revoke(device, strayAdmission, f.Signer(other));
+        Assert.True(Ok(api.FirstAuthority(new FirstAuthorityRequest())).Candidates.Single(c => c.Admission == stray.Id).Revoked);
+        Assert.Contains("no longer reads as the check", Stale(plan), StringComparison.Ordinal);
+
+        // A fresh check's plan is taken.
+        plan = Plan();
+        Assert.True(Ok(api.FirstAuthority(new FirstAuthorityRequest(f.Estate.OperatorId, Admission: first.Id, ExpectPlan: plan))).Applied);
     }
 
     /// <summary>The estate's only self-admission so far, the root operator's first device's.</summary>

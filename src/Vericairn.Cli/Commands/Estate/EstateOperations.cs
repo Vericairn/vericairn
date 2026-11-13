@@ -217,6 +217,7 @@ internal sealed class EstateOperations(CommandContext context)
                 context.Output.WriteLine($"  {candidate.Admission}  device {candidate.Device ?? "none"}{(candidate.Name is null ? string.Empty : $" \"{candidate.Name}\"")}  {candidate.Platform ?? "unknown platform"}, {candidate.Custody ?? "unknown custody"}, presence {candidate.Presence ?? "unknown"}  principal {candidate.Principal ?? "none"}");
                 context.Output.WriteLine($"    states {candidate.At} (a claim, not evidence of order); named by the manifest: {YesNo(candidate.Named)}; the estate reads it as its first authority: {YesNo(candidate.Reads)}");
                 context.Output.WriteLine($"    were it the first authority: witnessed first by history checkpoints: {YesNo(candidate.WitnessedFirst)}; its device revoked: {YesNo(candidate.Revoked)}; admits {candidate.Admits} other {(candidate.Admits == 1 ? "device" : "devices")}; its device signed {candidate.RecordsSigned} {(candidate.RecordsSigned == 1 ? "record" : "records")}");
+                context.Output.WriteLine(candidate.SignatureVerifies ? "    its signature verifies under its device's key at its time" : $"    its signature does not verify: {candidate.SignatureProblem}");
                 context.Output.WriteLine(candidate.Nameable ? "    nameable" : $"    not nameable: {candidate.NotNameable}");
             }
 

@@ -225,10 +225,14 @@ vericairn estate first-authority --device <your first device id> --expect-plan <
 ```
 
 The first lists each self-admission with its evidence: the device and its custody, whether it stands revoked,
-how many devices rest on it and how many records it signed. The second shows the change to `estate/manifest.json`
-and its plan hash, writing nothing; the third writes it, as you, with that hash. The command names only one of
-your own devices, revoked or not, and refuses where the estate's history checkpoints already speak to the first
-authority. Then remove every other self-admission of the root operator's device from the copy and commit the
+how many devices rest on it, how many records it signed and whether its signature verifies. The second shows the
+change to `estate/manifest.json` and its plan hash, writing nothing; the third writes it, as you, with that hash.
+The command names only one of your own devices whose self-admission's signature verifies, revoked or not, and
+refuses where the estate's history checkpoints already speak to the first authority. It does not replace every
+hand edit: in an estate that has adopted history checkpoints and whose manifest names an admission that is no
+candidate, the copy reads unsettled and the command refuses; there the repair is the operator's own edit of
+`firstAuthority` back to the self-admission the checkpoints witnessed, after comparing the copy with a head known
+elsewhere (`vericairn estate check --expect <checkpoint>`). Then remove every other self-admission of the root operator's device from the copy and commit the
 manifest with the records: naming the first makes your devices' admissions count again, but each other one still
 reads `signature.self-admission`, an error, which the command lists and leaves to you, and the upgrade refuses
 until it is gone ([the first authority](operator-guide.md#3-principals-devices-and-admission)).

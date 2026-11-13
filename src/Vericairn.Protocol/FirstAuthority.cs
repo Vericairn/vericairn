@@ -38,8 +38,15 @@ public sealed record FirstAuthorityRequest(string? By = null, string? Device = n
 /// <param name="Revoked">Whether, read as the first authority, its device's current admission is a revocation. A revoked device's self-admission stays nameable.</param>
 /// <param name="Admits">How many other devices an admission that counts admits when it is read as the first authority.</param>
 /// <param name="RecordsSigned">How many records its device signed.</param>
+/// <param name="SignatureVerifies">
+/// Whether its signature verifies, read as the first authority, as the estate verifies every signature: under its device's key at its
+/// stated time, over the hash its content has. A self-admission is listed when its signature names a device of the line it admits,
+/// whether or not it verifies, and one that does not verify is never nameable.
+/// </param>
+/// <param name="SignatureProblem">Why its signature does not verify, with the finding's code; null when it verifies.</param>
 public sealed record FirstAuthorityCandidate(string Admission, string Hash, string At, string Path, string? Device, string? Name, string? Platform, string? Custody, string? Presence,
-    string? Principal, bool Nameable, string? NotNameable, bool Named, bool Reads, bool WitnessedFirst, bool Revoked, int Admits, int RecordsSigned);
+    string? Principal, bool Nameable, string? NotNameable, bool Named, bool Reads, bool WitnessedFirst, bool Revoked, int Admits, int RecordsSigned, bool SignatureVerifies,
+    string? SignatureProblem);
 
 /// <summary>The change to the manifest that naming the first authority makes.</summary>
 /// <param name="Manifest">The manifest's repository-relative path.</param>
@@ -56,11 +63,15 @@ public sealed record FirstAuthorityChange(string Manifest, string? Before, strin
 /// <param name="Findings">The findings about the root of trust: manifest.first-authority, history.root-ambiguous and history.manifest-root.</param>
 /// <param name="Candidates">Every self-admission that could be the first authority, by id.</param>
 /// <param name="Change">The change shown or made; null for a listing.</param>
-/// <param name="PlanHash">The hash of the change and of what it was judged from, which a write names in expectPlan; null for a listing.</param>
+/// <param name="PlanHash">
+/// The hash of the change, of the manifest's bytes and of everything else this response shows, the root operator and every candidate's
+/// evidence among it, which a write names in expectPlan; null for a listing.
+/// </param>
 /// <param name="Applied">Whether the manifest was written.</param>
 /// <param name="Remaining">
-/// After writing, the errors about the root of trust the estate still reports, such as each other self-admission's
-/// signature.self-admission, which the operator resolves by removing those record files; nothing here removes them.
+/// After writing, the errors the estate still reports about the root of trust, such as each other self-admission's
+/// signature.self-admission, which the operator resolves by removing those record files, and every error it reports on the admission
+/// named; nothing here removes them.
 /// </param>
 public sealed record FirstAuthorityResponse(string? RootOperator, string? Named, string? FirstAuthority, bool Adopted, bool Unsettled, IReadOnlyList<FindingDto> Findings,
     IReadOnlyList<FirstAuthorityCandidate> Candidates, FirstAuthorityChange? Change, string? PlanHash, bool Applied, IReadOnlyList<FindingDto> Remaining);
