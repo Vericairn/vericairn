@@ -21,7 +21,8 @@ can run on its declared flow. `vericairn estate first-authority` names an estate
 guides cover enrollment's presence prompts and a cold recovery's inventories (DOCS-33 and DOCS-32), an estate's
 root can hold its owner's agent instruction files (CODE-70), and main's push run skips a commit the merge queue
 already tested (CI-07), with FIX-118 and FIX-133. Every distributable is still built with SDK 10.0.404 and
-embeds the .NET and ASP.NET Core 10.0.15 runtimes.
+embeds the .NET and ASP.NET Core 10.0.15 runtimes. 0.9.3 reads a key only in the form Vericairn makes
+(FIX-132), as its release notes' Security section describes.
 0.9.2 added declared flows: a goal can run a template of kind `flow` whose steps are routed to their roles one
 step per command, with each step's position, hand-offs and reviews derived from the records, stops where a
 person holds the role, and the software pack's release and upgrade flows (PROC-05, PROC-06, PROC-07 and
