@@ -252,6 +252,10 @@ can sign it.
 Any other write asks once for its record, and once more for a history checkpoint or closing it carries, such as a charter
 revision's; the interval checkpoint is never asked of a person's device that needs presence ([history checkpoints](#history-checkpoints-092)).
 
+When a prompt expires, is refused or the command times out while you enroll a device, [enrollment troubleshooting](enrollment-troubleshooting.md)
+tells those endings apart from what the command prints, and reconciles from what the estate holds without replaying the
+enrollment: an authenticated prompt is no receipt, and only the stored record says what happened.
+
 ### History checkpoints (0.9.2)
 
 A history checkpoint is a signed record listing, by path and hash, the records your estate holds and naming the checkpoints it follows ([record format 3](record-format-v3.md#history-checkpoints-092)). What a checkpoint that counts witnesses cannot be removed or altered unnoticed, and it closes the backdating route that required signatures alone leave open. Four things change once an estate holds a counting checkpoint, which is what adopting checkpoints means:
