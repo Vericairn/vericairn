@@ -202,15 +202,15 @@ public sealed class PresencePromptTests
     {
         using var f = new HistoryTriggerTests.Fixture();
         RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
-        var provider = new FakeReleaseProvider();
-        f.Api.Providers = new ProviderRegistry();
-        f.Api.Providers.Register(provider);
-        ReleaseGateSource.Prepare(f.Api, "Example/widget", provider.HeadSha);
-        // The operator signs here only with a device recorded as needing presence, held by the recording stand-in for its custody.
-        f.PresenceDevice(f.Records.Estate.OperatorId);
-        f.ForgetOperatorDevice();
-        var custody = new RecordingCustody(VericairnHome.Path());
-        f.Api.KeyStores = [custody];
+        (FakeReleaseProvider provider, RecordingCustody custody) = PresenceRelease(f);
+        // The fixture stamps its records with its own clock, which can run a second ahead of the wall clock. The runtime reads a
+        // controlled clock past every record instead (FIX-133), and the clock turns between the admission and the dispatch, as on a
+        // loaded machine: the submission-time basis is complete at both and the same, so the path announced is the path signed.
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        Assert.All(f.Api.Session.Load().Records, r => Assert.True(r.AtTime < clock.Now, $"{r.Type} {r.Id} is stamped {r.At}, past the runtime's clock."));
+        f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") clock.Now = clock.Now.AddSeconds(1); };
+        List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
         long start = f.Api.PresencePrompts(new()).Cursor;
 
         ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
@@ -218,6 +218,7 @@ public sealed class PresencePromptTests
 
         Assert.True(submitted.Ok, submitted.Message);
         IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(notices, asked);
         Assert.Equal(["announced", "prompt", "prompt", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
         Assert.All(notices, n => Assert.Equal("release submit 1.1.0", n.Action));
         Assert.Equal(
@@ -243,6 +244,112 @@ public sealed class PresencePromptTests
         Assert.Equal(4, observation[0].Count);
         Assert.Equal("release 1.1.0: records the release candidate for your acceptance", observation[0].Signatures[^1].Describe());
         Assert.Equal("Signed 4 of 4.", observation[^1].Text);
+    }
+
+    [Fact]
+    public void ASubmissionWhoseBasisChangesBeforeDispatchAnnouncesItsRevisedPathBeforeItsNextPrompt()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        HeldClock clock = MinuteAhead();
+        // The product is stamped a second past the runtime's controlled clock, so the submission-time basis is incomplete at admission.
+        // The clock reaches the product's second before the dispatch: the basis is then complete, so it changed, and the reserved
+        // intent is recorded again first (FIX-133). That revision is announced before the next prompt, and every prompt still counts.
+        f.Records.Estate.SetClock(clock.Now);
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        Assert.Equal(clock.Now.AddSeconds(1), product.AtTime);
+        (FakeReleaseProvider provider, RecordingCustody custody) = PresenceRelease(f);
+        Hold(f, provider, clock);
+        Assert.All(f.Api.Session.Load().Records.Where(r => r.Id != product.Id), r => Assert.True(r.AtTime < clock.Now, $"{r.Type} {r.Id} is stamped {r.At}, past the runtime's clock."));
+        f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") clock.Now = product.AtTime; };
+        List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+        Assert.True(submitted.Ok, submitted.Message);
+        Assert.Equal(2, submitted.BasisEvidence!.Count);
+        IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(notices, asked);
+        Assert.Equal(["announced", "prompt", "prompt", "prompt", "revised", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal("""
+            release submit 1.1.0 now needs 6 signatures in all, because the admission basis changed before dispatch, so the reserved intent is recorded again first. The rest are:
+              4. operation release 1.1.0: records the release build as uncertain, to be observed before any retry
+              5. operation release 1.1.0: a trial signature, never stored, that proves your device can sign this release evidence before it is written
+              6. operation release 1.1.0: records the release build's dispatch receipt
+            """.ReplaceLineEndings("\n"), notices[4].Text);
+        Assert.Equal("Signed 6 of 6.", notices[^1].Text);
+        Assert.Equal(["1 of 5", "2 of 5", "3 of 5", "4 of 6", "5 of 6", "6 of 6"], custody.Reasons.Select(r => r!["sign Vericairn signature ".Length..r!.IndexOf(':', StringComparison.Ordinal)]));
+    }
+
+    // A release source and provider for Example/widget, and the operator signing here only with a device recorded as needing presence,
+    // held by the recording stand-in for its custody.
+    private static (FakeReleaseProvider Provider, RecordingCustody Custody) PresenceRelease(HistoryTriggerTests.Fixture f)
+    {
+        var provider = new FakeReleaseProvider();
+        f.Api.Providers = new ProviderRegistry();
+        f.Api.Providers.Register(provider);
+        ReleaseGateSource.Prepare(f.Api, "Example/widget", provider.HeadSha);
+        f.PresenceDevice(f.Records.Estate.OperatorId);
+        f.ForgetOperatorDevice();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Api.KeyStores = [custody];
+        return (provider, custody);
+    }
+
+    // A controlled clock at a whole second a minute past the wall clock, and so past every record the fixture has written, whose own
+    // clock runs at most a second ahead of the wall clock.
+    private static HeldClock MinuteAhead() => new(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds()));
+
+    // The runtime reads its policy time, and the provider stamps its receipts and observations, from the one controlled clock.
+    private static void Hold(HistoryTriggerTests.Fixture f, FakeReleaseProvider provider, HeldClock clock)
+    {
+        f.Api.PolicyClock = clock;
+        provider.Now = () => clock.Now;
+    }
+
+    // The newest notice the runtime had published as custody was asked for each signature.
+    private static List<PresenceNotice> NewestAtEachSignature(RecordingCustody custody, EstateService api)
+    {
+        var newest = new List<PresenceNotice>();
+        custody.BeforeSigning = _ => newest.Add(Since(api, 0)[^1]);
+        return newest;
+    }
+
+    // Read in order, the notices hold every prompt to what was announced before it: each names the signature announced at its place,
+    // by the announcement or by a later addition or revision, and states the count announced by then. Custody was asked for each
+    // signature only once its prompt was the newest notice.
+    private static void AssertAnnouncedBeforeAsked(IReadOnlyList<PresenceNotice> notices, IReadOnlyList<PresenceNotice> newestAtSignature)
+    {
+        List<PresenceSignature> plan = [];
+        int prompts = 0;
+        foreach (PresenceNotice notice in notices)
+        {
+            switch (notice.Kind)
+            {
+                case "announced":
+                    Assert.Equal(0, prompts);
+                    plan = [.. notice.Signatures];
+                    break;
+                case "added":
+                    plan.InsertRange(prompts, notice.Signatures);
+                    break;
+                case "revised":
+                    plan.RemoveRange(prompts, plan.Count - prompts);
+                    plan.AddRange(notice.Signatures);
+                    break;
+                case "prompt":
+                    prompts++;
+                    Assert.Equal(prompts, notice.Index);
+                    Assert.True(prompts <= plan.Count, "Asked before it was announced: " + notice.Text);
+                    Assert.Equal(plan[prompts - 1], Assert.Single(notice.Signatures));
+                    break;
+            }
+
+            Assert.Equal(plan.Count, notice.Count);
+        }
+
+        Assert.Equal(notices.Where(n => n.Kind == "prompt").Select(n => n.Sequence), newestAtSignature.Select(n => n.Sequence));
     }
 
     // The operator's file device stated as needing presence, its key held by a recording stand-in for the custody that would ask.

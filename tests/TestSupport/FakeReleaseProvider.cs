@@ -39,6 +39,9 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
     /// <summary>Every dispatch requested.</summary>
     public IReadOnlyList<DispatchRequest> Dispatches => dispatches;
 
+    /// <summary>The clock the fake's receipts and observations are stamped from: the wall clock unless a test holds its own.</summary>
+    public Func<DateTimeOffset> Now { get; set; } = () => DateTimeOffset.UtcNow;
+
     /// <summary>An in-memory provider serving a provider id (github-releases unless a test names another).</summary>
     public FakeReleaseProvider(string provider = "github-releases")
     {
@@ -73,7 +76,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
     public DispatchReceipt Dispatch(DispatchRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        string at = RecordParser.FormatTimestamp(Now());
         switch (NextDispatch)
         {
             case DispatchBehavior.RefuseAuthentication:
@@ -105,7 +108,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         ArgumentException.ThrowIfNullOrWhiteSpace(checksums);
         RunObservation run = runs[repository + "#" + runId];
-        runs[repository + "#" + runId] = run with { Status = "completed", Conclusion = success ? "success" : "failure", At = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+        runs[repository + "#" + runId] = run with { Status = "completed", Conclusion = success ? "success" : "failure", At = RecordParser.FormatTimestamp(Now()) };
         if (!success)
         {
             return;
@@ -137,7 +140,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
             }
 
             assets.Add(new ReleaseAsset(checksums, 300, null));
-            releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+            releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(Now()));
             return;
         }
 
@@ -153,7 +156,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         assets.Add(new ReleaseAsset($"vericairn-{version}-sbom.cdx.json", 500, "sha256:" + new string('a', 64)));
         assets.Add(new ReleaseAsset($"vericairn-{version}-THIRD-PARTY-NOTICES.md", 400, "sha256:" + new string('b', 64)));
         assets.Add(new ReleaseAsset(checksums, 300, null));
-        releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(Now()));
     }
 
     /// <summary>What the operator's manual step does at GitHub: the draft becomes public.</summary>
@@ -162,7 +165,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         ReleaseObservation release = releases[repository + "#" + tag];
-        releases[repository + "#" + tag] = release with { Draft = false, PublishedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), At = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+        releases[repository + "#" + tag] = release with { Draft = false, PublishedAt = RecordParser.FormatTimestamp(Now()), At = RecordParser.FormatTimestamp(Now()) };
     }
 
     /// <inheritdoc />
@@ -170,7 +173,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        return runs.TryGetValue(destination + "#" + runId, out RunObservation? run) ? run with { At = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) } : null;
+        return runs.TryGetValue(destination + "#" + runId, out RunObservation? run) ? run with { At = RecordParser.FormatTimestamp(Now()) } : null;
     }
 
     /// <inheritdoc />
@@ -179,7 +182,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         ArgumentNullException.ThrowIfNull(settings);
-        return releases.TryGetValue(destination + "#" + tag, out ReleaseObservation? release) ? release with { At = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) } : null;
+        return releases.TryGetValue(destination + "#" + tag, out ReleaseObservation? release) ? release with { At = RecordParser.FormatTimestamp(Now()) } : null;
     }
 
     /// <inheritdoc />
