@@ -698,6 +698,33 @@ public sealed class OperatorRecordTests
         Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
     }
 
+    [Fact]
+    public void AnActionWhoseTargetRequiresAMergeQueueWaitsThereAndCompletesOnceTheQueueMergesIt()
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.QueueRequired = true;
+        OperatorRecordResponse queued = f.Run();
+        Assert.False(queued.Ok);
+        Assert.Equal("waiting", queued.Status);
+        Assert.Equal(("dispatched", "queued"), (queued.Change!.Status, queued.Change.CheckStatus));
+        Assert.Equal(["branch", "commit", "scan", "push", "open", "pull", "pull", "enqueue", "pull"], f.Events);
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(("merge-queued", false), (shown.Stage, shown.Finishable));
+        Assert.Contains("waiting in the target branch's merge queue", shown.Summary, StringComparison.Ordinal);
+        Assert.Contains("vericairn changes observe --operation " + shown.Merge!.Id, shown.NextStep, StringComparison.Ordinal);
+
+        // The queue merges the change at the commit its group tested; the same input resumes, observes that and completes.
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "merged");
+        f.Reopen();
+        int events = f.Events.Count;
+        OperatorRecordResponse completed = f.Run();
+        Assert.True(completed.Ok, completed.Message + " " + completed.NextStep);
+        Assert.Equal(["pull", "target"], f.Events.Skip(events));
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
     private static ChangeCheck[] Checks(string head) => Required.Select(n => new ChangeCheck(n, head, "completed", "success")).ToArray();
 
     private sealed class Fixture : IDisposable
@@ -864,6 +891,11 @@ public sealed class OperatorRecordTests
         { fixture.Step("merge"); Assert.Equal(fixture.Local.Head, head); ChangeReceipt receipt = Memory.Merge(destination, number, head); Receipt("merge"); return receipt; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveTarget(destination, branch, commit); }
+        public MergeQueueObservation ObserveQueue(string destination, string number) => Memory.ObserveQueue(destination, number);
+        public ChangeReceipt Enqueue(string destination, string number, string head)
+        { fixture.Step("enqueue"); Assert.Equal(fixture.Local.Head, head); ChangeReceipt receipt = Memory.Enqueue(destination, number, head); Receipt("enqueue"); return receipt; }
+        public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
+        { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveQueuedTarget(destination, branch, commit); }
         private void Receipt(string step) { if (LoseReceipt == step) throw new ProviderUncertainException("The receipt was lost."); }
     }
 }

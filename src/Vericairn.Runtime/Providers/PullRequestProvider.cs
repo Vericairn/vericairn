@@ -17,6 +17,25 @@ public sealed record TargetObservation(string Branch, string Head, IReadOnlyList
 public sealed record ChangeReceipt(string? PullRequest = null, string? MergeCommit = null);
 
 /// <summary>
+/// Whether the target branch requires every merge to go through its merge queue, and the pull request's place in that queue, as the
+/// host observed it (CODE-71). An incomplete observation never authorizes a merge or settles a queued one.
+/// </summary>
+/// <param name="Required">The target branch requires merging through its merge queue.</param>
+/// <param name="State">
+/// <c>absent</c> when the pull request is not in the queue and the host reports no removal; <c>queued</c> while it waits or its group
+/// runs; <c>failed</c> when the queue found it cannot merge, as on failed checks or a conflict; <c>removed</c> when it left the queue
+/// unmerged otherwise.
+/// </param>
+/// <param name="Head">The pull-request head its queue entry holds, while it has one.</param>
+/// <param name="Reason">The host's reason for its latest removal from the queue, as a short upper-case token, when the host gives one.</param>
+/// <param name="Complete">False when the host could not be observed completely.</param>
+public sealed record MergeQueueObservation(bool Required, string State, string? Head = null, string? Reason = null, bool Complete = true)
+{
+    /// <summary>The states a pull request can have in a merge queue.</summary>
+    public static readonly IReadOnlyList<string> States = ["absent", "queued", "failed", "removed"];
+}
+
+/// <summary>
 /// Pull requests, contract version 1. Every observation is complete or explicitly incomplete. Implementations merge with an
 /// atomic expected-head condition, never auto-merge later, and never read credentials. The host records intent before calling.
 /// </summary>
@@ -45,6 +64,27 @@ public interface IPullRequestProvider
 
     /// <summary>Observes push runs on the target branch at the merge commit, never the branch's latest commit.</summary>
     TargetObservation ObserveTarget(string destination, string branch, string commit);
+
+    /// <summary>
+    /// Observes whether the pull request's target branch requires a merge queue, and the pull request's place in it (CODE-71). A
+    /// provider that does not override this reports that no queue is required, so merges go through <see cref="Merge"/> as before.
+    /// </summary>
+    MergeQueueObservation ObserveQueue(string destination, string number) => new(false, "absent");
+
+    /// <summary>
+    /// Enqueues the pull request into its target branch's required merge queue only if it still has this head, never a later or
+    /// automatic merge of another head; an ambiguous receipt throws uncertainty. The queue merges it later; its outcome is observed
+    /// with <see cref="ObserveQueue"/> and <see cref="Observe"/>. A provider that does not override this refuses before any request.
+    /// </summary>
+    ChangeReceipt Enqueue(string destination, string number, string head) =>
+        throw new ProviderRefusedException("This pull-request provider cannot enqueue into a merge queue; nothing was requested.");
+
+    /// <summary>
+    /// Observes the runs of exactly the commit a merge queue moved the target branch to: the queue's own runs of that commit (event
+    /// merge_group) as well as the branch's push runs, never a newer commit's run. A provider that does not override this reads the
+    /// push runs alone.
+    /// </summary>
+    TargetObservation ObserveQueuedTarget(string destination, string branch, string commit) => ObserveTarget(destination, branch, commit);
 }
 
 /// <summary>An independent in-memory implementation for conformance tests; qualifies no external service.</summary>
@@ -60,7 +100,13 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
 
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new("memory-pull-requests", IPullRequestProvider.Contract, "implemented",
-        ["open", "observe", "merge", "observe-target"], ["In-memory conformance implementation; no external effects."], Locations: ["github"]);
+        ["open", "observe", "merge", "observe-target", "enqueue", "observe-queue"], ["In-memory conformance implementation; no external effects."], Locations: ["github"]);
+
+    private readonly Dictionary<string, MergeQueueObservation> queue = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TargetObservation> queuedTargets = new(StringComparer.Ordinal);
+
+    /// <summary>Whether every target branch requires its merge queue, refusing a direct merge (CODE-71).</summary>
+    public bool QueueRequired { get; set; }
 
     /// <summary>The checks assigned to the next opening.</summary>
     public IReadOnlyList<ChangeCheck> Checks { get; set; } = [];
@@ -119,6 +165,7 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
     {
         lock (gate)
         {
+            if (QueueRequired) throw new ProviderRefusedException("The target branch requires its merge queue; nothing was merged.");
             PullRequestObservation? pull = Observe(destination, number);
             if (pull is null || pull.State != "open" || pull.Head != head)
                 throw new ProviderRefusedException("The pull request is absent, closed or its head moved.");
@@ -132,5 +179,70 @@ public sealed class MemoryPullRequestProvider : IPullRequestProvider
     public TargetObservation ObserveTarget(string destination, string branch, string commit)
     {
         lock (gate) return targets.GetValueOrDefault(destination + "#" + branch + "#" + commit) ?? new(branch, commit, []);
+    }
+
+    /// <inheritdoc />
+    public MergeQueueObservation ObserveQueue(string destination, string number)
+    {
+        lock (gate) return queue.GetValueOrDefault(destination + "#" + number) is { } place ? place with { Required = QueueRequired } : new(QueueRequired, "absent");
+    }
+
+    /// <inheritdoc />
+    public ChangeReceipt Enqueue(string destination, string number, string head)
+    {
+        lock (gate)
+        {
+            PullRequestObservation? pull = Observe(destination, number);
+            if (!QueueRequired) throw new ProviderRefusedException("The target branch has no merge queue; nothing was enqueued.");
+            if (pull is null || pull.State != "open" || pull.Head != head)
+                throw new ProviderRefusedException("The pull request is absent, closed or its head moved.");
+            if (queue.GetValueOrDefault(destination + "#" + number) is { State: "queued" })
+                throw new ProviderRefusedException("The pull request is already in the merge queue.");
+            queue[destination + "#" + number] = new(true, "queued", head);
+            Effects++;
+            return new(number);
+        }
+    }
+
+    /// <summary>
+    /// Settles a queued pull request as its merge queue would (CODE-71): <c>merged</c> merges it at <see cref="MergeCommit"/>, the commit
+    /// the queue's group tested; <c>failed</c> or <c>removed</c> takes it out of the queue unmerged, with an optional host reason.
+    /// </summary>
+    public void SettleQueue(string destination, string number, string outcome, string? reason = null)
+    {
+        lock (gate)
+        {
+            string key = destination + "#" + number;
+            if (queue.GetValueOrDefault(key) is not { State: "queued" or "failed" }) throw new InvalidOperationException("The pull request is not in the merge queue.");
+            PullRequestObservation pull = pulls[key];
+            switch (outcome)
+            {
+                case "merged":
+                    pulls[key] = pull with { State = "merged", MergeCommit = MergeCommit };
+                    queue.Remove(key);
+                    break;
+                case "unmergeable":
+                    queue[key] = new(true, "failed", pull.Head);
+                    break;
+                case "failed" or "removed":
+                    queue[key] = new(true, outcome, null, reason);
+                    break;
+                default:
+                    throw new ArgumentException("A merge queue merges, finds unmergeable, fails or removes a pull request.", nameof(outcome));
+            }
+        }
+    }
+
+    /// <summary>Supplies the runs of a commit a merge queue moved the target branch to, its queue's runs among them.</summary>
+    public void SetQueuedTarget(string destination, TargetObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        lock (gate) queuedTargets[destination + "#" + observation.Branch + "#" + observation.Head] = observation;
+    }
+
+    /// <inheritdoc />
+    public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
+    {
+        lock (gate) return queuedTargets.GetValueOrDefault(destination + "#" + branch + "#" + commit) ?? ObserveTarget(destination, branch, commit);
     }
 }

@@ -730,7 +730,11 @@ unobserved future commit. From 0.8.2 the scan applies gitleaks' rules without th
 allowlists, so it can report a finding that gitleaks' defaults pass. A finding refuses the push,
 and with it the merge; there is no per-estate allowance, so a change refused for a value that is
 not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
-check successful at the expected head; forks and required merge queues are unsupported.
+check successful at the expected head; forks are unsupported. From 0.9.3 a required merge
+queue is entered with the pinned head, and its outcome is read from the pull request and
+its place in the queue; a change that leaves the queue before its place was observed
+leaves the merge uncertain until it is reconciled, and the GitHub provider tells a failure
+from a removal by the host's latest removal reason.
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
 or publication authority is inferred from a check result.

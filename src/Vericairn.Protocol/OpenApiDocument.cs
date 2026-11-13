@@ -776,7 +776,7 @@ public static class OpenApiDocument
             ("mergeCommit", "string"), ("checkStatus", "string"), ("targetObservation", "object"), ("ask", "object"), ("finishable", "boolean"),
             ("summary", "string"), ("nextStep", "string"));
         unfinishedAction["required"] = new JsonArray("identity", "recordId", "branch", "stage", "finishable", "summary", "nextStep");
-        unfinishedAction["properties"]!["stage"]!["enum"] = new JsonArray("prepared", "recorded", "committed", "pushed", "opened", "merge-failed", "merge-uncertain", "merged");
+        unfinishedAction["properties"]!["stage"]!["enum"] = new JsonArray("prepared", "recorded", "committed", "pushed", "opened", "merge-failed", "merge-uncertain", "merge-queued", "merged");
         JsonObject unfinishedResponse = Object(("action", "object"), ("problem", "object"));
         unfinishedResponse["properties"]!["action"] = SchemaReference("OperatorUnfinishedAction");
 

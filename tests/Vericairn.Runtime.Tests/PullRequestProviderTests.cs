@@ -170,6 +170,119 @@ public sealed class PullRequestProviderTests
         Assert.Throws<ProviderRefusedException>(() => provider.Observe("Example/widget", "1"));
     }
 
+    [Fact]
+    public void TheGitHubProviderEnqueuesOnlyThePinnedHeadThroughTheMergeQueueAndReadsItsPlace()
+    {
+        var calls = new List<string[]>();
+        bool queued = false;
+        var provider = new GitHubPullRequestProvider(info =>
+        {
+            string[] args = [.. info.ArgumentList];
+            calls.Add(args);
+            Assert.Equal("gh", info.FileName);
+            Assert.Equal(["api", "graphql"], args[..2]);
+            string query = args.Single(a => a.StartsWith("query=", StringComparison.Ordinal));
+            if (query.Contains("enqueuePullRequest", StringComparison.Ordinal))
+            {
+                queued = true;
+                return Success("""{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"state":"QUEUED"}}}}""");
+            }
+            if (query.Contains("timelineItems", StringComparison.Ordinal)) return Success("""{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}""");
+            return Success(JsonSerializer.Serialize(new { data = new { repository = new { pullRequest = new { id = "PR_kwDOexample", number = 1, headRefOid = Head,
+                isMergeQueueEnabled = true, mergeQueueEntry = queued ? new { state = "AWAITING_CHECKS", headCommit = new { oid = Head } } : null } } } }));
+        });
+        Assert.Equal(new MergeQueueObservation(true, "absent"), provider.ObserveQueue("Example/widget", "1"));
+        Assert.Equal("1", provider.Enqueue("Example/widget", "1", Head).PullRequest);
+        string[] mutation = calls.Single(c => c.Any(a => a.Contains("enqueuePullRequest", StringComparison.Ordinal)));
+        Assert.Contains("id=PR_kwDOexample", mutation);
+        Assert.Contains("head=" + Head, mutation);
+        Assert.Contains("expectedHeadOid:$head", mutation.Single(a => a.StartsWith("query=", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Equal(new MergeQueueObservation(true, "queued", Head), provider.ObserveQueue("Example/widget", "1"));
+        // A head that moved is never enqueued, and nothing merges directly.
+        Assert.Throws<ProviderRefusedException>(() => provider.Enqueue("Example/widget", "1", MergeCommit));
+        Assert.Single(calls, c => c.Any(a => a.Contains("enqueuePullRequest", StringComparison.Ordinal)));
+        Assert.DoesNotContain(calls, c => c.Any(a => a.EndsWith("/merge", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData("UNMERGEABLE", null, "failed")]
+    [InlineData(null, "CI_FAILURE", "failed")]
+    [InlineData(null, "MERGE_CONFLICT", "failed")]
+    [InlineData(null, "MANUAL", "removed")]
+    [InlineData(null, "something odd!", "removed")]
+    [InlineData(null, null, "absent")]
+    public void TheGitHubProviderReadsAQueueEntryOrItsLatestRemovalAsTheQueuesOutcome(string? entry, string? reason, string state)
+    {
+        var provider = new GitHubPullRequestProvider(info =>
+        {
+            string query = info.ArgumentList.Single(a => a.StartsWith("query=", StringComparison.Ordinal));
+            if (query.Contains("timelineItems", StringComparison.Ordinal))
+                return Success(JsonSerializer.Serialize(new { data = new { repository = new { pullRequest = new { timelineItems = new { nodes = new[] { new { reason } }.Where(_ => reason is not null).ToArray() } } } } }));
+            return Success(JsonSerializer.Serialize(new { data = new { repository = new { pullRequest = new { id = "PR_kwDOexample", number = 1, headRefOid = Head,
+                isMergeQueueEnabled = true, mergeQueueEntry = entry is null ? null : new { state = entry, headCommit = new { oid = Head } } } } } }));
+        });
+        MergeQueueObservation observed = provider.ObserveQueue("Example/widget", "1");
+        Assert.True(observed.Complete);
+        Assert.Equal(state, observed.State);
+        Assert.Equal(entry is null ? null : Head, observed.Head);
+        Assert.Equal(reason switch { null => null, "something odd!" => "UNKNOWN", _ => reason }, observed.Reason);
+    }
+
+    [Fact]
+    public void AGitHubQueueAnswerWithErrorsIsIncompleteAndAWrongQueueRunIsIncomplete()
+    {
+        var errors = new GitHubPullRequestProvider(_ => Success("""{"data":null,"errors":[{"message":"untrusted diagnostics"}]}"""));
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => errors.ObserveQueue("Example/widget", "1"));
+        Assert.DoesNotContain("untrusted", refused.Message, StringComparison.Ordinal);
+        var other = new GitHubPullRequestProvider(Runs("gh-readonly-queue/release/pr-1-" + Head));
+        Assert.False(other.ObserveQueuedTarget("Example/widget", "main", MergeCommit).Complete);
+    }
+
+    [Fact]
+    public void TheGitHubQueuedTargetReadsTheQueuesRunOfTheExactCommitBesideThePushRun()
+    {
+        var calls = new List<string[]>();
+        var provider = new GitHubPullRequestProvider(info => { calls.Add([.. info.ArgumentList]); return Runs("gh-readonly-queue/main/pr-1-" + Head)(info); });
+        TargetObservation target = provider.ObserveQueuedTarget("Example/widget", "main", MergeCommit);
+        Assert.True(target.Complete);
+        Assert.Contains(target.Checks, c => c.Name == "tests" && c.Conclusion == "skipped");
+        Assert.Empty(ChangeGate.QueuedRefusals(MergeCommit, ["tests"], target.Checks, target.Complete));
+        Assert.NotEmpty(ChangeGate.Refusals(MergeCommit, ["tests"], target.Checks, target.Complete));
+        Assert.Contains(calls, c => c.Any(a => a.Contains("head_sha=" + MergeCommit, StringComparison.Ordinal) && a.Contains("event=merge_group", StringComparison.Ordinal)));
+        Assert.Contains(calls, c => c.Any(a => a.Contains("head_sha=" + MergeCommit, StringComparison.Ordinal) && a.Contains("event=push", StringComparison.Ordinal)));
+    }
+
+    // The runs of the merge commit: main's push run, whose job the queue's run already passed and is skipped, and the queue's own run.
+    private static Func<ProcessStartInfo, ProcessResult> Runs(string queueBranch) => info =>
+    {
+        string route = info.ArgumentList[1];
+        if (route.Contains("/actions/runs?", StringComparison.Ordinal) && route.Contains("event=push", StringComparison.Ordinal))
+            return Success(JsonSerializer.Serialize(new[] { new { total_count = 1, workflow_runs = new[] { new { id = 10, name = "CI", head_sha = MergeCommit, head_branch = "main", @event = "push", status = "completed", conclusion = "success" } } } }));
+        if (route.Contains("/actions/runs?", StringComparison.Ordinal) && route.Contains("event=merge_group", StringComparison.Ordinal))
+            return Success(JsonSerializer.Serialize(new[] { new { total_count = 1, workflow_runs = new[] { new { id = 11, name = "CI", head_sha = MergeCommit, head_branch = queueBranch, @event = "merge_group", status = "completed", conclusion = "success" } } } }));
+        if (route.Contains("/runs/10/jobs?", StringComparison.Ordinal))
+            return Success(JsonSerializer.Serialize(new[] { new { total_count = 1, jobs = new[] { new { name = "tests", head_sha = MergeCommit, status = "completed", conclusion = "skipped" } } } }));
+        if (route.Contains("/runs/11/jobs?", StringComparison.Ordinal))
+            return Success(JsonSerializer.Serialize(new[] { new { total_count = 1, jobs = new[] { new { name = "tests", head_sha = MergeCommit, status = "completed", conclusion = "success" } } } }));
+        throw new InvalidOperationException("Unscripted provider invocation.");
+    };
+
+    [Fact]
+    public void TheMemoryProviderRefusesADirectMergeWhereAQueueIsRequiredAndSettlesItsQueue()
+    {
+        var memory = new MemoryPullRequestProvider { Checks = [new("tests", Head, "completed", "success")], QueueRequired = true };
+        memory.Open("Example/widget", "work/change", "main", Head, "Change", "Body");
+        Assert.Throws<ProviderRefusedException>(() => memory.Merge("Example/widget", "1", Head));
+        Assert.Throws<ProviderRefusedException>(() => memory.Enqueue("Example/widget", "1", MergeCommit));
+        Assert.Equal("1", memory.Enqueue("Example/widget", "1", Head).PullRequest);
+        Assert.Equal(new MergeQueueObservation(true, "queued", Head), memory.ObserveQueue("Example/widget", "1"));
+        Assert.Throws<ProviderRefusedException>(() => memory.Enqueue("Example/widget", "1", Head));
+        memory.SettleQueue("Example/widget", "1", "merged");
+        Assert.Equal(("merged", MergeCommit), (memory.Observe("Example/widget", "1")!.State, memory.Observe("Example/widget", "1")!.MergeCommit));
+        Assert.Equal(new MergeQueueObservation(true, "absent"), memory.ObserveQueue("Example/widget", "1"));
+        Assert.Equal(2, memory.Effects);
+    }
+
     private static ProcessResult Success(string output = "") => new(ProcessOutcome.Exited, true, 0, output, string.Empty);
 
     private sealed class RecordedGitHub

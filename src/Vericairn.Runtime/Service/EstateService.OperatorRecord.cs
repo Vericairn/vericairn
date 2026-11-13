@@ -261,7 +261,7 @@ public sealed partial class EstateService
                 stage = "merge";
                 Guard();
                 change = ChangesObserve(new(priorMerge.Id, request.By));
-                if (change.Status != "observed-success") return Stopped(change);
+                if (change.Status != "observed-success" && change.CheckStatus != "queued") return Stopped(change);
             }
             else
             {
@@ -283,6 +283,15 @@ public sealed partial class EstateService
                 stage = "merge";
                 Guard();
                 change = Step("change-merge", pullRequest, reconciliation => ChangesMerge(new(checkpoint.Product, pullRequest, head, request.By, reconciliation)));
+            }
+            // Where the target branch requires a merge queue, the merge waits there; its place is observed again until the queue settles it (CODE-71).
+            var queueWatch = Stopwatch.StartNew();
+            while (!change.Ok && change.CheckStatus == "queued" && change.Operation is not null)
+            {
+                if (!Pause(queueWatch)) return Answer("waiting", change.Message, false, "Wait for the merge queue, then " + resume, change);
+                Guard();
+                ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "pull-request"), "the change still waits in the merge queue, so it is observed again");
+                change = ChangesObserve(new(change.Operation.Id, request.By));
             }
             stage = "target-checks";
             var targetWatch = Stopwatch.StartNew();
@@ -415,7 +424,7 @@ public sealed partial class EstateService
         if (stage is "prepared" or "recorded" or "committed") plan.AddRange(Step("change-push") ?? PushPresence(branch));
         if (stage is "prepared" or "recorded" or "committed" or "pushed") plan.AddRange(Step("change-open") ?? OpenPresence(branch));
         plan.AddRange(ObservationPresence(pull, "pull-request"));
-        if (stage == "merge-uncertain" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
+        if (stage is "merge-uncertain" or "merge-queued" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
         plan.AddRange(MergePresence(pull));
         return plan;
 
@@ -576,7 +585,8 @@ public sealed partial class EstateService
         RecordEnvelope? merge = pull is null ? null : Operation("change-merge", "pullRequest", pull);
         string? status = merge is null ? null : EstateModel.BodyString(merge, "status");
         string stage = push is null || EstateModel.BodyString(push, "status") != "observed-success" ? "committed" : pull is null ? "pushed"
-            : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed" : "merge-uncertain";
+            : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed"
+            : status == "dispatched" && QueuedMerge(merge) ? "merge-queued" : "merge-uncertain";
         if (stage != "merged") return new(identity, checkpoint, record, stage, pull, merge);
         HashSet<string> revisions = model.Chain(merge!).ToHashSet(StringComparer.Ordinal);
         RecordEnvelope? target = model.Current("operation").Where(o => EstateModel.BodyString(o, "action") == "change-observe"
@@ -602,7 +612,7 @@ public sealed partial class EstateService
             ? names.EnumerateArray().Select(n => n.GetString()).OfType<string>().ToArray() : [];
         bool exact = commit is not null && ChangeText(observed, "observedHead") == commit && ChangeText(observed, "observedTarget") == ChangeText(merged, "target")
             && ChangeText(observed, "complete") == "true";
-        if (exact && ChangeGate.Refusals(commit!, required, checks, true).Count == 0) return "passed";
+        if (exact && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(commit!, required, checks, true) : ChangeGate.Refusals(commit!, required, checks, true)).Count == 0) return "passed";
         if (exact && checks.Any(c => c.Head == commit && c.Status == "completed"
             && c.Conclusion is "failure" or "cancelled" or "timed_out" or "action_required" or "stale" or "startup_failure")) return "failed";
         return !exact || checks.Any(c => c.Head != commit || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
@@ -621,6 +631,7 @@ public sealed partial class EstateService
             "opened" => $"open as pull request {progress.PullRequest} and not merged",
             "merge-failed" => $"open as pull request {progress.PullRequest}, whose merge failed",
             "merge-uncertain" => $"open as pull request {progress.PullRequest}, whose merge is unconfirmed",
+            "merge-queued" => $"open as pull request {progress.PullRequest}, waiting in the target branch's merge queue",
             _ => $"merged in pull request {progress.PullRequest} at {progress.MergeCommit}, with its target checks " + progress.CheckStatus switch
             {
                 "passed" => "recorded as passed",
@@ -651,6 +662,8 @@ public sealed partial class EstateService
         if (progress.Stage == "merged") return $"Restore its signed record {progress.Checkpoint.Id} in this clone (update the clone from the target branch), then run {finish}.";
         if (progress.Stage == "merge-uncertain" && progress.Merge is not null)
             return $"Observe the merge under its original identity with vericairn changes observe --operation {progress.Merge.Id} --by {by}, then run vericairn operator unfinished again.";
+        if (progress.Stage == "merge-queued" && progress.Merge is not null)
+            return $"Once the merge queue settles it, observe the merge under its original identity with vericairn changes observe --operation {progress.Merge.Id} --by {by}, or rerun the original operator record command, which observes it and goes on.";
         string resume = progress.Type is string type && RecordTypeRegistry.Find(type) is not null && Ulid.IsValid(by)
             ? OperatorResume(new(type, by, default, progress.Subject, progress.Record?.Supersedes, progress.Checkpoint.Product))
             : "the original vericairn operator record command";
@@ -740,8 +753,10 @@ public sealed partial class EstateService
             && ChangeText(observed, "operation") == merge.Id && ChangeText(observed, "observation") == "target-run"
             && ChangeText(observed, "complete") == "true" && ChangeText(observed, "observedHead") == completed.MergeCommit
             && ChangeText(observed, "observedTarget") == configuration.Target
-            && ChangeGate.Refusals(completed.MergeCommit, configuration.Required,
-                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true).Count == 0;
+            && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(completed.MergeCommit, configuration.Required,
+                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)
+            : ChangeGate.Refusals(completed.MergeCommit, configuration.Required,
+                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)).Count == 0;
     }
 
     private string PullChecks(RecordWritten observation, ChangeConfiguration configuration, string branch, string pullRequest, string head, out string reason)

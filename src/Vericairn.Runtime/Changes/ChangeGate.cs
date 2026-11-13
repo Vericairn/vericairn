@@ -28,4 +28,17 @@ public static class ChangeGate
         }
         return reasons;
     }
+
+    /// <summary>
+    /// As <see cref="Refusals"/>, for the target run of a merge a required merge queue made (CODE-71). The queue moved the branch to the
+    /// exact commit its group's run tested, so the branch's push run of that commit may skip what that run already passed: a check
+    /// reported as skipped counts when a check of the same name completed successfully at the same commit. Every other check still has
+    /// to complete successfully there, and every required check has to be present.
+    /// </summary>
+    public static IReadOnlyList<string> QueuedRefusals(string head, IReadOnlyList<string> required, IReadOnlyList<ChangeCheck> checks, bool complete)
+    {
+        ArgumentNullException.ThrowIfNull(checks);
+        HashSet<string> passed = checks.Where(c => c.Head == head && c.Status == "completed" && c.Conclusion == "success").Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+        return Refusals(head, required, [.. checks.Where(c => !(c.Head == head && c.Status == "completed" && c.Conclusion == "skipped" && passed.Contains(c.Name)))], complete);
+    }
 }

@@ -784,8 +784,9 @@ exact commit has a successful `merge_group` run of `ci.yml`, every other job is 
 three-platform run is the queue's. Every other push to main builds in full, as do pull requests, queue groups
 and manual runs; a lookup that cannot be completed also builds in full. A main commit's run is therefore its
 `merge_group` run when the queue merged it, and its push run otherwise. This is the repository's own
-workflow, not a product behavior: `changes merge` still observes the target branch's push runs at the merge
-commit, in repositories that require no merge queue.
+workflow, not a product behavior: `changes merge` observes the target branch's push runs at the merge
+commit in repositories that require no merge queue, and from 0.9.3 (CODE-71), for a merge a required queue
+made, that commit's `merge_group` runs beside its push runs.
 
 The self-contained publishes restore locked from committed runtime-specific lock files:
 `packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and

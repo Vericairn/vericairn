@@ -284,6 +284,10 @@ Local git hooks are disabled for branch creation and commit, and git
 commit signing is disabled; the record retains its own device signature. The runtime invokes MERGE-01's recorded
 push (including its scan), opening, observations and merge. Each check must pass at the exact
 committed head. The merge rechecks the inventory and uses the provider's atomic head condition.
+From 0.9.3, where the target branch requires a merge queue, the merge enqueues that head instead
+and the command waits for the queue's outcome as it waits for checks
+([required merge queues](changes.md#required-merge-queues-093)); a change still queued when the wait
+ends stops as waiting, and the same input resumes it.
 Finally, recorded observations check the target run at the confirmed merge commit.
 
 `--wait-seconds` bounds each check phase from 0 to 240 seconds, defaulting to 120. Zero observes
@@ -323,7 +327,8 @@ vericairn operator unfinished --finish --by <operator-id>
 
 The first command reads the clone's checkpoint and records and writes nothing. It shows the action's
 record id, type and subject, branch, head, pull request and stage (`prepared`, `recorded`, `committed`,
-`pushed`, `opened`, `merge-failed`, `merge-uncertain` or `merged`), the merge commit and latest target
+`pushed`, `opened`, `merge-failed`, `merge-uncertain`, from 0.9.3 `merge-queued` while the change waits
+in a required merge queue, or `merged`), the merge commit and latest target
 check verdict, and what finishing it needs. For an action that has not merged, that is the original
 `operator record` command, to be run with the body of its stored record (`vericairn records show
 <record-id>`) and, after a known failure, `--reconciliation`. `--finish` finishes a merged action once

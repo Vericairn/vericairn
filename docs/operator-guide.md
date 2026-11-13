@@ -2382,7 +2382,13 @@ to pass at that head; missing, skipped,
 pending or stale checks refuse. The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.
-Fork pull requests and merge queues are unsupported. No retry can bypass an
+Fork pull requests are unsupported. From 0.9.3, where the target branch requires
+a merge queue, the merge enqueues the pinned head under the same authority and
+checks, records the queued merge, and `changes observe` records the queue's
+outcome against it: merged at a commit, whose `merge_group` run and push runs
+are then observed, or failed or removed, a known failure; an unconfirmed outcome
+stays uncertain. `operator record` waits in the queue as it waits for checks
+([required merge queues](changes.md#required-merge-queues-093)). No retry can bypass an
 uncertain effect. [Checked changes](changes.md) gives the complete reconciliation
 rules; passing checks supply neither acceptance nor publication authority.
 
