@@ -176,6 +176,23 @@ supersede its subject keeps its earlier meaning. `operation.duplicate-identity` 
 tasks that `status` and `estate reconcile` show. The rule adds no field and no format number; an earlier release
 reads such a reconciliation as an error and the withdrawn operations as current.
 
+## An operation keeps its intent and target (0.9.3)
+
+From 0.9.3, every revision of an `operation` keeps the `intent` of the revision it supersedes and every fact its `target`
+recorded, with the same value. A revision may add a target fact it observed, such as the run a dispatch started, but never
+changes or drops one: an operation with a different effect or destination takes its own `identity`. The rule is
+prospective, as the decision-time rule added in 0.9.1 is: it adds no field and no format number, and it binds the records
+written by a runtime that has it. Such a runtime refuses a new revision that changes its predecessor's intent
+(`operation.intent-kept`, an error) or changes or drops one of its target facts (`operation.target-kept`, an error naming
+each fact), in every record format and at every write surface, a record prepared for a device's signature included. A
+revision already in the estate keeps its reading: `estate check` and `records validate` report it as information, and no
+record is rewritten. Agent runs keep their own rule, under which the target and cap stay those of the run's intent
+(`operation.agent-run-target-kept`). Repository changes keep their pinned target facts (`operation.change-target`) and
+account-holder package actions their whole target (`operation.package-target`), as before, and both keep their intent under
+this rule. The retry path is unchanged: a retry after a known failure or a cancellation that names its `reconciliation` pins
+the settings it runs with, as a release retry that repairs its workflow or ref does, while a retry after an uncertain
+outcome names its reconciliation and keeps the intent and target.
+
 ## History checkpoints (0.9.2)
 
 From 0.9.2 an estate can hold signed `history-checkpoint` records, a type within

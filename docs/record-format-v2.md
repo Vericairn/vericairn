@@ -582,7 +582,8 @@ once assigned and cannot be introduced after settlement (`operation.agent-run-di
 those of the original intent (`operation.agent-run-target-kept`, `operation.cap`); changing the goal cannot move a
 reservation. Admission recognizes an already
 reserved revision only when its predecessor was in flight with the identical target. Generic operations retain their
-reconciliation and retry rules.
+reconciliation and retry rules, and from 0.9.3 keep their intent and target facts in every revision
+([record format](record-format.md#an-operation-keeps-its-intent-and-target-093)).
 
 From 0.6.1, every revision after settlement also keeps every previously recorded body field unchanged
 (`operation.agent-run-settlement-kept`), including usage, the observation, liveness and the scope audit. Evidence may

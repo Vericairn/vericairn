@@ -234,6 +234,12 @@ public sealed partial class EstateService
             return (null, new Problem("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
         }
 
+        if (record.Envelope.Type == "operation" && record.Envelope.Supersedes is { } superseded && model.ById.GetValueOrDefault(superseded) is { } predecessor
+            && OperationType.EffectChanges(record.Envelope, predecessor, record.RelativePath) is { Count: > 0 } effect)
+        {
+            return (null, new Problem("rejected", string.Join(" ", effect.Select(f => f.Message)), [.. effect.Select(f => new FindingDto("error", f.Code, f.Location, f.Message))]));
+        }
+
         draft = draft with { At = record.Envelope.AtTime };
         foreach ((string id, PreparedRecord _) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray())
         {
