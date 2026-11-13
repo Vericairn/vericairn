@@ -172,13 +172,27 @@ public static class GoalView
         }
 
         text.Append("Steps:");
-        text.Append(view.Steps.Count == 0 ? " none yet; the work orders its plan gives, and those that name it among their inputs, are its steps\n" : "\n");
+        text.Append(view.Steps.Count > 0 ? "\n" : GoalRules.SponsorApproves(goal)
+            ? " none yet; the work orders its plan gives, and those that name it among their inputs once its sponsor approves them, are its steps\n"
+            : " none yet; the work orders its plan gives, and those that name it among their inputs, are its steps\n");
         foreach (StepView step in view.Steps)
         {
             text.Append("  ").Append(step.Key).Append("  ").Append(step.Status).Append("  ").Append(step.Title).Append('\n');
             foreach (WorkView.AssignmentItem assignment in step.Assignments)
             {
                 text.Append("    assignment ").Append(assignment.AssignmentId).Append(" to ").Append(assignment.ContributorName).Append(": ").Append(assignment.Outcome).Append(", ").Append(assignment.State).Append('\n');
+            }
+        }
+
+        // Its plan says sponsor-approves: a proposed work order joins the goal only once who decides for it approves it (FIX-117).
+        if (view.Proposed.Count > 0)
+        {
+            text.Append("Proposed, waiting for the sponsor's approval before they join the goal:\n");
+            foreach (ProposedView proposed in view.Proposed)
+            {
+                text.Append("  ").Append(proposed.Order.Key).Append("  ").Append(proposed.Order.Title).Append("  proposed by ").Append(PrincipalName(model, proposed.Order.By) ?? proposed.Order.By)
+                    .Append(" (").Append(proposed.Order.By).Append("); approved by ").Append(view.Accepter.Principal is string sponsorId ? $"{PrincipalName(model, sponsorId) ?? sponsorId} ({sponsorId})" : "an operator")
+                    .Append(commands ? " with " + proposed.Approve : string.Empty).Append('\n');
             }
         }
 
@@ -277,6 +291,21 @@ public static class GoalView
             json["flow"] = FlowPosition.RenderJson(model, FlowPosition.Derive(model, goal, at), commands);
         }
 
+        // Work proposed for a goal whose plan says sponsor-approves, waiting for its sponsor's approval; absent when there is none.
+        if (view.Proposed.Count > 0)
+        {
+            json["proposed"] = new JsonArray([.. view.Proposed.Select(p => (JsonNode)new JsonObject
+            {
+                ["key"] = p.Order.Key,
+                ["id"] = p.Order.Id,
+                ["hash"] = p.Order.Hash,
+                ["title"] = p.Order.Title,
+                ["by"] = p.Order.By,
+                ["byName"] = PrincipalName(model, p.Order.By),
+                ["approve"] = commands ? p.Approve : null,
+            })]);
+        }
+
         using JsonDocument document = JsonDocument.Parse(json.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);
     }
@@ -314,7 +343,8 @@ public static class GoalView
             return new StepView(EstateModel.BodyString(order, "key") ?? "?", order.Id, EstateModel.BodyString(order, "title") ?? "?", orderStatus.TryGetValue(order.Id, out string? s) ? s : "planned", mine);
         }).ToList();
         JsonElement budget = goal.Body.TryGetProperty("budget", out JsonElement b) ? b : default;
-        return new Snapshot(model.Chain(goal).Count, status, since, activated, Caps.Granted(budget), conditions, evaluation, steps, GoalRules.AccepterOf(model, goal), NotReady(model, goal), acceptance);
+        List<ProposedView> proposed = [.. EstateStatus.Waiting(model, goal).Select(o => new ProposedView(Proposal.Of(o), Proposal.ApproveCommand(o)))];
+        return new Snapshot(model.Chain(goal).Count, status, since, activated, Caps.Granted(budget), conditions, evaluation, steps, GoalRules.AccepterOf(model, goal), NotReady(model, goal), acceptance, proposed);
     }
 
     private static IEnumerable<JsonElement> Completion(RecordEnvelope goal) =>
@@ -343,5 +373,23 @@ public static class GoalView
 
     private sealed record StepView(string Key, string Id, string Title, string Status, IReadOnlyList<WorkView.AssignmentItem> Assignments);
 
-    private sealed record Snapshot(int Revision, string Status, RecordEnvelope? Since, RecordEnvelope? Activated, IReadOnlyList<(string Unit, string? Cap)> Budget, IReadOnlyList<ConditionView> Conditions, RecordEnvelope? Evaluation, IReadOnlyList<StepView> Steps, GoalRules.Accepter Accepter, IReadOnlyList<string> NotReady, RecordEnvelope? Acceptance);
+    private sealed record ProposedView(Proposal Order, string Approve);
+
+    private sealed record Snapshot(int Revision, string Status, RecordEnvelope? Since, RecordEnvelope? Activated, IReadOnlyList<(string Unit, string? Cap)> Budget, IReadOnlyList<ConditionView> Conditions, RecordEnvelope? Evaluation, IReadOnlyList<StepView> Steps, GoalRules.Accepter Accepter, IReadOnlyList<string> NotReady, RecordEnvelope? Acceptance, IReadOnlyList<ProposedView> Proposed);
+
+    /// <summary>A work order proposed for a goal, as its latest revision states it.</summary>
+    /// <param name="Key">Its key.</param>
+    /// <param name="Id">Its latest revision's id.</param>
+    /// <param name="Hash">Its latest revision's hash.</param>
+    /// <param name="Title">Its title.</param>
+    /// <param name="By">Who wrote that revision.</param>
+    internal sealed record Proposal(string Key, string Id, string Hash, string Title, string By)
+    {
+        internal static Proposal Of(RecordEnvelope order) =>
+            new(EstateModel.BodyString(order, "key") ?? "?", order.Id, order.ComputedHash, EstateModel.BodyString(order, "title") ?? "?", order.By);
+
+        /// <summary>The command that approves the proposed work order's exact revision: its status planned, recorded by who decides for the goal.</summary>
+        internal static string ApproveCommand(RecordEnvelope order) =>
+            $"echo '{{\"status\":\"planned\",\"note\":\"Approved for the goal.\"}}' | vericairn records new work-status --by <sponsor> --subject work-order:{order.Id}:{order.ComputedHash} --body -";
+    }
 }

@@ -191,6 +191,66 @@ public class GoalServiceTests
         Assert.Equal(0, service.Check().Errors);
     }
 
+    [Fact]
+    public void AGoalIsRecordedImpossibleOnlyOnItsEvaluatorsVerdict()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        (string goal, string reviewer, string result) = Work(estate, service);
+        JsonElement shown = service.Goal(goal)!.Json.GetProperty("goal");
+        var confirm = new NewRecordRequest("goal-status", estate.OperatorId, Json("""{"status":"impossible","note":"The widget cannot be built."}"""),
+            $"goal:{goal}:{shown.GetProperty("hash").GetString()}");
+
+        // No evaluation, then one that judges nothing impossible: the sponsor's confirmation is refused, naming the missing verdict and its command.
+        foreach (string missing in new[] { $"No evaluation of goal {goal}'s exact revision is recorded", "judges no condition impossible (condition 1 not-yet, condition 2 met)" })
+        {
+            if (missing.StartsWith("judges", StringComparison.Ordinal))
+                Ok(service.GoalEvaluate(goal, new GoalEvaluateRequest(reviewer, "Read the result.", [new GoalVerdict(2, "met", "The guide covers the widget.", [result])])));
+            WriteOutcome refused = service.NewRecord(confirm);
+            Assert.False(refused.Ok);
+            FindingDto finding = Assert.Single(refused.Problem!.Findings, f => f.Code == "goal-status.verdict");
+            Assert.Equal("error", finding.Severity);
+            Assert.Contains(missing, finding.Message, StringComparison.Ordinal);
+            Assert.Contains($"vericairn goal evaluate {goal} --by <evaluator> --verdict <n>:impossible:<reason>", finding.Message, StringComparison.Ordinal);
+            Assert.Equal("active", Status(service, goal));
+        }
+
+        // The evaluator judges a condition impossible; the sponsor confirms it, and the goal ends.
+        Ok(service.GoalEvaluate(goal, new GoalEvaluateRequest(reviewer, "The work order was retired.", [new GoalVerdict(1, "impossible", "W-1 will not be accepted."), new GoalVerdict(2, "met", "The guide covers the widget.", [result])])));
+        Ok(service.NewRecord(confirm));
+        Assert.Equal("impossible", Status(service, goal));
+        Assert.DoesNotContain(service.Validate().Findings, f => f.Code == "goal-status.verdict");
+        Assert.Equal(0, service.Check().Errors);
+    }
+
+    [Fact]
+    public void UnderSponsorApprovesAPlannersWorkOrderWaitsForTheSponsorOnEverySurface()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        string goal = Ok(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.OperatorId))))).Id;
+        Ok(service.GoalActivate(goal, new GoalActionRequest(estate.OperatorId)));
+        RecordWritten proposed = Ok(service.NewRecord(new NewRecordRequest("work-order", estate.BuilderId, Json(Order("W-1", goal)))));
+
+        // The planner's work order is no step of the goal: nothing routes it, and the sponsor alone is asked to approve it.
+        Assert.Empty(service.GoalNext(goal)!.Json.GetProperty("steps").EnumerateArray());
+        Assert.Equal(proposed.Id, Assert.Single(service.Goal(goal)!.Json.GetProperty("proposed").EnumerateArray()).GetProperty("id").GetString());
+        Assert.Equal(proposed.Id, Assert.Single(service.Status().Json.GetProperty("proposals").EnumerateArray()).GetProperty("id").GetString());
+        AttentionNotice notice = Assert.Single(service.AttentionGet(estate.OperatorId).Items, i => i.SubjectId == proposed.Id);
+        Assert.Equal(("decision needed", "waiting for the sponsor", "work-order"), (notice.Kind, notice.State, notice.SubjectType));
+        Assert.Contains($"Proposed for goal {goal} (Build the widget) by {estate.BuilderId}", notice.Why, StringComparison.Ordinal);
+        Assert.Contains($"vericairn records new work-status --by {estate.OperatorId} --subject work-order:{proposed.Id}:{proposed.Hash} --body -", notice.NextAction, StringComparison.Ordinal);
+        Assert.DoesNotContain(service.AttentionGet(estate.BuilderId).Items, i => i.SubjectId == proposed.Id);
+
+        // The sponsor approves it with the command attention names: it is a step, and nothing waits any more.
+        Ok(service.NewRecord(new NewRecordRequest("work-status", estate.OperatorId, Json("""{"status":"planned","note":"Approved for the goal."}"""), $"work-order:{proposed.Id}:{proposed.Hash}")));
+        Assert.Equal("W-1", Assert.Single(service.GoalNext(goal)!.Json.GetProperty("steps").EnumerateArray()).GetProperty("key").GetString());
+        Assert.False(service.Goal(goal)!.Json.TryGetProperty("proposed", out _));
+        Assert.False(service.Status().Json.TryGetProperty("proposals", out _));
+        Assert.DoesNotContain(service.AttentionGet(estate.OperatorId).Items, i => i.SubjectId == proposed.Id);
+        Assert.Equal(0, service.Check().Errors);
+    }
+
     /// <summary>A goal the builder proposes for the operator, activated; the work order that names it; the builder's result; and a reviewer.</summary>
     private static (string Goal, string Reviewer, string Result) Work(TestEstate estate, EstateService service)
     {

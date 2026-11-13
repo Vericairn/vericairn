@@ -95,6 +95,15 @@ public sealed partial class EstateService
                 Add("decision needed", "release " + AttentionString(release, "version"), "A release candidate awaits acceptance of its exact hash.", "candidate",
                     "Inspect the release in Workbench or the command line.", "release", AttentionString(release, "id"));
         }
+        // A work order proposed for a goal whose plan says sponsor-approves waits for who decides for the goal: its sponsor when a
+        // person, an operator when an agent or a service sponsors it (FIX-117).
+        foreach (JsonElement proposal in AttentionRows(document, "proposals").Where(p => p.TryGetProperty("sponsor", out JsonElement s) && s.ValueKind == JsonValueKind.String
+            ? s.GetString() == principal : model.HasRole(principal, Roles.Operator)))
+            Add("decision needed", AttentionString(proposal, "key") + " " + AttentionString(proposal, "title"),
+                $"Proposed for goal {AttentionString(proposal, "goal")} ({AttentionString(proposal, "goalTitle")}) by {AttentionString(proposal, "by")}; its plan says the sponsor approves, so it joins the goal only once you approve it.",
+                "waiting for the sponsor",
+                $"Read it with vericairn work brief {AttentionString(proposal, "key")}; approve it by recording its status planned: echo '{{\"status\":\"planned\",\"note\":\"Approved for the goal.\"}}' | vericairn records new work-status --by {principal} --subject work-order:{AttentionString(proposal, "id")}:{AttentionString(proposal, "hash")} --body -",
+                "work-order", AttentionString(proposal, "id"));
         foreach (JsonElement finding in AttentionRows(document, "findings").Where(f => AttentionString(f, "severity") is "error" or "warning"))
             Add(AttentionString(finding, "severity") == "error" ? "failed check" : "information", AttentionString(finding, "location"), AttentionString(finding, "message"), AttentionString(finding, "code"),
                 "Inspect the estate check in Workbench or run vericairn check.", "finding", AttentionString(finding, "location") + ":" + AttentionString(finding, "code"));

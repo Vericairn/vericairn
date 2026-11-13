@@ -24,6 +24,9 @@ store, and no real-device qualification is recorded for it.
     them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
     without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
+    From 0.9.3, a work order proposed for a goal whose plan says `sponsor-approves` is a decision needed for the goal's
+    sponsor, waiting for the sponsor, with the command that approves it; Remote approves nothing
+    ([goals](operator-guide.md#17-goals-predicates-and-evaluation)).
   - **Work:** work orders that are not accepted or retired, and assignments that are not accepted. Open either to inspect
     the goal, admitted scope, attempts, results, runs and requested progress; **Back to work** returns to the list.
   - **Products:** the estate's products.
