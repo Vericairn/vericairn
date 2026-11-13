@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers.Text;
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using Vericairn.Records.Hashing;
 
@@ -73,6 +74,10 @@ public static class RecordSigning
     /// <summary>Signature length in bytes.</summary>
     public const int SignatureBytes = 64;
 
+    private const string EcPublicKeyOid = "1.2.840.10045.2.1";
+
+    private const string NamedP256Oid = "1.2.840.10045.3.1.7";
+
     /// <summary>The 32 digest bytes behind a content hash such as sha256:ab12....</summary>
     public static byte[] Digest(string contentHash)
     {
@@ -87,7 +92,11 @@ public static class RecordSigning
     /// <summary>Encodes a public key for a device record.</summary>
     public static string EncodePublicKey(byte[] subjectPublicKeyInfo) => Base64Url.EncodeToString(subjectPublicKeyInfo);
 
-    /// <summary>True when the text is a usable P-256 public key.</summary>
+    /// <summary>
+    /// True when the text is a usable P-256 public key: a SubjectPublicKeyInfo naming P-256 (<see cref="IsNamedP256"/>) that the
+    /// platform imports. A key in any other form is refused before the platform or the framework's reader sees it, and one the platform
+    /// refuses to import is not usable however it refuses (<see cref="Refused"/>).
+    /// </summary>
     public static bool IsPublicKey(string? encoded)
     {
         if (string.IsNullOrEmpty(encoded) || !Base64Url.IsValid(encoded))
@@ -95,17 +104,63 @@ public static class RecordSigning
             return false;
         }
 
+        byte[] subjectPublicKeyInfo = Base64Url.DecodeFromChars(encoded);
+        if (!IsNamedP256(subjectPublicKeyInfo))
+        {
+            return false;
+        }
+
         try
         {
             using ECDsa key = ECDsa.Create();
-            key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(encoded), out _);
+            key.ImportSubjectPublicKeyInfo(subjectPublicKeyInfo, out _);
             return key.ExportParameters(false).Curve.Oid?.Value == ECCurve.NamedCurves.nistP256.Oid.Value;
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (Refused(exception))
         {
             return false;
         }
     }
+
+    /// <summary>
+    /// Whether the bytes begin with the only form of SubjectPublicKeyInfo a usable key takes, read as DER: the algorithm
+    /// id-ecPublicKey with the named curve P-256 as its only parameter, and an uncompressed point of 65 bytes. Every key Vericairn
+    /// makes has this form. Read before any import, so a key in another form (explicit curve parameters, another named curve, a
+    /// compressed point, another algorithm) is refused the same way on every platform, without asking the platform or the framework's
+    /// own reader, whose answers and errors for such keys differ. Bytes after the structure, and the bit string's count of unused bits,
+    /// are not read, as the platform's import does not read them, so such a key reads as it did before. The runtime identity
+    /// (Vericairn.Protocol's RuntimeIdentityScheme) keeps its own copy of this check, written to the same rules; a test holds the two
+    /// to the same answers, so a change here is made there too.
+    /// </summary>
+    private static bool IsNamedP256(byte[] subjectPublicKeyInfo)
+    {
+        try
+        {
+            AsnReader info = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER).ReadSequence();
+            AsnReader algorithm = info.ReadSequence();
+            if (algorithm.ReadObjectIdentifier() != EcPublicKeyOid || algorithm.ReadObjectIdentifier() != NamedP256Oid)
+            {
+                return false;
+            }
+
+            algorithm.ThrowIfNotEmpty();
+            byte[] point = info.ReadBitString(out _);
+            info.ThrowIfNotEmpty();
+            return point.Length == 65 && point[0] == 0x04;
+        }
+        catch (Exception exception) when (Refused(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether an exception from reading, importing or verifying a key or signature a record supplies is a refusal of it: any exception
+    /// but the fatal ones (out of memory, stack overflow, access violation). Platforms refuse with a cryptographic error, or with the
+    /// unsupported-platform error some give for keys they do not take, and the framework's reader may refuse with another error first;
+    /// whichever it is, the key is not usable or the signature does not verify, so every platform answers alike and none escapes.
+    /// </summary>
+    private static bool Refused(Exception exception) => exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 
     /// <summary>True when the signature text is a base64url 64-byte value.</summary>
     public static bool IsSignature(string? encoded) =>
@@ -120,8 +175,7 @@ public static class RecordSigning
 
     /// <summary>
     /// The point of an encoded public key as 64 bytes X‖Y, read through the same import <see cref="Verify"/> verifies with, so a key it
-    /// refuses has none; null when the text is not a usable P-256 key or the platform refuses its import, whether as a cryptographic error
-    /// or as unsupported.
+    /// refuses has none; null when the text is not a usable P-256 key or the platform refuses its import (<see cref="Refused"/>).
     /// </summary>
     internal static byte[]? PublicPoint(string encodedPublicKey)
     {
@@ -133,7 +187,7 @@ public static class RecordSigning
             ECPoint q = key.ExportParameters(false).Q;
             return q.X is { Length: 32 } x && q.Y is { Length: 32 } y ? [.. x, .. y] : null;
         }
-        catch (Exception exception) when (exception is CryptographicException or PlatformNotSupportedException)
+        catch (Exception exception) when (Refused(exception))
         {
             return null;
         }
@@ -141,7 +195,7 @@ public static class RecordSigning
 
     /// <summary>
     /// Whether a 64-byte signature over a digest verifies with the P-256 key at a point X‖Y, as the platform verifies it; false when the
-    /// platform refuses the point or the signature, whether as a cryptographic error or as unsupported, so every platform answers alike.
+    /// platform refuses the point or the signature (<see cref="Refused"/>), so every platform answers alike.
     /// </summary>
     internal static bool VerifyPoint(ReadOnlySpan<byte> point, ReadOnlySpan<byte> digest, ReadOnlySpan<byte> signature)
     {
@@ -151,7 +205,7 @@ public static class RecordSigning
             using ECDsa key = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = point[..32].ToArray(), Y = point[32..].ToArray() } });
             return key.VerifyHash(digest, signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         }
-        catch (Exception exception) when (exception is CryptographicException or PlatformNotSupportedException)
+        catch (Exception exception) when (Refused(exception))
         {
             return false;
         }
@@ -159,7 +213,8 @@ public static class RecordSigning
 
     /// <summary>
     /// A public key imported once, which verifies signatures as <see cref="RecordSigning.Verify"/> does, since that is how it verifies: nothing
-    /// when the text is not a usable P-256 key, when the signature is not 64 bytes, or when the platform rejects the key or the signature.
+    /// when the text is not a usable P-256 key, when the signature is not 64 bytes, or when the platform refuses the key or the signature
+    /// (<see cref="Refused"/>).
     /// </summary>
     internal sealed class ImportedKey : IDisposable
     {
@@ -182,7 +237,7 @@ public static class RecordSigning
                 key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(encodedPublicKey), out _);
                 return new(key);
             }
-            catch (CryptographicException)
+            catch (Exception exception) when (Refused(exception))
             {
                 key?.Dispose();
                 return new(null);
@@ -201,7 +256,7 @@ public static class RecordSigning
             {
                 return key.VerifyHash(digest, Base64Url.DecodeFromChars(encodedSignature), DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
             }
-            catch (CryptographicException)
+            catch (Exception exception) when (Refused(exception))
             {
                 return false;
             }
