@@ -46,9 +46,22 @@ public sealed class StoreSigner : IRecordSigner
     /// <inheritdoc />
     public string DeviceId { get; }
 
+    /// <summary>From 0.9.3: the key it signs with, the device's identity except for a rotation's new key before it takes the device's place.</summary>
+    public string KeyId => keyId;
+
+    /// <summary>From 0.9.3: the custody kind of the store holding the key, as device records name it.</summary>
+    public string Custody => store.Kind;
+
     /// <inheritdoc />
     public RecordSignature Sign(ReadOnlySpan<byte> digest) =>
         new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(keyId, digest)));
+
+    /// <summary>
+    /// From 0.9.3 (FIX-124): signs as <see cref="Sign(ReadOnlySpan{byte})"/> does, passing the store the reason its presence prompt shows
+    /// (<see cref="PresenceReason"/>); a store that asks nobody ignores it.
+    /// </summary>
+    public RecordSignature Sign(ReadOnlySpan<byte> digest, string reason) =>
+        new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(keyId, digest, PresenceReason.Text(reason))));
 }
 
 /// <summary>The signature scheme of the record formats and its verification; format 2 keeps format 1's.</summary>

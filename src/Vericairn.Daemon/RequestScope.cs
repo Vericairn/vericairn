@@ -272,6 +272,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/events"] = null,
         ["GET /v1/events/{key}"] = null,
         ["POST /v1/events/select"] = typeof(EventSelectRequest),
+        ["POST /v1/presence/prompts"] = typeof(PresencePromptsRequest),
         ["GET /v1/operator/actions"] = null,
         ["GET /v1/operator/requests"] = null,
         ["POST /v1/operator/requests"] = typeof(OperatorRequestWriteRequest),
@@ -375,6 +376,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(ResourceRequest)] = (_, _, _) => null,
         // A selecting read (MCP-05) reads for the device's own principal; the route refuses another and judges every delivery again.
         [typeof(EventSelectRequest)] = (_, r, d) => Optional(((EventSelectRequest)r).Principal, d),
+        // From 0.9.3 (FIX-124): presence notices name what the person at the runtime's machine is asked to sign there; no device reads them.
+        [typeof(PresencePromptsRequest)] = (_, _, _) => "Presence notices belong to the person at the runtime's machine and are read over its local socket only.",
         // A search, or a package, may be asked for a principal only to narrow what it reads: a device's request names its own or none.
         [typeof(SearchRequest)] = (_, r, d) => Optional(((SearchRequest)r).Principal, d),
         [typeof(ContextRequest)] = (_, r, d) => Optional(((ContextRequest)r).Principal, d),

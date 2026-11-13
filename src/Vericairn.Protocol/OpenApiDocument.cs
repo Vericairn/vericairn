@@ -109,6 +109,7 @@ public static class OpenApiDocument
         ("GET", "/v1/events"),
         ("GET", "/v1/events/{key}"),
         ("POST", "/v1/events/select"),
+        ("POST", "/v1/presence/prompts"),
         ("GET", "/v1/operator/actions"),
         ("GET", "/v1/operator/requests"),
         ("POST", "/v1/operator/requests"),
@@ -426,6 +427,18 @@ public static class OpenApiDocument
             responses["429"] = new JsonObject { ["description"] = "A device already holds four streams and long polls, or the runtime its limit (Problem). The local socket's reads wait their turn instead." };
             responses["501"] = new JsonObject { ["description"] = "The runtime keeps no event journal (Problem with code no-journal): a follower follows nothing here." };
             responses["503"] = new JsonObject { ["description"] = "The journal cannot be read now, or the runtime is stopping (Problem with code unavailable): read again later." };
+        }
+        else if (path == "/v1/presence/prompts")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "PresencePromptsResponse: the presence notices after the position given, oldest first, and the position to continue from. Each operator action that signs with a key "
+                    + "needing its owner's presence on this machine announces every record it will sign before the first prompt, names which signature of how many each prompt is and what it signs, "
+                    + "announces any it adds before their prompts, and says how many it signed when it ends. A position newer than the runtime's delivers every notice it keeps.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = SchemaReference("PresencePromptsResponse") } },
+            };
+            responses["400"] = new JsonObject { ["description"] = "A wait outside 0 to 25 (Problem)." };
+            responses["401"] = new JsonObject { ["description"] = "A device-signed request: presence notices are read over the runtime's local socket only (Problem with code denied)." };
         }
         else if (path == "/v1/events/{key}")
         {
@@ -854,6 +867,10 @@ public static class OpenApiDocument
             ["EventsResponse"] = EventsResponseSchema(),
             ["EventSelectRequest"] = EventSelectRequestSchema(),
             ["EventSelectResponse"] = EventSelectResponseSchema(),
+            ["PresencePromptsRequest"] = PresencePromptsRequestSchema(),
+            ["PresencePromptsResponse"] = PresencePromptsResponseSchema(),
+            ["PresenceNotice"] = PresenceNoticeSchema(),
+            ["PresenceSignature"] = Required(Object(("type", "string"), ("key", "string"), ("purpose", "string")), "type", "key", "purpose"),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -1084,6 +1101,7 @@ public static class OpenApiDocument
         "/v1/prompts" => "PromptSaveRequest",
         "/v1/resources/read" => "ResourceRequest",
         "/v1/events/select" => "EventSelectRequest",
+        "/v1/presence/prompts" => "PresencePromptsRequest",
         "/v1/context/prepare" => "ContextRequest",
         "/v1/context/brief" => "BriefContextRequest",
         "/v1/search" => "SearchRequest",
@@ -1287,6 +1305,7 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
+        ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. Local socket only; writes nothing. Not exposed through MCP.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
         ("GET", "/v1/operator/unfinished") => "Read this clone's unfinished operator action from its local checkpoint and its records: the signed record's id, type and subject, branch, head, pull request and stage, the recorded merge and latest target-run observation, whether its records alone can finish it, and what finishing it needs. Reading signs, observes and writes nothing. Not exposed through MCP.",
         ("POST", "/v1/operator/unfinished") => "Finish this clone's unfinished operator action from its own records: once its merge is recorded, a passing target run at the merge commit, already recorded or observed now under the merge's original identity, completes it and clears the clone's unfinished mark. Nothing is signed, branched, committed, pushed, opened or merged; any other action is refused with what finishing it needs. waitSeconds bounds the wait for pending target checks from 0 to 240 (default 120). Not exposed through MCP.",
@@ -1494,6 +1513,38 @@ public static class OpenApiDocument
         request["properties"]!["wait"]!["maximum"] = EventVocabulary.MaxWaitSeconds;
         request["description"] = "A selecting long poll: what the read delivers, the narrower selections each delivered event is judged by, and how long to wait (20 seconds by default).";
         return request;
+    }
+
+    private static JsonObject PresencePromptsRequestSchema()
+    {
+        JsonObject request = Object(("after", "integer"), ("wait", "integer"));
+        request["properties"]!["after"]!["nullable"] = true;
+        request["properties"]!["after"]!["description"] = "The position the reader holds; the runtime's newest when omitted, so the read delivers only what comes next.";
+        request["properties"]!["wait"]!["minimum"] = 0;
+        request["properties"]!["wait"]!["maximum"] = PresenceNoticeVocabulary.MaxWaitSeconds;
+        request["description"] = "A read of the presence notices after a position, waiting up to wait seconds (0 by default) for one.";
+        return request;
+    }
+
+    private static JsonObject PresencePromptsResponseSchema()
+    {
+        JsonObject response = Required(Object(("notices", "array"), ("cursor", "integer"), ("problem", "object")), "notices", "cursor");
+        response["properties"]!["notices"]!["items"] = SchemaReference("PresenceNotice");
+        response["properties"]!["problem"]!["nullable"] = true;
+        response["description"] = "The presence notices after the position given, oldest first, and the position to continue from.";
+        return response;
+    }
+
+    private static JsonObject PresenceNoticeSchema()
+    {
+        JsonObject notice = Required(Object(("sequence", "integer"), ("kind", "string"), ("action", "string"), ("count", "integer"), ("made", "integer"), ("signatures", "array"), ("text", "string"), ("index", "integer")),
+            "sequence", "kind", "action", "count", "made", "signatures", "text");
+        notice["properties"]!["kind"]!["enum"] = new JsonArray(PresenceNoticeVocabulary.Kinds.Select(k => (JsonNode)k).ToArray());
+        notice["properties"]!["signatures"]!["items"] = SchemaReference("PresenceSignature");
+        notice["properties"]!["index"]!["nullable"] = true;
+        notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1.";
+        notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed.";
+        return notice;
     }
 
     private static JsonObject EventSelectResponseSchema()

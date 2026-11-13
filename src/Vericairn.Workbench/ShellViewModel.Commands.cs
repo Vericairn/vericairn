@@ -223,7 +223,7 @@ public sealed partial class ShellViewModel
     public Task<CommunicationDocument?> OpenCommunicationAsync(CancellationToken cancellationToken) => RunCommandAsync("Open Communication", token => OpenCommunicationCoreAsync(token), cancellationToken);
 
     private Task DocumentCommandAsync(Document? page, string label, Func<CancellationToken, Task> action, bool refresh = true,
-        bool submission = false, CancellationToken cancellationToken = default)
+        bool submission = false, bool signs = false, CancellationToken cancellationToken = default)
     {
         if (page is null) return Task.CompletedTask;
         return RunCommandAsync(label, async token =>
@@ -235,7 +235,7 @@ public sealed partial class ShellViewModel
                 Status = unresolved.Message;
                 return;
             }
-            try { await action(token).ConfigureAwait(true); }
+            try { await WithPresenceAsync(submission || signs ? Api : null, action, token).ConfigureAwait(true); }
             catch (Exception exception) when (ClientFailure.FromException(exception) is ClientFailure)
             {
                 ClientFailure failure = ClientFailure.FromException(exception)!;
@@ -268,6 +268,86 @@ public sealed partial class ShellViewModel
 
     private IEstateApi AvailableApi => Api ?? throw new HttpRequestException("The runtime is unavailable.");
 
+    /// <summary>
+    /// The last presence notice of the submission in flight (FIX-124): before an operator action's first prompt, every record it will
+    /// sign; at each prompt, "Signature k of n" with what it signs; and how many it signed. Empty when it signs nothing with presence.
+    /// </summary>
+    public string PresencePrompt { get => presencePrompt; private set => Set(ref presencePrompt, value); }
+
+    private string presencePrompt = string.Empty;
+
+    /// <summary>
+    /// Runs a submission while following the runtime's presence notices (FIX-124): each is written to the activity log, a prompt's
+    /// "Signature k of n" line to the status, and the last to <see cref="PresencePrompt"/>. A runtime that keeps none is not followed.
+    /// </summary>
+    private async Task WithPresenceAsync(IEstateApi? api, Func<CancellationToken, Task> action, CancellationToken token)
+    {
+        long? start = null;
+        if (api is not null)
+        {
+            try
+            {
+                PresencePromptsResponse head = await api.PresencePromptsAsync(new PresencePromptsRequest(null, 0), token).ConfigureAwait(true);
+                start = head.Problem is null ? head.Cursor : null;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
+            {
+                start = null;
+            }
+        }
+
+        PresencePrompt = string.Empty;
+        if (start is not long position)
+        {
+            await action(token).ConfigureAwait(true);
+            return;
+        }
+
+        long cursor = position;
+        using var following = CancellationTokenSource.CreateLinkedTokenSource(token);
+        Task follow = FollowAsync(following.Token);
+        try
+        {
+            await action(token).ConfigureAwait(true);
+        }
+        finally
+        {
+            following.Cancel();
+            await follow.ConfigureAwait(true);
+            try { Show((await api!.PresencePromptsAsync(new PresencePromptsRequest(cursor, 0), CancellationToken.None).ConfigureAwait(true)).Notices); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+
+        async Task FollowAsync(CancellationToken stop)
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                PresencePromptsResponse response;
+                try { response = await api!.PresencePromptsAsync(new PresencePromptsRequest(cursor, 20), stop).ConfigureAwait(true); }
+                catch (Exception exception) when (exception is not OutOfMemoryException) { return; }
+                if (response.Problem is not null) return;
+                Show(response.Notices);
+                // A runtime answers an empty read only after its wait; one that answers at once is not asked again at once.
+                if (response.Notices.Count == 0)
+                {
+                    try { await Task.Delay(TimeSpan.FromMilliseconds(250), stop).ConfigureAwait(true); }
+                    catch (OperationCanceledException) { return; }
+                }
+            }
+        }
+
+        void Show(IReadOnlyList<PresenceNotice> notices)
+        {
+            foreach (PresenceNotice notice in notices.Where(n => n.Sequence > cursor))
+            {
+                cursor = notice.Sequence;
+                foreach (string line in notice.Text.Split('\n')) Log(line);
+                if (notice.Kind == "prompt") Status = notice.Text;
+                PresencePrompt = notice.Text;
+            }
+        }
+    }
+
     /// <summary>Sends an assignment and refreshes the views, preserving the composer's result.</summary>
     public Task SubmitAssignmentAsync(AssignmentComposer? page, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Send assignment for " + page?.WorkOrderKey, token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, submission: true);
@@ -299,7 +379,7 @@ public sealed partial class ShellViewModel
 
     /// <summary>Observes the original release identity; it does not resubmit a release.</summary>
     public Task ObserveReleaseAsync(ReleaseWorkspace? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Observe release " + page?.Version, token => page!.ObserveAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Observe release " + page?.Version, token => page!.ObserveAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, signs: true);
 
     /// <summary>Submits a living document's review through the runtime.</summary>
     public Task SubmitDocumentReviewAsync(LivingDocumentsWorkspace? page, CancellationToken cancellationToken = default) =>

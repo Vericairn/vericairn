@@ -48,7 +48,11 @@ public sealed partial class EstateService
             JsonObject body = JsonNode.Parse(candidate.Body.GetRawText())!.AsObject();
             body["status"] = "withdrawn";
             body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = request.Reason, ["hash"] = candidate.ComputedHash });
-            (AuthoredRecord? withdrawn, string? refusal) = AuthorLocked(new("release", request.By, Element(body), candidate.Subject, candidate.Id, at), model);
+            var withdrawing = new RecordDraft("release", request.By, Element(body), candidate.Subject, candidate.Id, at);
+            // Both records are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = presence.Action("release withdraw " + version, SignsWithPresence(model, request.By)
+                ? [DescribeRecord(withdrawing, model), OperationSignature(ReleaseFlow.DeleteDraftAction, "not-started", "release " + version)] : null);
+            (AuthoredRecord? withdrawn, string? refusal) = AuthorLocked(withdrawing, model);
             if (withdrawn is null) return Failed("refused", refusal!);
             var intent = new JsonObject
             {

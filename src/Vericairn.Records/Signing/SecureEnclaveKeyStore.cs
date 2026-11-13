@@ -94,7 +94,14 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     }
 
     /// <inheritdoc />
-    public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest)
+    public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest) => Sign(deviceId, digest, PresenceReason.Default);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// From 0.9.3 (FIX-124) the helper shows the reason in the system dialog of a key that asks for presence, held to
+    /// <see cref="PresenceReason.Text"/> here as well, so no secret or machine path reaches the dialog whatever the caller passed.
+    /// </remarks>
+    public byte[] Sign(string deviceId, ReadOnlySpan<byte> digest, string reason)
     {
         if (digest.Length != 32)
         {
@@ -102,7 +109,7 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         }
 
         string hex = Convert.ToHexString(digest).ToLowerInvariant();
-        (int code, string output) = Run(helper, WithPerson, "sign", Blob(deviceId), hex, "sign a Vericairn record");
+        (int code, string output) = Run(helper, WithPerson, "sign", Blob(deviceId), hex, PresenceReason.Text(reason));
         byte[] signature = code == 0 ? Convert.FromBase64String(output) : throw new InvalidOperationException(output);
         return signature.Length == RecordSigning.SignatureBytes ? signature : throw new InvalidOperationException("The Secure Enclave returned a signature of an unexpected size.");
     }

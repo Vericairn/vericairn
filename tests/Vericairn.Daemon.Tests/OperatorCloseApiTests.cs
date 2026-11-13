@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Tests;
 using Vericairn.Sdk;
 
@@ -103,6 +104,66 @@ public sealed class OperatorCloseApiTests
         JsonElement schemas = contract.RootElement.GetProperty("components").GetProperty("schemas");
         Assert.Equal(["by", "selection"], schemas.GetProperty("OperatorCloseRequest").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
         Assert.Equal(["key", "workOrder", "result", "reviews"], schemas.GetProperty("OperatorCloseSelection").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
+    }
+
+    [Fact]
+    public async Task AClientFollowsTheAnnouncementAndEachPromptOverTheApiWhileTheActionSigns()
+    {
+        // FIX-124: the operator's file device is stated as needing presence, its key held by a recording stand-in for that custody.
+        using var f = new OperatorCloseFixture();
+        var first = f.Add("STEP-1");
+        f.Add("STEP-2");
+        f.Api.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+        f.Api.PresenceRequired = device => device == f.Device;
+        await using ServiceProvider services = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
+        var routes = new MemoryRoutes(services);
+        ApiRoutes.Map(routes, f.Api, () => { });
+        using var client = new VericairnClient(new HttpClient(new RouteTransport(routes, services)) { BaseAddress = new Uri("http://localhost/") });
+        PresencePromptsResponse head = await client.PresencePromptsAsync(new(), TestContext.Current.CancellationToken);
+        Assert.Null(head.Problem);
+        Assert.Empty(head.Notices);
+        Task<PresencePromptsResponse> waiting = client.PresencePromptsAsync(new(head.Cursor, PresenceNoticeVocabulary.MaxWaitSeconds), TestContext.Current.CancellationToken);
+
+        OperatorCloseResponse closed = await client.OperatorCloseAsync(f.Request(), TestContext.Current.CancellationToken);
+
+        Assert.True(closed.Ok, closed.Problem?.Message);
+        // The waiting read woke with the announcement, raised before the first prompt.
+        PresencePromptsResponse woken = await waiting.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.Equal("announced", woken.Notices[0].Kind);
+        IReadOnlyList<PresenceNotice> notices = (await client.PresencePromptsAsync(new(head.Cursor), TestContext.Current.CancellationToken)).Notices;
+        Assert.Equal(["announced", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal($"Signature 1 of 2: acceptance STEP-1: accepts result {first.Result.Id} at its exact hash", notices[1].Text);
+        Assert.Equal("Signed 2 of 2.", notices[3].Text);
+        Assert.Empty((await client.PresencePromptsAsync(new(notices[^1].Sequence), TestContext.Current.CancellationToken)).Notices);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnlyTheLocalSocketReadsPresenceNoticesAndTheContractDescribesThem(bool localNetwork)
+    {
+        using var f = new OperatorCloseFixture();
+        var scope = new RequestScope(f.Api, new LocalNetworkLedger(f.Estate.Root));
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = "/v1/presence/prompts";
+        context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice("device", f.Estate.OperatorId, "public-key", localNetwork);
+        bool reached = false;
+        object? response = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, new PresencePromptsRequest()), _ =>
+        { reached = true; return ValueTask.FromResult<object?>(null); });
+        Assert.False(reached);
+        Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(response).StatusCode);
+        Assert.Contains("POST /v1/presence/prompts", RequestAuthenticator.MachineLocal);
+
+        Assert.True(RequestScope.Covers("POST /v1/presence/prompts"));
+        Assert.True(RequestScope.Covers(typeof(PresencePromptsRequest)));
+        using JsonDocument contract = JsonDocument.Parse(OpenApiDocument.Json);
+        JsonElement path = contract.RootElement.GetProperty("paths").GetProperty("/v1/presence/prompts").GetProperty("post");
+        Assert.Equal("postPresencePrompts", path.GetProperty("operationId").GetString());
+        Assert.Equal("#/components/schemas/PresencePromptsRequest", path.GetProperty("requestBody").GetProperty("content").GetProperty("application/json").GetProperty("schema").GetProperty("$ref").GetString());
+        JsonElement schemas = contract.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(PresenceNoticeVocabulary.Kinds, schemas.GetProperty("PresenceNotice").GetProperty("properties").GetProperty("kind").GetProperty("enum").EnumerateArray().Select(v => v.GetString()!));
+        Assert.Equal(["type", "key", "purpose"], schemas.GetProperty("PresenceSignature").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
     }
 
     private sealed class MemoryRoutes(IServiceProvider services) : IEndpointRouteBuilder

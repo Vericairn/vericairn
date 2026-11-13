@@ -52,7 +52,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
             (draft, model) => AuthorLocked(draft, model),
-            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, WriteCheckpointLocked, HistoryObjections);
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, WriteCheckpointLocked, HistoryObjections, presence, SignsWithPresence);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, goal, maxBytes, recipient, assignment, promptUse, searches, agent) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),
@@ -2425,6 +2425,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(denied);
         }
 
+        // A write outside an operator action states its own batch's presence prompts before the first (FIX-124): the record, and the
+        // checkpoint or closing it carries. Inside an action, the action has stated them.
+        using IDisposable? counted = presence.Counting ? null : presence.Action("Writing the " + draft.Type + " record", PresenceOfWrite(draft, current, signers));
+
         // A revision taking a role away is stored after a history checkpoint, or refused where it would make records fail
         // (design/signed-history.md § 8). A grant revision that needs a closing is stored after its closing instead, which is such a
         // checkpoint (OPS-07).
@@ -2624,7 +2628,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // A signing failure is described by its kind and type, never by its message, which may name a path on this machine and reaches
         // refusals and a checkpoint's skip reason. The record's own refusals name its fields and values, and keep their message, as does
         // a presigned signature's, which is fixed text.
-        List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s))];
+        // A key that needs its owner's presence is counted and named at this boundary (FIX-124).
+        RecordDraft signed = draft;
+        List<IRecordSigner> watched = [.. signers.Select(s => s is PresignedSigner ? s : new WatchedSigner(s, this, signed, current))];
         try
         {
             if (signers.Count > 0) BeforeSigningRecord?.Invoke();
@@ -2651,27 +2657,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         IOException => "the signing key could not be read",
         _ => "the device's key store refused to sign",
     }) + ", " + exception.GetType().Name + ").";
-
-    /// <summary>A signer that notes whether its signature failed, so the failure is told from the record's own refusals.</summary>
-    private sealed class WatchedSigner(IRecordSigner inner) : IRecordSigner
-    {
-        public bool Failed { get; private set; }
-
-        public string DeviceId => inner.DeviceId;
-
-        public RecordSignature Sign(ReadOnlySpan<byte> digest)
-        {
-            try
-            {
-                return inner.Sign(digest);
-            }
-            catch
-            {
-                Failed = true;
-                throw;
-            }
-        }
-    }
 
     // An estate policy's blocked terms stay out of authored records. A revision is refused only for an occurrence its
     // predecessor did not already hold, so automatic revisions of older records keep working.
@@ -3042,10 +3027,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Chooses the device that signs a record for its author on this machine, or explains why none can.</summary>
-    private static string? ResolveSigner(EstateModel model, RecordDraft draft, out IRecordSigner? signer)
+    private string? ResolveSigner(EstateModel model, RecordDraft draft, out IRecordSigner? signer)
     {
         signer = null;
-        IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
+        IReadOnlyList<IDeviceKeyStore> stores = HeldKeyStores();
         List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
         // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
         foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))

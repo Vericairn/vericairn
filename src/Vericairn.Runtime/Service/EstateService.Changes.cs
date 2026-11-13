@@ -45,6 +45,7 @@ public sealed partial class EstateService
     public ChangeResponse ChangesPush(ChangesPushRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using IDisposable counted = presence.Action("changes push", PresencePlan(request.By, () => PushPresence("branch " + request.Branch)));
         return ChangeEffect(request.Product, request.By, "change-push", request.Branch, request.Head, request.Reconciliation, claim =>
         {
             IPushAdapter adapter = Providers.PushAdapter ?? throw new ProviderRefusedException("No push adapter is registered.");
@@ -98,6 +99,7 @@ public sealed partial class EstateService
     public ChangeResponse ChangesOpen(ChangesOpenRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using IDisposable counted = presence.Action("changes open", PresencePlan(request.By, () => OpenPresence("branch " + request.Branch)));
         return ChangeEffect(request.Product, request.By, "change-open", request.Branch, request.Head, request.Reconciliation, claim =>
         {
             if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 200 || request.Body is null || request.Body.Length > 20000)
@@ -123,6 +125,7 @@ public sealed partial class EstateService
     public ChangeResponse ChangesMerge(ChangesMergeRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using IDisposable counted = presence.Action("changes merge", PresencePlan(request.By, () => MergePresence("pull request " + request.PullRequest)));
         return ChangeEffect(request.Product, request.By, "change-merge", request.PullRequest, request.Head, request.Reconciliation, claim =>
         {
             if (claim.Configuration.Required.Count == 0) throw new ProviderRefusedException("No required checks are declared on the product.");
@@ -168,6 +171,12 @@ public sealed partial class EstateService
     public ChangeResponse ChangesObserve(ChangesObserveRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        using IDisposable counted = presence.Action("changes observe", PresencePlan(request.By, () =>
+        {
+            RecordEnvelope? named = Ulid.IsValid(request.Operation) && session.Load().ById.TryGetValue(request.Operation, out RecordEnvelope? found) ? session.Load().Latest(found) : null;
+            return named is null || !ChangeOperationRulesForRuntime(named) ? [] : request.Cancel is null ? ObservePresence(named)
+                : [OperationSignature(EstateModel.BodyString(named, "action"), "canceled", OperationKey(named.Body))];
+        }));
         ChangeClaim? claim = null;
         try
         {
@@ -191,7 +200,10 @@ public sealed partial class EstateService
             }
 
             if (claim.Status is "not-started" or "dispatched")
+            {
+                ExpectPresence(request.By, [OperationSignature(claim.Action, "uncertain", OperationKey(EstateServiceValues.Element(claim.Body)))], "the original intent has no confirmed outcome, so it is recorded as uncertain first");
                 FinishChange(claim, "uncertain", "The original intent has no confirmed outcome; reconcile it by observation before any retry.");
+            }
             if (request.Cancel is not null)
             {
                 if (claim.Status is "observed-success" or "canceled")
@@ -237,6 +249,10 @@ public sealed partial class EstateService
             }
             if (confirmed && claim.Status != "observed-success")
             {
+                string key = OperationKey(EstateServiceValues.Element(claim.Body));
+                ExpectPresence(request.By, claim.Status is "not-started" or "known-failure" or "canceled"
+                    ? [OperationSignature(action, "uncertain", key), OperationSignature(action, "observed-success", key)] : [OperationSignature(action, "observed-success", key)],
+                    "the observation confirmed the original effect, so its outcome is recorded");
                 // A crash may have left the initial intent current. Preserve uncertainty as the bridge to the observation.
                 if (claim.Status is "not-started" or "known-failure" or "canceled")
                 {
@@ -246,7 +262,11 @@ public sealed partial class EstateService
                 }
                 FinishChange(claim, "observed-success", "The original effect was confirmed by a new recorded observation.");
             }
-            if (confirmed && action == "change-merge") return ObserveChangeTarget(claim, claim.Body["target"]!["mergeCommit"]!.GetValue<string>());
+            if (confirmed && action == "change-merge")
+            {
+                ExpectPresence(request.By, ObservationPresence(OperationKey(EstateServiceValues.Element(claim.Body)), "target-run"), "the merge is confirmed, so the target branch's run at the merge commit is observed");
+                return ObserveChangeTarget(claim, claim.Body["target"]!["mergeCommit"]!.GetValue<string>());
+            }
             return ChangeAnswer(claim, confirmed, confirmed ? "The original effect is confirmed." : "The original effect remains unconfirmed; do not retry.")
                 with { Observation = observation, CheckStatus = confirmed ? null : "uncertain" };
         }
@@ -440,6 +460,7 @@ public sealed partial class EstateService
                 else
                 {
                     string op = model.RootOperator!;
+                    ExpectPresence(claim.By, [new("ask", "operation " + claim.Written.Id, "records a question that waits on its principal")], "the target branch's run failed, so you are asked how to correct it");
                     JsonObject body = new() { ["to"] = op, ["state"] = "open", ["question"] = "The target branch's run failed at the recorded merge commit. How should it be corrected?",
                         ["recommendation"] = "Inspect the recorded failing checks and prepare a corrective change.", ["consequence"] = "The failed target run remains unresolved." };
                     WriteOutcome result = NewRecord(new("ask", claim.By, EstateServiceValues.Element(body), $"operation:{claim.Written.Id}:{claim.Written.Hash}"));

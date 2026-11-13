@@ -389,7 +389,7 @@ public sealed partial class EstateService
             // A key's closing is signed by its own device, with the key the rotation replaces.
             string identity = copy.Chain(copy.ById[closes.Id])[0];
             closer = signers?.FirstOrDefault(s => s.DeviceId == identity);
-            if (closer is null && DeviceKeyStores.All().FirstOrDefault(s => s.Has(identity)) is { } store) closer = new StoreSigner(store, identity);
+            if (closer is null && HeldKeyStores().FirstOrDefault(s => s.Has(identity)) is { } store) closer = new StoreSigner(store, identity);
             if (closer is null) return Refuse(Unclosed(closes, $"a key's closing is signed by its own device, and this machine holds no key of device {identity}."));
         }
         else if (signers is { Count: > 0 })

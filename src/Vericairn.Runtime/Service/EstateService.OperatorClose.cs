@@ -53,10 +53,8 @@ public sealed partial class EstateService
             if (refusal is not null || signer is null)
                 return new([], new("refused", "The operator needs their own admitted signing device on this machine. No unsigned acceptance is allowed.", []));
 
-            List<AuthoredRecord> records = [];
-            foreach (OperatorCloseSelection item in selection)
+            RecordDraft[] drafts = [.. selection.Select(item =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 RecordEnvelope result = model.ById[item.Result.Id];
                 JsonElement body = JsonSerializer.SerializeToElement(new
                 {
@@ -64,8 +62,18 @@ public sealed partial class EstateService
                     basis = item.Reviews.Select(r => r.Id).Order(StringComparer.Ordinal).ToArray(),
                     self = result.By == request.By,
                 });
-                // Custody currently signs one record per presence check; it offers no batch presence session.
-                (AuthoredRecord? record, refusal) = AuthorLocked(new("acceptance", request.By, body, result.Reference), model, [signer]);
+                return new RecordDraft("acceptance", request.By, body, result.Reference);
+            })];
+
+            // Custody signs one record per presence check; it offers no batch presence session. Every acceptance is announced before
+            // the first prompt, and each prompt says which of them it signs (FIX-124).
+            using IDisposable counted = presence.Action("operator close",
+                NeedsPresence(signer, drafts[0], model) ? drafts.Select(d => DescribeRecord(d, model)) : null);
+            List<AuthoredRecord> records = [];
+            foreach (RecordDraft draft in drafts)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                (AuthoredRecord? record, refusal) = AuthorLocked(draft, model, [signer]);
                 if (record is null) return new([], new("refused", refusal!, []));
                 records.Add(record);
             }

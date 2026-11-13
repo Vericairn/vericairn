@@ -28,8 +28,10 @@ public sealed class DaemonVersionCommandTests
         var requests = new List<string>();
         using var client = Client(request =>
         {
-            requests.Add(request.RequestUri!.AbsolutePath);
+            lock (requests) requests.Add(request.RequestUri!.AbsolutePath);
             if (request.RequestUri.AbsolutePath == "/v1/health") return Json(Health());
+            // From 0.9.3 (FIX-124) an upgrade that applies follows the runtime's presence notices while it runs; a check reads none.
+            if (request.RequestUri.AbsolutePath == "/v1/presence/prompts") return Json(new PresencePromptsResponse([], 0));
             Assert.Equal("/v1/estate/upgrade", request.RequestUri.AbsolutePath);
             UpgradeRequest upgrade = request.Content!.ReadFromJsonAsync<UpgradeRequest>(ProtocolJson.Options).GetAwaiter().GetResult()!;
             Assert.Equal(check, upgrade.Check);
@@ -43,7 +45,12 @@ public sealed class DaemonVersionCommandTests
         Assert.DoesNotContain("warning:", result.Out, StringComparison.Ordinal);
         if (json) Assert.Equal(!check, result.Json.GetProperty("applied").GetBoolean());
         else Assert.Contains(check ? "would upgrade" : "upgraded", result.Out, StringComparison.Ordinal);
-        Assert.Equal(UpgradeRequests, requests);
+        lock (requests)
+        {
+            Assert.Equal(UpgradeRequests, requests.Where(path => path != "/v1/presence/prompts"));
+            Assert.Equal(!check, requests.Take(2).Contains("/v1/presence/prompts"));
+        }
+
         Assert.Equal("0.8.0", client.Health().Vericairn);
     }
 

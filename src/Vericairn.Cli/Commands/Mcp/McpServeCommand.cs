@@ -50,7 +50,7 @@ internal sealed class McpServeCommand : Command
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
         server.RunAsync(Console.In, context.Output, context.Error, context.CancellationToken).GetAwaiter().GetResult();
         return Clean;
-    });
+    }, presence: false);
 
     /// <summary>
     /// Serves a remote estate's network MCP to a local client (MCP-03): each message is forwarded to its /mcp over the paired

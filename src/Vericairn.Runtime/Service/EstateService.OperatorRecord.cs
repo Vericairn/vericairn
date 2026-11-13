@@ -100,6 +100,13 @@ public sealed partial class EstateService
                 active = session.Live.Meta(OperatorActive);
             }
 
+            // Every record the action signs with presence is announced before the first prompt, from where the action stands; an
+            // observation it repeats while checks run is announced before it asks (FIX-124).
+            OperatorCheckpoint? planned = checkpoint;
+            string? earlierAction = active;
+            using IDisposable counted = presence.Action("operator record " + request.Type,
+                PresencePlan(request.By, () => OperatorRecordPresence(request, identity, planned, earlierAction, configuration)));
+
             // An earlier action whose merge is recorded is finished from its own records first, when its target checks pass.
             // Any other earlier action is truly unfinished and still refuses a new one.
             if (!string.IsNullOrEmpty(active) && active != identity)
@@ -251,9 +258,12 @@ public sealed partial class EstateService
             {
                 stage = "checks";
                 var watch = Stopwatch.StartNew();
+                bool again = false;
                 while (true)
                 {
                     Guard();
+                    if (again) ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "pull-request"), "the pull request's checks are still running, so it is observed again");
+                    again = true;
                     change = ChangesObserve(new(opening.Id, request.By));
                     if (!change.Ok || change.Observation is null) return Stopped(change);
                     string verdict = PullChecks(change.Observation, configuration, checkpoint.Branch, pullRequest, head, out string reason);
@@ -271,6 +281,7 @@ public sealed partial class EstateService
             {
                 if (!Pause(targetWatch)) return Stopped(change);
                 Guard();
+                ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "target-run"), "the target branch's run at the merge commit is still running, so it is observed again");
                 change = ChangesObserve(new(change.Operation!.Id, request.By));
             }
             if (!change.Ok || change.CheckStatus != "passed") return Stopped(change);
@@ -356,6 +367,60 @@ public sealed partial class EstateService
                     receipts.UnionWith(OperatorReceiptsLocked(followed));
                 return receipts;
             }
+        }
+    }
+
+    /// <summary>
+    /// What an operator record signs with presence from where it stands (FIX-124): finishing an earlier merged action's target run, the
+    /// record itself unless it is stored, the push, the opening, the first observation of the pull request's checks, and the merge with
+    /// the first observation of the target run, each step left out once its effect is recorded. Caller holds the gate.
+    /// </summary>
+    private List<PresenceSignature> OperatorRecordPresence(OperatorRecordRequest request, string identity, OperatorCheckpoint? checkpoint, string? active, ChangeConfiguration configuration)
+    {
+        List<PresenceSignature> plan = [];
+        EstateModel model = session.Load();
+        if (!string.IsNullOrEmpty(active) && active != identity && OperatorCheckpointLocked(active) is { } earlier)
+        {
+            OperatorProgress before = OperatorProgressLocked(active, earlier);
+            if (before.Finishable && before.CheckStatus != "passed") plan.AddRange(ObservationPresence("pull request " + before.PullRequest, "target-run"));
+        }
+
+        string branch = checkpoint is null ? "the action's new branch" : "branch " + checkpoint.Branch;
+        OperatorProgress? progress = checkpoint is null ? null : OperatorProgressLocked(identity, checkpoint);
+        string stage = progress?.Stage ?? "prepared";
+        string pull = progress?.PullRequest is string number ? "pull request " + number : "the pull request of " + branch;
+        if (stage == "prepared")
+        {
+            RecordReference? subject = request.Subject is not null && TryParseSubject(request.Subject, out RecordReference? parsed) ? parsed : null;
+            plan.Add(DescribeRecord(new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes), model));
+        }
+
+        if (stage == "merged")
+        {
+            if (progress!.CheckStatus != "passed") plan.AddRange(ObservationPresence(pull, "target-run"));
+            return plan;
+        }
+
+        if (stage is "prepared" or "recorded" or "committed") plan.AddRange(Step("change-push") ?? PushPresence(branch));
+        if (stage is "prepared" or "recorded" or "committed" or "pushed") plan.AddRange(Step("change-open") ?? OpenPresence(branch));
+        plan.AddRange(ObservationPresence(pull, "pull-request"));
+        if (stage == "merge-uncertain" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
+        plan.AddRange(MergePresence(pull));
+        return plan;
+
+        // A step whose operation is recorded signs nothing once it succeeded or while its failure waits for a reconciliation, one
+        // observation while its outcome is unconfirmed, and the whole step when it is retried; null when none is recorded.
+        PresenceSignature[]? Step(string action)
+        {
+            if (checkpoint?.Head is not string head) return null;
+            RecordEnvelope? prior = CurrentOperation($"{configuration.Provider.Provider}:{configuration.Repository.Id}:{action}:{checkpoint.Branch}:{head}:{checkpoint.ProductHash[7..]}");
+            if (prior is null) return null;
+            return EstateModel.BodyString(prior, "status") switch
+            {
+                "observed-success" => [],
+                "known-failure" or "canceled" => string.IsNullOrWhiteSpace(request.Reconciliation) ? [] : null,
+                _ => ObservePresence(prior, branch),
+            };
         }
     }
 
@@ -471,6 +536,10 @@ public sealed partial class EstateService
                 return Answer(false, "refused", OperatorDescription(progress) + "; its recorded product or repository declaration is unavailable.", "Restore the declaration it was merged under, then finish it again.");
         }
         RecordEnvelope merge = progress.Merge!;
+        // Finishing observes the target run at the merge commit, once and again while it runs, each announced before it asks (FIX-124).
+        string pull = "pull request " + progress.PullRequest;
+        using IDisposable counted = presence.Action("operator unfinished --finish",
+            progress.CheckStatus == "passed" ? null : PresencePlan(by, () => ObservationPresence(pull, "target-run")));
         ChangeResponse change = progress.CheckStatus == "passed"
             ? new(EstateModel.BodyString(merge, "identity")!, "observed-success", "The pinned merge and its target checks are recorded as successful.", true,
                 new(merge.ExpectedPath, merge.Id, merge.ComputedHash), new(progress.Target!.ExpectedPath, progress.Target.Id, progress.Target.ComputedHash),
@@ -483,6 +552,7 @@ public sealed partial class EstateService
             TimeSpan left = TimeSpan.FromSeconds(waitSeconds) - watch.Elapsed;
             if (left <= TimeSpan.Zero) break;
             if (cancellationToken.WaitHandle.WaitOne(left < TimeSpan.FromSeconds(2) ? left : TimeSpan.FromSeconds(2))) cancellationToken.ThrowIfCancellationRequested();
+            ExpectPresence(by, ObservationPresence(pull, "target-run"), "the target branch's run at the merge commit is still running, so it is observed again");
             change = ChangesObserve(new(change.Operation.Id, by));
         }
         if (!change.Ok || change.CheckStatus != "passed")

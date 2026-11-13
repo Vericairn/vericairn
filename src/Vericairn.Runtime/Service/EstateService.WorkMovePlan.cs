@@ -85,9 +85,11 @@ public sealed partial class EstateService
             }
 
             List<AuthoredRecord> records = [];
-            foreach (var (original, body) in revisions.Values)
+            RecordDraft[] drafts = [.. revisions.Values.Select(r => new RecordDraft("work-order", request.By, Element(r.Body), r.Original.Subject, r.Original.Id, at))];
+            // Every revision is announced before the first presence prompt (FIX-124).
+            using IDisposable counted = presence.Action("work move-plan", SignsWithPresence(model, request.By) ? drafts.Select(d => DescribeRecord(d, model)) : null);
+            foreach (RecordDraft draft in drafts)
             {
-                var draft = new RecordDraft("work-order", request.By, Element(body), original.Subject, original.Id, at);
                 string? refusal = ResolveSigner(model, draft, out IRecordSigner? signer);
                 if (refusal is not null || signer is null)
                     return Failed("refused", refusal ?? "The acting principal needs an admitted device whose key this runtime holds.");

@@ -116,8 +116,11 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     public TextWriter Output => output ?? Console.Out;
     public TextWriter Error => error ?? Console.Error;
 
-    /// <summary>Runs an operation against the estate's API, retaining the existing ownership and failure boundary.</summary>
-    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false, bool upgrade = false)
+    /// <summary>
+    /// Runs an operation against the estate's API, retaining the existing ownership and failure boundary. An operation that may write
+    /// shows the presence prompts it asks for unless <paramref name="presence"/> is false, as for a server that runs for a session.
+    /// </summary>
+    public int WithApi(string root, Func<IEstateApi, int> operation, bool readOnly = false, bool upgrade = false, bool presence = true)
     {
         try
         {
@@ -131,7 +134,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             if (BorrowedApi is not null)
             {
                 if (BorrowedApi is VericairnClient borrowedClient) _ = IsAlive(borrowedClient);
-                return operation(new CancellationBoundApi(BorrowedApi, CancellationToken));
+                return Showing(new CancellationBoundApi(BorrowedApi, CancellationToken), operation, readOnly || !presence);
             }
 
             served = null;
@@ -143,18 +146,29 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 {
                     UsingDaemon = true;
                     served = (root, endpoint, lastHealth!);
-                    return operation(new CancellationBoundApi(client, CancellationToken));
+                    return Showing(new CancellationBoundApi(client, CancellationToken), operation, readOnly || !presence);
                 }
             }
 
             using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : upgrade ? EstateService.OpenForUpgrade(root) : EstateService.Open(root);
             UsingDaemon = false;
-            return operation(new CancellationBoundApi(service, CancellationToken));
+            return Showing(new CancellationBoundApi(service, CancellationToken), operation, readOnly || !presence);
         }
         catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException) && exception is not IClientOperationFailure)
         {
             return Fail(exception.Message);
         }
+    }
+
+    /// <summary>
+    /// Runs an operation, showing on standard error, for one that may write, the presence prompts its operator action asks for on the
+    /// runtime's machine: the announcement before the first and "Signature k of n" at each (FIX-124). A read-only operation shows none.
+    /// </summary>
+    private int Showing(IEstateApi api, Func<IEstateApi, int> operation, bool quiet)
+    {
+        if (quiet) return operation(api);
+        using PresenceDisplay display = PresenceDisplay.Start(api, Error);
+        return operation(api);
     }
 
     /// <summary>Runs an operation that only a running daemon serves, such as pairing; refused, with the way on, when none answers.</summary>

@@ -25,6 +25,13 @@ public interface IDeviceKeyStore
     /// <summary>Signs a 32-byte digest with the device key (IEEE P1363 fixed-field signature, 64 bytes).</summary>
     byte[] Sign(string deviceId, ReadOnlySpan<byte> digest);
 
+    /// <summary>
+    /// From 0.9.3 (FIX-124): signs as <see cref="Sign(string, ReadOnlySpan{byte})"/> does, and a store that asks its owner's presence shows
+    /// <paramref name="reason"/> in its prompt: which signature of how many it is and what it signs, held to <see cref="PresenceReason.Text"/>.
+    /// A store that asks nobody ignores it.
+    /// </summary>
+    byte[] Sign(string deviceId, ReadOnlySpan<byte> digest, string reason) => Sign(deviceId, digest);
+
     /// <summary>Removes the key; the device record stays and is revoked separately.</summary>
     void Remove(string deviceId);
 

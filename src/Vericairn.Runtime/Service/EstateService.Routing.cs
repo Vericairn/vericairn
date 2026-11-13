@@ -75,6 +75,8 @@ public sealed partial class EstateService
             return StepProblem(goal, "refused", "The recording principal and the repository are named by ULIDs; nothing was recorded.");
         }
 
+        // The records a step signs together are announced before the first prompt once its route is known (FIX-124).
+        using IDisposable counted = presence.Action("goal step " + goal);
         AuthoredRecord? routed = null;
         RunStartRequest run;
         string key;
@@ -177,7 +179,9 @@ public sealed partial class EstateService
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference), model);
+                var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference);
+                ExpectPresence(request.By, [DescribeRecord(assigning, model), OperationSignature(global::Vericairn.Records.Types.OperationType.AgentRun, "not-started", "agent run of " + key)], "the step is routed to an agent");
+                (routed, string? unsigned) = AuthorLocked(assigning, model);
                 if (routed is null)
                 {
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -300,7 +304,9 @@ public sealed partial class EstateService
         {
             // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
             // together, or neither is.
-            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference), model);
+            var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference);
+            ExpectPresence(request.By, [DescribeRecord(assigning, model), new("ask", SubjectKey(model, step.Order.Reference), "records a question that waits on its principal")], "the step is routed to a person");
+            (assignment, string? unsigned) = AuthorLocked(assigning, model);
             if (assignment is null)
             {
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);

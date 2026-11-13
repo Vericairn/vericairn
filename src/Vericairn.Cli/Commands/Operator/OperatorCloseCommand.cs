@@ -67,8 +67,8 @@ internal sealed class OperatorCloseCommand : Command
                     }
                     // Keep machine output one JSON response; the evidence is still shown before signing on standard error.
                     TextWriter display = parse.GetValue(context.JsonOption) ? context.Error : context.Output;
+                    // A device that needs its owner's presence asks once per acceptance; the runtime announces and counts those prompts.
                     Show(display, chosen);
-                    display.WriteLine("The signing device checks presence for each acceptance when required.");
                     display.Flush();
                     OperatorCloseResponse response = api.OperatorClose(new(actor!, [.. chosen.Select(i => i.ToSelection())], every));
                     if (parse.GetValue(context.JsonOption)) WriteJson(response);

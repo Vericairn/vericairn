@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 21, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
+
 Revision 20, November 12, 2026. Describe 0.9.2's command additions as released commands rather than development builds.
 
 Revision 19, November 8, 2026. Add `estate checkpoint`, the history checkpoints the runtime writes, closings with `devices revoke`, `devices rotate` and narrowing grant revisions, a closing stored without its act and the act written again after it, and this machine's memory of the estate's history in `estate check`, in the development build.
@@ -117,7 +119,8 @@ exit questions, result summaries, passing-review summaries and independence, and
 Each acceptance names its exact result and all displayed passing reviews. A changed selected
 work order, result or review, a missing passing review, an existing acceptance or a non-operator
 refuses the whole action without acceptances. `--all` also pins complete eligible membership.
-Current signing custody checks presence per acceptance when required. Exit 0 means success,
+Signing custody checks presence once per acceptance when required; from 0.9.3 the acceptances are
+announced on standard error before the first prompt, with `Signature k of n` at each. Exit 0 means success,
 1 a selection or record refusal, and 2 invalid arguments or a client failure. The
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
@@ -814,3 +817,13 @@ upgrade's runtime step does that. An estate pinned to a source commit is refused
 ran on: the runtime by its release and process, another estate by its id, the commands as run in the estate's directory, and any
 other path in a finding's message as `<path>`; the exact commands for this machine are printed after the check, and `--json`
 gives them as `here`, never recorded.
+
+## Presence prompts on standard error (0.9.3)
+
+From 0.9.3 (FIX-124) every command that may write follows the presence notices of the runtime that serves it, embedded or the
+daemon, while it runs. When it signs with a device that needs its owner's presence, it prints on standard error, before the first
+prompt, every record it will sign and what each authorizes; at each prompt, `Signature k of n: <type> <key>: <purpose>`; any
+signatures it adds, with why, before they are asked for; and when it ends, how many it signed. Standard output keeps the
+command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
+and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
+lists how many prompts the release and acceptance steps ask for.
