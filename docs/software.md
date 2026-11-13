@@ -778,6 +778,15 @@ creates the draft: it holds the write token, in that one step, and checks nothin
 its credentials, and every workflow input reaches a script through an environment variable, never
 interpolated into it. `nuget.yml` has no pull-request trigger, so no pull request reports its skipped job.
 
+From 0.9.3 (CI-07), Vericairn's own `ci.yml` builds a commit on main once. A merge queue moves main to the
+exact commit its group's run tested, so the workflow's first job looks that run up: on a push to main whose
+exact commit has a successful `merge_group` run of `ci.yml`, every other job is skipped, and that commit's
+three-platform run is the queue's. Every other push to main builds in full, as do pull requests, queue groups
+and manual runs; a lookup that cannot be completed also builds in full. A main commit's run is therefore its
+`merge_group` run when the queue merged it, and its push run otherwise. This is the repository's own
+workflow, not a product behavior: `changes merge` still observes the target branch's push runs at the merge
+commit, in repositories that require no merge queue.
+
 The self-contained publishes restore locked from committed runtime-specific lock files:
 `packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and
 Workbench ship, for the six platforms. Ordinary builds and the NuGet packages keep the portable graph. After a

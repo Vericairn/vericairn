@@ -20,7 +20,15 @@ and script bodies are data. No gem installation is needed. Run its regression ca
 with `ruby .github/scripts/test-workflow-actions.rb`.
 
 `ci.yml` runs on pull requests, merge queue groups, main pushes and manual dispatch.
-Tests run in three shares on each of Linux, macOS and Windows. It also calls
+Tests run in three shares on each of Linux, macOS and Windows. Its first job,
+`queue-tested`, looks up whether a push to main brings a commit whose merge queue
+run of `ci.yml` passed: the queue moves main to the exact commit its group's run
+tested, so on such a push every other job is skipped and that commit's
+three-platform run is the queue's. Every other push to main builds in full, as do
+pull requests, queue groups and manual runs, for which nothing is looked up; a
+lookup that cannot be completed also builds in full. Each commit on main thus has
+exactly one passing three-platform run. Look for a main commit's run among its
+`merge_group` runs first, then its push run. It also calls
 `package.yml`, the same packaging workflow that `release.yml` calls after its tests.
 Packaging builds and verifies NuGet packages, CLI and Workbench archives,
 documentation, the bill of materials and checksums. It executes the published Linux
@@ -32,6 +40,7 @@ Every runnable job has an explicit `timeout-minutes` limit:
 
 | Workflow | Job | Minutes |
 | --- | --- | --- |
+| `ci.yml` | `queue-tested` | 10 |
 | `ci.yml` | `workflow-policy` | 15 |
 | `ci.yml` | `build-test` (each platform and share) | 60 |
 | `ci.yml` | `remote-ios`, `remote-android` | 45 |

@@ -24,7 +24,39 @@ env:
   AVALONIA_TELEMETRY_OPTOUT: "1"
 
 jobs:
+  # A merge queue moves main to the exact commit its group's run tested, so main's push run would repeat a run that passed.
+  # This job finds that run: on a push to main whose exact commit has a successful merge_group run of this workflow, every
+  # other job is skipped and the commit's three-platform run is the queue's. Any other push builds in full, as does a pull
+  # request, a queue group or a manual run, for which the job looks nothing up. A lookup that cannot be completed builds in
+  # full: only a found, passing run of the same commit skips anything.
+  queue-tested:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.lookup.outputs.skip }}
+    steps:
+      - name: Find a passing merge queue run of this exact commit
+        id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          skip=false
+          if [ "$EVENT" = push ]; then
+            count=$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$COMMIT&event=merge_group&status=success&per_page=1" --jq '.total_count') || count=0
+            case "$count" in ''|*[!0-9]*) count=0 ;; esac
+            if [ "$count" -gt 0 ]; then skip=true; fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "event $EVENT, commit $COMMIT: skip=$skip"
+
   workflow-policy:
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -49,6 +81,8 @@ jobs:
     # iOS alone is pinned to workload set 10.0.401 (iOS 26.5, Xcode 26.6): Avalonia.iOS does not build against the iOS 27.1
     # bindings of the band's later sets yet. The phone head is a developer build, not a release artifact: that set's Mono
     # runtime (10.0.12) ships in no release, and the distributables embed the SDK's own runtime.
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -83,6 +117,8 @@ jobs:
 
   remote-android:
     # Android follows the SDK's patch: workload set 10.0.404 carries the Mono runtime 10.0.15 that the phone head embeds.
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -111,6 +147,8 @@ jobs:
           -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME_17_X64"
 
   build-test:
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -254,6 +292,8 @@ jobs:
   package:
     # The release's packaging path on every change, everything but the draft: release.yml runs the same package.yml. It runs
     # beside the tests rather than after them, so it adds no time to the run's critical path.
+    needs: [queue-tested]
+    if: needs.queue-tested.outputs.skip != 'true'
     uses: ./.github/workflows/package.yml
     with:
       release: false
