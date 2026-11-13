@@ -42,8 +42,8 @@ public sealed class CredentialReferenceType : IRecordType
         new("scopes", "string[]", true, "What it permits; may be empty.", 2),
         new("check", "string", false, "How its presence is checked without using it; a presence check is not authentication.", 2),
         new("status", string.Join('|', Statuses), true, "active, rotated (a successor reference replaces it), revoked or retired.", 2),
-        new("rotatedAt", "timestamp", false, "When it was last issued or rotated.", 2),
-        new("rotateBy", "timestamp", false, "When it is due for rotation.", 2),
+        new("rotatedAt", FieldKinds.Timestamp, false, "When it was last issued or rotated.", 2),
+        new("rotateBy", FieldKinds.Timestamp, false, "When it is due for rotation.", 2),
     ];
 
     /// <inheritdoc />

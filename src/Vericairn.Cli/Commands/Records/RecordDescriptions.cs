@@ -45,6 +45,11 @@ internal static class RecordDescriptions
             context.Output.WriteLine($"  {field.Name,-18} {field.Kind,-28} {(field.Required ? "required" : "optional"),-9} {since}{field.Description}");
         }
 
+        if (found.Fields.Any(f => f.Kind == FieldKinds.Timestamp))
+        {
+            context.Output.WriteLine($"A timestamp is a UTC time in whole seconds, {RecordParser.TimestampForm}, such as 2026-10-13T14:00:00Z; a value with fractional seconds or an offset is refused, never converted.");
+        }
+
         return Clean;
     }
 }

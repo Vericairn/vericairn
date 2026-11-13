@@ -33,7 +33,7 @@ public sealed class CustodyExceptionType : IRecordType
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
         new("reason", "string", true, "Why the sponsor accepts unattended runs of the goal while such a key signs where they run.", 2),
-        new("expires", "timestamp", true, "When the exception stops being in force; later than the record. A revision by its author can bring it forward.", 2),
+        new("expires", FieldKinds.Timestamp, true, "When the exception stops being in force; later than the record. A revision by its author can bring it forward.", 2),
     ];
 
     /// <inheritdoc />

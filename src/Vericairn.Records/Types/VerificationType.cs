@@ -45,13 +45,13 @@ public sealed class VerificationType : IRecordType
         new("summary", "string", true, "What was observed."),
         new("exitCode", "integer", false, "Process exit code, when a command ran."),
         new("durationMs", "integer", false, "How long the check took."),
-        new("startedAt", "timestamp", false, "When it started."),
-        new("finishedAt", "timestamp", false, "When it finished."),
+        new("startedAt", FieldKinds.Timestamp, false, "When it started."),
+        new("finishedAt", FieldKinds.Timestamp, false, "When it finished."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("limitations", "string[]", true, "What the check does not establish; may be empty."),
         new("evidenceClass", string.Join('|', EvidenceClasses), false, "How the evidence was obtained: observed where it was recorded, reported by a host or provider, attested by a principal, or inferred from other evidence.", 2),
         new("observer", string.Join('|', Observers), false, "What kind of observer made the claim.", 2),
-        new("expires", "timestamp", false, "When the claim stops counting as current and needs observing again.", 2),
+        new("expires", FieldKinds.Timestamp, false, "When the claim stops counting as current and needs observing again.", 2),
     ];
 
     /// <inheritdoc />

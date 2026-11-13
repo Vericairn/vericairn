@@ -24,7 +24,7 @@ public sealed class AttemptType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("startedAt", "timestamp", true, "When the attempt began."),
+        new("startedAt", FieldKinds.Timestamp, true, "When the attempt began."),
         new("workspace", "string", true, "Where the work happens, named without machine-specific paths: a repository and branch, a clone, a tool."),
         new("note", "string", true, "What the contributor intends to do."),
     ];

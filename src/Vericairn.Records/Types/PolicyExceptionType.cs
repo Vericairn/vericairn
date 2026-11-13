@@ -27,7 +27,7 @@ public sealed class PolicyExceptionType : IRecordType
         new("rule", "slug", true, "The rule in the exact subject policy.", 3),
         new("targets", "object[]", true, "Nonempty finite record, publication, file or occurrence targets; optional exact release submission.", 3),
         new("reason", "string", true, "Why this grant is needed.", 3),
-        new("expiresAt", "timestamp", true, "Exclusive expiry, bounded from the initial grant time.", 3),
+        new("expiresAt", FieldKinds.Timestamp, true, "Exclusive expiry, bounded from the initial grant time.", 3),
         new("basis", "object", true, "Exact decision and, for a delegate, authority reference.", 3),
         new("state", "granted|revoked", true, "A revocation is an immediate signed successor; renewal is a new identity.", 3),
     ];

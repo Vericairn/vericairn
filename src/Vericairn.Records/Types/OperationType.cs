@@ -50,7 +50,7 @@ public sealed class OperationType : IRecordType
         new("intent", "string", true, "The intended effect, in a sentence."),
         new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; for an agent run, its assignment, its principal, its workspace (a repository and branch, never a machine path), the goal it is charged to, the worker contract and, for a run launched under it, the sponsor's custody exception (custodyException); string values only. Format-3 package actions pin provider, product, productHash, package and version, with either release and releaseHash or reserved (the same version declared reserved in that exact product, with no release pins); the subject pins that release or product declaration."),
         new("status", string.Join('|', Statuses), true, "not-started, dispatched, observed-success, known-failure, canceled or uncertain."),
-        new("dispatchedAt", "timestamp", false, "When the dispatch was made; required once dispatched. Account-holder package actions never claim a dispatch and omit this field."),
+        new("dispatchedAt", FieldKinds.Timestamp, false, "When the dispatch was made; required once dispatched. Account-holder package actions never claim a dispatch and omit this field."),
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
         new("reconciliation", "string", false, "How an uncertain or failed outcome was settled before a retry; required when a retry is dispatched."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),

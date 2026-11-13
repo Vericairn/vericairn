@@ -41,7 +41,7 @@ public sealed class DecisionType : IRecordType
         new("effects", "string[]", true, "Concrete effects on the estate."),
         new("affects", "ulid[]", true, "Work orders this decision changes; may be empty."),
         new("decidedBy", "ulid", true, "The operator principal who decided."),
-        new("decidedAt", "timestamp", true, "When the operator decided."),
+        new("decidedAt", FieldKinds.Timestamp, true, "When the operator decided."),
         new("stake", string.Join('|', Stakes), true, "How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time.", 2),
         new("notAuthorized", "string[]", true, "What this answer does not authorize, so no one reads more into it; may be empty.", 2),
         new("answers", "ulid[]", false, "The asks this decision answers; an ask is answered by the principal it was put to, and never by waiting.", 2),

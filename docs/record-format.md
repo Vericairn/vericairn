@@ -50,6 +50,15 @@ same build registry and identify the format that introduced each field. An older
 reader's recognition of a format number alone does not prove that it implements
 every later additive field or behavior described here.
 
+A body timestamp takes the envelope's form: a UTC time in whole seconds,
+`YYYY-MM-DDTHH:MM:SSZ`, such as `2026-10-13T14:00:00Z`. From 0.9.3 (FIX-114), both
+show each timestamp field's kind as `timestamp (YYYY-MM-DDTHH:MM:SSZ)`. A value in
+any other form, such as `2026-10-13T14:00:00.123456Z` or `2026-10-13T16:00:00+02:00`,
+is refused with `body.timestamp`, naming the field and that form, before its
+length is considered, and a missing required timestamp is refused with
+`body.missing` and the same form. Nothing is written, and no value is converted
+to the required form on the caller's behalf.
+
 ## Release lines and channels (0.9.0)
 
 These optional fields extend record format 3. Existing release bodies, hashes and
