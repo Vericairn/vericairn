@@ -129,17 +129,34 @@ public sealed partial class EstateService
         return ChangeEffect(request.Product, request.By, "change-merge", request.PullRequest, request.Head, request.Reconciliation, claim =>
         {
             if (claim.Configuration.Required.Count == 0) throw new ProviderRefusedException("No required checks are declared on the product.");
+            // A retry keeps the route its earlier attempt recorded: a merge pinned to the merge queue goes through it again.
+            bool pinnedToQueue = QueuedMerge(claim.Body);
+            MergeQueueObservation? queue = null;
             PullRequestObservation? pull = ObserveChange(claim, "pull-request", observation =>
             {
                 PullRequestObservation? value = claim.Configuration.Provider.Observe(claim.Configuration.Destination, request.PullRequest);
-                if (value is not null) StorePullObservation(observation, value);
+                if (value is not null)
+                {
+                    StorePullObservation(observation, value);
+                    // The same observation records whether the target branch requires a merge queue, and the pull request's place in it.
+                    queue = claim.Configuration.Provider.ObserveQueue(claim.Configuration.Destination, value.Number);
+                    StoreQueueObservation(observation, queue);
+                }
                 return value;
             }, out RecordWritten observed);
             claim.Body["checks"] = JsonSerializer.SerializeToNode(pull?.Checks ?? [], ChangeJson);
+            IReadOnlyList<string> refused = pull is null ? [] : ChangeGate.Refusals(request.Head, claim.Configuration.Required, pull.Checks, pull.Complete);
+            // A retry of a queued merge whose pull request the queue has merged at the pinned head records that merge, without another effect.
+            if (pinnedToQueue && pull is { Complete: true, State: "merged" } && pull.Number == request.PullRequest && pull.Head == request.Head
+                && pull.Target == claim.Configuration.Target && pull.MergeCommit is not null && Patterns.Commit.IsMatch(pull.MergeCommit) && refused.Count == 0)
+                return RecordQueuedMerge(claim, pull.MergeCommit);
             if (pull is null || pull.Number != request.PullRequest || pull.Head != request.Head || pull.Target != claim.Configuration.Target || pull.State != "open")
-                throw new ProviderRefusedException("The pull request is absent, closed, targets another branch or its head moved.");
-            IReadOnlyList<string> refused = ChangeGate.Refusals(request.Head, claim.Configuration.Required, pull.Checks, pull.Complete);
+                throw new ProviderRefusedException(pinnedToQueue && pull?.State == "merged"
+                    ? "The pull request is already merged; observe the original merge with vericairn changes observe --operation " + claim.Written.Id + ", which records the queue's outcome."
+                    : "The pull request is absent, closed, targets another branch or its head moved.");
             if (refused.Count > 0) throw new ProviderRefusedException(string.Join(" ", refused));
+            if (!WholeQueue(queue))
+                throw new ProviderRefusedException("Whether the target branch requires a merge queue could not be observed completely; nothing was merged.");
             // Every merged head rests on a scan of exactly its commits, even when its pull request was opened elsewhere.
             lock (gate)
             {
@@ -149,6 +166,14 @@ public sealed partial class EstateService
             claim.Body["target"]!["pullRequest"] = pull.Number;
             claim.Body["target"]!["branch"] = pull.Branch;
             claim.Body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Checks observed before merge.", ["hash"] = observed.Hash, ["location"] = observed.Path });
+            if (queue.Required || pinnedToQueue)
+            {
+                if (!queue.Required)
+                    throw new ProviderRefusedException("This merge was recorded through the target branch's merge queue, which the branch no longer requires; nothing was merged. Push a new head to merge it directly.");
+                if (queue.State is "queued" or "unmergeable")
+                    throw new ProviderRefusedException("The pull request is already in the merge queue, enqueued outside this operation; nothing was requested.");
+                return EnqueueChange(claim, pull.Number);
+            }
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
             ChangeReceipt receipt = claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head);
@@ -159,6 +184,170 @@ public sealed partial class EstateService
             return ObserveChangeTarget(claim, receipt.MergeCommit);
         });
     }
+
+    /// <summary>
+    /// Enqueues a checked pull request into its target branch's required merge queue (CODE-71), under the same authority, checks and
+    /// scanned push a direct merge needs: the merge records the queue as its route, its dispatch is the enqueue request at the pinned
+    /// head, and an observation confirms the pull request's place in the queue before the merge waits there. The queue merges it later;
+    /// <see cref="ChangesObserve"/> records the outcome against the same merge.
+    /// </summary>
+    private ChangeResponse EnqueueChange(ChangeClaim claim, string number)
+    {
+        claim.Body["target"]!["mergeQueue"] = "required";
+        string key = OperationKey(EstateServiceValues.Element(claim.Body));
+        RevisePresence(claim.By, [OperationSignature("change-merge", "dispatched", key), .. ObservationPresence(key, "pull-request")],
+            "the target branch requires its merge queue, so the change is enqueued and its place in the queue observed");
+        DispatchChange(claim);
+        claim.EffectMayHaveStarted = true;
+        ChangeReceipt receipt = claim.Configuration.Provider.Enqueue(claim.Configuration.Destination, number, claim.Head);
+        if (receipt.PullRequest != number) throw new ProviderUncertainException("The enqueue was requested but its pull request was not confirmed.");
+        return ObserveQueuedMerge(claim);
+    }
+
+    /// <summary>Whether a merge operation's body records the target branch's merge queue as its route (CODE-71).</summary>
+    private static bool QueuedMerge(JsonObject body) => body["target"]?["mergeQueue"]?.GetValue<string>() == "required";
+
+    /// <summary>Whether a recorded merge operation went through the target branch's merge queue (CODE-71).</summary>
+    private static bool QueuedMerge(RecordEnvelope merge) =>
+        merge.Body.TryGetProperty("target", out JsonElement target) && ChangeText(target, "mergeQueue") == "required";
+
+    /// <summary>
+    /// Observes a queued merge's place in the merge queue and then its pull request, in one recorded observation, and records the outcome
+    /// against the merge (CODE-71): merged at a commit, then that commit's target run; still queued at the pinned head, waiting; a known
+    /// failure only on the host's positive evidence about this attempt (still listed as unmergeable at the pinned head, a removal the host
+    /// dates after this attempt's dispatch, the pull request closed or its head moved); anything else, such as an entry gone with no such
+    /// removal while the pull request does not yet read merged, stays uncertain and is never retried before it is reconciled.
+    /// </summary>
+    private ChangeResponse ObserveQueuedMerge(ChangeClaim claim)
+    {
+        string number = claim.Body["target"]!["pullRequest"]!.GetValue<string>();
+        MergeQueueObservation? queue = null;
+        PullRequestObservation? pull = ObserveChange(claim, "pull-request", observation =>
+        {
+            // The queue is read first: a merge between the two reads then shows as merged, never as an open change out of the queue.
+            queue = claim.Configuration.Provider.ObserveQueue(claim.Configuration.Destination, number);
+            PullRequestObservation? value = claim.Configuration.Provider.Observe(claim.Configuration.Destination, number);
+            if (value is not null) StorePullObservation(observation, value);
+            StoreQueueObservation(observation, queue);
+            return value;
+        }, out RecordWritten observation);
+        string key = OperationKey(EstateServiceValues.Element(claim.Body));
+        bool complete = pull is { Complete: true } && WholeQueue(queue) && pull.Number == number && pull.Target == claim.Configuration.Target;
+        if (complete && pull!.State == "merged" && pull.Head == claim.Head && pull.MergeCommit is not null && Patterns.Commit.IsMatch(pull.MergeCommit))
+            return RecordQueuedMerge(claim, pull.MergeCommit);
+        bool open = complete && pull!.State == "open";
+        bool atHead = open && pull!.Head == claim.Head && queue!.Head == claim.Head;
+        if (atHead && queue!.State == "queued")
+        {
+            // An enqueue whose receipt was lost is confirmed by its place in the queue, under its original identity.
+            if (claim.Status is "not-started" or "uncertain")
+            {
+                ExpectPresence(claim.By, [OperationSignature("change-merge", "dispatched", key)], "the change was observed in the merge queue, so its enqueue is recorded as dispatched");
+                claim.Body["dispatchedAt"] ??= Now();
+                claim.Body["reconciliation"] = "The change was observed in the merge queue at its pinned head under its original identity.";
+                SaveChange(claim, "dispatched");
+            }
+            return ChangeAnswer(claim, false, "The change waits in the target branch's merge queue at the pinned head; observe this operation again for the queue's outcome.")
+                with { Observation = observation, CheckStatus = "queued" };
+        }
+        // Only the host's positive evidence about this attempt settles it unmerged.
+        string? evidence = !complete ? null
+            : pull!.State == "closed" ? "The pull request was closed without its merge; nothing was merged."
+            : open && pull!.Head != claim.Head ? "The pull request's head moved from the pinned head, so the queue cannot merge it; nothing was merged."
+            : atHead && queue!.State == "unmergeable" ? "The merge queue found the change could not merge" + Because(queue.Reason)
+            : open && queue!.State is "failed" or "removed" && queue.RemovedAt is { } removedAt && DispatchedBefore(claim, removedAt)
+                ? (queue.State == "failed" ? "The merge queue took the change out unmerged for a failure" : "The change was removed from the merge queue unmerged") + Because(queue.Reason)
+            : null;
+        if (evidence is not null && claim.Status is "dispatched" or "uncertain")
+        {
+            ExpectPresence(claim.By, [OperationSignature("change-merge", "known-failure", key)], "the host shows the change was not merged, so its known failure is recorded");
+            FinishChange(claim, "known-failure", evidence);
+            return ChangeAnswer(claim, false, evidence + " Resolve the cause, then retry the merge with --reconciliation; if the change may still have merged, observe this operation first.")
+                with { Observation = observation };
+        }
+        if (claim.Status == "dispatched")
+        {
+            ExpectPresence(claim.By, [OperationSignature("change-merge", "uncertain", key)], "the change's merge is not confirmed in the queue or on the pull request, so the merge is recorded as uncertain");
+            FinishChange(claim, "uncertain", "The change is not confirmed in the merge queue and its pull request is not seen merged; observe it again before any retry.");
+        }
+        return ChangeAnswer(claim, false, "The queued merge remains unconfirmed; observe this operation again and do not retry.") with { Observation = observation, CheckStatus = "uncertain" };
+
+        static string Because(string? reason) => QueueReason(reason) is string token ? " (" + token + ")." : ".";
+    }
+
+    // Records the merge queue's merge of the pinned head at its merge commit, then observes that commit's target run (CODE-71).
+    private ChangeResponse RecordQueuedMerge(ChangeClaim claim, string mergeCommit)
+    {
+        string key = OperationKey(EstateServiceValues.Element(claim.Body));
+        ExpectPresence(claim.By, claim.Status is "not-started" or "known-failure" or "canceled"
+            ? [OperationSignature("change-merge", "uncertain", key), OperationSignature("change-merge", "observed-success", key)] : [OperationSignature("change-merge", "observed-success", key)],
+            "the merge queue merged the change, so its outcome is recorded");
+        if (claim.Status is "not-started" or "known-failure" or "canceled")
+        {
+            claim.Body["dispatchedAt"] ??= Now();
+            claim.Body["reconciliation"] = "The queued merge was subsequently observed under its original identity.";
+            FinishChange(claim, "uncertain", "Reconciliation of the earlier unconfirmed effect.");
+        }
+        claim.Body["target"]!["mergeCommit"] = mergeCommit;
+        FinishChange(claim, "observed-success", "The merge queue merged the pinned head; the target branch moved to the commit its group's run tested.");
+        ExpectPresence(claim.By, ObservationPresence(key, "target-run"), "the merge queue merged the change, so the target branch's run at the merge commit is observed");
+        return ObserveChangeTarget(claim, mergeCommit);
+    }
+
+    // Whether the host dates a removal after this attempt's dispatch, recorded before the enqueue was requested.
+    private static bool DispatchedBefore(ChangeClaim claim, DateTimeOffset removedAt) =>
+        claim.Body["dispatchedAt"]?.GetValue<string>() is string dispatched
+        && DateTimeOffset.TryParse(dispatched, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset at)
+        && removedAt > at;
+
+    /// <summary>
+    /// Whether this attempt of a queued merge was seen in the merge queue at its pinned head: a recorded observation of its pull request,
+    /// since the attempt began after the merge chain's latest known failure or cancellation, that found it queued there. Caller holds the gate.
+    /// </summary>
+    private static bool QueuedConfirmed(EstateModel model, ChangeClaim claim) =>
+        model.ById.TryGetValue(claim.Written.Id, out RecordEnvelope? current) && QueuedConfirmed(model, current, claim.Head);
+
+    /// <summary>As <see cref="QueuedConfirmed(EstateModel, ChangeClaim)"/>, for a recorded merge revision and its pinned head.</summary>
+    private static bool QueuedConfirmed(EstateModel model, RecordEnvelope merge, string head)
+    {
+        IReadOnlyList<string> chain = model.Chain(merge);
+        int start = 0;
+        for (int i = 0; i < chain.Count; i++)
+            if (model.ById.TryGetValue(chain[i], out RecordEnvelope? revision) && EstateModel.BodyString(revision, "status") is "known-failure" or "canceled") start = i + 1;
+        HashSet<string> attempt = [.. chain.Skip(start)];
+        return model.Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-observe" && EstateModel.BodyString(o, "status") == "observed-success"
+            && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "observation") == "pull-request"
+            && attempt.Contains(ChangeText(t, "operation") ?? string.Empty) && ChangeText(t, "queue") == "queued" && ChangeText(t, "queueHead") == head
+            && ChangeText(t, "observedHead") == head && ChangeText(t, "state") == "open");
+    }
+
+    // The merge queue's facts beside a pull-request observation (CODE-71): whether the target branch requires it, the pull request's
+    // place in it, the pull request's own head read with that place, the queue's group commit, and the host's latest removal, each a
+    // target fact of that observation.
+    private static void StoreQueueObservation(ChangeClaim claim, MergeQueueObservation? queue)
+    {
+        JsonObject target = claim.Body["target"]!.AsObject();
+        if (queue is null)
+        {
+            target["complete"] = "false";
+            return;
+        }
+        target["mergeQueue"] = queue.Required ? "required" : "none";
+        target["queue"] = MergeQueueObservation.States.Contains(queue.State) ? queue.State : "unknown";
+        if (queue.Head is not null && Patterns.Commit.IsMatch(queue.Head)) target["queueHead"] = queue.Head;
+        if (queue.Group is not null && Patterns.Commit.IsMatch(queue.Group)) target["queueGroup"] = queue.Group;
+        if (QueueReason(queue.Reason) is string reason) target["queueReason"] = reason;
+        if (queue.RemovedAt is { } removedAt) target["queueRemovedAt"] = RecordParser.FormatTimestamp(removedAt);
+        if (!WholeQueue(queue)) target["complete"] = "false";
+    }
+
+    // A complete queue observation in a known state, whose commits, when it names them, are exact.
+    private static bool WholeQueue([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] MergeQueueObservation? queue) => queue is { Complete: true }
+        && MergeQueueObservation.States.Contains(queue.State) && (queue.Head is null || Patterns.Commit.IsMatch(queue.Head))
+        && (queue.Group is null || Patterns.Commit.IsMatch(queue.Group));
+
+    // A host's removal reason enters a record only as a short upper-case token, never as free text.
+    private static string? QueueReason(string? reason) => reason is { Length: > 0 and <= 64 } && reason.All(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') && char.IsAsciiLetterUpper(reason[0]) ? reason : null;
 
     // A recorded push, observed at the remote after its scan of exactly the pushed commits passed. Caller holds the gate.
     private bool ScannedPush(ChangeClaim claim, string? branch, string head) =>
@@ -199,7 +388,10 @@ public sealed partial class EstateService
                 changeEffects.Add(claim.Identity);
             }
 
-            if (claim.Status is "not-started" or "dispatched")
+            // A queued merge whose place in the merge queue was confirmed waits there as dispatched; the queue's outcome settles it (CODE-71).
+            bool waiting = claim.Status == "dispatched" && claim.Action == "change-merge" && QueuedMerge(claim.Body) && request.Cancel is null;
+            if (waiting) lock (gate) waiting = QueuedConfirmed(session.Load(), claim);
+            if (claim.Status is "not-started" or "dispatched" && !waiting)
             {
                 ExpectPresence(request.By, [OperationSignature(claim.Action, "uncertain", OperationKey(EstateServiceValues.Element(claim.Body)))], "the original intent has no confirmed outcome, so it is recorded as uncertain first");
                 FinishChange(claim, "uncertain", "The original intent has no confirmed outcome; reconcile it by observation before any retry.");
@@ -215,6 +407,7 @@ public sealed partial class EstateService
             string action = claim.Action;
             if (action == "change-merge" && claim.Status == "observed-success" && claim.Body["target"]!["mergeCommit"] is JsonNode merged)
                 return ObserveChangeTarget(claim, merged.GetValue<string>());
+            if (action == "change-merge" && QueuedMerge(claim.Body)) return ObserveQueuedMerge(claim);
             bool confirmed;
             RecordWritten observation;
             if (action == "change-push")
@@ -434,21 +627,30 @@ public sealed partial class EstateService
 
     private ChangeResponse ObserveChangeTarget(ChangeClaim claim, string commit)
     {
+        // A queued merge's commit is the one its group's run tested: that run and the branch's push runs of the commit both count; a
+        // commit the queue landed inside a group is judged by the runs of the group's head that landed it (CODE-71).
+        bool queued = QueuedMerge(claim.Body);
         TargetObservation target = ObserveChange(claim, "target-run", observation =>
         {
             observation.Body["target"]!["mergeCommit"] = commit;
-            TargetObservation value = claim.Configuration.Provider.ObserveTarget(claim.Configuration.Destination, claim.Configuration.Target, commit);
+            if (queued) observation.Body["target"]!["mergeQueue"] = "required";
+            TargetObservation value = queued
+                ? claim.Configuration.Provider.ObserveQueuedTarget(claim.Configuration.Destination, claim.Configuration.Target, commit)
+                : claim.Configuration.Provider.ObserveTarget(claim.Configuration.Destination, claim.Configuration.Target, commit);
             observation.Body["checks"] = JsonSerializer.SerializeToNode(value.Checks, ChangeJson);
             observation.Body["target"]!["observedHead"] = value.Head;
             observation.Body["target"]!["observedTarget"] = value.Branch;
-            observation.Body["target"]!["complete"] = value.Complete ? "true" : "false";
+            if (queued && value.Group is not null) observation.Body["target"]!["queueGroup"] = value.Group;
+            observation.Body["target"]!["complete"] = value.Complete && (value.Group is null || queued && Patterns.Commit.IsMatch(value.Group)) ? "true" : "false";
             return value;
         }, out RecordWritten recorded);
-        bool exact = target.Head == commit && target.Branch == claim.Configuration.Target && target.Complete;
-        bool passed = exact && ChangeGate.Refusals(commit, claim.Configuration.Required, target.Checks, true).Count == 0;
-        bool failed = exact && target.Checks.Any(c => c.Head == commit && c.Status == "completed"
+        string gate = queued && target.Group is string group && Patterns.Commit.IsMatch(group) ? group : commit;
+        bool exact = target.Head == commit && target.Branch == claim.Configuration.Target && target.Complete && (target.Group is null || gate == target.Group);
+        bool passed = exact && (queued ? ChangeGate.QueuedRefusals(gate, claim.Configuration.Required, target.Checks, true)
+            : ChangeGate.Refusals(commit, claim.Configuration.Required, target.Checks, true)).Count == 0;
+        bool failed = exact && target.Checks.Any(c => c.Head == gate && c.Status == "completed"
             && c.Conclusion is "failure" or "cancelled" or "timed_out" or "action_required" or "stale" or "startup_failure");
-        bool unknown = !exact || target.Checks.Any(c => c.Head != commit || c.Status == "unknown" || c.Conclusion == "unknown");
+        bool unknown = !exact || target.Checks.Any(c => c.Head != gate || c.Status == "unknown" || c.Conclusion == "unknown");
         RecordWritten? ask = null;
         if (failed)
         {

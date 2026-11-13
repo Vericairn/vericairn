@@ -328,7 +328,10 @@ destination; only observed absence settles it. The record format is unchanged.
 All four return `ChangeResponse` with the operation identity, state, record
 references and any problem. `status` describes the external effect; `checkStatus`
 separately describes the target branch's checks. A confirmed merge with pending
-or failed target checks has `ok: false`. The runtime checks repository-write
+or failed target checks has `ok: false`. From 0.9.3 a merge into a target branch
+that requires a merge queue answers `status` `dispatched` with `checkStatus`
+`queued` while the change waits there, and `changes/observe` records the queue's
+outcome against it. The runtime checks repository-write
 authority, records intent before provider calls, and preserves uncertain outcomes.
 No corresponding MCP tools are exposed. The [changes guide](changes.md) describes
 the declared requirements, exact-head gate, scan and reconciliation rules.

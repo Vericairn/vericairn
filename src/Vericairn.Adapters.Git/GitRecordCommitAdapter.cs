@@ -57,20 +57,25 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
     }
 
     /// <inheritdoc />
-    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts) =>
+        Commit(directory, branch, basis, files, receipts, NoneCarried);
+
+    /// <inheritdoc />
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried)
     {
         ArgumentNullException.ThrowIfNull(receipts);
         string record = ValidateFiles(files);
+        Dictionary<string, string> all = WithCarried(files, carried);
         string head = Head(directory);
         RequireBranch(directory, branch, head);
-        RequireChanges(directory, receipts, head == basis ? files.Keys.ToHashSet(StringComparer.Ordinal) : null);
+        RequireChanges(directory, receipts, head == basis ? all.Keys.ToHashSet(StringComparer.Ordinal) : null);
         if (head != basis)
         {
-            Verify(directory, head, basis, files);
+            Verify(directory, head, basis, files, carried);
             return head;
         }
 
-        foreach ((string path, string byteHash) in files)
+        foreach ((string path, string byteHash) in all)
         {
             string file = Path.Combine(directory, path.Replace('/', Path.DirectorySeparatorChar));
             for (FileSystemInfo? entry = new FileInfo(file); entry is not null && entry.FullName != Path.GetFullPath(directory); entry = new DirectoryInfo(Path.GetDirectoryName(entry.FullName)!))
@@ -79,14 +84,38 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
             if (ContentHash.Sha256(File.ReadAllBytes(file)) != byteHash)
                 throw new ProviderRefusedException("The signed record or generated member bytes changed before the commit.");
         }
-        string[] paths = files.Keys.Order(StringComparer.Ordinal).ToArray();
-        // --only names precisely the prepared record and members. The record already carries its device signature.
+        string[] paths = all.Keys.Order(StringComparer.Ordinal).ToArray();
+        // --only names precisely the prepared record and members, and any carried trail records. Each record already carries its device signature.
         Read(directory, ["add", "--intent-to-add", "--", .. paths]);
-        WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", "Record operator action " + Path.GetFileNameWithoutExtension(record), "--", .. paths]);
+        string message = "Record operator action " + Path.GetFileNameWithoutExtension(record)
+            + (carried.Count == 0 ? string.Empty : $" and carry {carried.Count} trail {(carried.Count == 1 ? "record" : "records")} of earlier actions");
+        WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", message, "--", .. paths]);
         head = Head(directory);
-        Verify(directory, head, basis, files);
+        Verify(directory, head, basis, files, carried);
         Check(directory, branch, head, receipts);
         return head;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlySet<string>? Untracked(string directory, IReadOnlySet<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        var untracked = new HashSet<string>(StringComparer.Ordinal);
+        if (paths.Count == 0) return untracked;
+        string git = Path.Combine(directory, ".git");
+        if (!Directory.Exists(git) && !File.Exists(git)) return null;
+        try
+        {
+            // The same reading of untracked files as the working-tree check: every untracked file under records/, ignored ones excepted.
+            string status = Read(directory, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none", "--", EstateLayout.RecordsDirectory + "/");
+            foreach (string entry in status.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+                if (entry.Length > 3 && entry[..2] == "??" && paths.Contains(entry[3..])) untracked.Add(entry[3..]);
+            return untracked;
+        }
+        catch (ProviderRefusedException)
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc />
@@ -126,16 +155,39 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
     }
 
     /// <inheritdoc />
-    public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files)
+    public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files) => Verify(directory, head, basis, files, NoneCarried);
+
+    /// <inheritdoc />
+    public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files, IReadOnlyDictionary<string, string> carried)
     {
         ValidateFiles(files);
+        Dictionary<string, string> all = WithCarried(files, carried);
         if (!Patterns.Commit.IsMatch(head) || !Patterns.Commit.IsMatch(basis)
             || Read(directory, "rev-list", "--parents", "-n", "1", head).Trim() != head + " " + basis
             || !Read(directory, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", basis, head).Split('\0', StringSplitOptions.RemoveEmptyEntries)
-                .Order(StringComparer.Ordinal).SequenceEqual(files.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal)
-            || files.Any(file => Read(directory, "ls-tree", head, "--", file.Key).Split(' ')[0] != "100644"
+                .Order(StringComparer.Ordinal).SequenceEqual(all.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal)
+            || all.Any(file => Read(directory, "ls-tree", head, "--", file.Key).Split(' ')[0] != "100644"
                 || ContentHash.Sha256(Encoding.UTF8.GetBytes(Read(directory, "show", head + ":" + file.Key))) != file.Value))
-            throw new ProviderRefusedException("The branch does not contain exactly the original signed record and generated members on its pinned base; inspect it before resuming.");
+            throw new ProviderRefusedException("The branch does not contain exactly the original signed record, its generated members and any carried trail records on its pinned base; inspect it before resuming.");
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> NoneCarried = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    // The action's own record and members with the carried trail records of earlier actions: each carried path a canonical record path
+    // with its byte hash, none of them the action's own files.
+    private static Dictionary<string, string> WithCarried(IReadOnlyDictionary<string, string> files, IReadOnlyDictionary<string, string> carried)
+    {
+        ArgumentNullException.ThrowIfNull(carried);
+        var all = new Dictionary<string, string>(files, StringComparer.Ordinal);
+        foreach ((string path, string byteHash) in carried)
+        {
+            if (!path.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal) || !path.EndsWith(".json", StringComparison.Ordinal)
+                || !DocumentPatterns.IsSafePath(path) || !ContentHash.IsValid(byteHash)
+                || all.Keys.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)))
+                throw new ProviderRefusedException("Carried trail records are canonical record paths with byte hashes, apart from the action's own files.");
+            all.Add(path, byteHash);
+        }
+        return all;
     }
 
     private static string ValidateFiles(IReadOnlyDictionary<string, string> files)

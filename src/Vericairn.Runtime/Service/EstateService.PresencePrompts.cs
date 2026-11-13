@@ -108,6 +108,18 @@ public sealed partial class EstateService
         if (needs) presence.Expect(more, why);
     }
 
+    /// <summary>
+    /// Replaces the signatures the open action still plans when its path changed, as when a merge turns out to go through a required
+    /// merge queue (CODE-71), when the principal's device here asks for presence.
+    /// </summary>
+    private void RevisePresence(string by, IReadOnlyList<PresenceSignature> rest, string why)
+    {
+        if (!presence.Counting) return;
+        bool needs;
+        lock (gate) needs = SignsWithPresence(session.Load(), by);
+        if (needs) presence.Revise(rest, why);
+    }
+
     // What the recorded changes operations sign, on the path that succeeds (MERGE-01): each effect's intent, its dispatch and its
     // outcome, and each observation's intent, dispatch and outcome. An operation's outcome-dependent records are expected by it.
     private static PresenceSignature[] ObservationPresence(string key, string observation) =>

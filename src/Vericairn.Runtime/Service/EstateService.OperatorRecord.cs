@@ -26,10 +26,14 @@ public sealed partial class EstateService
 
     // A local recovery checkpoint contains identities and hashes only, never a key or the operator's input body.
     // Records and MERGE-01's operations establish what happened; this checkpoint never establishes authority or a successful effect.
-    // Type, Subject and By name the action in a refusal; Follows names the finished action whose receipts this one tolerates.
+    // Type, Subject and By name the action in a refusal; Follows names the finished action whose receipts this one tolerates; Carried
+    // pins, by path and byte hash, the settled trail records of earlier actions its commit carries (FIX-126).
     private sealed record OperatorCheckpoint(string Product, string ProductHash, string RepositoryHash, string Id, string At,
         RecordCommitBasis Basis, string Branch, string Hash, string? Head = null, ChangeResponse? Completed = null,
-        string? Type = null, string? Subject = null, string? By = null, string? Follows = null);
+        string? Type = null, string? Subject = null, string? By = null, string? Follows = null, IReadOnlyDictionary<string, string>? Carried = null)
+    {
+        internal IReadOnlyDictionary<string, string> CarriedFiles => Carried ?? new Dictionary<string, string>(StringComparer.Ordinal);
+    }
 
     // How far an action went, from its checkpoint and its records: the signed record, the pull request and, once merged, its target run.
     private sealed record OperatorProgress(string Identity, OperatorCheckpoint Checkpoint, RecordEnvelope? Record, string Stage,
@@ -133,7 +137,12 @@ public sealed partial class EstateService
                         return new(identity, "refused", early.Message, false, early.NextStep, Problem: early.Problem);
                     string? follows = session.Live.Meta(OperatorFinished);
                     OperatorCheckpoint? followed = string.IsNullOrEmpty(follows) ? null : OperatorCheckpointLocked(follows);
-                    RecordCommitBasis basis = adapter.Prepare(Root, followed is null ? new HashSet<string>(StringComparer.Ordinal) : OperatorReceiptsLocked(followed));
+                    // The settled push and merge trails of earlier actions that this clone still holds untracked travel in this action's
+                    // commit (FIX-126); the earlier actions' own records are not touched.
+                    Dictionary<string, string> carried = UncommittedTrailLocked(adapter);
+                    HashSet<string> tolerated = followed is null ? new(StringComparer.Ordinal) : OperatorReceiptsLocked(followed);
+                    tolerated.UnionWith(carried.Keys);
+                    RecordCommitBasis basis = adapter.Prepare(Root, tolerated);
                     string id = Ulid.NewUlid().Value;
                     string at = Now();
                     var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(at), id);
@@ -148,7 +157,7 @@ public sealed partial class EstateService
                         return new(identity, "refused", "The proposed signed record did not pass validation.", false, "Correct the JSON body and " + resume, Problem: rejected);
                     checkpoint = new(configuration.Product.Id, configuration.Product.ComputedHash, configuration.Repository.ComputedHash,
                         id, at, basis, "operator/" + id, authored.Envelope.ComputedHash, Type: request.Type, Subject: request.Subject, By: request.By,
-                        Follows: followed is null ? null : follows);
+                        Follows: followed is null ? null : follows, Carried: carried.Count == 0 ? null : carried);
                     SaveOperatorCheckpoint(identity, checkpoint);
                     session.Live.SetMeta(OperatorActive, identity);
                     if (followed is not null) session.Live.SetMeta(OperatorFinished, string.Empty);
@@ -165,9 +174,9 @@ public sealed partial class EstateService
                 {
                     if (written is null || !OperatorCompletionRecorded(checkpoint, completed, ChangeConfigurationFor(checkpoint.Product, currentDeclaration: false)))
                         throw new ProviderRefusedException("The completed action's recorded evidence is unavailable; restore it before resuming.");
-                    adapter.Verify(Root, checkpoint.Head!, checkpoint.Basis.Head, OperatorRecordFiles(written));
+                    adapter.Verify(Root, checkpoint.Head!, checkpoint.Basis.Head, OperatorRecordFiles(written), checkpoint.CarriedFiles);
                     if (session.Live.Meta(OperatorActive) == identity) session.Live.SetMeta(OperatorActive, string.Empty);
-                    return Answer("completed", completed.Message, true, "The signed record and checked merge are complete.", completed);
+                    return Answer("completed", completed.Message, true, CompletedStep(checkpoint), completed);
                 }
                 // Once its merge is recorded, an action is finished from its records alone: no signature, branch, commit, push, opening or
                 // merge again, whatever branch the clone is on now.
@@ -228,7 +237,7 @@ public sealed partial class EstateService
             cancellationToken.ThrowIfCancellationRequested();
             adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files, Receipts());
             stage = "commit";
-            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts());
+            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts(), checkpoint.CarriedFiles);
             if (checkpoint.Head is not null && checkpoint.Head != head) throw new ProviderRefusedException("The recorded commit changed; reconcile it before continuing.");
             checkpoint = checkpoint with { Head = head };
             lock (gate) SaveOperatorCheckpoint(identity, checkpoint);
@@ -247,12 +256,25 @@ public sealed partial class EstateService
 
             // A confirmed merge is only observed again. Neither waiting nor a rerun can send that mutation a second time.
             RecordEnvelope? priorMerge = Prior("change-merge", pullRequest);
-            if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is not ("known-failure" or "canceled"))
+            // A queued merge settled unmerged is observed again before any retry: the queue may have merged it since (CODE-71).
+            bool queuedAgain = false;
+            if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is "known-failure" or "canceled" && QueuedMerge(priorMerge))
             {
                 stage = "merge";
                 Guard();
                 change = ChangesObserve(new(priorMerge.Id, request.By));
-                if (change.Status != "observed-success") return Stopped(change);
+                queuedAgain = change.Status == "observed-success" || change.CheckStatus == "queued";
+            }
+            if (queuedAgain)
+            {
+                // The queued merge observed again is merged or back in the queue: nothing is checked or merged again.
+            }
+            else if (priorMerge is not null && EstateModel.BodyString(priorMerge, "status") is not ("known-failure" or "canceled"))
+            {
+                stage = "merge";
+                Guard();
+                change = ChangesObserve(new(priorMerge.Id, request.By));
+                if (change.Status != "observed-success" && change.CheckStatus != "queued" && !QueuedUnsettled(change)) return Stopped(change);
             }
             else
             {
@@ -275,6 +297,18 @@ public sealed partial class EstateService
                 Guard();
                 change = Step("change-merge", pullRequest, reconciliation => ChangesMerge(new(checkpoint.Product, pullRequest, head, request.By, reconciliation)));
             }
+            // Where the target branch requires a merge queue, the merge waits there; its place is observed again until the queue settles it,
+            // as is a queued merge whose outcome is not yet confirmed, such as one just out of the queue whose pull request does not yet
+            // read merged (CODE-71).
+            var queueWatch = Stopwatch.StartNew();
+            while (!change.Ok && (change.CheckStatus == "queued" || QueuedUnsettled(change)) && change.Operation is not null)
+            {
+                if (!Pause(queueWatch))
+                    return change.CheckStatus == "queued" ? Answer("waiting", change.Message, false, "Wait for the merge queue, then " + resume, change) : Stopped(change);
+                Guard();
+                ExpectPresence(request.By, ObservationPresence("pull request " + pullRequest, "pull-request"), "the change is still settling in the merge queue, so it is observed again");
+                change = ChangesObserve(new(change.Operation.Id, request.By));
+            }
             stage = "target-checks";
             var targetWatch = Stopwatch.StartNew();
             while (!change.Ok && change.Status == "observed-success" && change.CheckStatus == "pending")
@@ -290,7 +324,7 @@ public sealed partial class EstateService
                 SaveOperatorCheckpoint(identity, checkpoint with { Completed = change });
                 session.Live.SetMeta(OperatorActive, string.Empty);
             }
-            return Answer("completed", change.Message, true, "The signed record and checked merge are complete.", change);
+            return Answer("completed", change.Message, true, CompletedStep(checkpoint), change);
 
             bool Pause(Stopwatch watch)
             {
@@ -352,12 +386,23 @@ public sealed partial class EstateService
         OperatorRecordResponse Stopped(ChangeResponse latest)
         {
             string next = latest.Operation is null ? "Resolve the refusal and " + resume
+                : latest.Status is "known-failure" or "canceled" && QueuedMergeOperation(latest.Operation)
+                    ? $"Observe the queued merge with vericairn changes observe --operation {latest.Operation.Id} --by {request.By}, which records it if the queue merged it since; otherwise resolve the known failure, then {resume} --reconciliation <explanation>"
                 : latest.Status is "known-failure" or "canceled" ? "Resolve the known failure, then " + resume + " --reconciliation <explanation>"
                 : $"vericairn changes observe --operation {latest.Operation.Id} --by {request.By}; after reconciling the original effect, {resume}";
             return Answer("stopped", latest.Message, false, next, latest);
         }
 
-        // This action's own receipts, and those of the finished action it follows, whose receipts may still be uncommitted.
+        // A queued merge whose outcome is still unconfirmed: recorded uncertain, not yet failed or merged.
+        bool QueuedUnsettled(ChangeResponse latest) => latest.Status == "uncertain" && latest.Operation is not null && QueuedMergeOperation(latest.Operation);
+
+        bool QueuedMergeOperation(RecordWritten operation)
+        {
+            lock (gate) return session.Load().ById.TryGetValue(operation.Id, out RecordEnvelope? record) && EstateModel.BodyString(record, "action") == "change-merge" && QueuedMerge(record);
+        }
+
+        // This action's own receipts, those of the finished action it follows, whose receipts may still be uncommitted, and the earlier
+        // trail records it carries, untracked until its commit holds them.
         HashSet<string> Receipts()
         {
             lock (gate)
@@ -365,6 +410,7 @@ public sealed partial class EstateService
                 HashSet<string> receipts = OperatorReceiptsLocked(checkpoint!);
                 if (checkpoint!.Follows is string follows && OperatorCheckpointLocked(follows) is OperatorCheckpoint followed)
                     receipts.UnionWith(OperatorReceiptsLocked(followed));
+                receipts.UnionWith(checkpoint.CarriedFiles.Keys);
                 return receipts;
             }
         }
@@ -403,8 +449,10 @@ public sealed partial class EstateService
 
         if (stage is "prepared" or "recorded" or "committed") plan.AddRange(Step("change-push") ?? PushPresence(branch));
         if (stage is "prepared" or "recorded" or "committed" or "pushed") plan.AddRange(Step("change-open") ?? OpenPresence(branch));
+        // A queued merge settled unmerged is observed once more before the pull request's checks, since the queue may have merged it (CODE-71).
+        if (stage == "merge-failed" && progress?.Merge is { } settled && QueuedMerge(settled)) plan.AddRange(ObservationPresence(pull, "pull-request"));
         plan.AddRange(ObservationPresence(pull, "pull-request"));
-        if (stage == "merge-uncertain" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
+        if (stage is "merge-uncertain" or "merge-queued" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
         plan.AddRange(MergePresence(pull));
         return plan;
 
@@ -422,35 +470,6 @@ public sealed partial class EstateService
                 _ => ObservePresence(prior, branch),
             };
         }
-    }
-
-    // An action's receipts: its own push, opening and merge operations with every revision, and the observations and asks that point
-    // to them, all authored by the action's own principal. Caller holds the gate.
-    private HashSet<string> OperatorReceiptsLocked(OperatorCheckpoint checkpoint)
-    {
-        EstateModel model = session.Load();
-        string? by = checkpoint.By ?? (model.ById.TryGetValue(checkpoint.Id, out RecordEnvelope? signed) ? signed.By : null);
-        if (by is null || checkpoint.Head is null) return new(StringComparer.Ordinal);
-        HashSet<string> pulls = model.OfType("operation").Where(o => o.By == by && EstateModel.BodyString(o, "action") == "change-open"
-            && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint.Product
-            && ChangeText(t, "head") == checkpoint.Head && ChangeText(t, "branch") == checkpoint.Branch)
-            .Select(o => ChangeText(o.Body.GetProperty("target"), "pullRequest")).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        HashSet<string> owned = model.OfType("operation").Where(o => o.By == by
-            && o.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "product") == checkpoint.Product
-            && ChangeText(t, "head") == checkpoint.Head && (ChangeText(t, "branch") == checkpoint.Branch
-                || EstateModel.BodyString(o, "action") == "change-merge" && pulls.Contains(ChangeText(t, "pullRequest") ?? string.Empty))
-            && EstateModel.BodyString(o, "action") is "change-push" or "change-open" or "change-merge").Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
-        // Include every revision and the observations and asks that point to those original operation records.
-        bool added;
-        do
-        {
-            added = false;
-            foreach (RecordEnvelope record in model.Records)
-                if (record.By == by && (record.Supersedes is not null && owned.Contains(record.Supersedes)
-                    || record.Subject is not null && owned.Contains(record.Subject.Id) && record.Type is "operation" or "ask"))
-                    added |= owned.Add(record.Id);
-        } while (added);
-        return model.Records.Where(r => owned.Contains(r.Id)).Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <inheritdoc />
@@ -569,7 +588,7 @@ public sealed partial class EstateService
             session.Live.SetMeta(OperatorFinished, identity);
         }
         return Answer(true, "completed", $"Finished from its records: {progress.Type} {checkpoint.Id}, merged in pull request {progress.PullRequest} at {progress.MergeCommit}, with its target checks passed.",
-            "The signed record and checked merge are complete. Nothing was branched or committed; the clone stays on its current branch, and the next operator action tolerates this action's uncommitted receipts.", change);
+            "The signed record and checked merge are complete. Nothing was branched or committed; the clone stays on its current branch, and the next operator action carries this action's push and merge trail, still uncommitted here, into its own commit.", change);
 
         OperatorRecordResponse Answer(bool ok, string status, string message, string next, ChangeResponse? latest = null) =>
             new(identity, status, message, ok, next, progress.Record is null ? null : new(progress.Record.ExpectedPath, progress.Record.Id, progress.Record.ComputedHash),
@@ -594,7 +613,8 @@ public sealed partial class EstateService
         RecordEnvelope? merge = pull is null ? null : Operation("change-merge", "pullRequest", pull);
         string? status = merge is null ? null : EstateModel.BodyString(merge, "status");
         string stage = push is null || EstateModel.BodyString(push, "status") != "observed-success" ? "committed" : pull is null ? "pushed"
-            : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed" : "merge-uncertain";
+            : merge is null ? "opened" : status == "observed-success" ? "merged" : status is "known-failure" or "canceled" ? "merge-failed"
+            : status == "dispatched" && QueuedMerge(merge) && QueuedConfirmed(model, merge, checkpoint.Head) ? "merge-queued" : "merge-uncertain";
         if (stage != "merged") return new(identity, checkpoint, record, stage, pull, merge);
         HashSet<string> revisions = model.Chain(merge!).ToHashSet(StringComparer.Ordinal);
         RecordEnvelope? target = model.Current("operation").Where(o => EstateModel.BodyString(o, "action") == "change-observe"
@@ -608,6 +628,11 @@ public sealed partial class EstateService
             && ChangeText(o.Body.GetProperty("target"), field) == value).OrderBy(o => o.At, StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
+    // The commit whose runs judge a queued merge's target observation: the group head that landed its merge commit, when the observation
+    // names one, else the merge commit itself (CODE-71).
+    private static string? QueueGate(JsonElement observed, string? commit) =>
+        ChangeText(observed, "queueGroup") is string group && Patterns.Commit.IsMatch(group) ? group : commit;
+
     // A recorded target-run observation's verdict, by the rules the merge observation applies: passed, failed, pending or uncertain.
     private static string TargetVerdict(RecordEnvelope merge, RecordEnvelope observation)
     {
@@ -620,10 +645,12 @@ public sealed partial class EstateService
             ? names.EnumerateArray().Select(n => n.GetString()).OfType<string>().ToArray() : [];
         bool exact = commit is not null && ChangeText(observed, "observedHead") == commit && ChangeText(observed, "observedTarget") == ChangeText(merged, "target")
             && ChangeText(observed, "complete") == "true";
-        if (exact && ChangeGate.Refusals(commit!, required, checks, true).Count == 0) return "passed";
-        if (exact && checks.Any(c => c.Head == commit && c.Status == "completed"
+        // A commit a merge queue landed inside a group is judged by the runs of that group's head (CODE-71).
+        string? gate = QueuedMerge(merge) ? QueueGate(observed, commit) : commit;
+        if (exact && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(gate!, required, checks, true) : ChangeGate.Refusals(gate!, required, checks, true)).Count == 0) return "passed";
+        if (exact && checks.Any(c => c.Head == gate && c.Status == "completed"
             && c.Conclusion is "failure" or "cancelled" or "timed_out" or "action_required" or "stale" or "startup_failure")) return "failed";
-        return !exact || checks.Any(c => c.Head != commit || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
+        return !exact || checks.Any(c => c.Head != gate || c.Status == "unknown" || c.Conclusion == "unknown") ? "uncertain" : "pending";
     }
 
     // Names the action by its record id, type and subject, and where it stopped.
@@ -639,6 +666,7 @@ public sealed partial class EstateService
             "opened" => $"open as pull request {progress.PullRequest} and not merged",
             "merge-failed" => $"open as pull request {progress.PullRequest}, whose merge failed",
             "merge-uncertain" => $"open as pull request {progress.PullRequest}, whose merge is unconfirmed",
+            "merge-queued" => $"open as pull request {progress.PullRequest}, waiting in the target branch's merge queue",
             _ => $"merged in pull request {progress.PullRequest} at {progress.MergeCommit}, with its target checks " + progress.CheckStatus switch
             {
                 "passed" => "recorded as passed",
@@ -669,10 +697,14 @@ public sealed partial class EstateService
         if (progress.Stage == "merged") return $"Restore its signed record {progress.Checkpoint.Id} in this clone (update the clone from the target branch), then run {finish}.";
         if (progress.Stage == "merge-uncertain" && progress.Merge is not null)
             return $"Observe the merge under its original identity with vericairn changes observe --operation {progress.Merge.Id} --by {by}, then run vericairn operator unfinished again.";
+        if (progress.Stage == "merge-queued" && progress.Merge is not null)
+            return $"Once the merge queue settles it, observe the merge under its original identity with vericairn changes observe --operation {progress.Merge.Id} --by {by}, or rerun the original operator record command, which observes it and goes on.";
         string resume = progress.Type is string type && RecordTypeRegistry.Find(type) is not null && Ulid.IsValid(by)
             ? OperatorResume(new(type, by, default, progress.Subject, progress.Record?.Supersedes, progress.Checkpoint.Product))
             : "the original vericairn operator record command";
         string body = progress.Record is null ? "its original JSON body" : $"the body of its stored record (vericairn records show {progress.Checkpoint.Id})";
+        if (progress.Stage == "merge-failed" && progress.Merge is not null && QueuedMerge(progress.Merge))
+            return $"Observe the queued merge with vericairn changes observe --operation {progress.Merge.Id} --by {by}, which records it if the queue merged it since; otherwise resolve the failure, then rerun {resume} with {body} and --reconciliation <explanation>, which observes it again first.";
         return progress.Stage == "merge-failed"
             ? $"Resolve the merge failure, then rerun {resume} with {body} and --reconciliation <explanation>."
             : $"Rerun {resume} with {body} to resume it.";
@@ -758,8 +790,10 @@ public sealed partial class EstateService
             && ChangeText(observed, "operation") == merge.Id && ChangeText(observed, "observation") == "target-run"
             && ChangeText(observed, "complete") == "true" && ChangeText(observed, "observedHead") == completed.MergeCommit
             && ChangeText(observed, "observedTarget") == configuration.Target
-            && ChangeGate.Refusals(completed.MergeCommit, configuration.Required,
-                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true).Count == 0;
+            && (QueuedMerge(merge) ? ChangeGate.QueuedRefusals(QueueGate(observed, completed.MergeCommit)!, configuration.Required,
+                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)
+            : ChangeGate.Refusals(completed.MergeCommit, configuration.Required,
+                JsonSerializer.Deserialize<ChangeCheck[]>(observation.Body.GetProperty("checks"), ProtocolJson.Options)!, true)).Count == 0;
     }
 
     private string PullChecks(RecordWritten observation, ChangeConfiguration configuration, string branch, string pullRequest, string head, out string reason)

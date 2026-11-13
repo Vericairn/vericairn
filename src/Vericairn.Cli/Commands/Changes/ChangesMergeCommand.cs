@@ -9,7 +9,7 @@ namespace Vericairn.Cli;
 internal sealed class ChangesMergeCommand : Command
 {
     public ChangesMergeCommand(CommandContext context)
-        : base("merge", "Observe every declared check at the exact head, merge pinned to that head, then observe the target run.")
+        : base("merge", "Observe every declared check at the exact head, merge pinned to that head, or enqueue it where the target branch requires a merge queue, then observe the target run.")
     {
         var productOption = new Option<string>("--product") { Description = "Product record id declaring the repository, provider, target branch and required checks.", Required = true };
         var pullrequestOption = new Option<string>("--pull-request") { Description = "Pull request number at the declared destination.", Required = true };

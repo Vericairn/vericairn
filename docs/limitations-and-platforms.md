@@ -732,15 +732,24 @@ unobserved future commit. From 0.8.2 the scan applies gitleaks' rules without th
 allowlists, so it can report a finding that gitleaks' defaults pass. A finding refuses the push,
 and with it the merge; there is no per-estate allowance, so a change refused for a value that is
 not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
-check successful at the expected head; forks and required merge queues are unsupported.
+check successful at the expected head; forks are unsupported. From 0.9.3 a required merge
+queue is entered with the pinned head, and its outcome is read from the pull request and
+its place in the queue. A change out of the queue with no removal the host dates after
+its dispatch leaves the merge uncertain until it is reconciled; the GitHub provider tells
+a failure from a removal by the host's latest removal reason, compared with a local
+dispatch time, so a clock far from the host's leaves more merges uncertain. A merge commit
+inside a queue's group is judged by the group that landed it only when the provider finds
+that group among the queue's latest twenty pushes; otherwise its target checks stay pending.
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
 or publication authority is inferred from a check result.
 
 `operator record` requires repository-synced format 3, the operator's own admitted
 device and a matching changes declaration. It commits exactly the signed record
-and its required generated register members, verifying their paths and bytes;
-operation receipts remain separate, uncommitted estate records. Resume keeps the
+and its required generated register members, verifying their paths and bytes.
+Its operation receipts are written after that commit; from 0.9.3 the next operator
+action in the same clone carries them into its own commit, and until then they exist
+only in that clone, which status and the estate check report. Resume keeps the
 original input, stored signed record, generated members and operation identity
 without signing again. Known failures need reconciliation;
 uncertain effects need observation before retrying. Local checkpoints belong to that

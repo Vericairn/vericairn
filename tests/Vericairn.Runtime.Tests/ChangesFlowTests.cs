@@ -478,6 +478,266 @@ public sealed class ChangesFlowTests
 
     internal static IReadOnlyList<ChangeCheck> Checks(string head) => Required.Select(n => new ChangeCheck(n, head, "completed", "success")).ToArray();
 
+    [Theory]
+    [InlineData("merged")]
+    [InlineData("failed")]
+    [InlineData("removed")]
+    [InlineData("unmergeable")]
+    public void ARequiredMergeQueueReceivesThePinnedHeadAndTheQueuedMergeAndItsOutcomeAreRecorded(string outcome)
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        Assert.False(queued.Ok);
+        Assert.Equal(("dispatched", "queued"), (queued.Status, queued.CheckStatus));
+        Assert.Equal(Head, f.Provider.EnqueuedHead);
+        Assert.Null(f.Provider.MergedHead);
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        // The merge records the queue as its route, keeps the checks it relied on, and an observation records its place in the queue.
+        RecordEnvelope merge = f.Current("change-merge");
+        Assert.Equal(("dispatched", "required"), (EstateModel.BodyString(merge, "status"), merge.Body.GetProperty("target").GetProperty("mergeQueue").GetString()));
+        Assert.Equal(Required.Length, merge.Body.GetProperty("checks").GetArrayLength());
+        // Its place is the pull request's own at the pinned head; the queue's group commit is recorded beside it and confirms nothing.
+        JsonElement place = f.Service.Session.Load().ById[queued.Observation!.Id].Body.GetProperty("target");
+        Assert.Equal(("required", "queued", Head, Merged), (place.GetProperty("mergeQueue").GetString(), place.GetProperty("queue").GetString(),
+            place.GetProperty("queueHead").GetString(), place.GetProperty("queueGroup").GetString()));
+        Assert.Equal(0, f.Service.Validate().Errors);
+
+        // While it waits, an observation records its place again and changes nothing about the merge.
+        ChangeResponse waiting = f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("dispatched", "queued", false), (waiting.Status, waiting.CheckStatus, waiting.Ok));
+        Assert.Equal(merge.Id, f.Current("change-merge").Id);
+
+        f.Provider.Memory.SettleQueue("Example/widget", "1", outcome, outcome == "failed" ? "CI_FAILURE" : null);
+        // The push run of the queue's commit skips what the queue's own run of that commit passed.
+        f.Provider.Memory.SetQueuedTarget("Example/widget", new("main", Merged,
+            [.. Checks(Merged).Select(c => c with { Conclusion = "skipped" }), .. Checks(Merged)]));
+        ChangeResponse settled = f.Service.ChangesObserve(new(queued.Operation.Id, f.Estate.OperatorId));
+        RecordEnvelope latest = f.Current("change-merge");
+        if (outcome == "merged")
+        {
+            Assert.True(settled.Ok, settled.Message);
+            Assert.Equal(("observed-success", "passed", Merged), (settled.Status, settled.CheckStatus, settled.MergeCommit));
+            Assert.Equal(Merged, f.Provider.ObservedQueuedTarget);
+            JsonElement run = f.Service.Session.Load().ById[settled.Observation!.Id].Body.GetProperty("target");
+            Assert.Equal(("target-run", "required", Merged), (run.GetProperty("observation").GetString(), run.GetProperty("mergeQueue").GetString(), run.GetProperty("observedHead").GetString()));
+            Assert.Empty(f.Service.Session.Load().OfType("ask"));
+        }
+        else
+        {
+            Assert.False(settled.Ok);
+            Assert.Equal("known-failure", settled.Status);
+            string expected = outcome switch
+            {
+                "removed" => "The change was removed from the merge queue unmerged.",
+                "failed" => "The merge queue took the change out unmerged for a failure (CI_FAILURE).",
+                _ => "The merge queue found the change could not merge.",
+            };
+            Assert.StartsWith(expected, settled.Message, StringComparison.Ordinal);
+            Assert.Contains("observe this operation first", settled.Message, StringComparison.Ordinal);
+            Assert.Equal(expected, latest.Body.GetProperty("observed").GetProperty("summary").GetString());
+            // A known failure is retried only with a reconciliation, which enqueues the same pinned head again.
+            Assert.False(f.Service.ChangesMerge(f.Merge).Ok);
+            if (outcome == "unmergeable") f.Provider.Memory.SettleQueue("Example/widget", "1", "removed");
+            ChangeResponse again = f.Service.ChangesMerge(f.Merge with { Reconciliation = "The queue's failure was corrected; nothing was merged." });
+            Assert.Equal(("dispatched", "queued"), (again.Status, again.CheckStatus));
+            Assert.Equal(2, f.Provider.Memory.Effects);
+        }
+        Assert.Null(f.Provider.MergedHead);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AnEnqueueWhoseReceiptWasLostIsConfirmedByItsPlaceInTheQueueAndNeverSentAgain()
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        f.Provider.AfterEffect = () => throw new IOException("The receipt was interrupted.");
+        ChangeResponse first = f.Service.ChangesMerge(f.Merge);
+        Assert.Equal("uncertain", first.Status);
+        f.Provider.AfterEffect = null;
+        f.Reopen();
+        Assert.False(f.Service.ChangesMerge(f.Merge).Ok);
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        ChangeResponse found = f.Service.ChangesObserve(new(first.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("dispatched", "queued"), (found.Status, found.CheckStatus));
+        Assert.Equal("The change was observed in the merge queue at its pinned head under its original identity.", EstateModel.BodyString(f.Current("change-merge"), "reconciliation"));
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "merged");
+        ChangeResponse merged = f.Service.ChangesObserve(new(first.Operation.Id, f.Estate.OperatorId));
+        Assert.True(merged.Ok, merged.Message);
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AnUnconfirmedEnqueueOutOfTheQueueWithNoRemovalStaysUncertainUntilTheOperatorReconcilesIt()
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        f.Provider.AfterEffect = () => throw new IOException("The receipt was interrupted.");
+        ChangeResponse first = f.Service.ChangesMerge(f.Merge);
+        Assert.Equal("uncertain", first.Status);
+        f.Provider.AfterEffect = null;
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "absent");
+        // Its place in the queue was never confirmed and the host reports no removal, so nothing shows what became of this request.
+        ChangeResponse observed = f.Service.ChangesObserve(new(first.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("uncertain", "uncertain"), (observed.Status, observed.CheckStatus));
+        Assert.False(f.Service.ChangesMerge(f.Merge with { Reconciliation = "Retry." }).Ok);
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        const string reason = "The operator found the change out of the queue and unmerged at the host.";
+        Assert.Equal("canceled", f.Service.ChangesObserve(new(first.Operation.Id, f.Estate.OperatorId, reason)).Status);
+        ChangeResponse again = f.Service.ChangesMerge(f.Merge with { Reconciliation = reason });
+        Assert.Equal(("dispatched", "queued"), (again.Status, again.CheckStatus));
+        Assert.Equal(2, f.Provider.Memory.Effects);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AConfirmedChangeOutOfTheQueueWhosePullRequestStillReadsOpenStaysUncertainAndItsMergeIsRecordedLater()
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        Assert.Equal(("dispatched", "queued"), (queued.Status, queued.CheckStatus));
+        // As a host shows a change it has just merged: out of the queue, no removal reported, the pull request not yet merged.
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "absent");
+        ChangeResponse between = f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("uncertain", "uncertain", false), (between.Status, between.CheckStatus, between.Ok));
+        Assert.Equal("uncertain", EstateModel.BodyString(f.Current("change-merge"), "status"));
+        Assert.DoesNotContain("nothing was merged", f.Current("change-merge").Body.GetProperty("observed").GetProperty("summary").GetString()!, StringComparison.Ordinal);
+        Assert.False(f.Service.ChangesMerge(f.Merge with { Reconciliation = "Retry." }).Ok);
+        f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "merged", Merged, Checks(Head)));
+        ChangeResponse merged = f.Service.ChangesObserve(new(queued.Operation.Id, f.Estate.OperatorId));
+        Assert.True(merged.Ok, merged.Message);
+        Assert.Equal(("observed-success", Merged), (merged.Status, merged.MergeCommit));
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AStaleRemovalFromBeforeThisAttemptIsNotItsOutcome()
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        Assert.Equal("dispatched", queued.Status);
+        // The host's latest removal is an earlier one, dated before this attempt was dispatched.
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "removed", "MANUAL", DateTimeOffset.UtcNow.AddHours(-1));
+        ChangeResponse observed = f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("uncertain", "uncertain"), (observed.Status, observed.CheckStatus));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("closed")]
+    [InlineData("head-moved")]
+    public void AClosedPullRequestOrAMovedHeadSettlesAQueuedMergeUnmerged(string kind)
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "absent");
+        f.Provider.Memory.Set("Example/widget", kind == "closed"
+            ? new("1", "work/change", "main", Head, "closed", null, Checks(Head))
+            : new("1", "work/change", "main", Basis, "open", null, Checks(Basis)));
+        ChangeResponse observed = f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal("known-failure", observed.Status);
+        Assert.Contains(kind == "closed" ? "closed without its merge" : "head moved", observed.Message, StringComparison.Ordinal);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void ARetryOfAQueuedMergeTheQueueHasSinceMergedRecordsThatMergeWithoutAnotherEffect()
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "removed", "MANUAL");
+        Assert.Equal("known-failure", f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId)).Status);
+        // Someone enqueued it again at the host and the queue merged it there.
+        f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "merged", Merged, Checks(Head)));
+        ChangeResponse retried = f.Service.ChangesMerge(f.Merge with { Reconciliation = "The removal was resolved." });
+        Assert.True(retried.Ok, retried.Message);
+        Assert.Equal(("observed-success", Merged), (retried.Status, retried.MergeCommit));
+        Assert.Equal(1, f.Provider.Memory.Effects);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ACommitTheQueueLandedInsideAGroupIsJudgedByTheGroupThatLandedItOrStaysPending(bool landed)
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        ChangeResponse queued = f.Service.ChangesMerge(f.Merge);
+        f.Provider.Memory.SettleQueue("Example/widget", "1", "merged");
+        string group = new('e', 40);
+        // The merge commit has no run of its own; the group's head the queue moved main to has the queue's run and main's push run.
+        f.Provider.Memory.SetQueuedTarget("Example/widget", landed
+            ? new("main", Merged, [.. Checks(group).Select(c => c with { Conclusion = "skipped" }), .. Checks(group)]) { Group = group }
+            : new("main", Merged, []));
+        ChangeResponse settled = f.Service.ChangesObserve(new(queued.Operation!.Id, f.Estate.OperatorId));
+        Assert.Equal(("observed-success", landed ? "passed" : "pending"), (settled.Status, settled.CheckStatus));
+        JsonElement run = f.Service.Session.Load().ById[settled.Observation!.Id].Body.GetProperty("target");
+        Assert.Equal(Merged, run.GetProperty("observedHead").GetString());
+        Assert.Equal(landed ? group : null, run.TryGetProperty("queueGroup", out JsonElement named) ? named.GetString() : null);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("checks")]
+    [InlineData("queue-unreadable")]
+    [InlineData("already-queued")]
+    [InlineData("queue-dropped")]
+    public void AQueuedMergeIsAdmittedOnlyAsADirectMergeWouldBe(string refusal)
+    {
+        using var f = new Fixture();
+        f.SeedPull();
+        f.Provider.Memory.QueueRequired = true;
+        if (refusal == "checks") f.Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "open", null, Checks(Head).Take(2).ToArray()));
+        if (refusal == "queue-unreadable") f.Provider.QueueUnavailable = true;
+        if (refusal == "already-queued") Assert.Equal("1", f.Provider.Memory.Enqueue("Example/widget", "1", Head).PullRequest);
+        int effects = f.Provider.Memory.Effects;
+        if (refusal == "queue-dropped")
+        {
+            // A merge whose earlier attempt went through the queue keeps that route; a branch that stopped requiring it refuses the retry.
+            Assert.Equal("dispatched", f.Service.ChangesMerge(f.Merge).Status);
+            f.Provider.Memory.SettleQueue("Example/widget", "1", "removed");
+            Assert.Equal("known-failure", f.Service.ChangesObserve(new(f.Current("change-merge").Id, f.Estate.OperatorId)).Status);
+            f.Provider.Memory.QueueRequired = false;
+            effects = f.Provider.Memory.Effects;
+        }
+        ChangeResponse result = f.Service.ChangesMerge(f.Merge with { Reconciliation = refusal == "queue-dropped" ? "Retry after the removal." : null });
+        Assert.False(result.Ok);
+        Assert.Equal("known-failure", result.Status);
+        Assert.Equal(effects, f.Provider.Memory.Effects);
+        Assert.Null(f.Provider.MergedHead);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AQueuedTargetRunCountsOnlyWhatTheQueuesRunOfTheSameCommitPassed()
+    {
+        IReadOnlyList<ChangeCheck> queue = Checks(Merged);
+        IReadOnlyList<ChangeCheck> skipped = [.. Checks(Merged).Select(c => c with { Conclusion = "skipped" })];
+        Assert.Empty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, [.. skipped, .. queue], true));
+        Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.Refusals(Merged, Required, [.. skipped, .. queue], true));
+        // A skipped check without a passed one of its name, a failure beside a pass, another commit's pass or an incomplete read refuses.
+        Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, skipped, true));
+        Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, [.. queue, queue[0] with { Conclusion = "failure" }], true));
+        Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, [.. skipped, .. Checks(Head)], true));
+        Assert.NotEmpty(Vericairn.Runtime.Changes.ChangeGate.QueuedRefusals(Merged, Required, queue, false));
+    }
+
     [Fact]
     public void AMergeOfAHeadNoScannedPushRecordsIsRefusedBeforeTheMerge()
     {
@@ -575,6 +835,7 @@ public sealed class ChangesFlowTests
         internal Action? BeforeRead { get; set; }
         internal bool Uncertain { get; set; }
         internal bool ReadUnavailable { get; set; }
+        internal bool QueueUnavailable { get; set; }
         internal int Calls { get; private set; }
         internal string? MergedHead { get; private set; }
         internal string? ObservedTarget { get; private set; }
@@ -589,6 +850,14 @@ public sealed class ChangesFlowTests
         { Effect("change-merge"); MergedHead = head; ChangeReceipt result = Memory.Merge(destination, number, head); AfterEffect?.Invoke(); return result; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { Read(); ObservedTarget = commit; return Memory.ObserveTarget(destination, branch, commit); }
+        internal string? EnqueuedHead { get; private set; }
+        internal string? ObservedQueuedTarget { get; private set; }
+        public MergeQueueObservation ObserveQueue(string destination, string number)
+        { Read(); return QueueUnavailable ? Memory.ObserveQueue(destination, number) with { Complete = false } : Memory.ObserveQueue(destination, number); }
+        public ChangeReceipt Enqueue(string destination, string number, string head)
+        { Effect("change-merge"); EnqueuedHead = head; ChangeReceipt result = Memory.Enqueue(destination, number, head); AfterEffect?.Invoke(); return result; }
+        public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
+        { Read(); ObservedTarget = commit; ObservedQueuedTarget = commit; return Memory.ObserveQueuedTarget(destination, branch, commit); }
         private void Effect(string action) { BeforeEffect?.Invoke(action); Calls++; if (Uncertain) throw new ProviderUncertainException("Unconfirmed request."); }
         private void Read() { BeforeRead?.Invoke(); if (ReadUnavailable) throw new ProviderRefusedException("Observation unavailable."); }
     }

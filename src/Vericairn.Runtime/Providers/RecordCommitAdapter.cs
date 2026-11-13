@@ -31,9 +31,38 @@ public interface IRecordCommitAdapter
     /// <summary>Commit exactly the record and generated members named by path and byte hash, or recognize their existing commit after a lost receipt. Other changes refuse.</summary>
     string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts);
 
+    /// <summary>
+    /// As <see cref="Commit(string, string, string, IReadOnlyDictionary{string, string}, IReadOnlySet{string})"/>, also committing the
+    /// carried records, named by path and byte hash: the settled push and merge trail of earlier actions, still untracked in the
+    /// working tree (FIX-126). An adapter that does not override this carries none of them and refuses a non-empty set.
+    /// </summary>
+    string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts, IReadOnlyDictionary<string, string> carried)
+    {
+        ArgumentNullException.ThrowIfNull(carried);
+        return carried.Count == 0 ? Commit(directory, branch, basis, files, receipts)
+            : throw new ProviderRefusedException("This record commit adapter cannot carry an earlier action's trail.");
+    }
+
     /// <summary>Verify the retained commit contains exactly the original record and members on its pinned base, without changing the working tree.</summary>
     void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files);
 
+    /// <summary>
+    /// As <see cref="Verify(string, string, string, IReadOnlyDictionary{string, string})"/>, with the carried records the commit holds
+    /// beside them (FIX-126). An adapter that does not override this refuses a non-empty set.
+    /// </summary>
+    void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files, IReadOnlyDictionary<string, string> carried)
+    {
+        ArgumentNullException.ThrowIfNull(carried);
+        if (carried.Count != 0) throw new ProviderRefusedException("This record commit adapter cannot verify an earlier action's carried trail.");
+        Verify(directory, head, basis, files);
+    }
+
     /// <summary>Require the exact branch and head with no changes except untracked, recorded receipts belonging to this action.</summary>
     void Check(string directory, string branch, string head, IReadOnlySet<string> receipts);
+
+    /// <summary>
+    /// Of the named repository-relative paths, those the working tree holds untracked, read without changing anything (FIX-126). Null
+    /// when the adapter cannot say, as for an adapter that does not override this: the runtime then carries no earlier trail.
+    /// </summary>
+    IReadOnlySet<string>? Untracked(string directory, IReadOnlySet<string> paths) => null;
 }

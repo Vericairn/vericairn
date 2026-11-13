@@ -43,7 +43,8 @@ declared register member in the head checked by the pull request. The commit
 check requires exactly the record and its members, with their expected bytes;
 extra files, missing members and changed members are refused. Resuming with the
 same input reuses the stored signed record and members without signing or
-committing again. Operation receipts remain separate, uncommitted records.
+committing again. Operation receipts are written after that commit; from 0.9.3
+the next operator action in the same clone carries them into its own commit.
 See [Operator actions](operator-actions.md) for prerequisites and recovery.
 
 ## Push and open
@@ -151,7 +152,9 @@ Fork pull requests are not supported by this provider.
 The successful check inventory is recorded before the merge request. GitHub's
 request uses the synchronous merge API through `gh`, with its atomic `sha`
 condition (the head pin corresponding to `--match-head-commit`). It cannot enable
-auto-merge or enqueue a later merge; a repository requiring a queue refuses it.
+auto-merge. From 0.9.3 a target branch that requires a merge queue is entered
+through its queue instead, as [Required merge queues](#required-merge-queues-093)
+describes; before 0.9.3 such a repository refused the merge.
 A response that does not identify a confirmed merge commit remains uncertain.
 After a confirmed merge, another operation observes
 the target branch's push runs and jobs at that exact merge commit. It never
@@ -163,8 +166,84 @@ Each command observes once. Inspect its operation id and call `changes observe`
 again when checks are still running. A merge command can report a confirmed
 merge with `ok: false` while its target checks remain incomplete or failed.
 The response's `status` describes the effect; `checkStatus` describes the target
-checks. The CLI's exit code is zero only when `ok` is true. `--json` retains both
-states and the record references, including refusals.
+checks, or is `queued` while a change waits in a merge queue. The CLI's exit code
+is zero only when `ok` is true. `--json` retains both states and the record
+references, including refusals.
+
+### Required merge queues (0.9.3)
+
+From 0.9.3, `changes merge` merges into a target branch that requires a merge
+queue by enqueueing the change, where it refused the repository before. The
+observation of the pull request before the merge also records whether its target
+branch requires a merge queue and the pull request's place in it, as target
+facts: `mergeQueue`, `queue` (`absent`, `queued`, `unmergeable`, `failed` or
+`removed`), `queueHead`, the pull request's own head read with that place, and,
+when the host gives them, `queueGroup`, the commit of the merge group the queue
+built, `queueReason` and `queueRemovedAt` for its latest removal. The same
+authority, the same required checks at the exact head and the same scanned push
+admit the change. A requirement that cannot be observed completely, or a pull
+request already in the queue, refuses the merge before anything is requested.
+
+The merge then records the queue as its route, with the target fact
+`mergeQueue` set to `required`, and its dispatch is the enqueue request at the
+pinned head: GitHub's `enqueuePullRequest` with `expectedHeadOid`, through `gh`,
+so a head that moved is never enqueued and nothing merges at once. An
+observation confirms the change's place: the pull request has an entry in the
+queue, and its own head, read with the entry and again from the pull request,
+is the pinned head. The entry's group commit is recorded beside it and never
+taken for the head, and the host may name none before it builds a group. The
+command then answers with `status` `dispatched`, `checkStatus` `queued` and
+`ok` false. A lost or unconfirmed receipt leaves the merge `uncertain`.
+
+`changes observe --operation <merge-id>` records the queue's outcome against the
+same merge, each time in a new observation that reads the change's place in the
+queue first and its pull request after it, so a merge between the two reads
+shows as merged, never as an open change out of the queue:
+
+- merged: the merge is `observed-success` at its merge commit, and its target
+  run is observed as below;
+- still queued at the pinned head: the merge stays `dispatched`, with
+  `checkStatus` `queued`; observe it again later;
+- not merged, on the host's positive evidence about this attempt: the entry
+  still listed as unable to merge at the pinned head, a removal from the queue
+  that the host dates after this attempt's dispatch (`failed` for a failure such
+  as of checks or a conflict, `removed` otherwise), the pull request closed, or
+  its head moved from the pinned head. The merge is a `known-failure` whose
+  summary says which, with the host's reason token. A retry needs
+  `--reconciliation`, fresh checks and a scanned push, and enqueues the same
+  pinned head again; if the pull request reads merged at the pinned head by
+  then, the retry records that merge instead, sending nothing;
+- anything else, such as a change out of the queue with no removal dated after
+  its dispatch while its pull request does not yet read merged, or with only an
+  earlier removal: the merge is `uncertain`. It is never retried until a later
+  observation settles it or the operator's `--cancel` reconciles it, as for any
+  uncertain effect.
+
+A retry keeps its route. A merge recorded through the queue is refused if the
+branch no longer requires one; push a new head to merge it directly.
+
+For a merge the queue made, the target observation reads the queue's runs of
+exactly the merge commit (event `merge_group`, on the queue's read-only branch
+for the target) as well as the branch's push runs of that commit, and never a
+newer commit's run. A queue that merges changes in groups runs only a group's
+head: a merge commit inside a group has no run of its own. Its target
+observation then reads the runs of the group that landed it, by that group's
+exact head commit, recorded as `queueGroup`: GitHub's provider finds the merge
+queue's push to the branch whose range holds the merge commit, among the latest
+twenty, and takes the commit after it. When that group cannot be established,
+the commit's own empty inventory stands and the target checks stay pending;
+observe again, or settle the target run on the host. A check the push run
+skipped counts when a check of the same name passed at the same commit, as when
+Vericairn's own push run skips a commit its queue run passed. Every other check
+must pass, and every required check must be present.
+
+`operator record` waits for the queue within `--wait-seconds` as it waits for
+checks, observing a change whose outcome is still unconfirmed again in the same
+way. Its unfinished action shows the stage `merge-queued` once the change's
+place in the queue is confirmed, and `merge-uncertain` before then. When a
+queued merge stops unmerged or unconfirmed, its next step names `changes
+observe --operation <merge-id>`, and a rerun with `--reconciliation` observes
+the queued merge again before any retry.
 
 ## Interruption and retry
 
@@ -192,7 +271,11 @@ synchronization. Observations and provider processes run outside that gate.
 ## Contracts
 
 `IPullRequestProvider` implements `vericairn.provider.pull-request/1` for opening,
-observing, merging with a head pin and observing the target run. The GitHub
+observing, merging with a head pin and observing the target run. From 0.9.3 it
+adds `ObserveQueue`, `Enqueue` and `ObserveQueuedTarget` for required merge
+queues, with default implementations that report no queue required, refuse an
+enqueue before any request and read the push runs alone, so a provider written
+before them keeps working. The GitHub
 implementation uses bounded gh processes; `MemoryPullRequestProvider` is an
 independent in-memory implementation for controlled use. `IPushAdapter` implements
 `vericairn.adapter.push/1`; `ISecretScanner` implements `vericairn.scanner.secrets/1`.

@@ -698,6 +698,127 @@ public sealed class OperatorRecordTests
         Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
     }
 
+    [Fact]
+    public void AnActionWhoseTargetRequiresAMergeQueueWaitsThereAndCompletesOnceTheQueueMergesIt()
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.QueueRequired = true;
+        OperatorRecordResponse queued = f.Run();
+        Assert.False(queued.Ok);
+        Assert.Equal("waiting", queued.Status);
+        Assert.Equal(("dispatched", "queued"), (queued.Change!.Status, queued.Change.CheckStatus));
+        Assert.Equal(["branch", "commit", "scan", "push", "open", "pull", "pull", "enqueue", "pull"], f.Events);
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(("merge-queued", false), (shown.Stage, shown.Finishable));
+        Assert.Contains("waiting in the target branch's merge queue", shown.Summary, StringComparison.Ordinal);
+        Assert.Contains("vericairn changes observe --operation " + shown.Merge!.Id, shown.NextStep, StringComparison.Ordinal);
+
+        // The queue merges the change at the commit its group tested; the same input resumes, observes that and completes.
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "merged");
+        f.Reopen();
+        int events = f.Events.Count;
+        OperatorRecordResponse completed = f.Run();
+        Assert.True(completed.Ok, completed.Message + " " + completed.NextStep);
+        Assert.Equal(["pull", "target"], f.Events.Skip(events));
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        Assert.Null(f.Service.OperatorUnfinished().Action);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AQueuedChangeOutOfTheQueueBeforeItsPullRequestReadsMergedIsObservedAgainAndCompletesWithoutAnotherMerge(bool reconciliation)
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.QueueRequired = true;
+        Assert.Equal("waiting", f.Run().Status);
+        PullRequestObservation open = f.Remote.Memory.Observe("Example/widget", "1")!;
+        // The queue merged it: out of the queue, no removal reported, the pull request not yet read as merged.
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "absent");
+        OperatorRecordResponse unsettled = f.Run();
+        Assert.False(unsettled.Ok);
+        Assert.Equal("uncertain", unsettled.Change!.Status);
+        Assert.Contains("vericairn changes observe --operation " + unsettled.Change.Operation!.Id, unsettled.NextStep, StringComparison.Ordinal);
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal("merge-uncertain", shown.Stage);
+        Assert.Contains("vericairn changes observe --operation", shown.NextStep, StringComparison.Ordinal);
+        f.Remote.Memory.Set("Example/widget", open with { State = "merged", MergeCommit = Merged });
+        OperatorRecordResponse completed = f.Run(reconciliation ? "The change merged in the queue." : null);
+        Assert.True(completed.Ok, completed.Message + " " + completed.NextStep);
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void AQueuedMergeSettledUnmergedNamesItsObservationAndIsObservedAgainBeforeAnyRetry()
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.QueueRequired = true;
+        Assert.Equal("waiting", f.Run().Status);
+        PullRequestObservation open = f.Remote.Memory.Observe("Example/widget", "1")!;
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "removed", "MANUAL");
+        OperatorRecordResponse failed = f.Run();
+        Assert.Equal("known-failure", failed.Change!.Status);
+        Assert.Contains("vericairn changes observe --operation " + failed.Change.Operation!.Id, failed.NextStep, StringComparison.Ordinal);
+        OperatorUnfinishedAction shown = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal("merge-failed", shown.Stage);
+        Assert.Contains("vericairn changes observe --operation", shown.NextStep, StringComparison.Ordinal);
+        // The change was enqueued again at the host and merged there: the retry observes that first and sends nothing again.
+        f.Remote.Memory.Set("Example/widget", open with { State = "merged", MergeCommit = Merged });
+        OperatorRecordResponse completed = f.Run("The removal was resolved at the host.");
+        Assert.True(completed.Ok, completed.Message + " " + completed.NextStep);
+        Assert.Equal((1, 1, 2), (f.Local.Commits, f.Remote.Pushes, f.Remote.Memory.Effects));
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
+    [Fact]
+    public void ARerunOfAQueuedMergeSettledUnmergedAnnouncesItsObservationBeforeTheChecksAndSignsNoMore()
+    {
+        using var f = new Fixture();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Remote.Memory.QueueRequired = true;
+        Assert.Equal("waiting", f.Run().Status);
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "removed", "MANUAL");
+        Assert.Equal("known-failure", f.Run().Change!.Status);
+        Assert.Equal("merge-failed", f.Service.OperatorUnfinished().Action!.Stage);
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        int signed = custody.Reasons.Count;
+
+        // A plain rerun observes the queued merge again, then the pull request's checks, and stops before any retry.
+        OperatorRecordResponse rerun = f.Run();
+        Assert.False(rerun.Ok);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        PresenceNotice announced = Assert.Single(notices, n => n.Kind == "announced");
+        Assert.Equal(6, announced.Count);
+        Assert.Equal(6, custody.Reasons.Count - signed);
+        Assert.Equal(6, notices.Count(n => n.Kind == "prompt"));
+        Assert.DoesNotContain(notices, n => n.Kind is "added" or "revised");
+        Assert.Equal("Signed 6 of 6.", notices[^1].Text);
+        Assert.Equal(2, f.Remote.Memory.Effects);
+    }
+
+    [Fact]
+    public void AQueuedMergeShowsItsQueueStageOnlyOnceItsPlaceIsConfirmed()
+    {
+        using var f = new Fixture();
+        f.Remote.Memory.QueueRequired = true;
+        f.Remote.StopAfterEnqueue = true;
+        Assert.Throws<NotSupportedException>(() => f.Run());
+        f.Remote.StopAfterEnqueue = false;
+        f.Reopen();
+        // The enqueue was dispatched, and nothing yet confirms its place in the queue.
+        OperatorUnfinishedAction dispatched = Assert.IsType<OperatorUnfinishedAction>(f.Service.OperatorUnfinished().Action);
+        Assert.Equal("merge-uncertain", dispatched.Stage);
+        Assert.Equal("dispatched", EstateModel.BodyString(f.Service.Session.Load().ById[dispatched.Merge!.Id], "status"));
+        OperatorRecordResponse waiting = f.Run();
+        Assert.Equal("waiting", waiting.Status);
+        Assert.Equal("merge-queued", f.Service.OperatorUnfinished().Action!.Stage);
+        Assert.Equal(2, f.Remote.Memory.Effects);
+    }
+
     private static ChangeCheck[] Checks(string head) => Required.Select(n => new ChangeCheck(n, head, "completed", "success")).ToArray();
 
     private sealed class Fixture : IDisposable
@@ -864,6 +985,20 @@ public sealed class OperatorRecordTests
         { fixture.Step("merge"); Assert.Equal(fixture.Local.Head, head); ChangeReceipt receipt = Memory.Merge(destination, number, head); Receipt("merge"); return receipt; }
         public TargetObservation ObserveTarget(string destination, string branch, string commit)
         { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveTarget(destination, branch, commit); }
+        public MergeQueueObservation ObserveQueue(string destination, string number) => Memory.ObserveQueue(destination, number);
+        // The process stops right after the enqueue was sent, before anything records its outcome.
+        internal bool StopAfterEnqueue { get; set; }
+        public ChangeReceipt Enqueue(string destination, string number, string head)
+        {
+            fixture.Step("enqueue");
+            Assert.Equal(fixture.Local.Head, head);
+            ChangeReceipt receipt = Memory.Enqueue(destination, number, head);
+            if (StopAfterEnqueue) throw new NotSupportedException("The controlled process stopped.");
+            Receipt("enqueue");
+            return receipt;
+        }
+        public TargetObservation ObserveQueuedTarget(string destination, string branch, string commit)
+        { fixture.Step("target"); Assert.Equal(Merged, commit); return Memory.ObserveQueuedTarget(destination, branch, commit); }
         private void Receipt(string step) { if (LoseReceipt == step) throw new ProviderUncertainException("The receipt was lost."); }
     }
 }

@@ -295,6 +295,10 @@ Local git hooks are disabled for branch creation and commit, and git
 commit signing is disabled; the record retains its own device signature. The runtime invokes MERGE-01's recorded
 push (including its scan), opening, observations and merge. Each check must pass at the exact
 committed head. The merge rechecks the inventory and uses the provider's atomic head condition.
+From 0.9.3, where the target branch requires a merge queue, the merge enqueues that head instead
+and the command waits for the queue's outcome as it waits for checks
+([required merge queues](changes.md#required-merge-queues-093)); a change still queued when the wait
+ends stops as waiting, and the same input resumes it.
 Finally, recorded observations check the target run at the confirmed merge commit.
 
 `--wait-seconds` bounds each check phase from 0 to 240 seconds, defaulting to 120. Zero observes
@@ -334,7 +338,8 @@ vericairn operator unfinished --finish --by <operator-id>
 
 The first command reads the clone's checkpoint and records and writes nothing. It shows the action's
 record id, type and subject, branch, head, pull request and stage (`prepared`, `recorded`, `committed`,
-`pushed`, `opened`, `merge-failed`, `merge-uncertain` or `merged`), the merge commit and latest target
+`pushed`, `opened`, `merge-failed`, `merge-uncertain`, from 0.9.3 `merge-queued` while the change waits
+in a required merge queue with its place there confirmed, or `merged`), the merge commit and latest target
 check verdict, and what finishing it needs. For an action that has not merged, that is the original
 `operator record` command, to be run with the body of its stored record (`vericairn records show
 <record-id>`) and, after a known failure, `--reconciliation`. `--finish` finishes a merged action once
@@ -343,16 +348,35 @@ a failed target run must first be rerun or corrected on the host. Only the actio
 finishes it, on their admitted device.
 
 Starting the next `operator record` finishes a merged action the same way before it starts, and then
-proceeds. That next action tolerates the finished action's own untracked receipts, including the
-target-run observation just recorded, beside its own; commit them all separately afterwards, as
-always. An action that has not merged still refuses a new one, and the refusal names its record id,
-type and subject.
+proceeds. From 0.9.3 that next action carries the finished action's push and merge trail, including
+the target-run observation just recorded, into its own commit, as the next section describes. An
+action that has not merged still refuses a new one, and the refusal names its record id, type and
+subject.
 
-The action's commit contains only its signed record and required generated register members.
-Operation revisions, observations and any target-failure ask stay in the estate as separate,
-uncommitted records. A resumed action tolerates
-only its own untracked receipts; it never stages them or unrelated work. Preserve and commit those
-receipts separately before starting a new action. No branch is automatically deleted or reset.
+### The push and merge trail reaches the estate (0.9.3)
+
+An action's commit holds its signed record and required generated register members. Its push and
+merge trail is written after that commit: the operation records of its push, opening and merge with
+every revision, the observations that point to them and any target-failure ask, all signed by the
+action's operator. Before 0.9.3 the trail stayed untracked in the clone that ran the action until
+someone committed it separately.
+
+From 0.9.3, once an action is complete, its trail is settled. The next `operator record` in the same
+clone carries every settled trail record the working tree still holds untracked into its own
+commit, beside its own signed record and members. The commit check requires exactly those paths and
+their bytes, and the local checkpoint pins them, so a resumed action commits the same set and never
+another. The earlier action's signed record and commit are not changed. Only records the runtime
+wrote for the earlier actions it ran in this clone travel this way: any other untracked or changed
+file still refuses the action. The new action's own trail is written after its commit in turn, and
+the action after it carries that.
+
+Until a commit holds it, a settled trail exists only in the clone that ran the action. `vericairn
+status` and `vericairn estate check` report each such action with a warning, code
+`operator.trail-uncommitted` at `operator-action:<record id>`, naming the action's type, record id
+and subject and how many trail records wait. Running the next operator action clears the warning for
+the trail it carries; committing the records yourself, as before, clears it too. A fresh clone holds
+no untracked trail and reports none. A resumed action tolerates only its own untracked receipts and
+those it carries; it never stages unrelated work. No branch is automatically deleted or reset.
 
 Git and gh use the user's own login and configuration. There is no token parameter or credential
 retrieval. If the client disconnects or cancels, the runtime lets the current recorded operation

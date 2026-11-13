@@ -2352,7 +2352,7 @@ presence before the first prompt, 22 for a new action, and each observation it
 repeats while checks run before that observation asks
 ([presence prompts](#presence-prompts-announced-and-counted-093)).
 [Operator actions](operator-actions.md) explains recovery with the same
-body and identity, presence, authority and the separate uncommitted receipts.
+body and identity, presence, authority and the action's push and merge trail.
 
 From 0.9.2, an action that stopped after its merge, for example while main's
 check was still running, is finished from its own records. Once the merge is
@@ -2362,9 +2362,22 @@ whatever branch it is on, usually main. `operator unfinished` shows the clone's
 unfinished action: its record id, type and subject, branch, head, pull request,
 stage, and what finishing it needs. `operator unfinished --finish --by <operator>`
 finishes it once the target checks pass. Starting the next `operator record`
-does the same first, then proceeds; that next action tolerates the finished
-action's own uncommitted receipts. An action that has not merged still refuses
+does the same first, then proceeds. An action that has not merged still refuses
 a new one, and the refusal names its record id, type and subject.
+
+From 0.9.3 an action's push and merge trail reaches the estate. The trail is
+the operation records of the action's push, opening and merge, with their
+observations and any target-failure ask; it is written after the action's
+commit, so it stays untracked in the clone that ran it. Once the action is
+complete, the next `operator record` in that clone carries every trail record
+still untracked there into its own commit, beside its signed record and
+members, and the commit check requires exactly those files and bytes. The
+earlier action's signed record is not changed, and nothing else untracked
+travels: other changes still refuse the action. Until a commit holds a trail,
+`status` and `estate check` report the action with the warning
+`operator.trail-uncommitted`, naming its type, record id and subject and how
+many trail records wait
+([operator actions](operator-actions.md#the-push-and-merge-trail-reaches-the-estate-093)).
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
 The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
@@ -2375,7 +2388,14 @@ to pass at that head; missing, skipped,
 pending or stale checks refuse. The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.
-Fork pull requests and merge queues are unsupported. No retry can bypass an
+Fork pull requests are unsupported. From 0.9.3, where the target branch requires
+a merge queue, the merge enqueues the pinned head under the same authority and
+checks, records the queued merge, and `changes observe` records the queue's
+outcome against it: merged at a commit, whose `merge_group` run and push runs,
+or those of the group that landed it, are then observed; not merged, a known
+failure, only on the host's evidence about this attempt; anything else stays
+uncertain. `operator record` waits in the queue as it waits for checks
+([required merge queues](changes.md#required-merge-queues-093)). No retry can bypass an
 uncertain effect. [Checked changes](changes.md) gives the complete reconciliation
 rules; passing checks supply neither acceptance nor publication authority.
 
