@@ -449,9 +449,13 @@ impossible, and `findings` otherwise (`review.outcome`).
 
 The evaluator is a principal other than any step's author (`review.evaluator`). A goal's work is the work orders its
 plan gives and those of which any revision names the goal, by any revision, among its `inputs`, each represented by
-its current revision; the authors of its steps
-are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
-one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
+its current revision. From 0.9.3, when the goal's `plan.approval` is `sponsor-approves`, a work order that names it
+joins its work only once who decides for the goal approves it: that principal wrote the work order's revision then
+current, or recorded a `work-status` of `planned` or `active` on that exact revision since. Until then it is proposed
+for the goal, and a revision someone else writes later is proposed afresh; under `self-approves-ordinary` it joins at
+once, and the plan's own work orders always do. The authors of its steps
+are the contributor of every assignment of that work, or of work proposed for it, and every principal that recorded an
+attempt or a result under one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
 authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
 goal's current evaluation is the latest one of its exact revision that counts: one that gives a known verdict for
 each condition and whose author authored no step when it was written. A revised goal is evaluated afresh.

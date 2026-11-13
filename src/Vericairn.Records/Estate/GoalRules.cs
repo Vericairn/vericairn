@@ -55,8 +55,8 @@ public static class GoalRules
 
     /// <summary>
     /// The reserved actions the records show a goal includes, each in words: a completion condition about a release, whose acceptance
-    /// and publication are the operator's; a completion condition about a milestone work order, or a milestone among its work, whose
-    /// acceptance is the operator's. A goal that includes one is never accepted by delegation (design/goals.md § 5).
+    /// and publication are the operator's; a completion condition about a milestone work order, or a milestone among its work or proposed
+    /// for it, whose acceptance is the operator's. A goal that includes one is never accepted by delegation (design/goals.md § 5).
     /// </summary>
     public static IReadOnlyList<string> ReservedActions(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
@@ -86,7 +86,7 @@ public static class GoalRules
             }
         }
 
-        foreach (RecordEnvelope order in Work(model, goal, before).Where(o => EstateModel.BodyString(o, "kind") == "milestone"))
+        foreach (RecordEnvelope order in WorkAndProposed(model, goal, before).Where(o => EstateModel.BodyString(o, "kind") == "milestone"))
         {
             reserved.Add($"work order {EstateModel.BodyString(order, "key")} is a milestone, whose acceptance is the operator's");
         }
@@ -212,21 +212,51 @@ public static class GoalRules
 
     /// <summary>
     /// The work orders a goal is made of, each at its latest revision: those its plan gives, and those of which a revision names any
-    /// revision of the goal among its inputs, which is how a planner proposes work for it. Ordered by key and identifier.
+    /// revision of the goal among its inputs, which is how a planner proposes work for it. When the goal's plan says sponsor-approves,
+    /// a work order that names it joins only once who decides for the goal approves it, and until then it is among the goal's
+    /// <see cref="Proposed"/> work; under self-approves-ordinary it joins at once. Ordered by key and identifier.
     /// </summary>
-    public static IReadOnlyList<RecordEnvelope> Work(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
+    public static IReadOnlyList<RecordEnvelope> Work(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null) =>
+        [.. Named(model, goal, before).Where(n => n.Joined).Select(n => n.Order)];
+
+    /// <summary>
+    /// The work orders proposed for a goal whose plan says sponsor-approves that wait for its sponsor's approval, each at its latest
+    /// revision (design/goals.md §§ 4 and 6): a work order that names the goal among its inputs, whose revision then current was written
+    /// by someone other than who decides for the goal, its sponsor when a person and an operator when an agent sponsors it, and on which
+    /// who decides has recorded no work-status of planned or active since. A work order the plan gives is the sponsor's own and never
+    /// waits. Empty for any other plan. Judged from the records before a record when one is given. Ordered by key and identifier.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> Proposed(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null) =>
+        [.. Named(model, goal, before).Where(n => !n.Joined).Select(n => n.Order)];
+
+    /// <summary>True when a goal's plan says its sponsor approves the work orders proposed for it.</summary>
+    public static bool SponsorApproves(RecordEnvelope goal)
+    {
+        ArgumentNullException.ThrowIfNull(goal);
+        return goal.Body.TryGetProperty("plan", out JsonElement plan) && plan.ValueKind == JsonValueKind.Object && plan.TryGetProperty("approval", out JsonElement approval)
+            && approval.ValueKind == JsonValueKind.String && approval.GetString() == "sponsor-approves";
+    }
+
+    /// <summary>
+    /// The goal's work and the work proposed for it, each at its latest revision and once whatever its revisions: what its plan gives,
+    /// and every work order of which a revision named the goal before a record when one is given. Each says whether it joined the goal:
+    /// at once, except under sponsor-approves, where only the plan's own work orders and those who decides for the goal approved join.
+    /// </summary>
+    private static List<(RecordEnvelope Order, bool Joined)> Named(EstateModel model, RecordEnvelope goal, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         IReadOnlyList<string> chain = model.Chain(goal);
+        var given = new HashSet<string>(StringComparer.Ordinal);
         var named = new List<RecordEnvelope>();
-        if (goal.Body.TryGetProperty("plan", out JsonElement plan) && plan.ValueKind == JsonValueKind.Object && plan.TryGetProperty("workOrders", out JsonElement given) && given.ValueKind == JsonValueKind.Array)
+        if (goal.Body.TryGetProperty("plan", out JsonElement plan) && plan.ValueKind == JsonValueKind.Object && plan.TryGetProperty("workOrders", out JsonElement listed) && listed.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement id in given.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String))
+            foreach (JsonElement id in listed.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String))
             {
                 if (model.ById.TryGetValue(id.GetString()!, out RecordEnvelope? order) && order.Type == "work-order")
                 {
                     named.Add(order);
+                    given.Add(model.Chain(order)[0]);
                 }
             }
         }
@@ -240,19 +270,52 @@ public static class GoalRules
             orders[model.Chain(order)[0]] = model.Latest(order);
         }
 
-        return orders.Values.OrderBy(o => EstateModel.BodyString(o, "key"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
+        bool approves = SponsorApproves(goal);
+        return orders.OrderBy(o => EstateModel.BodyString(o.Value, "key"), StringComparer.Ordinal).ThenBy(o => o.Value.Id, StringComparer.Ordinal)
+            .Select(o => (o.Value, !approves || given.Contains(o.Key) || Approved(model, goal, o.Value, before))).ToList();
     }
 
     /// <summary>
-    /// The authors of a goal's steps: for every assignment of its work, the contributor it delegates to and every principal that
-    /// recorded an attempt or a result under it. Reviewing a result is not authoring a step, so a reviewer may still evaluate.
+    /// True when who decides for a goal approved a work order proposed for it: it wrote the revision current before a record when one is
+    /// given, or recorded a work-status of planned or active on that exact revision since. A revision someone else writes later is
+    /// proposed afresh, as a revised goal is activated afresh.
+    /// </summary>
+    private static bool Approved(EstateModel model, RecordEnvelope goal, RecordEnvelope order, RecordEnvelope? before)
+    {
+        RecordEnvelope? revision = model.Chain(order).Select(id => model.ById[id]).LastOrDefault(r => before is null || Before(r, before));
+        return revision is not null && (DecidesFor(model, goal, revision.By, revision)
+            || model.About(revision.Id, "work-status").Any(s => (before is null || Before(s, before)) && EstateModel.BodyString(s, "status") is "planned" or "active"
+                && DecidesFor(model, goal, s.By, s)));
+    }
+
+    /// <summary>
+    /// True when a principal decides for a goal at a record's place: its sponsor when the sponsor is a person, an operator when an agent
+    /// or a service sponsors it; <see cref="Accepter.Decides(EstateModel, string?, RecordEnvelope?)"/> without reading the goal's work.
+    /// </summary>
+    private static bool DecidesFor(EstateModel model, RecordEnvelope goal, string? by, RecordEnvelope record)
+    {
+        string? sponsor = EstateModel.BodyString(goal, "sponsor");
+        return by is not null && (sponsor is not null && IsPerson(model, sponsor) ? by == sponsor : model.HasRoleAt(by, Roles.Operator, record));
+    }
+
+    /// <summary>
+    /// The goal's work with the work proposed for it, whether or not its sponsor approved it yet: whose authors are not independent of it,
+    /// and whose reserved actions withdraw a delegated acceptance, as soon as they are proposed.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> WorkAndProposed(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null) =>
+        [.. Named(model, goal, before).Select(n => n.Order)];
+
+    /// <summary>
+    /// The authors of a goal's steps: for every assignment of its work, or of work proposed for it and not yet approved, the contributor
+    /// it delegates to and every principal that recorded an attempt or a result under it. Reviewing a result is not authoring a step, so
+    /// a reviewer may still evaluate.
     /// </summary>
     public static IReadOnlySet<string> StepAuthors(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         var authors = new HashSet<string>(StringComparer.Ordinal);
-        foreach (RecordEnvelope order in Work(model, goal, before))
+        foreach (RecordEnvelope order in WorkAndProposed(model, goal, before))
         {
             IReadOnlyList<string> chain = model.Chain(order);
             foreach (RecordEnvelope assignment in model.OfType("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && (before is null || Before(a, before))))

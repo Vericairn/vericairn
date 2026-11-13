@@ -105,6 +105,52 @@ public class GoalsTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task AWorkOrderProposedUnderSponsorApprovesShowsAsWaitingForTheSponsor()
+    {
+        string root = Seed.Temp("wb-proposed");
+        string scratch = Seed.Temp("wb-proposed-scratch");
+        string op = Seed.Init(root);
+        string builder = Seed.Id(Seed.Cli("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", Seed.Write(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")));
+        string goal = Seed.Id(Seed.Cli("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Release the guide", "--objective", "A published guide for the widget.", "--done", """{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2"));
+        Seed.Cli("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+        string order = Seed.Id(Seed.Cli("--estate", root, "--json", "records", "new", "work-order", "--by", builder, "--body", Seed.Write(scratch, "W-1.json", $$"""{"key":"W-1","kind":"ordinary","title":"Write the guide","intent":"Work.","scope":["guide"],"exitQuestion":"Done?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["guide"]}""")));
+
+        var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-proposed")));
+        MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
+        try
+        {
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+
+            // Home: the builder's work order is a decision needed, waiting for the goal's sponsor, from canonical status.
+            AttentionItem waiting = Assert.Single(shell.Attention, a => a.SubjectType == "work-order" && a.SubjectId == order);
+            Assert.Equal(("decision needed", "W-1 Write the guide", "waiting for the sponsor"), (waiting.KindLabel, waiting.Subject, waiting.State));
+            Assert.Equal($"Proposed for goal {goal} (Release the guide) by {builder}; its plan says the sponsor approves, so it joins the goal only once you approve it.", waiting.Why);
+
+            // The Goals workspace lists it apart from the steps, with the command that approves it, and acts on nothing.
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.G, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.G, null);
+                await shell.PendingOperation;
+            });
+            GoalsWorkspace page = Assert.IsType<GoalsWorkspace>(shell.SelectedDocument);
+            Assert.Equal(goal, page.Selected!.Id);
+            Assert.Empty(page.Steps);
+            Assert.True(page.HasProposed);
+            ProposedRow proposed = Assert.Single(page.Proposed);
+            Assert.Equal("W-1  Write the guide: waiting for the sponsor's approval", proposed.Heading);
+            Assert.StartsWith($"Proposed by Builder; work order {order}. It joins the goal only once its sponsor approves it: echo ", proposed.Detail, StringComparison.Ordinal);
+            ListBox list = await fixture.Ui(() => window.DocumentTabs.GetVisualDescendants().OfType<ListBox>().Single(l => Avalonia.Automation.AutomationProperties.GetName(l) == "Proposed work orders"));
+            Assert.True(await fixture.Ui(() => list.IsEffectivelyVisible));
+            Assert.Same(page.Proposed, list.ItemsSource);
+            Assert.Empty(await fixture.Ui(() => window.DocumentTabs.GetVisualDescendants().OfType<Button>().Where(b => b.GetType() == typeof(Button) && ReferenceEquals(b.DataContext, page)).ToList()));
+        }
+        finally
+        {
+            await fixture.Ui(window.Close);
+        }
+    }
+
+    [Fact]
     public void AnAsksAttentionComesFromTheDeliveryAndTheRestWaitInOrder()
     {
         Assert.Empty(AskAttention.From(default, "now"));

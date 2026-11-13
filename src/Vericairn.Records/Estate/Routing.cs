@@ -155,7 +155,13 @@ public static class Routing
     /// The goals a work order is a step of, each at its revision when a record was written and only when its work then included the work
     /// order; at their current revisions without a record. The work order is named by any of its revisions.
     /// </summary>
-    public static IReadOnlyList<RecordEnvelope> GoalsOf(EstateModel model, RecordEnvelope order, RecordEnvelope? before = null)
+    public static IReadOnlyList<RecordEnvelope> GoalsOf(EstateModel model, RecordEnvelope order, RecordEnvelope? before = null) => GoalsOf(model, order, before, proposed: false);
+
+    /// <summary>
+    /// The goals a work order is a step of, as <see cref="GoalsOf(EstateModel, RecordEnvelope, RecordEnvelope?)"/>, and with
+    /// <paramref name="proposed"/> also those it is proposed for and that wait for their sponsor's approval.
+    /// </summary>
+    private static List<RecordEnvelope> GoalsOf(EstateModel model, RecordEnvelope order, RecordEnvelope? before, bool proposed)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
@@ -164,7 +170,7 @@ public static class Routing
         foreach (RecordEnvelope latest in model.Current("goal").OrderBy(g => g.Id, StringComparer.Ordinal))
         {
             RecordEnvelope? revision = before is null ? latest : AgentRuns.GoalAt(model, latest.Id, before);
-            if (revision is not null && GoalRules.Work(model, revision, before).Any(o => model.Chain(o)[0] == identity))
+            if (revision is not null && (proposed ? GoalRules.WorkAndProposed(model, revision, before) : GoalRules.Work(model, revision, before)).Any(o => model.Chain(o)[0] == identity))
             {
                 goals.Add(revision);
             }
@@ -174,14 +180,15 @@ public static class Routing
     }
 
     /// <summary>
-    /// True when a principal decides for a goal a work order is a step of, as of a record when one is given: the goal's sponsor when the
-    /// sponsor is a person, or an operator when an agent sponsors it (decision 01M507XV4VBFYWMRN8WCXMXHX4).
+    /// True when a principal decides for a goal a work order is a step of, or is proposed for and waits for its sponsor's approval, as of
+    /// a record when one is given: the goal's sponsor when the sponsor is a person, or an operator when an agent sponsors it (decision
+    /// 01M507XV4VBFYWMRN8WCXMXHX4). Who would approve a proposed work order may also assign or hand over its step.
     /// </summary>
     public static bool DecidesForStep(EstateModel model, string? principal, RecordEnvelope order, RecordEnvelope? before = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
-        return principal is not null && GoalsOf(model, order, before).Any(g => GoalRules.AccepterOf(model, g, before).Decides(model, principal, before));
+        return principal is not null && GoalsOf(model, order, before, proposed: true).Any(g => GoalRules.AccepterOf(model, g, before).Decides(model, principal, before));
     }
 
     /// <summary>

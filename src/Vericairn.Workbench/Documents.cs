@@ -126,6 +126,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>True while the goal shown is a run with a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>Work orders proposed for the goal shown that wait for its sponsor's approval.</summary>
+    public ObservableCollection<ProposedRow> Proposed { get; } = [];
+
+    /// <summary>True while the goal shown has a proposed work order waiting for its sponsor.</summary>
+    public bool HasProposed => Proposed.Count > 0;
+
     /// <summary>Reads the goals again and shows the one named, else the one shown, else the first open one.</summary>
     public async Task FillAsync(string? goal = null, CancellationToken cancellationToken = default)
     {
@@ -174,7 +180,9 @@ public sealed class GoalsWorkspace : Document
         Asks.Clear();
         Evaluations.Clear();
         Stops.Clear();
+        Proposed.Clear();
         Raise(nameof(HasStops));
+        Raise(nameof(HasProposed));
         IEstateApi? estate = api();
         if (selected is null || estate is null)
         {
@@ -232,7 +240,13 @@ public sealed class GoalsWorkspace : Document
             Stops.Add(row);
         }
 
+        foreach (ProposedRow row in view.Proposed)
+        {
+            Proposed.Add(row);
+        }
+
         Raise(nameof(HasStops));
+        Raise(nameof(HasProposed));
     }
 }
 

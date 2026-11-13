@@ -37,6 +37,19 @@ public sealed record StepRow(string Key, string Title, string Status, string Rol
 }
 
 /// <summary>
+/// A work order proposed for a goal whose plan says sponsor-approves, waiting for the sponsor's approval before it joins the goal, as the
+/// goal view gives it (FIX-117): who proposed it and the command that approves it.
+/// </summary>
+public sealed record ProposedRow(string Key, string Title, string Id, string By, string? Approve)
+{
+    /// <summary>The work order and who proposed it.</summary>
+    public string Heading => $"{Key}  {Title}: waiting for the sponsor's approval";
+
+    /// <summary>Who proposed it, and how the sponsor approves it.</summary>
+    public string Detail => $"Proposed by {By}; work order {Id}. It joins the goal only once its sponsor approves it{(Approve is null ? "." : ": " + Approve)}";
+}
+
+/// <summary>
 /// A stop of a run as every surface shows it (the estate's design/flow.md § 8): the step, why it waits, on whom, how it reaches them, and
 /// for a reserved act that is next its exact command. Read from the runtime's stops, the same in status, the goal view and the routed
 /// steps; nothing here derives a state of its own.
@@ -134,6 +147,9 @@ public sealed class GoalPresentation
     /// <summary>For a run, its stops in the order the flow reaches them; none for a goal that is not a run, or a run with none.</summary>
     public IReadOnlyList<StopRow> Stops { get; private set; } = [];
 
+    /// <summary>Work orders proposed for the goal that wait for its sponsor's approval; none unless its plan says sponsor-approves.</summary>
+    public IReadOnlyList<ProposedRow> Proposed { get; private set; } = [];
+
     /// <summary>Builds the workspace's view from the goal view and the routed next steps; a missing part is shown as unavailable, never as empty.</summary>
     public static GoalPresentation From(JsonElement goal, JsonElement next)
     {
@@ -153,6 +169,7 @@ public sealed class GoalPresentation
             return new ConditionRow(Int(c, "index"), Str(c, "description") ?? "?", Str(c, "verdict") ?? "unknown", Str(c, "reason") ?? string.Empty, Str(evaluation, "verdict"), Str(evaluation, "reason"));
         }).ToList();
         view.Stops = StopRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("stops", out JsonElement stops) ? stops : default);
+        view.Proposed = Items(goal, "proposed").Select(p => new ProposedRow(Str(p, "key") ?? "?", Str(p, "title") ?? "?", Str(p, "id") ?? "?", Str(p, "byName") ?? Str(p, "by") ?? "?", Str(p, "approve"))).ToList();
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();
         if (next.ValueKind != JsonValueKind.Object || Str(next, "format") != "vericairn.next/1")

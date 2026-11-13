@@ -96,6 +96,25 @@ public class PresentationTests
         Assert.Equal("uncertain: reconcile before any retry", view.Operations[0].StatusLabel);
     }
 
+    [Fact]
+    public void AProposedWorkOrderInStatusIsADecisionNeededWaitingForTheSponsor()
+    {
+        const string status = """
+        {"estate":{"id":"01","name":"Example","slug":"example"},"records":12,"workOrders":[{"key":"W-1","kind":"ordinary","title":"Write the guide","status":"planned","id":"o1"}],
+         "proposals":[{"goal":"g1","goalTitle":"Release the guide","sponsor":"p1","key":"W-1","title":"Write the guide","id":"o1","hash":"sha256:1","by":"b1"},
+                      {"goal":"g2","goalTitle":"Agent's goal","sponsor":null,"key":"W-2","title":"Fix it","id":"o2","hash":"sha256:2","by":"b1"}],
+         "findings":[],"reconcile":[]}
+        """;
+        using JsonDocument document = JsonDocument.Parse(status);
+        EstateView view = EstateView.From(document.RootElement, "2026-11-13T00:00:00Z");
+        Assert.Equal([new ProposalRow("g1", "Release the guide", "p1", "W-1", "Write the guide", "o1", "b1"), new ProposalRow("g2", "Agent's goal", null, "W-2", "Fix it", "o2", "b1")], view.Proposals);
+        Assert.Equal(["W-1 Write the guide", "W-2 Fix it"], view.Attention.Select(a => a.Subject));
+        Assert.All(view.Attention, a => Assert.Equal(("decision needed", "waiting for the sponsor", "work-order"), (a.Kind, a.State, a.SubjectType)));
+        Assert.Equal("Proposed for goal Release the guide by b1; its plan says the sponsor approves, so it joins the goal only once its sponsor, p1, approves it.", view.Attention[0].Why);
+        Assert.EndsWith("only once an operator approves it.", view.Attention[1].Why, StringComparison.Ordinal);
+        Assert.Empty(EstateView.From(default(JsonElement), "now").Proposals);
+    }
+
     private static string RepositoryRoot()
     {
         string? root = AppContext.BaseDirectory;
