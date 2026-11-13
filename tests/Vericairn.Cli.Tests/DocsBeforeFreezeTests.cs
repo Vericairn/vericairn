@@ -22,35 +22,76 @@ public sealed class DocsBeforeFreezeTests
     private static readonly (string, System.Text.RegularExpressions.Regex)[] Earlier = [("0.9.1", GuidesBeforeFreeze.Token("0.9.1")), ("0.9.0", GuidesBeforeFreeze.Token("0.9.0"))];
 
     [Theory]
-    [InlineData("# Installing Vericairn 0.9.1", true)]
-    [InlineData("Unpack `vericairn-0.9.1-<platform>.tar.gz`.", true)]
-    [InlineData("dotnet tool install dotnet-vc --version 0.9.1", true)]
-    [InlineData("Download from https://github.com/Vericairn/vericairn/releases/tag/v0.9.1 first.", true)]
-    [InlineData("dotnet add package Vericairn.Records.0.9.1.nupkg", true)]
-    [InlineData("Its exclusive start follows 0.9.0's recorded end.", true)]
-    [InlineData("This guide describes the 0.9.1 command line.", true)]
-    [InlineData("From 0.9.1, a workspace setup command runs first.", false)]
-    [InlineData("A runtime replaces an older one (0.9.1).", false)]
-    [InlineData("It is checked (FIX-90, 0.9.1) as it was.", false)]
-    [InlineData("Fixed in 0.9.0, and kept since.", false)]
-    [InlineData("A basis 0.9.1 or earlier retained it.", false)]
-    [InlineData("An estate upgrades from 0.8.0, 0.8.2, 0.8.4 or 0.9.0 without a format step.", false)]
-    [InlineData("See [for 0.9.0](api-compatibility-0.9.0.md) and docs/releases/0.9.1/README.md.", false)]
-    [InlineData("Version 0.9.10 and 10.9.1 are other versions.", false)]
-    [InlineData("Designs move during the 0.9.0 cycle.", false)]
-    [InlineData("Revision 11, November 7, 2026. Add a command in 0.9.1.", false)]
-    [InlineData("This guide describes the current release (0.9.1).", true)]
-    [InlineData("Unpack the archive (`vericairn-0.9.1-osx-arm64.tar.gz`) first.", true)]
-    [InlineData("Download it (the current release, 0.9.1) from the page.", true)]
-    [InlineData("A runtime replaces an older one (from 0.9.1).", false)]
-    public void APriorVersionTokenIsFoundOnlyWhereItStandsAsTheCurrentRelease(string line, bool found)
+    [InlineData("# Installing Vericairn 0.9.1", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("Unpack `vericairn-0.9.1-<platform>.tar.gz`.", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("dotnet tool install dotnet-vc --version 0.9.1", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("Download from https://github.com/Vericairn/vericairn/releases/tag/v0.9.1 first.", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("dotnet add package Vericairn.Records.0.9.1.nupkg", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("This guide describes the 0.9.1 command line.", GuidesBeforeFreeze.CurrentMentionRule)]
+    [InlineData("From 0.9.1, a workspace setup command runs first.", null)]
+    [InlineData("A runtime replaces an older one (0.9.1).", null)]
+    [InlineData("It is checked (FIX-90, 0.9.1) as it was.", null)]
+    [InlineData("Fixed in 0.9.0, and kept since.", null)]
+    [InlineData("A basis 0.9.1 or earlier retained it.", null)]
+    [InlineData("An estate upgrades from 0.8.0, 0.8.2, 0.8.4 or 0.9.0 without a format step.", null)]
+    [InlineData("See [for 0.9.0](api-compatibility-0.9.0.md) and docs/releases/0.9.1/README.md.", null)]
+    [InlineData("Version 0.9.10 and 10.9.1 are other versions.", null)]
+    [InlineData("Designs move during the 0.9.0 cycle.", null)]
+    [InlineData("Revision 11, November 7, 2026. Add a command in 0.9.1.", null)]
+    [InlineData("This guide describes the current release (0.9.1).", GuidesBeforeFreeze.CurrentClaimRule)]
+    [InlineData("Unpack the archive (`vericairn-0.9.1-osx-arm64.tar.gz`) first.", GuidesBeforeFreeze.ReleaseArtifactRule)]
+    [InlineData("Download it (the current release, 0.9.1) from the page.", GuidesBeforeFreeze.CurrentClaimRule)]
+    [InlineData("A runtime replaces an older one (from 0.9.1).", null)]
+    [InlineData("The 0.9.1 command line is current.", GuidesBeforeFreeze.CurrentClaimRule)]
+    [InlineData("Vericairn 0.9.1 is the latest release.", GuidesBeforeFreeze.CurrentClaimRule)]
+    [InlineData("The notes run `docs notes --from 0.9.0 --to 0.9.1`.", GuidesBeforeFreeze.CurrentClaimRule)]
+    [InlineData("An estate can upgrade to 0.9.1 at once.", GuidesBeforeFreeze.CurrentClaimRule)]
+
+    // A source or a predecessor passes: the value of --from or --previous, and a token after follows, succeeds, replaces or supersedes.
+    [InlineData("Its exclusive start follows 0.9.0's recorded end.", null)]
+    [InlineData("vericairn estate upgrade --from 0.9.1 --by <operator>", null)]
+    [InlineData("vericairn estate upgrade --from=0.9.1 --by <operator>", null)]
+    [InlineData("vericairn docs pass 1.2.0 --before --previous 0.9.1 --previous 0.9.0", null)]
+    [InlineData("This release succeeds 0.9.1 and replaces 0.9.0.", null)]
+    [InlineData("Its plan supersedes 0.9.1's.", null)]
+    [InlineData("A source passes, as in \"follows 0.9.1's recorded end\".", null)]
+    [InlineData("A plug-in 0.9.1 build ships it.", GuidesBeforeFreeze.CurrentMentionRule)]
+    public void APriorVersionTokenIsFoundOnlyWhereItNamesTheReleaseAsCurrentAndNamesTheRuleItMatched(string line, string? rule)
     {
-        List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/guide.md", line + "\n", Earlier).ToList();
-        Assert.Equal(found, findings.Any(f => f.Check == GuidesBeforeFreeze.PriorVersionMethod));
-        if (found)
+        List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/guide.md", line + "\n", Earlier).Where(f => f.Check == GuidesBeforeFreeze.PriorVersionMethod).ToList();
+        if (rule is null)
         {
-            Assert.All(findings, f => Assert.Equal(1, f.Line));
+            Assert.Empty(findings);
+            return;
         }
+
+        GuidesBeforeFreeze.Finding finding = Assert.Single(findings);
+        Assert.Equal((1, rule), (finding.Line, finding.Rule));
+        Assert.Contains($"({rule}: {GuidesBeforeFreeze.Describe(rule)})", finding.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheCasesFromTheGuidesOf092PassAsSourcesAndPredecessorsWhileATargetStillNamesTheReleaseAsCurrent()
+    {
+        // 0.9.2's guides, read as the 0.9.3 pass reads them, for 0.9.2 and 0.9.1: --from 0.9.1 and "follows 0.9.1's recorded end" name
+        // the release the notes start after, and pass; --to 0.9.2 names the release the notes are for, which in 0.9.3's guides is stale.
+        (string, System.Text.RegularExpressions.Regex)[] earlier = [("0.9.2", GuidesBeforeFreeze.Token("0.9.2")), ("0.9.1", GuidesBeforeFreeze.Token("0.9.1"))];
+        string text = string.Join('\n',
+            "# The notes' window",
+            "```sh",
+            "vericairn --estate <root> docs notes --from 0.9.1 --to 0.9.2 --out docs/releases/0.9.2",
+            "```",
+            "`docs notes` writes the exact window to the manifest. Its exclusive start follows 0.9.1's recorded end.",
+            "The notes command renders the estate's records with `--from 0.9.1 --to 0.9.2`.",
+            "Its exclusive start follows 0.9.1's recorded end; `docs notes` writes the exact window to the manifest.",
+            "  --documents docs/releases/documents.json --estate <root> --from 0.9.1 --overview overview.md \\");
+        List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/operator-guide.md", text, earlier).ToList();
+        Assert.Equal([(3, "0.9.2", GuidesBeforeFreeze.CurrentClaimRule), (6, "0.9.2", GuidesBeforeFreeze.CurrentClaimRule)],
+            findings.Select(f => (f.Line, f.Found, f.Rule)).ToArray());
+        Assert.DoesNotContain(findings, f => f.Found == "0.9.1");
+        Assert.Equal(
+            "docs/operator-guide.md:6: prior-version token 0.9.2 named as the current release (current-claim: a word such as current or latest, or a target such as --to, names it the current release): The notes command renders the estate's records with `--from 0.9.1 --to 0.9.2`.",
+            findings[1].ToString());
     }
 
     [Fact]
@@ -79,8 +120,16 @@ public sealed class DocsBeforeFreezeTests
         List<GuidesBeforeFreeze.Finding> findings = GuidesBeforeFreeze.ScanText("docs/guide.md", text, Earlier).ToList();
         // A heading labelled with a release, as "(0.8.3)", describes current behaviour and is read like any other section.
         Assert.Equal([4, 6, 10, 17], findings.Where(f => f.Check == GuidesBeforeFreeze.PriorVersionMethod).Select(f => f.Line).ToArray());
-        Assert.Equal([(15, "are a placeholder"), (19, "TODO")], findings.Where(f => f.Check == GuidesBeforeFreeze.PreparationMethod).Select(f => (f.Line, f.Found)).ToArray());
-        Assert.Equal("docs/guide.md:10: prior-version token 0.9.1 outside a history section: The 0.9.1 command line is current.", findings.Single(f => f.Line == 10).ToString());
+        Assert.Equal([(15, "are a placeholder", GuidesBeforeFreeze.PreparationPhraseRule), (19, "TODO", GuidesBeforeFreeze.UnfinishedMarkerRule)],
+            findings.Where(f => f.Check == GuidesBeforeFreeze.PreparationMethod).Select(f => (f.Line, f.Found, f.Rule)).ToArray());
+        Assert.Equal(
+            "docs/guide.md:10: prior-version token 0.9.1 named as the current release (current-claim: a word such as current or latest, or a target such as --to, names it the current release): The 0.9.1 command line is current.",
+            findings.Single(f => f.Line == 10).ToString());
+        Assert.Equal(
+            "docs/guide.md:4: prior-version token 0.9.1 named as the current release (current-mention: it stands outside a history section and a label, and names no source or predecessor): With 0.9.1 the command changed.",
+            findings.Single(f => f.Line == 4).ToString());
+        Assert.Equal("docs/guide.md:15: preparation wording 'are a placeholder' (preparation-phrase: wording only a set still being prepared uses): The release notes are a placeholder until the set is rendered.",
+            findings.Single(f => f.Line == 15).ToString());
 
         // A marker before the first heading marks nothing: no guide exempts itself whole.
         List<GuidesBeforeFreeze.Finding> marked = GuidesBeforeFreeze.ScanText("docs/guide.md", GuidesBeforeFreeze.HistoryMarker + "\n# Guide\nInstall 0.9.1.\n", Earlier).ToList();
@@ -157,7 +206,7 @@ public sealed class DocsBeforeFreezeTests
         CliHarness.Outcome checking = Run("docs", "pass", "0.3.0", "--before", "--documents", declaration, "--product", "widget");
         Assert.Equal(1, checking.Code);
         Assert.Contains("read for 0.2.0, 0.1.0", checking.Out, StringComparison.Ordinal);
-        Assert.Contains("docs/install.md:1: prior-version token 0.2.0 outside a history section: # Installing Widget 0.2.0", checking.Out, StringComparison.Ordinal);
+        Assert.Contains("docs/install.md:1: prior-version token 0.2.0 named as the current release (release-artifact: it names that release's install, download, package or tag): # Installing Widget 0.2.0", checking.Out, StringComparison.Ordinal);
         Assert.Contains("docs/install.md:3: prior-version token 0.2.0", checking.Out, StringComparison.Ordinal);
         Assert.DoesNotContain("guide.md:3", checking.Out, StringComparison.Ordinal);
         Assert.Contains($"{GuidesBeforeFreeze.PriorVersionMethod}: failed, 2 locations", checking.Out, StringComparison.Ordinal);
@@ -185,7 +234,8 @@ public sealed class DocsBeforeFreezeTests
         RecordEnvelope prior = Assert.Single(model.Current("verification"), v => EstateModel.BodyString(v, "method") == GuidesBeforeFreeze.PriorVersionMethod);
         Assert.Equal(("failed", failedCommit, "0.3.0", f.Product.Id), (EstateModel.BodyString(prior, "outcome"), EstateModel.BodyString(prior, "commit"), GoalPredicates.FieldString(prior, "environment.release"), prior.Subject!.Id));
         Assert.Equal("0.2.0 0.1.0", GoalPredicates.FieldString(prior, "environment.previous"));
-        Assert.Contains("docs/install.md:1: prior-version token 0.2.0", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
+        Assert.Contains("docs/install.md:1: prior-version token 0.2.0 named as the current release (release-artifact:", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
+        Assert.Contains("locations break no mention of 0.2.0, 0.1.0 as the current release", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);
 
         // A guide's line is quoted without the machine paths it names, so the record is portable on every platform.
         Assert.Contains("installed under <path> or <path>", EstateModel.BodyString(prior, "summary"), StringComparison.Ordinal);

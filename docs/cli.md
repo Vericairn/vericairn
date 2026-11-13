@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 25, November 13, 2026. `docs pass --before` passes an earlier release named as a source or predecessor and names the rule each location matched, in the development build.
+
 Revision 24, November 13, 2026. `goal propose --flow` binds the subject an extension flow inherits from its base, in the development build.
 
 Revision 23, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
@@ -785,6 +787,15 @@ a plain file, `docs/` beside `docs/releases/documents.json` by default (`--guide
   `api-compatibility-0.9.1.md`, is read for preparation wording only;
 - preparation wording, such as notes that are a placeholder, `under preparation`, `not yet rendered`, `pre-build`,
   `the builder must`, `TODO` or `TBD`.
+
+From 0.9.3 (FIX-125), a mention of an earlier release counts only where it names that release as the current one. A mention
+as a source or predecessor passes: the value of `--from` or `--previous`, as in `docs notes --from 0.9.1`, and a token just
+after `follows`, `succeeds`, `replaces` or `supersedes`, as in "follows 0.9.1's recorded end", besides those after `since`
+or `after`, in a history section and in a label. Each location names the rule it matched: `current-claim`, where a word such
+as `current` or `latest`, or a target such as `--to`, names it the current release; `release-artifact`, where it names that
+release's install, download, package or tag; `current-mention`, any other mention outside a history section and a label;
+and, for preparation wording, `preparation-phrase` or `unfinished-marker`. `--json` gives it as each finding's `rule`, and a
+recorded verification quotes it with each location.
 
 ```sh
 vericairn docs pass 1.2.0 --before --documents docs/releases/documents.json --product <product>
