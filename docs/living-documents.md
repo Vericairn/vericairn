@@ -65,6 +65,33 @@ on such a document, the `document.cleared-by` refusal names the `revised` outcom
 its cause and points to `current`. The independence rule is unchanged: nothing
 relabels a self review or clears a document for it.
 
+## When a declared check fails
+
+A failed declared check refuses a clearing review with `document.check-failed`,
+and nothing is written; `needs-change` is still recorded with the failed check, and
+the document stays due. From 0.9.3 (FIX-122), the refusal names what failed. Its
+message gives each failed check with what it found, and the refusal carries one
+`document.check-detail` child finding per problem, as information beside the
+refusal's error, in the text output and in the `findings` of `--json`.
+
+For `links-resolve`, each link that does not resolve is a child finding located at
+the document's repository-relative path with the link's line and column, such as
+`docs/guide.md:3:17`. It names the link as the document writes it and why it fails:
+the link leads outside the repository, or it names a path in the repository that
+holds nothing. Columns count characters from 1. The check's summary, which a review
+records, names the first links that fit in it and counts the rest; the refusal's
+child findings name every one. Neither names an absolute path or quotes the
+document beyond its links.
+
+```text
+ERROR document.check-failed records/document-review/...: A failed check refuses the clearance (links-resolve: Links in docs/guide.md that do not resolve within the repository (1): ../../other-repo/example.md at line 3, column 17, which leads outside the repository.); record needs-change, or fix the document and review it again.
+INFO document.check-detail docs/guide.md:3:17: links-resolve: ../../other-repo/example.md does not resolve, which leads outside the repository.
+```
+
+A failed check other than `links-resolve` has one child finding at the document's
+path with its summary. The refusal, `document.check-failed` and the clearance
+rules are unchanged.
+
 ## Which bytes are compared
 
 For a revision with `hashMode: authored-revisions-v1`, `hash` and `bytes` describe

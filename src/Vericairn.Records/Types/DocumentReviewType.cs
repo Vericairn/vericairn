@@ -80,12 +80,14 @@ public sealed class DocumentReviewType : IRecordType
         foreach (BodyReader check in body.NestedArray("checks", true, allowEmpty: true) ?? [])
         {
             string? name = check.Text("name", true, 200);
-            if (check.Enum("outcome", true, CheckOutcomes) == "failed" && name is not null)
+            bool fails = check.Enum("outcome", true, CheckOutcomes) == "failed";
+            string? summary = check.Text("summary", true, 2000);
+            if (fails && name is not null)
             {
-                failed.Add(name);
+                // From 0.9.3 the refusal names what each failed check found, not only the check (FIX-122).
+                failed.Add(summary is null ? name : name + ": " + summary);
             }
 
-            check.Text("summary", true, 2000);
             check.NoOtherKeys();
         }
 
@@ -118,7 +120,7 @@ public sealed class DocumentReviewType : IRecordType
         bool clears = outcome != "needs-change";
         if (clears && failed.Count > 0)
         {
-            context.Error("document.check-failed", $"A failed check refuses the clearance ({string.Join(", ", failed)}); record needs-change, or fix the document and review it again.");
+            context.Error("document.check-failed", $"A failed check refuses the clearance ({string.Join(" ", failed)}); record needs-change, or fix the document and review it again.");
         }
 
         bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;
