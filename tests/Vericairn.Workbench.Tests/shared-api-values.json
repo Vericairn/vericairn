@@ -555,6 +555,13 @@
     "submitted",
     "retired"
   ],
+  "Vericairn.Runtime.Providers.MergeQueueObservation.States": [
+    "absent",
+    "queued",
+    "unmergeable",
+    "failed",
+    "removed"
+  ],
   "Vericairn.Runtime.Providers.ProviderDescriptor.Statuses": [
     "candidate",
     "implemented",
