@@ -330,17 +330,21 @@ internal sealed class RequestAuthenticator
     /// <summary>
     /// True when a TLS client certificate is within its validity and carries an ECDSA P-256 signature with SHA-256 by the device's key:
     /// a certificate the device's key issued for the TLS key the connection proved it holds. Its subject names no device, and is not read.
+    /// False, the same refusal, for anything else: a key that is not a usable P-256 key as the records read it
+    /// (<see cref="RecordSigning.IsPublicKey"/>), and any error reading the certificate or the key, importing the key or verifying
+    /// the signature, except the fatal ones (out of memory, stack overflow, access violation). The validity is judged by distances
+    /// between instants, which cannot overflow, so a certificate dated at either end of the calendar is judged like any other.
     /// </summary>
     internal static bool IssuedBy(X509Certificate2 certificate, string publicKey, DateTimeOffset now)
     {
-        if (now < new DateTimeOffset(certificate.NotBefore.ToUniversalTime()) - RequestSigning.MaxSkew
-            || now > new DateTimeOffset(certificate.NotAfter.ToUniversalTime()))
-        {
-            return false;
-        }
-
         try
         {
+            DateTimeOffset notBefore = new(certificate.NotBefore.ToUniversalTime()), notAfter = new(certificate.NotAfter.ToUniversalTime());
+            if (notBefore - now > RequestSigning.MaxSkew || now > notAfter || !RecordSigning.IsPublicKey(publicKey))
+            {
+                return false;
+            }
+
             var reader = new AsnReader(certificate.RawData, AsnEncodingRules.DER);
             AsnReader whole = reader.ReadSequence();
             reader.ThrowIfNotEmpty();
@@ -362,7 +366,7 @@ internal sealed class RequestAuthenticator
             key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(publicKey), out _);
             return key.VerifyData(tbs.Span, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         }
-        catch (Exception exception) when (exception is AsnContentException or CryptographicException or FormatException)
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
         {
             return false;
         }

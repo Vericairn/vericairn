@@ -73,7 +73,8 @@ public static class RuntimeIdentityScheme
 
     /// <summary>
     /// True when the proof answers this nonce for this estate, names the certificate the client's handshake showed and the client
-    /// certificate it presented, and verifies with the identity the client pinned.
+    /// certificate it presented, and verifies with the identity the client pinned. Any error importing the identity or verifying the
+    /// signature is a refusal, false like any other, except the fatal ones (out of memory, stack overflow, access violation).
     /// </summary>
     public static bool Verify(RuntimeIdentityProof? proof, string identity, string estate, string certificate, string client, string nonce)
     {
@@ -91,7 +92,7 @@ public static class RuntimeIdentityScheme
             byte[] signature = Base64Url.DecodeFromChars(proof.Signature);
             return signature.Length == 64 && key.VerifyHash(Digest(estate, certificate, client, nonce), signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
         {
             return false;
         }
