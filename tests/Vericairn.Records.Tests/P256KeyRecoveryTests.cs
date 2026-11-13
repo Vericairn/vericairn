@@ -187,7 +187,7 @@ public sealed class P256KeyRecoveryTests
     }
 
     [Fact]
-    public void KeysThatDoNotImportOrAreNotOnTheCurveAreVerifiedAsBefore()
+    public void KeysThatDoNotImportAreVerifiedAsBefore()
     {
         using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var large = ECDsa.Create(ECCurve.NamedCurves.nistP384);
@@ -195,13 +195,11 @@ public sealed class P256KeyRecoveryTests
         byte[] signature = signer.SignHash(digest, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         byte[] own = Point(signer.ExportParameters(false));
         byte[] spki = signer.ExportSubjectPublicKeyInfo();
-        byte[] prefix = Convert.FromHexString("3059301306072A8648CE3D020106082A8648CE3D030107034200");
         BigInteger y = new(own.AsSpan(32), isUnsigned: true, isBigEndian: true);
         string[] odd =
         [
             RecordSigning.EncodePublicKey(large.ExportSubjectPublicKeyInfo()),
             Base64Url.EncodeToString([.. Convert.FromHexString("3039301306072A8648CE3D020106082A8648CE3D030107032200"), (byte)(y.IsEven ? 2 : 3), .. own[..32]]),
-            Base64Url.EncodeToString([.. prefix, 4, .. own[..32], .. Bytes(Mod(y + 1))]),
             Base64Url.EncodeToString(spki.AsSpan(..^1)),
             Base64Url.EncodeToString([.. spki, 0]),
             "AAAA",
@@ -219,11 +217,42 @@ public sealed class P256KeyRecoveryTests
         // Those the platform refuses have no point, so the platform's verification answers for them; one with bytes after it reads as the key.
         Assert.Null(keys.Point(odd[0]));
         Assert.Null(keys.Point(odd[2]));
-        Assert.Null(keys.Point(odd[3]));
+        Assert.Null(keys.Point(odd[4]));
         Assert.Null(keys.Point(odd[5]));
         Assert.Null(keys.Point(odd[6]));
-        Assert.Null(keys.Point(odd[7]));
-        Assert.Equal(own, keys.Point(odd[4]));
+        Assert.Equal(own, keys.Point(odd[3]));
+    }
+
+    [Fact]
+    public void ARecoveredKeyOffTheCurveIsDroppedAndItsSignatureFallsBackOnEveryPlatform()
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes("a recovered key off the curve"));
+        byte[] signature = signer.SignHash(digest, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        string sig = Base64Url.EncodeToString(signature);
+        byte[] own = Point(signer.ExportParameters(false));
+        byte[] other = P256KeyRecovery.Candidates(digest, signature)!.Single(k => !k.AsSpan().SequenceEqual(own));
+
+        // A point whose y is neither y nor -y of a point with its x, and one whose x is p: neither is on the curve, and neither verifies
+        // anything when the platform is asked to import it, on any platform.
+        byte[] offCurve = [.. own[..32], .. Bytes(Mod(new BigInteger(own.AsSpan(32), isUnsigned: true, isBigEndian: true) + 1))];
+        byte[] outOfField = [.. Bytes(P), .. own[32..]];
+        foreach (byte[] point in (byte[][])[offCurve, outOfField])
+        {
+            Assert.False(P256KeyRecovery.OnCurve(point));
+            Assert.False(RecordSigning.VerifyPoint(point, digest, signature));
+        }
+
+        // Added to the right keys by a recovery, each is dropped before the platform is asked, and the signature falls back.
+        foreach (byte[] point in (byte[][])[offCurve, outOfField])
+        {
+            var keys = new RecoveredKeys((d, s) => [.. P256KeyRecovery.Candidates(d, s)!, point]);
+            Assert.Null(keys.Confirmed(digest, sig, [Encode(own)]));
+            Assert.Equal(1, keys.Dropped);
+            Assert.Equal(1, keys.Fallbacks);
+            foreach (string key in (string[])[Encode(own), Encode(other)])
+                Assert.Equal(RecordSigning.Verify(key, digest, sig), keys.VerifiesUnder(key, digest, sig, [Encode(own)]) ?? RecordSigning.Verify(key, digest, sig));
+        }
     }
 
     /// <summary>The ways a recovery put in place of the arithmetic is wrong (<see cref="Wrong"/>).</summary>

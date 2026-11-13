@@ -170,6 +170,8 @@ public sealed class KeyClosingExactnessTests(ITestOutputHelper output)
                 Assert.True(model.Trust.DeviceRevisionRefused(model.ById[fork.Id]));
                 Assert.True(model.Trust.RecoveryFallbacks > 0, wrong);
                 Assert.Equal(model.Trust.KeyRecoveries, model.Trust.RecoveryFallbacks);
+                // A key off the curve, or on it but not one the signature verifies under, is dropped, never relied on.
+                Assert.Equal(wrong is "one corrupted" or "one replaced" or "unrelated", model.Trust.DroppedKeys > 0);
             }
             finally
             {

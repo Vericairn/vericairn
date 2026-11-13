@@ -107,7 +107,8 @@ public static class RecordSigning
 
     /// <summary>
     /// The point of an encoded public key as 64 bytes X‖Y, read through the same import <see cref="Verify"/> verifies with, so a key it
-    /// refuses has none; null when the text is not a usable P-256 key.
+    /// refuses has none; null when the text is not a usable P-256 key or the platform refuses its import, whether as a cryptographic error
+    /// or as unsupported.
     /// </summary>
     internal static byte[]? PublicPoint(string encodedPublicKey)
     {
@@ -119,7 +120,7 @@ public static class RecordSigning
             ECPoint q = key.ExportParameters(false).Q;
             return q.X is { Length: 32 } x && q.Y is { Length: 32 } y ? [.. x, .. y] : null;
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is CryptographicException or PlatformNotSupportedException)
         {
             return null;
         }
@@ -127,7 +128,7 @@ public static class RecordSigning
 
     /// <summary>
     /// Whether a 64-byte signature over a digest verifies with the P-256 key at a point X‖Y, as the platform verifies it; false when the
-    /// platform refuses the point or the signature.
+    /// platform refuses the point or the signature, whether as a cryptographic error or as unsupported, so every platform answers alike.
     /// </summary>
     internal static bool VerifyPoint(ReadOnlySpan<byte> point, ReadOnlySpan<byte> digest, ReadOnlySpan<byte> signature)
     {
@@ -137,7 +138,7 @@ public static class RecordSigning
             using ECDsa key = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = point[..32].ToArray(), Y = point[32..].ToArray() } });
             return key.VerifyHash(digest, signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is CryptographicException or PlatformNotSupportedException)
         {
             return false;
         }

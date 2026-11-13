@@ -438,7 +438,7 @@ internal sealed partial class EstateTrust
     /// <summary>How many signatures the key-closing check recovered keys from: once each, however many closings read it.</summary>
     internal long KeyRecoveries => recoveredKeys.Recoveries;
 
-    /// <summary>How many recovered keys the platform did not confirm: each is dropped, and its signature verified as before.</summary>
+    /// <summary>How many recovered keys were not points on the curve or the platform did not confirm: each is dropped, and its signature verified as before.</summary>
     internal long DroppedKeys => recoveredKeys.Dropped;
 
     /// <summary>How many signatures the key-closing check verified under each closed key as before, their recovered keys not certain.</summary>

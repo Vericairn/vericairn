@@ -8,13 +8,13 @@ namespace Vericairn.Records.Signing;
 /// <summary>
 /// The keys each signature verifies under, recovered from the signature (<see cref="P256KeyRecovery"/>) and relied on only where they are
 /// certain to be every such key, so that the key-closing check reads a closed key's signature from them without verifying under each
-/// closed key (FIX-121). A recovered key counts only once the platform's verification confirms it: by verifying under it, or because it
-/// is the point of a key the caller has already seen the platform verify the signature with. The keys are relied on only when none was
-/// dropped, when one of them is each key known to verify the signature, and when there are as many as the signature can verify under
-/// (<see cref="P256KeyRecovery.MostKeys"/>): a set of that many distinct keys the signature verifies under is all of them, whatever the
-/// arithmetic. Anything else, such as a signature that is not 64 bytes, r or s outside [1, n-1], or a recovery that misses a key, falls
-/// back to the platform's verification under each key, as the check verified before. Not safe for concurrent use; the estate's trust
-/// calls it under its lock.
+/// closed key (FIX-121). A recovered key counts only when it is a canonical point on the curve, its coordinates below p and satisfying the
+/// curve's equation, and the platform's verification confirms it: by verifying under it, or because it is the point of a key the caller
+/// has already seen the platform verify the signature with. The keys are relied on only when none was dropped, when one of them is each
+/// key known to verify the signature, and when there are as many as the signature can verify under (<see cref="P256KeyRecovery.MostKeys"/>):
+/// a set of that many distinct keys the signature verifies under is all of them, whatever the arithmetic. Anything else, such as a
+/// signature that is not 64 bytes, r or s outside [1, n-1], or a recovery that misses a key, falls back to the platform's verification
+/// under each key, as the check verified before. Not safe for concurrent use; the estate's trust calls it under its lock.
 /// </summary>
 internal sealed class RecoveredKeys
 {
@@ -39,7 +39,7 @@ internal sealed class RecoveredKeys
     /// <summary>How many signatures had their keys recovered.</summary>
     internal long Recoveries { get; private set; }
 
-    /// <summary>How many recovered keys the platform did not confirm, each dropped and never relied on.</summary>
+    /// <summary>How many recovered keys were not canonical points on the curve or the platform did not confirm, each dropped and never relied on.</summary>
     internal long Dropped { get; private set; }
 
     /// <summary>How many signatures fell back to the platform's verification under each key, their recovered keys not certain.</summary>
@@ -83,7 +83,8 @@ internal sealed class RecoveredKeys
         foreach (byte[] candidate in candidates)
         {
             if (confirmed.Exists(c => c.AsSpan().SequenceEqual(candidate))) continue;
-            if (candidate.Length == P256KeyRecovery.PointBytes && (Among(signing, candidate) || RecordSigning.VerifyPoint(candidate, digest, signature)))
+            // A canonical point on the curve, checked before the platform is asked, and then one the platform verifies the signature with.
+            if (P256KeyRecovery.OnCurve(candidate) && (Among(signing, candidate) || RecordSigning.VerifyPoint(candidate, digest, signature)))
             {
                 confirmed.Add(candidate);
                 continue;
