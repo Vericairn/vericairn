@@ -99,6 +99,8 @@ vericairn estate bootstrap
 
 The command reports `written` for a new or replaced copy and `unchanged` for identical bytes, and
 restores executable permission on the POSIX script. It checks both destinations before writing.
+It is also the repair for a copy that `estate restore` from a release before 0.9.3 wrote, which
+leaves `bootstrap` without its executable permission ([section 10](#10-export-restore-recovery-and-divergence)).
 A differing copy refuses the operation; preserve any customizations, then use
 `vericairn estate bootstrap --force` to replace it. A link or directory must be moved aside first,
 even with `--force`. Refreshing the scripts keeps the estate's records and manifest pin in place.
@@ -907,6 +909,21 @@ can leave earlier verified files in the destination; the operation does not repo
 failed destination and preserve it as needed before choosing another empty directory. The inventory
 does not establish who produced an export or grant authority. Record signatures are checked separately,
 and no private keys travel with the export.
+
+From 0.9.3 (FIX-112), an export records each member's mode as Git does, `100755` for an executable file
+and `100644` for any other, in its inventory entry and in its archive entry's attributes, so the
+restored `bootstrap` runs as `./bootstrap` with no permission repair. Records and objects are never
+executable. On Linux and macOS a file is executable when its owner may execute it; Windows keeps no
+such permission, so an export made there records the POSIX `bootstrap` script as executable and every
+other file as not. On Linux and macOS a restore creates an executable member with execute permission,
+filtered by the umask like every file it creates, and an ordinary member as before; on Windows it
+applies no mode. The verified inventory alone decides the mode, never the archive entry's attributes.
+A mode other than those two, such as a link's, a directory's or one with setuid, refuses the export
+with `export.entry-mode` before anything is written, so a restore still creates only regular files
+within the destination. An export written by an earlier release records no mode and restores as it
+always did. A copy restored by an earlier release has lost `bootstrap`'s executable permission: run
+`vericairn --estate <restored copy> estate bootstrap` there, which reports `unchanged` for identical
+bytes and restores the permission ([section 2](#2-create-an-estate)).
 
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged

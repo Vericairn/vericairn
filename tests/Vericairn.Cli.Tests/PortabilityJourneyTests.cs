@@ -2,7 +2,10 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Records.Signing;
 
 namespace Vericairn.Cli.Tests;
@@ -127,6 +130,110 @@ public class PortabilityJourneyTests
         finally
         {
             CliHarness.Delete(c, d, scratch);
+        }
+    }
+
+    [Fact]
+    public void ExecutableAndOrdinaryFilesRoundTripWithTheirModesAndIdenticalHashes()
+    {
+        string root = CliHarness.TempDirectory("mode-export");
+        string scratch = CliHarness.TempDirectory("mode-export-scratch");
+        try
+        {
+            Init(root);
+            Directory.CreateDirectory(Path.Combine(root, "docs"));
+            string tool = Path.Combine(root, "docs", "tool.sh"), note = Path.Combine(root, "docs", "note.md");
+            File.WriteAllText(tool, "#!/bin/sh\necho tool\n");
+            File.WriteAllText(note, "An ordinary document.\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(tool, File.GetUnixFileMode(tool) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            }
+
+            string archive = Path.Combine(scratch, "estate.zip");
+            CliHarness.Ok("--estate", root, "--json", "estate", "export", "--out", archive);
+
+            // The inventory and each archive entry record the mode as Git does. Windows keeps no execute permission, so
+            // there only the first-party POSIX bootstrap script, which estate init made executable, is recorded so.
+            string toolMode = OperatingSystem.IsWindows() ? "100644" : "100755";
+            var expected = new Dictionary<string, string> { ["bootstrap"] = "100755", ["bootstrap.ps1"] = "100644", ["docs/tool.sh"] = toolMode, ["docs/note.md"] = "100644" };
+            using (ZipArchive zip = ZipFile.OpenRead(archive))
+            {
+                using var inventory = JsonDocument.Parse(zip.GetEntry("export/inventory.json")!.Open());
+                Dictionary<string, string> modes = inventory.RootElement.EnumerateArray().ToDictionary(i => i.GetProperty("path").GetString()!, i => i.GetProperty("mode").GetString()!);
+                Assert.All(modes.Values, mode => Assert.True(mode is "100644" or "100755", mode));
+                foreach ((string path, string mode) in expected)
+                {
+                    Assert.Equal(mode, modes[path]);
+                    Assert.Equal(Convert.ToInt32(mode, 8), (int)((uint)zip.GetEntry(path)!.ExternalAttributes >> 16));
+                }
+            }
+
+            // The restore alone sets each mode; nothing repairs a permission afterwards.
+            string destination = Path.Combine(scratch, "restored");
+            CliHarness.Ok("--json", "estate", "restore", "--from", archive, "--to", destination);
+            foreach ((string path, string mode) in expected)
+            {
+                string source = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)), restored = Path.Combine(destination, path.Replace('/', Path.DirectorySeparatorChar));
+                Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source))), Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(restored))));
+                if (!OperatingSystem.IsWindows())
+                {
+                    UnixFileMode execute = File.GetUnixFileMode(restored) & UnixFileMode.UserExecute;
+                    Assert.Equal(mode == "100755" ? UnixFileMode.UserExecute : UnixFileMode.None, execute);
+                }
+            }
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void ExportInTheFormOfAnEarlierReleaseRestoresAsBefore()
+    {
+        string root = CliHarness.TempDirectory("modeless-export");
+        string scratch = CliHarness.TempDirectory("modeless-export-scratch");
+        try
+        {
+            Init(root);
+            string archive = Path.Combine(scratch, "estate.zip");
+            CliHarness.Ok("--estate", root, "--json", "estate", "export", "--out", archive);
+
+            // Rewrite the export as releases before 0.9.3 wrote it: an inventory of path, bytes and hash alone.
+            using (ZipArchive zip = ZipFile.Open(archive, ZipArchiveMode.Update))
+            {
+                ZipArchiveEntry inventoryEntry = zip.GetEntry("export/inventory.json")!, summaryEntry = zip.GetEntry("export/export.json")!;
+                JsonArray inventory;
+                JsonObject summary;
+                using (Stream stream = inventoryEntry.Open()) inventory = JsonNode.Parse(stream)!.AsArray();
+                using (Stream stream = summaryEntry.Open()) summary = JsonNode.Parse(stream)!.AsObject();
+                foreach (JsonNode? item in inventory) item!.AsObject().Remove("mode");
+                byte[] inventoryBytes = Encoding.UTF8.GetBytes(inventory.ToJsonString());
+                summary["inventoryHash"] = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(inventoryBytes));
+                inventoryEntry.Delete();
+                summaryEntry.Delete();
+                using (Stream stream = zip.CreateEntry("export/inventory.json").Open()) stream.Write(inventoryBytes);
+                using (Stream stream = zip.CreateEntry("export/export.json").Open()) stream.Write(Encoding.UTF8.GetBytes(summary.ToJsonString()));
+            }
+
+            string destination = Path.Combine(scratch, "restored");
+            CliHarness.Outcome restore = CliHarness.Ok("--json", "estate", "restore", "--from", archive, "--to", destination);
+            Assert.Equal(0, restore.Json.GetProperty("errors").GetInt32());
+            Assert.Equal(0, CliHarness.Run("--estate", destination, "estate", "check").Code);
+            Assert.Equal(File.ReadAllBytes(Path.Combine(root, "bootstrap")), File.ReadAllBytes(Path.Combine(destination, "bootstrap")));
+            if (!OperatingSystem.IsWindows())
+            {
+                // As before 0.9.3, nothing is executable; estate bootstrap is the repair the guides name for such a copy.
+                string script = Path.Combine(destination, "bootstrap");
+                Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(script) & UnixFileMode.UserExecute);
+                CliHarness.Ok("--estate", destination, "--json", "estate", "bootstrap");
+                Assert.Equal(UnixFileMode.UserExecute, File.GetUnixFileMode(script) & UnixFileMode.UserExecute);
+            }
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
         }
     }
 

@@ -66,7 +66,8 @@ vericairn --estate <estate root> estate bootstrap
 The command reports each script, `.gitattributes` and `.gitignore` as `written` or `unchanged`. It checks both files before writing and
 refuses to replace a differing copy unless you add `--force`; preserve any estate customizations
 before doing so. It restores the POSIX script's executable permission even when its bytes are
-unchanged. With `--json`, the `bootstrap` array gives each file's `path` and `status`. This refresh
+unchanged, which also repairs a copy that `estate restore` from a release before 0.9.3 wrote; from 0.9.3
+a restore keeps the executable mode itself. With `--json`, the `bootstrap` array gives each file's `path` and `status`. This refresh
 uses the installed command line's copies and leaves the manifest's pin in place.
 
 The scripts read `estate/manifest.json`. A release pin supplies the version and SHA-256 of every

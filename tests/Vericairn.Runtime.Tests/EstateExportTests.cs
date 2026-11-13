@@ -199,6 +199,58 @@ public sealed class EstateExportTests : IDisposable
     }
 
     [Fact]
+    public void RecordedModesRestoreTheExecutableBitWithIdenticalBytes()
+    {
+        string archive = WriteExport([("bootstrap", "#!/bin/sh\necho bootstrap\n"), ("docs/probe.md", "verified bytes")],
+            new JsonArray(Item("bootstrap", "#!/bin/sh\necho bootstrap\n", "100755"), Item("docs/probe.md", "verified bytes", "100644")));
+        string destination = Path.Combine(scratch, "restored");
+
+        EstateExport.Restore(archive, destination);
+
+        string script = Path.Combine(destination, "bootstrap"), document = Path.Combine(destination, "docs", "probe.md");
+        Assert.Equal(ContentHash.Sha256(Encoding.UTF8.GetBytes("#!/bin/sh\necho bootstrap\n")), ContentHash.Sha256(File.ReadAllBytes(script)));
+        Assert.Equal(ContentHash.Sha256("verified bytes"u8.ToArray()), ContentHash.Sha256(File.ReadAllBytes(document)));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserExecute, File.GetUnixFileMode(script) & UnixFileMode.UserExecute);
+            Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(document) & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute));
+        }
+    }
+
+    [Fact]
+    public void ExportWithoutModesFromAnEarlierReleaseRestoresAsBefore()
+    {
+        // Exports written before 0.9.3 list only path, bytes and hash for each member.
+        string archive = WriteExport([("bootstrap", "#!/bin/sh\n"), ("docs/probe.md", "verified bytes")]);
+        string destination = Path.Combine(scratch, "restored");
+        EstateExport.Restore(archive, destination);
+
+        Assert.Equal("#!/bin/sh\n", File.ReadAllText(Path.Combine(destination, "bootstrap")));
+        Assert.Equal("verified bytes", File.ReadAllText(Path.Combine(destination, "docs", "probe.md")));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(Path.Combine(destination, "bootstrap")) & UnixFileMode.UserExecute);
+        }
+    }
+
+    [Theory]
+    [InlineData("\"120000\"")]
+    [InlineData("\"040000\"")]
+    [InlineData("\"104755\"")]
+    [InlineData("\"100777\"")]
+    [InlineData("\"755\"")]
+    [InlineData("33261")]
+    [InlineData("null")]
+    public void ModeOtherThanARegularFileRestoresNothing(string mode)
+    {
+        JsonObject item = Item("docs/link.md", "target.md");
+        item["mode"] = JsonNode.Parse(mode);
+        string archive = WriteExport([("docs/first.md", "verified first"), ("docs/link.md", "target.md")], new JsonArray(Item("docs/first.md", "verified first", "100644"), item));
+        InvalidOperationException exception = AssertRefused(archive, "export.entry-mode", "docs/link.md");
+        Assert.Contains("never creates a link", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DuplicateRefusalLeavesAnExistingEmptyDestinationEmpty()
     {
         string archive = WriteExport([("docs/probe.md", "verified bytes"), ("docs/probe.md", "replacement")],
@@ -265,10 +317,16 @@ public sealed class EstateExportTests : IDisposable
         return path;
     }
 
-    private static JsonObject Item(string path, string content)
+    private static JsonObject Item(string path, string content, string? mode = null)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(content);
-        return new JsonObject { ["path"] = path, ["bytes"] = bytes.Length, ["hash"] = ContentHash.Sha256(bytes) };
+        var item = new JsonObject { ["path"] = path, ["bytes"] = bytes.Length, ["hash"] = ContentHash.Sha256(bytes) };
+        if (mode is not null)
+        {
+            item["mode"] = mode;
+        }
+
+        return item;
     }
 
     private static void WriteEntry(ZipArchive zip, string path, byte[] bytes)
