@@ -2842,11 +2842,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>The estate's checks with this machine's interrupted batches among them, as status, reconcile and inspect show them. Caller holds the gate.</summary>
+    /// <summary>
+    /// The estate's checks with this machine's interrupted batches among them, and from 0.9.3 the settled operator-action trails this
+    /// clone holds uncommitted (FIX-126), as status, the estate check, reconcile and inspect show them. Caller holds the gate.
+    /// </summary>
     private FindingList ChecksWithBatches(EstateModel model)
     {
         FindingList checks = RepositoryChecks(model);
         foreach (Finding finding in InterruptedBatches(model))
+        {
+            checks.Add(finding);
+        }
+
+        foreach (Finding finding in UncommittedTrails(model))
         {
             checks.Add(finding);
         }

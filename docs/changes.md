@@ -43,7 +43,8 @@ declared register member in the head checked by the pull request. The commit
 check requires exactly the record and its members, with their expected bytes;
 extra files, missing members and changed members are refused. Resuming with the
 same input reuses the stored signed record and members without signing or
-committing again. Operation receipts remain separate, uncommitted records.
+committing again. Operation receipts are written after that commit; from 0.9.3
+the next operator action in the same clone carries them into its own commit.
 See [Operator actions](operator-actions.md) for prerequisites and recovery.
 
 ## Push and open

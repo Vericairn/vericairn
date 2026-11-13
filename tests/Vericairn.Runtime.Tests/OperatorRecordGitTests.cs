@@ -117,6 +117,56 @@ public sealed class OperatorRecordGitTests : IDisposable
     }
 
     [Fact]
+    public void CarriedTrailRecordsAreCommittedWithTheRecordAndVerifiedExactly()
+    {
+        const string trail = "records/operation/2026-10/earlier-trail.json";
+        const string committed = "records/operation/2026-10/committed.json";
+        const string trailText = "{\"earlier\":true}\n";
+        Write(committed, "{}\n");
+        Git("add", "--", committed);
+        Git("commit", "-m", "A record already committed");
+        RecordCommitBasis start = adapter.Prepare(root);
+        commits = 0;
+        Write(trail, trailText);
+        var carried = new Dictionary<string, string>(StringComparer.Ordinal) { [trail] = ContentHash.Sha256(Encoding.UTF8.GetBytes(trailText)) };
+        var receipts = new HashSet<string>(StringComparer.Ordinal) { trail };
+        // Only an untracked path is reported untracked: not a committed record, nor one the working tree does not hold.
+        Assert.Equal([trail], adapter.Untracked(root, new HashSet<string>(StringComparer.Ordinal) { trail, committed, "records/operation/2026-10/absent.json" })!);
+        adapter.Branch(root, start, "operator/example", RecordFiles, receipts);
+        WriteRecord();
+        string head = adapter.Commit(root, "operator/example", start.Head, RecordFiles, receipts, carried);
+        Assert.Equal(new[] { RecordPath, trail }.Order(StringComparer.Ordinal), Git("diff-tree", "--no-commit-id", "--name-only", "-r", start.Head, head).Split('\n'));
+        Assert.Equal(trailText.TrimEnd(), Git("show", head + ":" + trail));
+        Assert.Contains("and carry 1 trail record of earlier actions", Git("log", "-1", "--format=%s", head), StringComparison.Ordinal);
+        Assert.Empty(Git("status", "--porcelain=v1", "--untracked-files=all"));
+        Assert.Empty(adapter.Untracked(root, receipts)!);
+        Assert.Equal(head, adapter.Commit(root, "operator/example", start.Head, RecordFiles, receipts, carried));
+        Assert.Equal(1, commits);
+        adapter.Verify(root, head, start.Head, RecordFiles, carried);
+        // The commit holds exactly the record and the carried records: without them it is not the original commit.
+        Assert.Throws<ProviderRefusedException>(() => adapter.Verify(root, head, start.Head, RecordFiles));
+    }
+
+    [Theory]
+    [InlineData("changed")]
+    [InlineData("not-a-record")]
+    [InlineData("own-file")]
+    public void ACarriedTrailRecordWithOtherBytesOrPathsRefusesBeforeCommitting(string difference)
+    {
+        const string trail = "records/operation/2026-10/earlier-trail.json";
+        const string trailText = "{\"earlier\":true}\n";
+        Write(trail, difference == "changed" ? "{\"changed\":true}\n" : trailText);
+        string path = difference switch { "not-a-record" => "docs/registers/decisions/member.md", "own-file" => RecordPath, _ => trail };
+        var carried = new Dictionary<string, string>(StringComparer.Ordinal) { [path] = difference == "own-file" ? ByteHash : ContentHash.Sha256(Encoding.UTF8.GetBytes(trailText)) };
+        var receipts = new HashSet<string>(StringComparer.Ordinal) { trail };
+        Git("checkout", "-b", "operator/example");
+        WriteRecord();
+        Assert.Throws<ProviderRefusedException>(() => adapter.Commit(root, "operator/example", basis.Head, RecordFiles, receipts, carried));
+        Assert.Equal(basis.Head, Git("rev-parse", "HEAD"));
+        Assert.Equal(0, commits);
+    }
+
+    [Fact]
     public void BranchingAndCommittingDoNotInvokeUserHooks()
     {
         foreach (string name in new[] { "post-checkout", "pre-commit" })
@@ -361,13 +411,161 @@ public sealed class OperatorRecordGitTests : IDisposable
         Assert.True(next.Ok, next.Message + " " + next.NextStep);
         Assert.Equal(before + 1, commits);
         Assert.Empty(Git("branch", "--list", first.Branch!));
-        Assert.Equal(next.Record!.Path, Git("diff-tree", "--no-commit-id", "--name-only", "-r", main, next.Head!));
+        // From 0.9.3 the commit also carries what finishing the first action wrote: the observation of its merge's target run (FIX-126).
+        string[] committed = Git("diff-tree", "--no-commit-id", "--name-only", "-r", main, next.Head!).Split('\n');
+        Assert.Contains(next.Record!.Path, committed);
+        string[] carried = [.. committed.Where(p => p != next.Record.Path)];
+        Assert.NotEmpty(carried);
+        EstateModel model = service.Session.Load();
+        HashSet<string> merge = [.. model.Chain(model.Current("operation").Single(o => EstateModel.BodyString(o, "action") == "change-merge"
+            && o.Body.GetProperty("target").GetProperty("head").GetString() == first.Head))];
+        Assert.All(carried, path =>
+        {
+            RecordEnvelope record = Assert.Single(model.Records, r => r.ExpectedPath == path);
+            JsonElement target = record.Body.GetProperty("target");
+            Assert.Equal(("change-observe", "target-run"), (EstateModel.BodyString(record, "action"), target.GetProperty("observation").GetString()));
+            Assert.Contains(target.GetProperty("operation").GetString()!, merge);
+        });
         Assert.Equal(next.Head + " " + main, Git("rev-list", "--parents", "-n", "1", next.Head!));
         Assert.All(Git("status", "--porcelain=v1", "--untracked-files=all").Split('\n'), line => Assert.StartsWith("?? records/operation/", line, StringComparison.Ordinal));
         Assert.Null(service.OperatorUnfinished().Action);
         Assert.Equal(2, remote.Pushes);
         Assert.Equal(0, service.Validate().Errors);
     }
+
+    [Fact]
+    public void ACompletedActionsTrailIsReportedUntilTheNextActionCarriesItIntoItsCommit()
+    {
+        using var estate = new TestEstate(3);
+        (EstateService service, RecordedRemote remote, RecordEnvelope[] milestones) = TwoMilestones(estate);
+        using EstateService owned = service;
+        OperatorRecordResponse first = service.OperatorRecord(Accept(estate, milestones[0]), TestContext.Current.CancellationToken);
+        Assert.True(first.Ok, first.Message + " " + first.NextStep);
+        Assert.Contains("until the next operator action carries it", first.NextStep, StringComparison.Ordinal);
+        byte[] firstRecord = File.ReadAllBytes(Path.Combine(root, first.Record!.Path));
+
+        // The first action's push and merge trail is written after its commit and stays untracked; status and the check name the action.
+        string[] trail = Untracked();
+        Assert.NotEmpty(trail);
+        Assert.All(trail, path => Assert.StartsWith("records/operation/", path, StringComparison.Ordinal));
+        FindingDto reported = Assert.Single(service.Check().Findings, f => f.Code == "operator.trail-uncommitted");
+        Assert.Equal(("warning", "operator-action:" + first.Record.Id), (reported.Severity, reported.Location));
+        Assert.Contains($"{trail.Length} records of the push and merge trail of operator action acceptance {first.Record.Id} of work-order:{milestones[0].Id}", reported.Message, StringComparison.Ordinal);
+        StatusResponse status = service.Status();
+        Assert.Contains("operator.trail-uncommitted", status.Text, StringComparison.Ordinal);
+        Assert.Contains("acceptance " + first.Record.Id, status.Text, StringComparison.Ordinal);
+        Assert.False(status.HasErrors, status.Text);
+
+        // As in the operator's clone: the pull request merged and the clone returned to main, the trail still untracked beside it.
+        Git("checkout", "main");
+        Git("merge", "--no-ff", "--no-edit", first.Branch!);
+        Git("branch", "-D", first.Branch!);
+        Assert.Equal(trail, Untracked());
+
+        // Only the settled trail travels: an unrelated untracked record still refuses the next action, which writes nothing.
+        WriteOutcome unrelated = service.NewRecord(new("work-status", estate.OperatorId, JsonSerializer.SerializeToElement(new { status = "submitted", note = "Again." }),
+            $"work-order:{milestones[1].Id}:{milestones[1].ComputedHash}"));
+        Assert.True(unrelated.Ok, unrelated.Problem?.Message);
+        int recorded = service.Session.Load().Records.Count;
+        OperatorRecordResponse refused = service.OperatorRecord(Accept(estate, milestones[1]), TestContext.Current.CancellationToken);
+        Assert.False(refused.Ok);
+        Assert.Contains("other changes", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(recorded, service.Session.Load().Records.Count);
+        Git("add", "--", unrelated.Written!.Path);
+        Git("commit", "-m", "Commit the unrelated record");
+        string main = Git("rev-parse", "HEAD");
+
+        // The next action carries every untracked record of the first trail into its own commit; the first record stays as it was.
+        OperatorRecordResponse next = service.OperatorRecord(Accept(estate, milestones[1]), TestContext.Current.CancellationToken);
+        Assert.True(next.Ok, next.Message + " " + next.NextStep);
+        Assert.Contains($"Its commit carried {trail.Length} trail records of earlier actions.", next.NextStep, StringComparison.Ordinal);
+        Assert.Equal(new[] { next.Record!.Path }.Concat(trail).Order(StringComparer.Ordinal), Git("diff-tree", "--no-commit-id", "--name-only", "-r", main, next.Head!).Split('\n'));
+        Assert.Equal(firstRecord, File.ReadAllBytes(Path.Combine(root, first.Record.Path)));
+        Assert.Contains($"and carry {trail.Length} trail records of earlier actions", Git("log", "-1", "--format=%s", next.Head!), StringComparison.Ordinal);
+
+        // Now only the next action's own trail waits, and the check names that action alone.
+        string[] left = Untracked();
+        Assert.NotEmpty(left);
+        Assert.Empty(left.Intersect(trail));
+        FindingDto now = Assert.Single(service.Check().Findings, f => f.Code == "operator.trail-uncommitted");
+        Assert.Contains("acceptance " + next.Record.Id, now.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(first.Record.Id, now.Message, StringComparison.Ordinal);
+        Assert.Equal(2, remote.Pushes);
+        Assert.Equal(0, service.Validate().Errors);
+
+        // The carried records validate in the commit itself, beside the record they followed.
+        string checkout = Path.Combine(scratch, "checked-commit");
+        Git("worktree", "add", "--detach", checkout, next.Head!);
+        FindingList findings = EstateChecks.Run(EstateLoader.Load(checkout));
+        Assert.False(findings.HasErrors, string.Join('\n', findings));
+    }
+
+    [Fact]
+    public void AnInterruptedCommitResumesWithTheTrailItPinnedToCarry()
+    {
+        using var estate = new TestEstate(3);
+        (EstateService service, RecordedRemote remote, RecordEnvelope[] milestones) = TwoMilestones(estate);
+        using EstateService owned = service;
+        Assert.True(service.OperatorRecord(Accept(estate, milestones[0]), TestContext.Current.CancellationToken).Ok);
+        string[] trail = Untracked();
+        string before = Git("rev-parse", "HEAD");
+        int committed = commits;
+        loseCommitReceipt = true;
+        OperatorRecordResponse first = service.OperatorRecord(Accept(estate, milestones[1]), TestContext.Current.CancellationToken);
+        Assert.False(first.Ok);
+        Assert.Equal(committed + 1, commits);
+        loseCommitReceipt = false;
+        service.Dispose();
+        using EstateService reopened = EstateService.Open(root);
+        reopened.Providers = new() { RecordCommitAdapter = adapter, PushAdapter = remote, SecretScanner = remote };
+        reopened.Providers.Register(remote.Memory);
+        OperatorRecordResponse resumed = reopened.OperatorRecord(Accept(estate, milestones[1]), TestContext.Current.CancellationToken);
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        Assert.Equal(committed + 1, commits);
+        Assert.Equal(new[] { resumed.Record!.Path }.Concat(trail).Order(StringComparer.Ordinal), Git("diff-tree", "--no-commit-id", "--name-only", "-r", before, resumed.Head!).Split('\n'));
+        Assert.Equal(2, remote.Pushes);
+    }
+
+    // An estate with two submitted milestones, committed in the repository, the operator's device admitted and a remote whose scans pass.
+    private (EstateService Service, RecordedRemote Remote, RecordEnvelope[] Milestones) TwoMilestones(TestEstate estate)
+    {
+        Git("rm", "--", "readme.txt");
+        RecordEnvelope repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Estate","role":"Estate","location":{"github":"Example/estate"},"visibility":"private"}""");
+        estate.Add("product", estate.OperatorId, $$"""
+            {"name":"Estate","slug":"estate","summary":"Test estate.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
+             "changes":{"provider":"memory-pull-requests","repository":"{{repository.Id}}","target":"main","requiredChecks":["tests"]} }
+            """);
+        RecordEnvelope[] milestones = [.. MilestoneKeys.Select(key =>
+        {
+            RecordEnvelope order = estate.Add("work-order", estate.OperatorId, $$"""{"key":"{{key}}","kind":"milestone","title":"Milestone {{key}}","intent":"Finish.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
+            estate.Add("work-status", estate.OperatorId, """{"status":"submitted","note":"Ready."}""", order.Reference);
+            return order;
+        })];
+        foreach (string file in Directory.EnumerateFiles(estate.Root, "*", SearchOption.AllDirectories))
+            Write(Path.GetRelativePath(estate.Root, file), File.ReadAllText(file));
+        RepositoryClones.Register(estate.Estate.Id, repository.Id, root);
+        EstateService service = EstateService.Open(root);
+        string device = service.DeviceCreate(new(estate.OperatorId, "Operator device", "file")).Written!.Id;
+        Assert.True(service.DeviceAdmit(new(device, estate.OperatorId, "Admit the operator.")).Ok);
+        Git("add", ".");
+        Git("commit", "-m", "Prepare the test estate");
+        var remote = new RecordedRemote(Git("rev-parse", "HEAD")) { ScanPasses = true };
+        service.Providers = new() { RecordCommitAdapter = adapter, PushAdapter = remote, SecretScanner = remote };
+        service.Providers.Register(remote.Memory);
+        return (service, remote, milestones);
+    }
+
+    private static OperatorRecordRequest Accept(TestEstate estate, RecordEnvelope order) => new("acceptance", estate.OperatorId,
+        JsonSerializer.SerializeToElement(new { statement = "I accept this milestone.", basis = Array.Empty<string>(), self = true }),
+        $"work-order:{order.Id}:{order.ComputedHash}", WaitSeconds: 0);
+
+    // The working tree's changes, each an untracked file, in path order.
+    private string[] Untracked() => [.. Git("status", "--porcelain=v1", "--untracked-files=all").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+        .Select(line =>
+        {
+            Assert.StartsWith("?? ", line, StringComparison.Ordinal);
+            return line[3..];
+        }).Order(StringComparer.Ordinal)];
 
     [Theory]
     [InlineData("decision", "branch")]

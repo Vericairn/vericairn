@@ -737,8 +737,10 @@ or publication authority is inferred from a check result.
 
 `operator record` requires repository-synced format 3, the operator's own admitted
 device and a matching changes declaration. It commits exactly the signed record
-and its required generated register members, verifying their paths and bytes;
-operation receipts remain separate, uncommitted estate records. Resume keeps the
+and its required generated register members, verifying their paths and bytes.
+Its operation receipts are written after that commit; from 0.9.3 the next operator
+action in the same clone carries them into its own commit, and until then they exist
+only in that clone, which status and the estate check report. Resume keeps the
 original input, stored signed record, generated members and operation identity
 without signing again. Known failures need reconciliation;
 uncertain effects need observation before retrying. Local checkpoints belong to that

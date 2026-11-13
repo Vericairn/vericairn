@@ -73,6 +73,18 @@ public sealed class LiveStore : IDisposable
         return command.ExecuteScalar() as string;
     });
 
+    /// <summary>Every metadata key that starts with the prefix, in key order.</summary>
+    internal IReadOnlyList<string> MetaKeys(string prefix) => Guard(() =>
+    {
+        var keys = new List<string>();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT key FROM meta WHERE substr(key, 1, length($prefix)) = $prefix ORDER BY key;";
+        command.Parameters.AddWithValue("$prefix", prefix);
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read()) keys.Add(reader.GetString(0));
+        return (IReadOnlyList<string>)keys;
+    });
+
     /// <summary>Sets a metadata value.</summary>
     public void SetMeta(string key, string value) => Guard(() =>
     {
