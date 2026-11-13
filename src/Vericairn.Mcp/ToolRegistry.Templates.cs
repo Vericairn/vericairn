@@ -46,7 +46,7 @@ public sealed partial class ToolRegistry
 
     private static JsonObject TemplateReviewArguments()
     {
-        JsonObject schema = Arguments(("path", "The document's repository-relative path."), ("outcome", "current, revised or needs-change."), ("summary", "What was checked."));
+        JsonObject schema = Arguments(("path", "The document's repository-relative path."), ("outcome", "current, revised or needs-change; revised declares that the reviewer revised the content itself, which counts as self review, so a reviewer of another principal's revision records current."), ("summary", "What was checked."));
         schema["properties"]!["sections"] = new JsonObject
         {
             ["type"] = "array", ["description"] = "For a template instance, the selected sections: id, outcome, fidelity and optional per-rule judgments (rule, verdict, summary, evidence hashes).",

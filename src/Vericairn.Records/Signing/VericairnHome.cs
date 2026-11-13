@@ -9,9 +9,24 @@ public static class VericairnHome
     /// <summary>Environment variable that overrides the location (tests, continuous integration, unusual machines).</summary>
     public const string EnvironmentVariable = "VERICAIRN_HOME";
 
+    /// <summary>
+    /// The home of the scope the calling code runs in, for a process that runs several isolated scopes side by side: the runtime's
+    /// tests give each test class its own home this way, since the environment variable is one per process. Null or empty outside a
+    /// scope, and always so in the product, which never sets it.
+    /// </summary>
+    internal static Func<string?>? Scope { get; set; }
+
+    /// <summary>The scope's own home when the calling code runs in one, which a process it starts is given; null otherwise.</summary>
+    internal static string? Scoped() => Scope?.Invoke() is { Length: > 0 } scoped ? System.IO.Path.GetFullPath(scoped) : null;
+
     /// <summary>The per-user state directory for this machine.</summary>
     public static string Path()
     {
+        if (Scoped() is string scoped)
+        {
+            return scoped;
+        }
+
         string? overridden = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(overridden))
         {

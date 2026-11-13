@@ -13,7 +13,11 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 21, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
+Revision 23, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
+
+Revision 22, November 12, 2026. Name the summary-only correction in `docs pin`'s overview and refusals, in the development build.
+
+Revision 21, November 12, 2026. Add `doctor --json`, JSON from `version`, `records describe`, `records hash`, `records format` and `recover compare`, and the commands that refuse `--json`, in the development build.
 
 Revision 20, November 12, 2026. Describe 0.9.2's command additions as released commands rather than development builds.
 
@@ -166,7 +170,7 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 | `--summary <text>` | Required. What this revision is or changes. |
 | `--title <text>` | Override the title. Otherwise carry the current pin's title; a first pin uses the file name without its extension. |
 | `--expected <id>` | Require this exact record id to be the current pin for the path. An old, unrelated or unknown id refuses the write. |
-| `--render-template` | Default false. Refresh existing template regions, or a converted revision history even when authored bytes are unchanged, in the pin's recoverable batch. Also admits root `README.md` template instances in format 3. |
+| `--render-template` | Default false. Refresh existing template regions, or a converted revision history even when authored bytes are unchanged, in the pin's recoverable batch. Also admits root `README.md` template instances in format 3. A plain whole-file document has neither, and the option is refused for it. |
 | `--convert-revisions` | Default false. In format 3, convert a Markdown document's opening revision lines to a generated history. Every existing line must match one distinct revision record. |
 | `--decision <id>` | The exact decision record carried by this revision, when one applies; rendered as `carries decision` in a generated line. |
 | `--json` | Print the record receipt as `{"path":"records/document-revision/...","id":"...","hash":"sha256:..."}`. The hash identifies the record; its body holds the document's byte hash. |
@@ -175,7 +179,7 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 
 Existing whole-file pins keep their behavior: the first pin is revision 1 and each later pin increments the current revision and supersedes that record. SHA-256 and byte count cover the exact file, including line endings and any byte-order mark. Media type follows the file extension: Markdown, plain text, JSON, YAML, HTML, XML, CSV, PDF, SVG, PNG and JPEG are recognized; other extensions use `application/octet-stream`.
 
-By default, unchanged bytes refuse even if the title or summary differs. Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
+By default, unchanged bytes refuse even if the title or summary differs. From 0.9.3 (FIX-120), that refusal and the refusal of `--render-template` for a plain whole-file document name the summary-only correction: a successor written with `records new document-revision` that pins the same path, hash and size ([living documents](living-documents.md#correcting-a-revisions-summary)). Paths outside the document directories, unavailable files, symbolic links, case aliases, whole generated documents and generated register members refuse. Authored documents may contain generated regions. A stale expected id or multiple current pins also refuses. These refusals record nothing. Without `--expected`, the runtime selects the current pin when the operation begins; clients that read a pin earlier should supply its id.
 
 For whole-file pins, two branches pinning the same predecessor still form a fork. `estate check` and `docs pin` identify both pins and the predecessor; a `reconciliation` keeps one successor and withdraws the others before pinning combined bytes. Converted histories instead order all revision records by recorded time and then id, and derive distinct ordinals from that order. Their `revision` integer is advisory. The latest record in this order is the current pin; all records and their actual predecessors remain in history.
 
@@ -817,6 +821,40 @@ upgrade's runtime step does that. An estate pinned to a source commit is refused
 ran on: the runtime by its release and process, another estate by its id, the commands as run in the estate's directory, and any
 other path in a finding's message as `<path>`; the exact commands for this machine are printed after the check, and `--json`
 gives them as `here`, never recorded.
+
+## `vericairn doctor --json` and JSON from every command (0.9.3)
+
+From 0.9.3 (FIX-119), every command that accepts the global `--json` writes decodable JSON on standard output with it, or
+refuses the option before it runs. `doctor --json` writes one object with the facts of its text report under stable names.
+`version`, `runtime`, `git`, `dotnet`, `estate`, `custody`, `enclave`, `records`, `search` and `daemon` are each an object of
+`state`, `value` and `detail`, and `stateWarnings` lists the per-user state whose permissions cannot be restricted, the report's
+`state` lines. `state` is `present`, `missing`, `unavailable` or `not-applicable`. `value` is the probe's main fact or `null`,
+such as the version, the tool's version line, the estate's path, the default custody or the serving daemon's process id.
+`detail` is the rest of the report's line or `null`.
+
+| Field | States |
+|---|---|
+| `version`, `runtime`, `custody`, `records` | `present` |
+| `git`, `dotnet` | `present`, or `missing` when the tool is not on `PATH` |
+| `estate` | `present`, or `missing` for a path that is not an estate root; `value` is the path either way |
+| `enclave` | `present` or `unavailable` on macOS, with the reason in `detail`; `not-applicable` elsewhere |
+| `search` | `present`, or `unavailable` with the reason |
+| `daemon` | `present` with its process, `missing` when commands run the embedded runtime, `not-applicable` outside an estate |
+
+```sh
+vericairn --json doctor
+```
+
+The text report is unchanged, and the release check's disclosure and notices stay on standard error with or without `--json`.
+`version --json` writes `{"version": "..."}`. `records describe --json` writes the type list (`reads`, `writesAtMost`, `types` with
+`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. `records hash --json` writes `{"hash": "..."}`,
+`records format --json` writes the files it `formatted` and those left `unchanged`, and `recover compare --json` writes
+`thisEstate`, `otherEstate`, `sameEstate` and the `onlyHere`, `onlyThere` and `differing` records by `type` and `id`.
+
+Three commands refuse `--json`: `runtime serve`, which serves until stopped and writes the service's log; `mcp serve`, whose
+standard output carries the MCP protocol; and `recover inspect`, whose report is text, while `status --json`, `devices list --json`
+and `estate reconcile --json` give the same facts as JSON. The refusal is a parse error: exit code 1, the reason on standard error
+and, as for any parse error, the usage help on standard output.
 
 ## Presence prompts on standard error (0.9.3)
 

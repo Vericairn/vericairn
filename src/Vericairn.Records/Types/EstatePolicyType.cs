@@ -32,7 +32,7 @@ public sealed class EstatePolicyType : IRecordType
         new("appliesTo", "object", true, "Tagged estate, product, work-orders or repository selection.", 3),
         new("rules", "object[]", true, "Unique stable key, namespaced kind, positive version and parameters for each rule.", 3),
         new("level", "remind|warn|refuse", true, "Level of every rule.", 3),
-        new("startsAt", "timestamp", true, "Activation no earlier than the first declaration.", 3),
+        new("startsAt", FieldKinds.Timestamp, true, "Activation no earlier than the first declaration.", 3),
         new("maxExceptionDays", "integer", true, "Positive maximum duration of any grant from its authoring time.", 3),
         new("predecessor", "reference", false, "Exact retired policy succeeded by a new identity and distinct key.", 3),
         new("retirement", "object", false, "Required only when retired: reason, findings disposition and optional successor identity.", 3),

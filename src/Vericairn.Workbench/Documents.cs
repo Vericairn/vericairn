@@ -126,6 +126,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>True while the goal shown is a run with a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>Work orders proposed for the goal shown that wait for its sponsor's approval.</summary>
+    public ObservableCollection<ProposedRow> Proposed { get; } = [];
+
+    /// <summary>True while the goal shown has a proposed work order waiting for its sponsor.</summary>
+    public bool HasProposed => Proposed.Count > 0;
+
     /// <summary>Reads the goals again and shows the one named, else the one shown, else the first open one.</summary>
     public async Task FillAsync(string? goal = null, CancellationToken cancellationToken = default)
     {
@@ -174,7 +180,9 @@ public sealed class GoalsWorkspace : Document
         Asks.Clear();
         Evaluations.Clear();
         Stops.Clear();
+        Proposed.Clear();
         Raise(nameof(HasStops));
+        Raise(nameof(HasProposed));
         IEstateApi? estate = api();
         if (selected is null || estate is null)
         {
@@ -232,7 +240,13 @@ public sealed class GoalsWorkspace : Document
             Stops.Add(row);
         }
 
+        foreach (ProposedRow row in view.Proposed)
+        {
+            Proposed.Add(row);
+        }
+
         Raise(nameof(HasStops));
+        Raise(nameof(HasProposed));
     }
 }
 
@@ -1147,7 +1161,10 @@ public sealed class LivingDocumentsWorkspace : Document
     /// <summary>What a review can find.</summary>
     public IReadOnlyList<string> Outcomes { get; } = ["current", "revised", "needs-change"];
 
-    /// <summary>current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due).</summary>
+    /// <summary>
+    /// current (the reviewer judges that the current exact bytes hold, whoever revised them), revised (the reviewer declares that it
+    /// revised the content itself, which counts as self review) or needs-change (it is stale and stays due).
+    /// </summary>
     public string Outcome { get => outcome; set => Set(ref outcome, value); }
 
     /// <summary>What was checked.</summary>

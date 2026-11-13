@@ -19,7 +19,24 @@ public static partial class DocumentChecks
     /// <param name="Name">The check.</param>
     /// <param name="Result">passed, failed, skipped or not-performed.</param>
     /// <param name="Summary">What it found.</param>
-    public sealed record Outcome(string Name, string Result, string Summary);
+    public sealed record Outcome(string Name, string Result, string Summary)
+    {
+        /// <summary>
+        /// What a failed check found, one entry per problem, at a repository-relative location: for links-resolve, each link that does
+        /// not resolve, at the document's path with its line and column. A review records only the summary; a refused clearance
+        /// reports these as its child findings.
+        /// </summary>
+        internal IReadOnlyList<Detail> Details { get; init; } = [];
+    }
+
+    /// <summary>One problem a failed check found.</summary>
+    /// <param name="Location">Repository-relative: the document's path, with line and column where the check knows them.</param>
+    /// <param name="Message">The check, what it found and why it fails.</param>
+    internal sealed record Detail(string Location, string Message);
+
+    // The links a check's summary names before it counts the rest; the refusal's child findings name every one.
+    internal const int SummaryLinks = 20;
+    private const int SummaryCharacters = 1400;
 
     /// <summary>
     /// Runs every check a declaration names against the document's text, answering the given trigger records. Links resolve in the
@@ -150,10 +167,11 @@ public static partial class DocumentChecks
     private static Outcome LinksResolve(string text, string documentPath, Func<string, bool> exists)
     {
         string directory = documentPath.Contains('/', StringComparison.Ordinal) ? documentPath[..documentPath.LastIndexOf('/')] : string.Empty;
-        var broken = new List<string>();
+        var broken = new List<(string Target, int Line, int Column, string? Resolved)>();
         foreach (Match link in LinkRegex().Matches(text))
         {
-            string target = link.Groups["target"].Value.Split('#')[0].Split('?')[0];
+            string written = link.Groups["target"].Value;
+            string target = written.Split('#')[0].Split('?')[0];
             if (target.Length == 0 || target.Contains("://", StringComparison.Ordinal) || target.StartsWith("mailto:", StringComparison.Ordinal) || target.StartsWith('/'))
             {
                 continue;
@@ -185,13 +203,33 @@ public static partial class DocumentChecks
 
             if (outside || segments.Count == 0 || !exists(string.Join('/', segments)))
             {
-                broken.Add(target);
+                // Line and column of the link's target, counting characters from 1.
+                int index = link.Groups["target"].Index;
+                int line = 1 + text.AsSpan(0, index).Count('\n');
+                int column = index - (index == 0 ? 0 : text.LastIndexOf('\n', index - 1) + 1) + 1;
+                broken.Add((written, line, column, outside || segments.Count == 0 ? null : string.Join('/', segments)));
             }
         }
 
-        return broken.Count == 0
-            ? new Outcome("links-resolve", "passed", "Every relative link resolves within the repository.")
-            : new Outcome("links-resolve", "failed", $"Links that do not resolve within the repository: {string.Join(", ", broken.Distinct(StringComparer.Ordinal))}.");
+        if (broken.Count == 0) return new Outcome("links-resolve", "passed", "Every relative link resolves within the repository.");
+        static string Why((string Target, int Line, int Column, string? Resolved) link) => link.Resolved is null
+            ? "which leads outside the repository"
+            : $"which names {link.Resolved}, not in the repository";
+        // A review records the summary in at most 2,000 characters, so it names the first links that fit and counts the rest.
+        var named = new List<string>();
+        foreach (var link in broken)
+        {
+            string entry = $"{link.Target} at line {link.Line}, column {link.Column}, {Why(link)}";
+            if (named.Count == SummaryLinks || named.Sum(n => n.Length + 2) + entry.Length > SummaryCharacters) break;
+            named.Add(entry);
+        }
+        string listed = named.Count == 0 ? string.Empty : ": " + string.Join("; ", named);
+        string rest = broken.Count == named.Count ? string.Empty
+            : (named.Count == 0 ? ", " : $"; and {broken.Count - named.Count} more, ") + "each named by a refused clearance of the document";
+        return new Outcome("links-resolve", "failed", $"Links in {documentPath} that do not resolve within the repository ({broken.Count}){listed}{rest}.")
+        {
+            Details = [.. broken.Select(l => new Detail($"{documentPath}:{l.Line}:{l.Column}", $"links-resolve: {l.Target} does not resolve, {Why(l)}."))],
+        };
     }
 
     [GeneratedRegex(@"\]\((?<target>[^)\s]+)(\s+""[^""]*"")?\)")]

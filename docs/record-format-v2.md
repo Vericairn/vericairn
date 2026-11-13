@@ -136,7 +136,8 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
   `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when it is activated, which grants its
   budget, or ends unstarted when it is abandoned; active is recorded by its sponsor, a person with the authority to
-  spend, or by an operator when an agent sponsors it, and impossible and abandoned by the sponsor or that operator (see
+  spend, or by an operator when an agent sponsors it, and impossible and abandoned by the sponsor or that operator,
+  impossible from 0.9.3 only on the evaluator's verdict of impossible (see
   [A goal's activation and acceptance](#a-goals-activation-and-acceptance)); nothing follows impossible or abandoned;
   a revised goal starts again from its activation. Achievement is never a status: it is the goal's acceptance, by its
   sponsor when the sponsor is a person and by an operator when an agent sponsors it.
@@ -448,9 +449,13 @@ impossible, and `findings` otherwise (`review.outcome`).
 
 The evaluator is a principal other than any step's author (`review.evaluator`). A goal's work is the work orders its
 plan gives and those of which any revision names the goal, by any revision, among its `inputs`, each represented by
-its current revision; the authors of its steps
-are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
-one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
+its current revision. From 0.9.3, when the goal's `plan.approval` is `sponsor-approves`, a work order that names it
+joins its work only once who decides for the goal approves it: that principal wrote the work order's revision then
+current, or recorded a `work-status` of `planned` or `active` on that exact revision since. Until then it is proposed
+for the goal, and a revision someone else writes later is proposed afresh; under `self-approves-ordinary` it joins at
+once, and the plan's own work orders always do. The authors of its steps
+are the contributor of every assignment of that work, or of work proposed for it, and every principal that recorded an
+attempt or a result under one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
 authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
 goal's current evaluation is the latest one of its exact revision that counts: one that gives a known verdict for
 each condition and whose author authored no step when it was written. A revised goal is evaluated afresh.
@@ -476,6 +481,13 @@ the goal's budget, unit by unit: `wallMinutes` and `attemptsPerStep` always, and
 `currency` where the goal states them; a unit the goal does not state is not granted, never granted without limit.
 Impossible and abandoned are recorded by the sponsor or by who decides for the goal. A status counts only when its
 author could record it, so an activation an agent wrote around the runtime activates nothing.
+
+Impossible is the evaluator's verdict, which the sponsor confirms. From 0.9.3 a new `impossible` status is refused
+unless the goal's current evaluation, by a principal who authored none of its steps and recorded before the status,
+judges at least one condition `impossible` (`goal-status.verdict`). The refusal names the missing verdict and the
+command that records it, `vericairn goal evaluate <goal> --by <evaluator> --verdict <n>:impossible:<reason>`. The rule
+is prospective: an `impossible` status already in the estate keeps its reading and still ends its goal, and
+`estate check` and `records validate` report each one without that verdict as information.
 
 A goal is achieved by an `acceptance` of its exact revision. Who accepts it is the operator's decision
 01M507XV4VBFYWMRN8WCXMXHX4, kept in one place:

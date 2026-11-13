@@ -94,7 +94,7 @@ public sealed partial class EstateService
         }
         string hash = ContentHash.Sha256(bytes);
         if (!request.RenderTemplate && previous is not null && EstateModel.BodyString(previous, "hash") == hash)
-            return Refused($"{request.Path} has unchanged bytes; nothing to pin (current pin {previous.Id}).");
+            return Refused($"{request.Path} has unchanged bytes; nothing to pin (current pin {previous.Id}). " + SummaryCorrection);
         revision = authored ? RevisionLines.History(model, request.Path).Count + 1 : previous is null ? 1 : previous.Body.GetProperty("revision").GetInt64() + 1;
         string title = request.Title ?? (previous is null ? null : EstateModel.BodyString(previous, "title"))
             ?? Path.GetFileNameWithoutExtension(request.Path);

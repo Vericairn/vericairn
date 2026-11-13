@@ -418,6 +418,41 @@ public static partial class EstateChecks
         }
     }
 
+    /// <summary>
+    /// The findings with each one about a record that a later revision supersedes marked as historical, naming that revision. Every
+    /// finding stays, with its code, severity and location: a correction never rewrites what was found in the record it corrects.
+    /// </summary>
+    internal static FindingList MarkHistorical(EstateModel model, IEnumerable<Finding> findings)
+    {
+        var marked = new FindingList();
+        foreach (Finding finding in findings)
+        {
+            if (SupersededRecord(model, finding.Location) is (RecordEnvelope record, string successor))
+            {
+                string by = model.ById.TryGetValue(successor, out RecordEnvelope? next) ? next.Type + " " + successor : successor;
+                marked.Add(finding with { Message = finding.Message + $" Historical: {record.Type} {record.Id} is superseded by {by}; this finding stays as evidence about the superseded revision." });
+            }
+            else
+            {
+                marked.Add(finding);
+            }
+        }
+
+        return marked;
+    }
+
+    // A finding located in a record file, at the file or within it ("#body.field" or ":line"), whose record a later revision supersedes.
+    private static (RecordEnvelope Record, string Successor)? SupersededRecord(EstateModel model, string location)
+    {
+        if (!location.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal)) return null;
+        int end = location.IndexOf(".json", StringComparison.Ordinal);
+        if (end < 0) return null;
+        string path = location[..(end + ".json".Length)];
+        string id = Path.GetFileNameWithoutExtension(path);
+        return model.ById.TryGetValue(id, out RecordEnvelope? record) && record.ExpectedPath == path && model.SupersededBy.TryGetValue(id, out string? successor)
+            ? (record, successor) : null;
+    }
+
     private static void CheckDocuments(EstateModel model, FindingList findings)
     {
         var retired = new HashSet<string>(model.Current("retirement").Where(r => EstateModel.BodyString(r, "retiredAt") is not null).Select(r => EstateModel.BodyString(r, "path") ?? string.Empty), StringComparer.Ordinal);

@@ -38,7 +38,16 @@ public static class EstateExport
     /// <summary>Entry name of the export description.</summary>
     public const string SummaryEntry = "export/export.json";
 
+    // Inventory modes, as Git records them: an executable member and every other member.
+    internal const string ExecutableMode = "100755";
+    internal const string RegularMode = "100644";
+
     private static readonly string[] CopiedTopLevel = ["estate", "objects", "design", "docs", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1", ".gitattributes", ".gitignore", ".mailmap", ".github"];
+
+    // Group and other execute follow the umask when a restore creates an executable file, as Git does on checkout.
+    private const UnixFileMode ExecutableCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+        | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
     /// <summary>Writes an export of an opened estate to a zip file.</summary>
     public static ExportSummary Write(EstateSession session, string zipPath, string? by = null)
@@ -60,7 +69,7 @@ public static class EstateExport
         {
             foreach (RecordFile record in records)
             {
-                Add(zip, inventory, record.Path, record.Bytes);
+                Add(zip, inventory, record.Path, record.Bytes, executable: false);
             }
 
             foreach (string hash in session.Objects.List())
@@ -68,7 +77,7 @@ public static class EstateExport
                 byte[]? bytes = session.Objects.Read(hash);
                 if (bytes is not null)
                 {
-                    Add(zip, inventory, EstateLayout.ObjectsDirectory + "/" + hash[ContentHash.Prefix.Length..], bytes);
+                    Add(zip, inventory, EstateLayout.ObjectsDirectory + "/" + hash[ContentHash.Prefix.Length..], bytes, executable: false);
                     objects++;
                 }
             }
@@ -78,14 +87,15 @@ public static class EstateExport
                 string full = Path.Combine(session.Root, entry);
                 if (File.Exists(full))
                 {
-                    Add(zip, inventory, entry, File.ReadAllBytes(full));
+                    Add(zip, inventory, entry, File.ReadAllBytes(full), Executable(full, entry));
                     documents++;
                 }
                 else if (Directory.Exists(full) && entry != EstateLayout.ObjectsDirectory)
                 {
                     foreach (string file in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
                     {
-                        Add(zip, inventory, EstateLayout.Relative(session.Root, file), File.ReadAllBytes(file));
+                        string relative = EstateLayout.Relative(session.Root, file);
+                        Add(zip, inventory, relative, File.ReadAllBytes(file), Executable(file, relative));
                         documents++;
                     }
                 }
@@ -195,6 +205,20 @@ public static class EstateExport
                 continue;
             }
 
+            // An export written before 0.9.3 records no mode; its members restore as they always did.
+            bool executable = false;
+            if (item.TryGetProperty("mode", out JsonElement mode))
+            {
+                string? value = mode.ValueKind == JsonValueKind.String ? mode.GetString() : null;
+                if (value is not (ExecutableMode or RegularMode))
+                {
+                    findings.Error("export.entry-mode", path, $"Refusing the mode {mode.GetRawText()} of '{path}': a member is a regular file, {ExecutableMode} when executable and {RegularMode} otherwise; a restore never creates a link, a directory or any other kind of file.");
+                    continue;
+                }
+
+                executable = value == ExecutableMode;
+            }
+
             byte[] bytes = ReadEntry(entry);
             if (bytes.LongLength != size || ContentHash.Sha256(bytes) != hash)
             {
@@ -202,7 +226,7 @@ public static class EstateExport
                 continue;
             }
 
-            verified.Members.Add(new VerifiedMember(entry, size, hash));
+            verified.Members.Add(new VerifiedMember(entry, size, hash, executable));
         }
 
         foreach (ZipArchiveEntry entry in members.Values.Where(e => e.FullName != InventoryEntry && e.FullName != SummaryEntry && !e.FullName.EndsWith('/')))
@@ -290,14 +314,21 @@ public static class EstateExport
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            // The verified inventory alone decides the mode, never the archive entry's attributes. Windows keeps no mode.
+            if (member.Executable && !OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = ExecutableCreateMode;
+            }
+
+            using var output = new FileStream(target, options);
             output.Write(bytes);
         }
 
         return (verified.Summary, verified.Findings);
     }
 
-    private sealed record VerifiedMember(ZipArchiveEntry Entry, long Size, string Hash);
+    private sealed record VerifiedMember(ZipArchiveEntry Entry, long Size, string Hash, bool Executable);
 
     private sealed class VerifiedExport(FindingList findings)
     {
@@ -320,16 +351,29 @@ public static class EstateExport
         return manifestBytes;
     }
 
-    private static void Add(ZipArchive zip, JsonArray inventory, string path, byte[] bytes)
+    // Windows keeps no execute permission, so there the first-party POSIX bootstrap script, which estate init and estate
+    // bootstrap always make executable, is recorded as executable and every other file as not.
+    private static bool Executable(string file, string relative) => OperatingSystem.IsWindows()
+        ? relative == "bootstrap"
+        : (File.GetUnixFileMode(file) & UnixFileMode.UserExecute) != 0;
+
+    private static void Add(ZipArchive zip, JsonArray inventory, string path, byte[] bytes, bool executable)
     {
-        WriteEntry(zip, path, bytes);
-        inventory.Add(new JsonObject { ["path"] = path, ["bytes"] = bytes.LongLength, ["hash"] = ContentHash.Sha256(bytes) });
+        string mode = executable ? ExecutableMode : RegularMode;
+        WriteEntry(zip, path, bytes, mode);
+        inventory.Add(new JsonObject { ["path"] = path, ["bytes"] = bytes.LongLength, ["hash"] = ContentHash.Sha256(bytes), ["mode"] = mode });
     }
 
-    private static void WriteEntry(ZipArchive zip, string path, byte[] bytes)
+    private static void WriteEntry(ZipArchive zip, string path, byte[] bytes, string? mode = null)
     {
         ZipArchiveEntry entry = zip.CreateEntry(path, CompressionLevel.Optimal);
         entry.LastWriteTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        if (mode is not null)
+        {
+            // The Unix file type and permissions sit in the high 16 bits, where unzip and other archive tools read them.
+            entry.ExternalAttributes = unchecked((int)(Convert.ToUInt32(mode, 8) << 16));
+        }
+
         using Stream stream = entry.Open();
         stream.Write(bytes);
     }

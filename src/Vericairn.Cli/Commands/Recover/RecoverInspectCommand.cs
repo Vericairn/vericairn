@@ -6,8 +6,10 @@ using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 
-internal sealed class RecoverInspectCommand : Command
+internal sealed class RecoverInspectCommand : Command, ITextOutputCommand
 {
+    public string WhyNotJson => "its report is text. status --json, devices list --json and estate reconcile --json give the same facts as JSON.";
+
     public RecoverInspectCommand(CommandContext context)
         : base("inspect", "What this copy knows, which devices can author from here, work in progress, unresolved effects and reconcile tasks.")
     {

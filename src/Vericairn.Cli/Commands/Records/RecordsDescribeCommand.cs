@@ -12,6 +12,6 @@ internal sealed class RecordsDescribeCommand : Command
     {
         var describeTypeArgument = new Argument<string?>("type") { Description = "Record type to describe; omit to list all types.", Arity = ArgumentArity.ZeroOrOne };
         Arguments.Add(describeTypeArgument);
-        SetAction(result => RecordDescriptions.Show(context, result.GetValue(describeTypeArgument)));
+        SetAction(result => RecordDescriptions.Show(context, result.GetValue(describeTypeArgument), result.GetValue(context.JsonOption)));
     }
 }

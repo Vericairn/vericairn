@@ -27,7 +27,7 @@ public sealed class CommunicationDelegationType : IRecordType
         new("scope", "person|assignment", true, "The personal scope delegated."),
         new("assignment", "ulid", false, "Required only for the assignment scope."),
         new("status", "active|revoked", true, "Revocation supersedes the grant; earlier authorized changes remain valid."),
-        new("expires", "timestamp", false, "No change at or after this time is authorized."),
+        new("expires", FieldKinds.Timestamp, false, "No change at or after this time is authorized."),
     ];
 
     /// <inheritdoc />

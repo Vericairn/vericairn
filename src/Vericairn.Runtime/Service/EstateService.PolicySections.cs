@@ -58,7 +58,8 @@ public sealed partial class EstateService
         foreach (PolicyRequirement requirement in sections.Evaluation.Requirements ?? [])
             checks.Info("policy.requirement-" + requirement.State, "decision:" + requirement.Decision.Id + "/" + requirement.Key,
                 $"{requirement.Action} {requirement.Policy}: {requirement.Change} {requirement.Reason} Decision {requirement.Decision.Hash}; recorded revision {requirement.Recorded?.Hash ?? "none"}; basis {sections.Evaluation.Basis}.");
-        return checks;
+        // From 0.9.3, a finding about a superseded record says so and names its successor; none is dropped (FIX-120).
+        return EstateChecks.MarkHistorical(model, checks);
     }
 
     private static void AddPolicySections(JsonObject json, PolicySections sections)

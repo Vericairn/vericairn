@@ -155,23 +155,33 @@ public sealed class BodyReader
         return text;
     }
 
-    /// <summary>Reads a record timestamp.</summary>
+    /// <summary>
+    /// Reads a record timestamp. Its form is checked before anything else, so a value in any other form, such as one with fractional
+    /// seconds or a numeric offset, is refused with the field's name and the required form; nothing is converted.
+    /// </summary>
     public string? Timestamp(string name, bool required)
     {
-        string? text = Text(name, required, 20);
-        if (text is null)
+        if (!TryGetRaw(name, required: false, out JsonElement value))
         {
+            if (required)
+            {
+                findings.Error("body.missing", Field(name), $"'{name}' is required: {TimestampRequirement}.");
+            }
+
             return null;
         }
 
+        string? text = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         if (!RecordParser.IsTimestamp(text))
         {
-            findings.Error("body.timestamp", Field(name), $"'{name}' must look like 2026-10-13T14:00:00Z.");
+            findings.Error("body.timestamp", Field(name), $"'{name}' must be {TimestampRequirement}.");
             return null;
         }
 
         return text;
     }
+
+    private const string TimestampRequirement = "a UTC time in whole seconds, " + RecordParser.TimestampForm + ", such as 2026-10-13T14:00:00Z, without fractional seconds or an offset";
 
     /// <summary>Reads an array of strings.</summary>
     public IReadOnlyList<string>? StringArray(string name, bool required, bool allowEmpty = true, int maxItemLength = 4000, Regex? itemPattern = null, string? patternHint = null)

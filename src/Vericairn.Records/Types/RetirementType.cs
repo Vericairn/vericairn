@@ -28,7 +28,7 @@ public sealed partial class RetirementType : IRecordType
         new("path", "path", true, "Repository-relative path of the temporary artifact."),
         new("reason", "string", true, "Why it exists."),
         new("condition", "string", true, "When it must be removed."),
-        new("retiredAt", "timestamp", false, "Set by the superseding record once the artifact is removed."),
+        new("retiredAt", FieldKinds.Timestamp, false, "Set by the superseding record once the artifact is removed."),
     ];
 
     /// <inheritdoc />

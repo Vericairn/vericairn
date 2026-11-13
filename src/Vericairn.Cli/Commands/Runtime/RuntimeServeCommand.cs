@@ -5,8 +5,10 @@ using System.CommandLine;
 
 namespace Vericairn.Cli;
 
-internal sealed class RuntimeServeCommand : Command
+internal sealed class RuntimeServeCommand : Command, ITextOutputCommand
 {
+    public string WhyNotJson => "it serves the estate until stopped and writes the service's log. runtime start --json starts it in the background and runtime status --json reports on it.";
+
     public RuntimeServeCommand(CommandContext context)
         : base("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.")
     {

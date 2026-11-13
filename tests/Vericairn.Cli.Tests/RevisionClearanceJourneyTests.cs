@@ -105,6 +105,61 @@ public sealed class RevisionClearanceJourneyTests
     }
 
     [Fact]
+    public void ASeparateReviewerClearsAnotherPrincipalsRevisionWithCurrentAndRevisedIsNamedAsSelfReview()
+    {
+        string root = CliHarness.TempDirectory("revision-clearance-outcomes");
+        string scratch = CliHarness.TempDirectory("revision-clearance-outcomes-scratch");
+        try
+        {
+            (string op, string builder, string reviewer, string product) = Initialize(root, scratch);
+            Write(root, "docs/guide.md", "# Guide\n");
+            Declare(root, scratch, op, "docs/guide.md", product, "independent", covers: false);
+
+            // The help says what each outcome declares.
+            string help = CliHarness.Run("docs", "review", "--help").Out;
+            Assert.Contains("whoever revised them", help, StringComparison.Ordinal);
+            Assert.Contains("counts as self review", help, StringComparison.Ordinal);
+
+            // The builder revises the document and pins the new bytes.
+            Write(root, "docs/guide.md", "# Guide\n\nRevised by the builder.\n");
+            Pin(root, "docs/guide.md", builder, "Revise the guide.");
+            Assert.Equal("due", Row(root, "docs/guide.md").GetProperty("state").GetString());
+
+            // A separate reviewer who records revised declares that it revised the content itself: a self review, refused by
+            // name, with current as the outcome that judges another principal's revision.
+            CliHarness.Outcome declared = CliHarness.Run("--estate", root, "--json", "docs", "review", "docs/guide.md", "--by", reviewer, "--outcome", "revised", "--summary", "Read the builder's revision.");
+            Assert.Equal(1, declared.Code);
+            Assert.Contains("document.cleared-by", declared.Out, StringComparison.Ordinal);
+            Assert.Contains("the outcome revised declares that this reviewer revised it, which counts as self review", declared.Out, StringComparison.Ordinal);
+            Assert.Contains("records current, which judges the current exact bytes, whoever revised them", declared.Out, StringComparison.Ordinal);
+            Assert.Equal(JsonValueKind.Null, Row(root, "docs/guide.md").GetProperty("clearance").ValueKind);
+
+            // The content's author is refused whichever outcome it records, and the refusal does not point it to current.
+            foreach (string outcome in new[] { "current", "revised" })
+            {
+                CliHarness.Outcome own = CliHarness.Run("--estate", root, "--json", "docs", "review", "docs/guide.md", "--by", builder, "--outcome", outcome, "--summary", "My own revision.");
+                Assert.Equal(1, own.Code);
+                Assert.Contains("document.cleared-by", own.Out, StringComparison.Ordinal);
+                Assert.Contains("a principal other than the one that wrote or revised its content", own.Out, StringComparison.Ordinal);
+                Assert.DoesNotContain("records current", own.Out, StringComparison.Ordinal);
+            }
+
+            // The separate reviewer's current records an independent clearance of the builder's exact bytes.
+            string review = Review(root, "docs/guide.md", reviewer);
+            JsonElement row = Row(root, "docs/guide.md");
+            Assert.Equal("current", row.GetProperty("state").GetString());
+            Assert.Equal(review, row.GetProperty("clearance").GetString());
+            JsonElement body = CliHarness.Ok("--estate", root, "--json", "records", "show", review).Json.GetProperty("body");
+            Assert.Equal("current", body.GetProperty("outcome").GetString());
+            Assert.Equal("independent-agent", body.GetProperty("independence").GetString());
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void CoveredPathsAreClearedOnlyByAReviewAndAFailingCheckKeepsARevisionFromClearing()
     {
         string root = CliHarness.TempDirectory("revision-clearance-checks");
