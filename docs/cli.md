@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 27, November 13, 2026. Describe 0.9.3's command additions as released commands rather than development builds.
+
 Revision 26, November 13, 2026. Add `estate first-authority`, which lists the self-admissions that could be the estate's first authority with their evidence and names one of the root operator's devices in the manifest, in the development build.
 
 Revision 25, November 13, 2026. `docs pass --before` passes an earlier release named as a source or predecessor and names the rule each location matched, in the development build.

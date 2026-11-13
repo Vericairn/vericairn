@@ -1,6 +1,6 @@
-# Record formats, Vericairn 0.9.2
+# Record formats, Vericairn 0.9.3
 
-Vericairn 0.9.2 reads record formats 1, 2 and 3. It writes an estate's own format,
+Vericairn 0.9.3 reads record formats 1, 2 and 3. It writes an estate's own format,
 at most 3; new estates start at 3. API version 1 remains the transport contract.
 Context, hand-over, reference inventories and readable renditions have their own
 artifact contracts and are not additional record formats.
@@ -241,7 +241,7 @@ alone or beside the manifest's, the estate check reports `history.root-ambiguous
 manifest's own is not witnessed, and no record counts until the manifest or the history that does not belong is removed; neither
 finding names an id to restore. A charter or self-admission that first appears after adoption is never witnessed first. When
 none is witnessed, the manifest decides, as the introduction says. The runtime writes `firstAuthority` when the root operator's
-first device admits itself, and the 0.9.2 upgrade writes it for an estate whose manifest names none, naming the first authority
+first device admits itself, and an upgrade to 0.9.2 or later writes it for an estate whose manifest names none, naming the first authority
 the estate reads; a release before 0.9.2 refuses a manifest that carries it. From 0.9.3 the root operator names it with
 `vericairn estate first-authority`, which writes the same field and changes nothing in how it is read.
 

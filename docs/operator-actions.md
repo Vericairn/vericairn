@@ -371,7 +371,7 @@ file still refuses the action. The new action's own trail is written after its c
 the action after it carries that.
 
 Until a commit holds it, a settled trail exists only in the clone that ran the action. `vericairn
-status` and `vericairn estate check` report each such action with a warning, code
+status`, `vericairn estate check`, `estate reconcile` and `recover inspect` report each such action with a warning, code
 `operator.trail-uncommitted` at `operator-action:<record id>`, naming the action's type, record id
 and subject and how many trail records wait. Running the next operator action clears the warning for
 the trail it carries; committing the records yourself, as before, clears it too. A fresh clone holds
