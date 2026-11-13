@@ -330,6 +330,15 @@ as `rule`. A recorded verification's summary now says that the guides hold no me
 current release, where it said no token of them stood outside history sections and labels, and its evidence quotes the rule with
 each location; the methods it records are unchanged.
 
+## Keys in forms Vericairn does not use (FIX-132)
+
+`RecordSigning.IsPublicKey` now returns false for any form of key it cannot use, where it threw for some, and
+`RecordSigning.Verify` and `RuntimeIdentityScheme.Verify` return false instead of throwing for such a key; no route,
+interface member, protocol type or record field is added or changed, and every key Vericairn makes reads as before. A
+public key in any other form, an elliptic-curve key that is not a named P-256 key with a 65-byte uncompressed point, is
+now not usable on every platform, even where a platform's import formerly took it, and a runtime identity pinned in such
+a form verifies no proof; an estate holding such a key sees a `device.public-key` finding for it.
+
 ## Judging costs (FIX-107, FIX-121, FIX-131)
 
 No route, interface member, protocol type or public member is added or changed, and every finding, refusal and reading is the same.
