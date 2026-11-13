@@ -18,6 +18,7 @@ public sealed class EstateModel
     private bool judging;
     private IReadOnlySet<string> notCounting = new HashSet<string>(StringComparer.Ordinal);
     private AuthorityReplay? authority;
+    private Dictionary<string, WorkOrderKey>? currentWorkOrderKeys;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -118,6 +119,7 @@ public sealed class EstateModel
     {
         applied = trust;
         authority = null;
+        currentWorkOrderKeys = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -153,6 +155,34 @@ public sealed class EstateModel
 
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
+
+    /// <summary>
+    /// Whether a current work order with another id than <paramref name="record"/>'s uses <paramref name="key"/> (FIX-107): read from a
+    /// map of the current work orders' keys, built in one pass the first time it is asked, so judging every work order's key costs time
+    /// in proportion to their number.
+    /// </summary>
+    internal bool AnotherCurrentWorkOrderUses(string key, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(record);
+        Dictionary<string, WorkOrderKey> keys = LazyInitializer.EnsureInitialized(ref currentWorkOrderKeys, () =>
+        {
+            var built = new Dictionary<string, WorkOrderKey>(StringComparer.Ordinal);
+            foreach (RecordEnvelope order in Current("work-order"))
+            {
+                if (!order.Body.TryGetProperty("key", out JsonElement named) || named.ValueKind != JsonValueKind.String) continue;
+                string text = named.GetString()!;
+                if (!built.TryGetValue(text, out WorkOrderKey seen)) built[text] = new(order.Id, false);
+                else if (!seen.Shared && seen.First != order.Id) built[text] = seen with { Shared = true };
+            }
+
+            return built;
+        });
+        return keys.TryGetValue(key, out WorkOrderKey found) && (found.Shared || found.First != record.Id);
+    }
+
+    /// <summary>The first current work order using a key, and whether one with another id uses it too.</summary>
+    private readonly record struct WorkOrderKey(string First, bool Shared);
 
     /// <summary>
     /// The estate's first charter, the one every later revision supersedes: the charter the manifest names, never displaced by another that
