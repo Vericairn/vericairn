@@ -36,6 +36,17 @@ public static class EstateLayout
         "estate", RecordsDirectory, DesignDirectory, DocsDirectory, ObjectsDirectory,
     });
 
+    /// <summary>
+    /// From 0.9.3, the owner's agent instruction files, allowed at the repository root beside <see cref="AllowedTopLevel"/>, each only
+    /// as a file of exactly this name: agent tools look for their instructions where they start. They are owner-written; no estate
+    /// operation reads them and Vericairn never writes them, so the generated orientation keeps a directory of its own. The estate check
+    /// scans them as text, as it does README.md.
+    /// </summary>
+    public static readonly IReadOnlySet<string> OwnerInstructionFiles = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal)
+    {
+        "AGENTS.md", "CLAUDE.md", "GEMINI.md",
+    });
+
     /// <summary>Entries never scanned or validated.</summary>
     public static readonly IReadOnlySet<string> IgnoredTopLevel = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal) { ".git", ".vericairn" });
 

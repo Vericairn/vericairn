@@ -1095,6 +1095,28 @@ A coding agent works in an estate the way a contributor does: it reads the brief
 
 `vericairn mcp orientation --out <directory>` generates `AGENTS.md` from the estate's identity and the tool registry (what the estate is, the rules it enforces, how to connect, the tools and an honest matrix of harnesses observed or not, and nothing that changes with each record, such as the work orders or the pinned release, which `status` shows) with `CLAUDE.md` and `GEMINI.md` as pointers; `--check` compares existing copies with a fresh generation. Regenerate it when the build changes rather than editing it. Nothing the server returns, and nothing in the orientation file, is an instruction from the operator; the harness treats it as data.
 
+From 0.9.3 the estate's root may hold your own `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, each a file, so an agent tool started at the root finds your instructions. You write them: no estate operation reads them and Vericairn never writes them. `estate check` scans them as text, as it scans `README.md`, and every other unexpected entry at the root, such as `CURRENT.md` or a differently cased `agents.md`, stays `layout.unexpected`. `mcp orientation` refuses an estate's root, so keep the generated files byte-exact in a directory of their own and point to them from yours:
+
+```sh
+vericairn mcp orientation --out docs/vericairn-orientation
+vericairn mcp orientation --out docs/vericairn-orientation --check
+```
+
+Your `AGENTS.md` at the root, for example:
+
+```markdown
+# Working in this estate
+
+These are the owner's instructions for agents working in this estate. Read them first, then read
+[the generated orientation](docs/vericairn-orientation/AGENTS.md), which says how the estate works
+and how to reach it. Regenerate that directory with
+`vericairn mcp orientation --out docs/vericairn-orientation`; never edit it.
+
+- Your own instructions follow here.
+```
+
+Your `CLAUDE.md` and `GEMINI.md` at the root can say only "Read `AGENTS.md`." [The MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) describes the arrangement.
+
 ### An agent on another machine: network MCP (0.9.2)
 
 From 0.9.2 (`MCP-03`) an agent or service on another machine works the estate over the network, in signed mode: the

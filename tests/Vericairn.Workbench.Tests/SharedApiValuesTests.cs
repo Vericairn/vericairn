@@ -42,7 +42,7 @@ public sealed class SharedApiValuesTests
     public void SharedSetsKeepTheirOrdinalMembershipAndCannotBeChanged()
     {
         IReadOnlySet<string>[] sets = [RecordParser.RequiredKeys, RecordParser.OptionalKeys, RecordParser.HashExcludedKeys,
-            EstateLayout.AllowedTopLevel, EstateLayout.IgnoredTopLevel];
+            EstateLayout.AllowedTopLevel, EstateLayout.IgnoredTopLevel, EstateLayout.OwnerInstructionFiles];
         foreach (IReadOnlySet<string> set in sets)
         {
             string first = set.First();

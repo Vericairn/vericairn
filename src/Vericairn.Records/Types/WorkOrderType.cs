@@ -158,13 +158,10 @@ public sealed class WorkOrderType : IRecordType
             context.Error("work.author", $"Authoring principal {context.Record.By} has no principal record.");
         }
 
-        if (key is not null && context.Model.IsCurrent(context.Record))
+        // One pass over a map of the current keys, rather than a scan of every current work order for each (FIX-107).
+        if (key is not null && context.Model.IsCurrent(context.Record) && context.Model.AnotherCurrentWorkOrderUses(key, context.Record))
         {
-            bool duplicate = context.Model.Current(Name).Any(other => other.Id != context.Record.Id && other.Body.TryGetProperty("key", out System.Text.Json.JsonElement k) && k.GetString() == key);
-            if (duplicate)
-            {
-                context.Error("work.duplicate-key", $"Another current work order already uses key {key}.");
-            }
+            context.Error("work.duplicate-key", $"Another current work order already uses key {key}.");
         }
     }
 }

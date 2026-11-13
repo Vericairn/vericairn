@@ -234,6 +234,12 @@ public sealed partial class EstateService
             return (null, new Problem("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
         }
 
+        if (record.Envelope.Type == "operation" && record.Envelope.Supersedes is { } superseded && model.ById.GetValueOrDefault(superseded) is { } predecessor
+            && OperationType.EffectChanges(record.Envelope, predecessor, record.RelativePath) is { Count: > 0 } effect)
+        {
+            return (null, new Problem("rejected", string.Join(" ", effect.Select(f => f.Message)), [.. effect.Select(f => new FindingDto("error", f.Code, f.Location, f.Message))]));
+        }
+
         // From 0.9.3 (FIX-116), a goal is recorded impossible only on its evaluator's verdict of impossible.
         if (record.Envelope.Type == "goal-status" && EstateModel.BodyString(record.Envelope, "status") == "impossible"
             && model.ById.TryGetValue(record.Envelope.Subject?.Id ?? string.Empty, out RecordEnvelope? goal) && goal.Type == "goal"

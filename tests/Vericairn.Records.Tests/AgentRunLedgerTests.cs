@@ -52,6 +52,23 @@ public class AgentRunLedgerTests
         Assert.Contains(findings, f => f.Code == "operation.budget");
     }
 
+    [Fact]
+    public void AnAgentRunKeepsItsOwnTargetRuleWithoutTheGenericOperationFindings()
+    {
+        // FIX-109 leaves agent runs to their existing rule: a moved target is an error against the run's intent, with no generic finding.
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope intent = ledger.Intent("moved", Small);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(intent.Body.GetRawText())!.AsObject();
+        body["status"] = "dispatched";
+        body["dispatchedAt"] = intent.At;
+        body["intent"] = "Run the builder on another branch.";
+        body["target"]!["workspace"] = "widget, branch work/w-2";
+        RecordEnvelope moved = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: intent.Id);
+        var findings = ledger.Estate.Load().Findings.Where(f => f.Location.StartsWith(moved.ExpectedPath, StringComparison.Ordinal)).ToList();
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-target-kept" && f.Severity == Severity.Error);
+        Assert.DoesNotContain(findings, f => f.Code is OperationEffectKeptTests.IntentCode or OperationEffectKeptTests.TargetCode);
+    }
+
     [Theory]
     [InlineData("known-failure", "canceled")]
     [InlineData("known-failure", "uncertain")]

@@ -178,7 +178,9 @@ before anything is dispatched, and every change of what is known is a supersedin
 `uncertain` when the provider cannot say whether the effect happened. The validators refuse an operation
 that starts in any state but not-started, a revision that changes the identity or provider, a transition
 the state language does not allow, a second current operation under the same identity, and a retry after
-an uncertain, failed or canceled outcome that does not say how it was reconciled. The transport response
+an uncertain, failed or canceled outcome that does not say how it was reconciled. From 0.9.3 a new revision
+also keeps the intent and every target fact of the revision it supersedes
+([record format](record-format.md#an-operation-keeps-its-intent-and-target-093)). The transport response
 is not the effect; `vericairn release submit` and `release observe` write these records.
 
 ## Rules that are enforced, not merely documented

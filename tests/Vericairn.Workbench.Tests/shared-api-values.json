@@ -51,6 +51,11 @@
     ".git",
     ".vericairn"
   ],
+  "Vericairn.Records.Estate.EstateLayout.OwnerInstructionFiles": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md"
+  ],
   "Vericairn.Records.Estate.EstateManifest.Profiles": [
     "repository-synced",
     "local-only"

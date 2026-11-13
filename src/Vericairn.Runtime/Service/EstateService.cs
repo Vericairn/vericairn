@@ -3085,6 +3085,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding with { Severity = Severity.Error });
         }
 
+        // From 0.9.3, a new operation revision keeps its predecessor's intent and target facts (FIX-109); revisions already in the estate
+        // keep their reading.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is OperationType.IntentKeptCode or OperationType.TargetKeptCode
+            && records.Any(r => f.Location == r.RelativePath + "#body.intent" || f.Location == r.RelativePath + "#body.target")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
         // From 0.9.2, a new record's author is a known principal (FIX-98); records already in the estate keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Code == RecordAuthorship.Code && records.Any(r => f.Location == r.RelativePath + "#by")))
         {

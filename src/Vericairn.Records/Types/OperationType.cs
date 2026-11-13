@@ -73,6 +73,20 @@ public sealed class OperationType : IRecordType
     public const string AgentRun = "agent-run";
 
     /// <summary>
+    /// A revision changes the intent of the revision it supersedes. From 0.9.3 the write boundary refuses a new revision with this
+    /// finding; a revision already in the estate keeps its reading, and validation reports it as information.
+    /// </summary>
+    internal const string IntentKeptCode = "operation.intent-kept";
+
+    /// <summary>
+    /// A revision changes or drops a target fact of the revision it supersedes. From 0.9.3 the write boundary refuses a new revision
+    /// with this finding; a revision already in the estate keeps its reading, and validation reports it as information.
+    /// </summary>
+    internal const string TargetKeptCode = "operation.target-kept";
+
+    private static readonly string[] OperationKeys = ["identity", "provider", "action"];
+
+    /// <summary>
     /// An agent run states its cap before it starts and keeps it, and its observed usage once settled, unit by unit; its intent, when it
     /// names its goal, is within the goal's budget (the agent-run ledger, <see cref="AgentRuns"/>); a stop records its facts as they were
     /// observed. Other operations carry none of these.
@@ -250,6 +264,53 @@ public sealed class OperationType : IRecordType
                 context.Error("operation.agent-run-settlement-kept", $"A settled agent run keeps its recorded '{fact.Name}' unchanged; evidence may only be appended and new facts must satisfy the record rules.");
             }
         }
+    }
+
+    /// <summary>
+    /// The information that a revision changes the effect of the operation revision it supersedes; empty when it keeps it (decision
+    /// 01M6WZSSDJDMMTJ6QF6KT45P92): a revision keeps its predecessor's intent and every target fact the predecessor recorded, adding only
+    /// facts it observed, such as the run a dispatch started, so a different effect or destination takes its own identity. A revision
+    /// that changes the identity, provider or action is judged by operation.identity instead. Agent runs keep their own rule, and
+    /// repository changes and account-holder package actions keep their targets by theirs. A retry after a known failure or a
+    /// cancellation that names its reconciliation reads as before: the retry path is unchanged. The rule is prospective: the write
+    /// boundary refuses a new revision with these findings, and a revision already in the estate keeps its reading.
+    /// </summary>
+    internal static IReadOnlyList<Finding> EffectChanges(RecordEnvelope record, RecordEnvelope previous, string location)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(previous);
+        string? status = EstateModel.BodyString(record, "status");
+        string? previousStatus = EstateModel.BodyString(previous, "status");
+        if (record.Type != "operation" || previous.Type != "operation" || EstateModel.BodyString(record, "action") == AgentRun
+            || OperationKeys.Any(key => EstateModel.BodyString(record, key) != EstateModel.BodyString(previous, key))
+            || previousStatus is "known-failure" or "canceled" && status is "dispatched" or "uncertain"
+                && !string.IsNullOrWhiteSpace(EstateModel.BodyString(record, "reconciliation")))
+        {
+            return [];
+        }
+
+        var findings = new List<Finding>();
+        if (EstateModel.BodyString(previous, "intent") is string intent && EstateModel.BodyString(record, "intent") is string current && intent != current)
+        {
+            findings.Add(new(Severity.Info, IntentKeptCode, location + "#body.intent", $"This revision changes the intent of {previous.Id}, which it supersedes. From 0.9.3 a new revision of an operation keeps its predecessor's intent: a different effect takes its own operation identity. A revision already in the estate keeps its reading."));
+        }
+
+        if (ChangeOperationRules.IsChange(record) || PackageRecordRules.IsAction(record)
+            || !previous.Body.TryGetProperty("target", out JsonElement recorded) || recorded.ValueKind != JsonValueKind.Object)
+        {
+            return findings;
+        }
+
+        JsonElement target = record.Body.TryGetProperty("target", out JsonElement t) && t.ValueKind == JsonValueKind.Object ? t : default;
+        List<string> changed = recorded.EnumerateObject()
+            .Where(fact => target.ValueKind != JsonValueKind.Object || !target.TryGetProperty(fact.Name, out JsonElement kept) || CanonicalJson.Serialize(kept) != CanonicalJson.Serialize(fact.Value))
+            .Select(fact => $"'{fact.Name}'").ToList();
+        if (changed.Count > 0)
+        {
+            findings.Add(new(Severity.Info, TargetKeptCode, location + "#body.target", $"This revision changes or drops target {(changed.Count == 1 ? "fact" : "facts")} {string.Join(", ", changed)} of {previous.Id}, which it supersedes. From 0.9.3 a new revision of an operation keeps every target fact its predecessor recorded and adds only facts it observed: a different destination takes its own operation identity. A revision already in the estate keeps its reading."));
+        }
+
+        return findings;
     }
 
     /// <summary>A settled run's usage states, for each charged unit its cap states, what was spent or that it was not reported.</summary>
@@ -538,6 +599,11 @@ public sealed class OperationType : IRecordType
             if (dispatchedAt is not null && string.CompareOrdinal(dispatchedAt, previous.At) < 0 && previousStatus == "not-started")
             {
                 context.Error("operation.intent-first", "The dispatch cannot precede the recorded intent.");
+            }
+
+            foreach (Finding finding in EffectChanges(context.Record, previous, context.Location))
+            {
+                context.Findings.Add(finding);
             }
         }
 
