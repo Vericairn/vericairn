@@ -215,10 +215,27 @@ From 0.9.2 the upgrade also names the estate's first authority in the manifest's
 operator's admission of its own first device, when the manifest names none, and the migration's changes say so.
 Releases before 0.9.2 refuse a manifest that carries it, so upgrade every clone that reads or writes the estate.
 An estate whose manifest names none while it holds more than one such self-admission is refused, as any estate
-with errors is. Name your first device's self-admission in the manifest's `firstAuthority` by hand, and remove
-every other self-admission of the root operator's device from the copy: naming the first makes your devices'
-admissions count again, but each other one still reads `signature.self-admission`, an error, and the upgrade
-refuses until it is gone ([the first authority](operator-guide.md#3-principals-devices-and-admission)).
+with errors is. From 0.9.3 you name your first device's self-admission with a command instead of editing the
+manifest by hand ([`vericairn estate first-authority`](cli.md#vericairn-estate-first-authority-093)):
+
+```sh
+vericairn estate first-authority
+vericairn estate first-authority --device <your first device id> --check
+vericairn estate first-authority --device <your first device id> --expect-plan <plan> --by <operator id>
+```
+
+The first lists each self-admission with its evidence: the device and its custody, whether it stands revoked,
+how many devices rest on it, how many records it signed and whether its signature verifies. The second shows the
+change to `estate/manifest.json` and its plan hash, writing nothing; the third writes it, as you, with that hash.
+The command names only one of your own devices whose self-admission's signature verifies, revoked or not, and
+refuses where the estate's history checkpoints already speak to the first authority. It does not replace every
+hand edit: in an estate that has adopted history checkpoints and whose manifest names an admission that is no
+candidate, the copy reads unsettled and the command refuses; there the repair is the operator's own edit of
+`firstAuthority` back to the self-admission the checkpoints witnessed, after comparing the copy with a head known
+elsewhere (`vericairn estate check --expect <checkpoint>`). Then remove every other self-admission of the root operator's device from the copy and commit the
+manifest with the records: naming the first makes your devices' admissions count again, but each other one still
+reads `signature.self-admission`, an error, which the command lists and leaves to you, and the upgrade refuses
+until it is gone ([the first authority](operator-guide.md#3-principals-devices-and-admission)).
 
 The command uses a recorded Vericairn release when one exists. Otherwise it anonymously
 reads the target's GitHub release, its tag and `SHA256SUMS`, downloads this machine's platform archive

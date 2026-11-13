@@ -40,6 +40,8 @@ the [release notice settings](software.md#newer-release-notices-073).
 File custody here is for disposable practice identities. For a real estate, use
 each person's own device and the strongest available custody, with presence where
 supported; follow [devices and admission](operator-guide.md#3-principals-devices-and-admission).
+When a presence prompt expires, is refused or times out while you enroll a device, follow
+[enrollment troubleshooting](enrollment-troubleshooting.md) and inspect before running anything again.
 Keep signing keys outside the repository and never give an agent a person's key.
 
 ```bash

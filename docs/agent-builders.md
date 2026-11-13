@@ -47,6 +47,8 @@ vericairn devices create --principal <agent id> --name "My agent's key"
 vericairn devices admit <agent device id> --by <operator id> --note "The agent's own key."
 ```
 
+When a presence prompt expires, is refused or times out while you create or admit a device, [enrollment troubleshooting](enrollment-troubleshooting.md) tells the endings apart and reconciles from what the estate holds: inspect before running anything again, and keep the principals, devices and admissions it already has.
+
 `records new principal` warns that no installed launcher routes to the agent's product: that is expected, since your agent runs in your own code, not through Vericairn's worker. Give it a work order and an assignment:
 
 ```sh

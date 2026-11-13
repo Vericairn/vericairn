@@ -242,7 +242,8 @@ manifest's own is not witnessed, and no record counts until the manifest or the 
 finding names an id to restore. A charter or self-admission that first appears after adoption is never witnessed first. When
 none is witnessed, the manifest decides, as the introduction says. The runtime writes `firstAuthority` when the root operator's
 first device admits itself, and the 0.9.2 upgrade writes it for an estate whose manifest names none, naming the first authority
-the estate reads; a release before 0.9.2 refuses a manifest that carries it.
+the estate reads; a release before 0.9.2 refuses a manifest that carries it. From 0.9.3 the root operator names it with
+`vericairn estate first-authority`, which writes the same field and changes nothing in how it is read.
 
 Canonical status adds `history`: whether the estate has adopted checkpoints, its heads
 by id and hash, how many records they witness, the unwitnessed tail and the standing

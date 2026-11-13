@@ -15,6 +15,7 @@ internal sealed class EstateCommand : Command
         Subcommands.Add(new EstateWritingExceptionsCommand(context));
         Subcommands.Add(new EstateCheckCommand(context));
         Subcommands.Add(new EstateCheckpointCommand(context));
+        Subcommands.Add(new EstateFirstAuthorityCommand(context));
         Subcommands.Add(new EstateExportCommand(context));
         Subcommands.Add(new EstateRestoreCommand(context));
         Subcommands.Add(new EstateUpgradeCommand(context));

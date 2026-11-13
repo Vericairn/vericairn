@@ -159,6 +159,7 @@ public static class OpenApiDocument
 
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/history/checkpoints"),
+        ("POST", "/v1/estate/first-authority"),
         ("POST", "/v1/estate/export"),
         ("GET", "/v1/reconcile"),
         ("GET", "/v1/recover/inspect"),
@@ -685,6 +686,14 @@ public static class OpenApiDocument
                 ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/HistoryCheckpointResponse" } } },
             };
         }
+        else if (method == "POST" && path == "/v1/estate/first-authority")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "FirstAuthorityResponse: how the estate reads its first authority and every self-admission that could be it with its evidence; with a device or an admission, the manifest change and its plan hash, written unless check was asked.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/FirstAuthorityResponse" } } },
+            };
+        }
         else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
         {
             responses["200"] = new JsonObject
@@ -696,7 +705,7 @@ public static class OpenApiDocument
             responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with written null and a problem; a rejection carries findings). A reconcile-required problem without written holds further writes until recovery." };
         }
 
-        if (path is "/v1/estate/upgrade" or "/v1/estate/export" or "/v1/history/checkpoints")
+        if (path is "/v1/estate/upgrade" or "/v1/estate/export" or "/v1/history/checkpoints" or "/v1/estate/first-authority")
         {
             responses["409"] = new JsonObject { ["description"] = "Not carried out (Problem)." };
         }
@@ -1071,6 +1080,16 @@ public static class OpenApiDocument
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
                 ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array"), ("authorityChanges", "array")),
                 "trigger", "applied", "adopted", "witnessed", "listed", "heads", "anchored", "notCounting", "byRevokedDevices", "deletedInHistory"),
+            ["FirstAuthorityRequest"] = Object(("by", "string"), ("device", "string"), ("admission", "string"), ("check", "boolean"), ("expectPlan", "string")),
+            ["FirstAuthorityCandidate"] = Required(Object(("admission", "string"), ("hash", "string"), ("at", "string"), ("path", "string"), ("device", "string"), ("name", "string"),
+                ("platform", "string"), ("custody", "string"), ("presence", "string"), ("principal", "string"), ("nameable", "boolean"), ("notNameable", "string"), ("named", "boolean"),
+                ("reads", "boolean"), ("witnessedFirst", "boolean"), ("revoked", "boolean"), ("admits", "integer"), ("recordsSigned", "integer"), ("signatureVerifies", "boolean"),
+                ("signatureProblem", "string")),
+                "admission", "hash", "at", "path", "nameable", "named", "reads", "witnessedFirst", "revoked", "admits", "recordsSigned", "signatureVerifies"),
+            ["FirstAuthorityChange"] = Required(Object(("manifest", "string"), ("before", "string"), ("after", "string")), "manifest", "after"),
+            ["FirstAuthorityResponse"] = Required(Object(("rootOperator", "string"), ("named", "string"), ("firstAuthority", "string"), ("adopted", "boolean"), ("unsettled", "boolean"),
+                ("findings", "array"), ("candidates", "array"), ("change", "object"), ("planHash", "string"), ("applied", "boolean"), ("remaining", "array")),
+                "adopted", "unsettled", "findings", "candidates", "applied", "remaining"),
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
         };
     }
@@ -1171,6 +1190,7 @@ public static class OpenApiDocument
 
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/history/checkpoints" => "HistoryCheckpointRequest",
+        "/v1/estate/first-authority" => "FirstAuthorityRequest",
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
         "/v1/pairings" => "PairingIssueRequest",

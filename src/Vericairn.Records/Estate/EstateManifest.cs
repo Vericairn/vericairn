@@ -210,6 +210,21 @@ public sealed partial class EstateManifest
         return CanonicalJson.SerializePrettyUtf8(document.RootElement);
     }
 
+    /// <summary>
+    /// The manifest's bytes with <c>firstAuthority</c> set to the admission given, replacing whatever it names, in canonical pretty form:
+    /// what <c>vericairn estate first-authority</c> writes from 0.9.3 (CODE-72), which decides beforehand whether the admission may be named.
+    /// </summary>
+    public static byte[] WithFirstAuthority(byte[] manifestBytes, string admission)
+    {
+        ArgumentNullException.ThrowIfNull(manifestBytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(admission);
+        if (System.Text.Json.Nodes.JsonNode.Parse(manifestBytes) is not System.Text.Json.Nodes.JsonObject manifest)
+            throw new InvalidOperationException("The manifest is not a JSON object.");
+        manifest["firstAuthority"] = admission;
+        using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
+        return CanonicalJson.SerializePrettyUtf8(document.RootElement);
+    }
+
     [System.Text.RegularExpressions.GeneratedRegex("^[0-9a-f]{40}$")]
     private static partial System.Text.RegularExpressions.Regex CommitPattern();
 }
