@@ -300,11 +300,14 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
     /// an earlier key. It is compared with the same estate in which only the first rotation follows a closing, which holds the same operators
     /// and rotations and still judges a closing, so the comparison measures what the other 119 closings add; an estate with no closing would
     /// skip judging closings altogether. The memory a loaded model keeps stays within twice that estate's, plus 8 MiB, and the load within
-    /// ten times its load, plus 150 ms. Each rotation is still checked against every earlier closed key by verifying its signatures under
-    /// that key, about 14,000 verifications, which took the load to about six times the first-only estate's on macOS; the bound leaves room
-    /// for slower verification elsewhere, and still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict was
-    /// kept under the closings it read (about thirteen times the first-only estate's load). The two estates are loaded in turn, three times
-    /// each, and the fastest load of each is compared.
+    /// ten times its load, plus 150 ms. Since FIX-121 the key-closing check recovers the keys of each rotation's two signatures once and
+    /// compares every earlier closed key with them, rather than verifying the signatures under each earlier closed key, about 14,000
+    /// verifications that took the load to 8.5 to 9 times the first-only estate's on macOS: both estates recover the same 238 signatures and
+    /// verify none under a closed key, which the test asserts. What the other 119 closings still add, about four times the first-only
+    /// estate's load on macOS, is mostly judging each closing against the closings before it, which judges which admissions count once for
+    /// each of those sets of closings. The bound still fails a return to the 3 to 4 s and 240 MiB this estate took when every strict verdict
+    /// was kept under the closings it read (about thirteen times the first-only estate's load). The two estates are loaded in turn, three
+    /// times each, and the fastest load of each is compared.
     /// </summary>
     [Fact]
     public void KeyRotationsOfTheRootOperatorsDeviceStayWithinTenTimesItsFirstClosing()
@@ -328,6 +331,18 @@ public sealed class HistoryCostTests(ITestOutputHelper output) : IDisposable
         output.WriteLine($"key rotations of the root operator's device, {Rotations:N0} over {Operators:N0} operators: {each.TotalMilliseconds:N0} ms and {eachKept / 1048576.0:N1} MiB kept with a closing before each; {first.TotalMilliseconds:N0} ms and {firstKept / 1048576.0:N1} MiB with a closing before the first only");
         Assert.True(each <= 10 * first + TimeSpan.FromMilliseconds(150), $"A closing before each rotation: {each.TotalMilliseconds:N0} ms against {first.TotalMilliseconds:N0} ms.");
         Assert.True(eachKept <= 2 * Math.Max(firstKept, 0) + 8 * 1048576L, $"A closing before each rotation keeps {eachKept / 1048576.0:N1} MiB against {firstKept / 1048576.0:N1} MiB.");
+
+        // The key-closing check's counters: each rotation after the first recovered once, in both estates, and no signature verified
+        // under a closed key.
+        foreach ((string label, HistoryFixture f) in (ReadOnlySpan<(string, HistoryFixture)>)[("a closing before each", closedEach), ("a closing before the first only", closedFirst)])
+        {
+            EstateTrust trust = f.Load().Trust;
+            output.WriteLine($"  {label}: {trust.KeyRecoveries:N0} signatures recovered, {trust.DroppedKeys:N0} recovered keys dropped, {trust.RecoveryFallbacks:N0} fallbacks, {trust.ClosedKeyVerifications:N0} verifications under a closed key");
+            Assert.Equal(2 * (Rotations - 1), trust.KeyRecoveries);
+            Assert.Equal(0, trust.DroppedKeys);
+            Assert.Equal(0, trust.RecoveryFallbacks);
+            Assert.Equal(0, trust.ClosedKeyVerifications);
+        }
 
         // One load, checking that the closings written act.
         static TimeSpan TimedLoad(HistoryFixture f, int closings)
