@@ -128,7 +128,9 @@ public static class RecordSigning
     /// makes has this form. Read before any import, so a key in another form (explicit curve parameters, another named curve, a
     /// compressed point, another algorithm) is refused the same way on every platform, without asking the platform or the framework's
     /// own reader, whose answers and errors for such keys differ. Bytes after the structure, and the bit string's count of unused bits,
-    /// are not read, as the platform's import does not read them, so such a key reads as it did before.
+    /// are not read, as the platform's import does not read them, so such a key reads as it did before. The runtime identity
+    /// (Vericairn.Protocol's RuntimeIdentityScheme) keeps its own copy of this check, written to the same rules; a test holds the two
+    /// to the same answers, so a change here is made there too.
     /// </summary>
     private static bool IsNamedP256(byte[] subjectPublicKeyInfo)
     {

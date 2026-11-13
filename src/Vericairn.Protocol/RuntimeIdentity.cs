@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers.Text;
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -51,6 +52,10 @@ public static class RuntimeIdentityScheme
     /// <summary>The route a client asks for a proof on, with the query parameter nonce.</summary>
     public const string Path = "/v1/runtime/identity";
 
+    private const string EcPublicKeyOid = "1.2.840.10045.2.1";
+
+    private const string NamedP256Oid = "1.2.840.10045.3.1.7";
+
     /// <summary>The digest the identity key signs.</summary>
     public static byte[] Digest(string estate, string certificate, string client, string nonce)
     {
@@ -73,8 +78,10 @@ public static class RuntimeIdentityScheme
 
     /// <summary>
     /// True when the proof answers this nonce for this estate, names the certificate the client's handshake showed and the client
-    /// certificate it presented, and verifies with the identity the client pinned. Any error importing the identity or verifying the
-    /// signature is a refusal, false like any other, except the fatal ones (out of memory, stack overflow, access violation).
+    /// certificate it presented, and verifies with the identity the client pinned. The identity is read only in the form of every key
+    /// Vericairn makes (<see cref="IsNamedP256"/>): one in any other form verifies nothing and is not handed to the platform. Any error
+    /// importing the identity or verifying the signature is a refusal, false like any other, except the fatal ones (out of memory,
+    /// stack overflow, access violation).
     /// </summary>
     public static bool Verify(RuntimeIdentityProof? proof, string identity, string estate, string certificate, string client, string nonce)
     {
@@ -87,10 +94,48 @@ public static class RuntimeIdentityScheme
 
         try
         {
+            byte[] subjectPublicKeyInfo = Base64Url.DecodeFromChars(identity);
+            if (!IsNamedP256(subjectPublicKeyInfo))
+            {
+                return false;
+            }
+
             using ECDsa key = ECDsa.Create();
-            key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(identity), out _);
+            key.ImportSubjectPublicKeyInfo(subjectPublicKeyInfo, out _);
             byte[] signature = Base64Url.DecodeFromChars(proof.Signature);
             return signature.Length == 64 && key.VerifyHash(Digest(estate, certificate, client, nonce), signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        }
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the bytes begin with the only form of SubjectPublicKeyInfo a runtime identity takes, read as DER: the algorithm
+    /// id-ecPublicKey with the named curve P-256 as its only parameter, and an uncompressed point of 65 bytes. Every key Vericairn makes
+    /// has this form. Read before any import, so an identity in another form (explicit curve parameters, another named curve, a
+    /// compressed point, another algorithm) is refused the same way on every platform, without asking the platform or the framework's
+    /// own reader, whose answers for such keys differ: some platforms take the P-256 key written with its parameters in full, others do
+    /// not. Bytes after the structure, and the bit string's count of unused bits, are not read. This assembly references no other
+    /// Vericairn assembly, so this is its own copy of the records' check of a key's form, written to the same rules; a test holds the
+    /// two to the same answers.
+    /// </summary>
+    private static bool IsNamedP256(byte[] subjectPublicKeyInfo)
+    {
+        try
+        {
+            AsnReader info = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER).ReadSequence();
+            AsnReader algorithm = info.ReadSequence();
+            if (algorithm.ReadObjectIdentifier() != EcPublicKeyOid || algorithm.ReadObjectIdentifier() != NamedP256Oid)
+            {
+                return false;
+            }
+
+            algorithm.ThrowIfNotEmpty();
+            byte[] point = info.ReadBitString(out _);
+            info.ThrowIfNotEmpty();
+            return point.Length == 65 && point[0] == 0x04;
         }
         catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
         {

@@ -165,7 +165,7 @@ public sealed class UnusableKeyTests
     /// named curves and for another algorithm; parameters over a characteristic-two field; every truncation of several of them and
     /// every position of them changed four ways; and bytes that are no key.
     /// </summary>
-    private static IEnumerable<byte[]> Candidates()
+    public static IEnumerable<byte[]> Candidates()
     {
         var bases = new List<byte[]>();
         for (int i = 0; i < 8; i++)
@@ -357,7 +357,7 @@ public sealed class UnusableKeyTests
     }
 
     /// <summary>The SubjectPublicKeyInfo of an elliptic-curve point under a named curve.</summary>
-    private static byte[] Named(string curve, byte[] point) => Spki(EcPublicKey, w => w.WriteObjectIdentifier(curve), point, 0);
+    public static byte[] Named(string curve, byte[] point) => Spki(EcPublicKey, w => w.WriteObjectIdentifier(curve), point, 0);
 
     private static byte[] Spki(string algorithm, Action<AsnWriter>? parameters, byte[] key, int unusedBits)
     {
