@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
@@ -409,6 +410,48 @@ public sealed class OperatorRecordTests
         Assert.Equal(3, reads);
         Assert.Equal(3, f.Service.Session.Load().Current("operation").Count(o => EstateModel.BodyString(o, "action") == "change-observe"
             && o.Body.GetProperty("target").GetProperty("observation").GetString() == "pull-request"));
+    }
+
+    [Fact]
+    public void EveryPresencePromptOfTheActionIsAnnouncedAndARepeatedObservationIsAnnouncedBeforeItAsks()
+    {
+        // FIX-124: the operator's device is stated as needing presence, its file key held by a recording stand-in for that custody.
+        using var f = new Fixture();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        int reads = 0;
+        f.Remote.Read = p => ++reads == 1 ? p with { Checks = [new(Required[0], Head, "queued", null)] } : p;
+        HashSet<string> before = [.. f.Service.Session.Load().Records.Select(r => r.Id)];
+        long start = f.Service.PresencePrompts(new()).Cursor;
+
+        OperatorRecordResponse result = f.Service.OperatorRecord(f.Request with { WaitSeconds = 1 }, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Ok, result.Message);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        // Announced before the first prompt: the record, the push (6), the opening (3), the first observation of the checks (3) and the
+        // merge with the first observation of the target run (9).
+        PresenceNotice announced = notices[0];
+        Assert.Equal("announced", announced.Kind);
+        Assert.Equal("operator record acceptance", announced.Action);
+        Assert.Equal(22, announced.Count);
+        Assert.Equal("acceptance", announced.Signatures[0].Type);
+        Assert.Equal("operation the action's new branch: records the intent to push the exact head, before its scan", announced.Signatures[1].Describe());
+        // The checks were still running at the first observation: the second is announced, with why, before it asks.
+        PresenceNotice added = Assert.Single(notices, n => n.Kind == "added");
+        Assert.Equal(3, added.Signatures.Count);
+        Assert.Equal(25, added.Count);
+        Assert.Contains("needs 3 more signatures than it announced, 25 in all, because the pull request's checks are still running, so it is observed again", added.Text, StringComparison.Ordinal);
+        PresenceNotice[] prompts = [.. notices.Where(n => n.Kind == "prompt")];
+        Assert.Equal(Enumerable.Range(1, 25), prompts.Select(p => p.Index!.Value));
+        Assert.True(prompts[12].Sequence < added.Sequence && added.Sequence < prompts[13].Sequence);
+        Assert.All(prompts, p => Assert.Equal(p.Index <= 13 ? 22 : 25, p.Count));
+        Assert.DoesNotContain(notices, n => n.Kind == "revised");
+        Assert.Equal("Signed 25 of 25.", notices[^1].Text);
+        // The count is exactly what the action signed with the operator's device, each with its reason in custody's prompt.
+        Assert.Equal(25, f.Service.Session.Load().Records.Count(r => !before.Contains(r.Id) && r.Signatures.Any(s => s.Device == f.Device)));
+        Assert.Equal(25, custody.Reasons.Count);
+        Assert.StartsWith("sign Vericairn signature 25 of 25: operation ", custody.Reasons[^1], StringComparison.Ordinal);
     }
 
     [Fact]

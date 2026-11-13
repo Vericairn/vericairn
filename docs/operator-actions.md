@@ -226,7 +226,10 @@ Refresh the listing and inspect the changed evidence before selecting again.
 
 The command uses the same admitted-device signing path as `operator record`, requiring a signature
 even in an estate that permits unsigned records. The installed custody interface signs one record
-at a time, so a device that requires presence checks it once per acceptance. All selected records
+at a time, so a device that requires presence checks it once per acceptance. From 0.9.3 every
+selected acceptance is announced before the first prompt, and each prompt says which signature of
+how many it is and what it signs, as the [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
+describes; a declined prompt stops the selection, and the last line says how many were signed. All selected records
 are signed and validated before the batch starts storing them; an evidence or authority refusal
 writes no acceptance. An interrupted storage operation retains its receipts and journal for
 reconciliation, using the existing batch recovery mechanism. Inspect those receipts before retrying.
@@ -258,7 +261,10 @@ vericairn operator record acceptance --by <operator-id> --subject release:<candi
 
 The body comes from standard input; `--body acceptance.json` also accepts a file. The command
 uses the existing record authoring and device signing path, including the device's presence prompt
-where required. It requires a signature even when the estate otherwise permits unsigned records.
+where required. Every operation it records is signed by the same device, so a device that needs
+presence asks for each: from 0.9.3 the command announces them before the first prompt, 22 for a new
+action, and an observation it repeats while checks run before that observation asks, as the
+[operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) lists. It requires a signature even when the estate otherwise permits unsigned records.
 It cannot borrow another principal's authority or device, and it never receives or retains a key.
 
 The estate must use repository-synced storage at record format 3. Its repository must be registered

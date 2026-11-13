@@ -191,6 +191,26 @@ journal, or stopping, 503 with `unavailable`, which a follower retries.
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#the-event-journal-and-the-api-stream-watch-05) lists
 the additions.
 
+## Presence prompts (0.9.3)
+
+From 0.9.3 (FIX-124), `POST /v1/presence/prompts` reads the presence notices of operator actions on the runtime's machine:
+`IEstateApi.PresencePrompts` and `PresencePromptsAsync`, which the SDK's `VericairnClient` and `CancellationBoundApi`
+carry. Every signature the runtime makes with a key that needs its owner's presence is counted against the action that asks
+for it. Its body, `PresencePromptsRequest`, names `after`, the position the reader holds (the runtime's newest when omitted),
+and `wait`, 0 to 25 seconds to wait for a notice (0 by default). `PresencePromptsResponse` carries the `notices` after that
+position, oldest first, and the `cursor` to continue from; a position newer than the runtime's, as after a restart, delivers
+every notice it keeps (the newest 256). Each `PresenceNotice` has its `sequence`, its `kind`, the `action` (such as
+`operator close` or `release submit 0.9.3`), the `count` of signatures announced so far, how many were `made`, its
+`signatures` (each `PresenceSignature`: the record `type`, the `key` a person knows it by and the `purpose` signing it
+authorizes), the `text` a client prints and, for a prompt, its `index` from 1. The kinds come in order: `announced` before the
+first prompt, listing every record; `added` before signatures the action did not announce, with why; `revised` when the path
+changed before the signatures not yet asked for, listing what remains; `prompt` at each, "Signature k of n" with what it
+signs; and `finished` with how many were signed. The reason the key's own prompt shows, such as the macOS system dialog
+through the `vericairn-enclave` helper, carries the same count and the record's type, key and purpose in one sentence of at
+most 200 characters, with no secret or machine path. Notices are kept in memory and are never records. The route writes
+nothing, is read over the local socket only (a device-signed request is refused with `401`), and is not exposed through MCP;
+a `wait` outside 0 to 25 answers 400. A runtime of an earlier release has no such route, and a client then shows nothing.
+
 ## Network MCP at /mcp (0.9.2)
 
 From 0.9.2 (`MCP-03`) the daemon serves the Model Context Protocol over Streamable HTTP at `/mcp` on its loopback and
@@ -783,7 +803,7 @@ What acts on the runtime's own machine is refused: `POST /v1/shutdown`,
 `/v1/pairings`, `/v1/runtime/certificate`, `/v1/releases/submit` and `/v1/releases/observe` (which use the
 release provider's credentials on that machine), `/v1/objects`, `/v1/runs` and `/v1/goals/{id}/step`, which
 launch coding agents there, and from 0.9.1 `/v1/runs/prepare`, which prepares a run's workspace there (stopping a
-run is not refused); `/v1/harness-qualifications`, which runs local
+run is not refused); from 0.9.3 `/v1/presence/prompts`, which names what the person at that machine is asked to sign there; `/v1/harness-qualifications`, which runs local
 probes and accepts a local command override; applying an upgrade, though not its plan (`check`);
 a record of type `device`; and any request that names a `recovery` key file. A refusal is `401` with a problem of code `denied`,
 and the connection is closed. The daemon always runs as a production host, so no answer carries a stack trace.
@@ -1037,6 +1057,7 @@ Remote support beyond what the Remote guide describes, and local-network pairing
 | `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, whether its launcher is generic, optional event-stream `liveness` and settled workspace `scope`), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
 | `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`; from 0.9.0, when the run's supervising worker process and its harness's boundary are gone and nothing was observed for longer than its stall limit, the stop also settles the run as exited without observation (`known-failure`), and `message` says so. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The main observation wait is capped at 30 seconds, whatever grace the request names, with a bounded settlement wait after exit; the response reports what is observed so far, and clients poll for later facts. From 0.6.0 |
 | `POST /v1/runs/{id}/settle` | Retry an exited run's unrecorded settlement from its retained local observation (`RunSettleRequest`: by, and from 0.9.0 optionally recordsChecked, which confirms no branch or copy of the estate holds a settlement and is required when the observation is already marked settled while the records hold none; see [API compatibility for 0.9.0](api-compatibility-0.9.0.md)), using the same authority as stopping it. Returns `RunSettleResponse` (run, status, message, ok, operation, problem). Charges observed usage and releases the branch on success; refuses in-flight or already settled runs, reports `no-observation` on a machine that did not supervise the run, and reports a missing, unreadable or inconsistent observation in its own run directory as unresolved. The runtime also attempts recovery when it starts. From 0.8.4. |
+| `POST /v1/presence/prompts` | From 0.9.3: the presence notices of operator actions on this machine after a position, as a long poll of up to 25 seconds (`PresencePromptsRequest`, `PresencePromptsResponse`); local socket only, writes nothing ([presence prompts](#presence-prompts-093)) |
 | `POST /v1/releases/check` | Read-only submission admission at the exact commit and product hash, from 0.8.3. Returns `ReleaseResponse.check` with all objections and next actions; no presence, intent, signing, retention or dispatch. |
 | `POST /v1/releases/submit` | Submit a release as intent before effect, on the runtime's machine (refused over the local network, as observing is, since both use the provider's credentials there): the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |

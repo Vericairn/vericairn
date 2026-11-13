@@ -64,7 +64,7 @@ public sealed partial class EstateService
     /// Signed evidence needs its exact subject, an expected hash and an admitted device whose key this runtime holds. A refusal names
     /// each one missing; a supplied hash that is no longer current is a conflict instead.
     /// </summary>
-    private static WriteOutcome? MissingEvidencePreconditions(EstateModel model, RecordDraft draft, string subjectType, bool subjectPinned, string? expected,
+    private WriteOutcome? MissingEvidencePreconditions(EstateModel model, RecordDraft draft, string subjectType, bool subjectPinned, string? expected,
         string expecting, string what, string? hint = null)
     {
         List<string> missing = [];

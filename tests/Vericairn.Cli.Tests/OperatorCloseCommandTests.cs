@@ -5,6 +5,7 @@ using System.CommandLine;
 using System.Text.Json.Nodes;
 using Vericairn.Cli;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
@@ -159,6 +160,43 @@ public sealed class OperatorCloseCommandTests
             Assert.Empty(f.Estate.Load().OfType("acceptance"));
         }
         finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public void TheCommandLineAnnouncesEveryAcceptanceBeforeItsFirstPromptAndCountsEachPrompt()
+    {
+        // FIX-124: the operator's file device is stated as needing presence, its key held by a recording stand-in for that custody.
+        using var f = new OperatorCloseFixture();
+        var first = f.Add("STEP-1");
+        var second = f.Add("STEP-2");
+        f.Api.KeyStores = [new RecordingCustody(VericairnHome.Path())];
+        f.Api.PresenceRequired = device => device == f.Device;
+
+        CliHarness.Outcome outcome = Run(f, "--all", "--by", f.Estate.OperatorId);
+
+        Assert.Equal(0, outcome.Code);
+        Assert.Equal($"""
+            operator close asks for your presence twice, once for each record it signs:
+              1. acceptance STEP-1: accepts result {first.Result.Id} at its exact hash
+              2. acceptance STEP-2: accepts result {second.Result.Id} at its exact hash
+            Signature 1 of 2: acceptance STEP-1: accepts result {first.Result.Id} at its exact hash
+            Signature 2 of 2: acceptance STEP-2: accepts result {second.Result.Id} at its exact hash
+            Signed 2 of 2.
+
+            """.ReplaceLineEndings("\n"), outcome.Err);
+        Assert.DoesNotContain("Signature", outcome.Out, StringComparison.Ordinal);
+        Assert.Equal(2, f.Estate.Load().OfType("acceptance").Count());
+    }
+
+    [Fact]
+    public void ACloseThatSignsNothingWithPresencePrintsNoAnnouncement()
+    {
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        CliHarness.Outcome outcome = Run(f, "--all", "--by", f.Estate.OperatorId);
+        Assert.Equal(0, outcome.Code);
+        Assert.Equal(string.Empty, outcome.Err);
+        Assert.Single(f.Estate.Load().OfType("acceptance"));
     }
 
     private static CliHarness.Outcome Run(OperatorCloseFixture fixture, params string[] arguments) =>

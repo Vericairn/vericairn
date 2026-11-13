@@ -215,6 +215,43 @@ You type a passphrase of at least twelve characters, or pass it on the first lin
 
 Rules the tool enforces here: only the root operator or a principal granted `administer` may author a principal record; a device record is signed by its own key to prove possession, and each later revision by the device in the name of its identity. An admission is authored by the operator or under `administer` authority, is signed in record format 2, and stays in force across the device's renames and rotations. A format-2 admission has no `scope` field. An agent principal that records operations and releases needs an authority with the `local-engineering` scope (section 4).
 
+### Presence prompts, announced and counted (0.9.3)
+
+A device that needs its owner's presence asks once for every record it signs; one prompt never covers two signatures. From
+0.9.3 (FIX-124), an operator action, a release step or a single write that signs with such a device announces every record it
+will sign before the first prompt, each with its type, the key you know it by and what signing it authorizes. At each prompt the
+command line prints `Signature k of n: <what it signs>` on standard error, Workbench writes the same line to its status and
+activity log, and the system dialog's reason, which the `vericairn-enclave` helper passes to macOS, says the same in one bounded
+sentence that carries no secret or machine path. When the action ends it says how many it signed (`Signed 4 of 4.`). A command
+that signs nothing with presence prints nothing of this.
+
+The count stays true for what the action signs. When it must sign more than it announced, for example observing a pull request
+again because its checks are still running, it announces the addition, with why, before the first of the added prompts. When its
+path changes before the prompts it has not yet asked for, it announces the new remainder. When it stops part way, by a refusal,
+a declined prompt or a failure, its last line says how many of the announced signatures it made, and a prompt that was declined
+is named as not made. Standard output keeps the command's own answer, so `--json` output stays one JSON document. The runtime
+that signs keeps these notices in memory for the clients on its machine (`POST /v1/presence/prompts`, local socket only); they
+are never records, and a daemon of an older release shows none.
+
+With a device that needs presence, the release and acceptance steps ask for these prompts, in this order. "Format 3" is an
+estate at record format 3, where the release evidence is written only after a trial signature, never stored, proves the device
+can sign it.
+
+| Step (release flow step) | Prompts |
+| --- | --- |
+| `release submit` (`submit`) | 5 at format 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent, a trial signature before dispatch, a trial signature of the dispatch receipt and the receipt. One fewer before adoption (no checkpoint), and one fewer below format 3 (no trial of the receipt). An admission that changes before dispatch replaces the last two with the intent's cancellation, or records the reserved intent again first. |
+| `release observe` of a finished build (`candidate`) | 4 at format 3: a trial signature and the operation's revision, then a trial signature and the candidate; 2 below format 3. The revision alone, with its trial at format 3, when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (2 more at format 3), and is announced with the rest; while the build still runs, the observation signs that alone. |
+| `release observe` of the publication (`publish`) | 2 at format 3: a trial signature and the published revision; 1 below format 3. |
+| The operator's acceptance of a candidate or of finished work (`accept`, `close`) with `records new` or Workbench | 1. |
+| The same acceptance with `operator record` | 22 for a new action: the record, 6 for the push (its intent, its dispatch, the 3 records of observing the pushed branch and its outcome), 3 for the opening, 3 for the first observation of the pull request's checks, and 9 for the merge (its intent, 3 for observing the pull request, its dispatch, its outcome and 3 for observing the target branch's run at the merge commit). Each further observation while the checks or that run are still running adds 3, announced before it asks. A resumed action leaves out what its records show done; finishing an earlier merged action first adds 3. |
+| `operator close` (`close`) | 1 per selected step's acceptance. |
+| `operator unfinished --finish` | 3 per observation of the target branch's run. |
+| `goal activate`, `goal accept` | 1 each. |
+| `goal step` | 2 for a person's step (the assignment and the ask) or an agent's step routed now (the assignment and the run's intent); 1 for an ask alone. |
+
+Any other write asks once for its record, and once more for a history checkpoint or closing it carries, such as a charter
+revision's; the interval checkpoint is never asked of a person's device that needs presence ([history checkpoints](#history-checkpoints-092)).
+
 ### History checkpoints (0.9.2)
 
 A history checkpoint is a signed record listing, by path and hash, the records your estate holds and naming the checkpoints it follows ([record format 3](record-format-v3.md#history-checkpoints-092)). What a checkpoint that counts witnesses cannot be removed or altered unnoticed, and it closes the backdating route that required signatures alone leave open. Four things change once an estate holds a counting checkpoint, which is what adopting checkpoints means:
@@ -415,8 +452,9 @@ vericairn operator close --all --by <operator id>
 
 The selection displays its evidence before signing one acceptance per result. Each acceptance
 names that exact result and all displayed passing reviews. Changed evidence or a non-operator
-refuses the entire action without acceptances. Current custody checks presence per signature
-when required. `--all` covers every eligible step in the estate; use `--select` to close only
+refuses the entire action without acceptances. Custody checks presence once per acceptance; from
+0.9.3 the selection's acceptances are announced before the first prompt, and each prompt says which
+of them it signs ([presence prompts](#presence-prompts-announced-and-counted-093)). `--all` covers every eligible step in the estate; use `--select` to close only
 the steps you inspected for a release. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
 for saved listings with `--from`, API/SDK use and interrupted-storage recovery.
 
@@ -545,6 +583,10 @@ the destination repository resource and prepare or refresh its refs separately; 
 changes a clone. The CLI sends its build identity automatically; format 3 requires the same full version
 and source commit as the runtime. A passing check is an observation at that instant. Submission checks
 again, so changes to records, reviews, source refs or files can produce new objections.
+
+From 0.9.3, `release submit` and `release observe` announce every record they will sign with a device that needs presence
+before the first prompt, and name each prompt "Signature k of n" with what it signs; [presence prompts](#presence-prompts-announced-and-counted-093)
+lists how many each asks for.
 
 `release submit` resolves the provider and settings from provider defaults, the product and the request,
 refuses missing required settings, checks built-in conditions, living documents and applicable policies, then records intent before dispatch. It records
@@ -1075,7 +1117,7 @@ Home shows attention: what needs a person, derived from status and waiting asks,
 
 The work screens: Products lists the product records with their editions and surfaces. A work order (open it by key with Ctrl+G, or from attention) is a page with its brief, its assignments with attempt counts and latest results, and its observation; an assignment is a page with the brief as delegated, the assigning note and every attempt with its result and state. The assignment composer (Ctrl+Shift+A on an open work order) takes the brief's fields, one list entry per line, and sends nothing until "Send the assignment" or Ctrl+Enter; the runtime validates and signs, and a refusal is shown with every finding. The result inbox (Ctrl+I) lists the results awaiting review across the estate; Enter opens one in the review and decision workspace, which shows the exact result (outcome, summary, outputs, evidence, checks, limitations, unresolved effects, next step), the reviews on record, a review draft (outcome, summary, findings) and an acceptance draft whose basis is the checked reviews. Both go through the API pinned to the subject's hash (Ctrl+Enter sends the review, Ctrl+Shift+Enter the acceptance); Workbench derives the independence and self flags it will declare from who authored the subject, shows them, and the runtime checks them. A prepared review or acceptance stays pinned to the subject revision and to the facts on record about it: checking or sending it reports reusable, needs review (new records about the subject; the draft is kept and nothing is sent) or withdrawn (the subject was superseded or is gone). A comparison view (Work menu) puts a record beside the revision it supersedes with the line difference between them.
 
-The release workspace (Ctrl+Shift+E) runs section 8 from the desktop. Enter the exact Commit; the request carries the product hash captured when it was loaded. A stale product requires fresh preparation, and format 3 requires an admitted held signing device. From 0.8.3, **Check submission (nothing recorded)** runs every admission check without signing, recording, retaining, dispatching or requiring presence. It displays every objection and next action, the exact checked inputs and the measured basis size. Submission checks again. The response also displays policy holds and retained-basis inspection commands after a submission. The existing flow follows: the providers the runtime can reach are listed and the product's declared provider is selected (for a product that declares none, nothing is selected until you choose); the form shows one field per setting the selected provider declares, filled with the product's declared values, where an empty field means the provider's default, which its label names; then "Submit the release" or Ctrl+Enter records the intent and dispatches; each destination shows its preparation, submission, external review and observed availability separately; "Observe" or Ctrl+Shift+Enter records the run's outcome, the candidate with every distributable by hash, and later the observed publication; Enter on a destination opens the candidate in the review workspace for the operator's acceptance at its exact hash; the manual publication command is shown and never run; a second submission under one identity is refused exactly as on the command line, and a retry needs a reconciliation.
+From 0.9.3 a submission from Workbench shows its presence prompts as the command line does: the announcement in the activity log before the first prompt, each prompt's "Signature k of n" line in the status line, and how many were signed ([presence prompts](#presence-prompts-announced-and-counted-093)). The release workspace (Ctrl+Shift+E) runs section 8 from the desktop. Enter the exact Commit; the request carries the product hash captured when it was loaded. A stale product requires fresh preparation, and format 3 requires an admitted held signing device. From 0.8.3, **Check submission (nothing recorded)** runs every admission check without signing, recording, retaining, dispatching or requiring presence. It displays every objection and next action, the exact checked inputs and the measured basis size. Submission checks again. The response also displays policy holds and retained-basis inspection commands after a submission. The existing flow follows: the providers the runtime can reach are listed and the product's declared provider is selected (for a product that declares none, nothing is selected until you choose); the form shows one field per setting the selected provider declares, filled with the product's declared values, where an empty field means the provider's default, which its label names; then "Submit the release" or Ctrl+Enter records the intent and dispatches; each destination shows its preparation, submission, external review and observed availability separately; "Observe" or Ctrl+Shift+Enter records the run's outcome, the candidate with every distributable by hash, and later the observed publication; Enter on a destination opens the candidate in the review workspace for the operator's acceptance at its exact hash; the manual publication command is shown and never run; a second submission under one identity is refused exactly as on the command line, and a retry needs a reconciliation.
 
 The theme binds the brand's roles, never values: Inter for titles, headings and body text and JetBrains Mono for identifiers, both bundled under the SIL Open Font License, one accent blue, one attention amber used only for the attention kinds, and neutral surfaces and outlines; the arrival page carries the cairn mark. The probe measures the contrast of every pair the roles form, in light and dark.
 
@@ -2299,6 +2341,10 @@ accepts exactly the record and its members with their expected bytes. Resuming
 reuses the stored signed record and members without signing again; interrupted
 member publication recovers from its original journal when the estate reopens.
 The queue and one-step command are not MCP tools.
+From 0.9.3 the action announces every record it signs with a device that needs
+presence before the first prompt, 22 for a new action, and each observation it
+repeats while checks run before that observation asks
+([presence prompts](#presence-prompts-announced-and-counted-093)).
 [Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
 

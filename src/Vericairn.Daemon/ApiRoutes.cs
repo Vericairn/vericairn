@@ -26,6 +26,12 @@ public static class ApiRoutes
             Results.Json(await service.ResourcesAsync(context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options)));
         app.MapPost("/v1/resources/read", async (ResourceRequest request, HttpContext context) =>
             Results.Json(await service.ResourceReadAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
+        // From 0.9.3 (FIX-124): the presence notices of operator actions on this machine, a long poll that writes nothing.
+        app.MapPost($"{v}/presence/prompts", async (PresencePromptsRequest request, HttpContext context) =>
+        {
+            PresencePromptsResponse response = await service.PresencePromptsAsync(request, context.RequestAborted).ConfigureAwait(false);
+            return Results.Json(response, ProtocolJson.Options, statusCode: response.Problem?.Code == "invalid" ? StatusCodes.Status400BadRequest : StatusCodes.Status200OK);
+        });
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>

@@ -126,7 +126,7 @@ public static class ClientOperation
         "QualifyHarness" or "RunPrepare" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" or "OperatorFinish" or "OperatorClose" => TimeSpan.FromMinutes(15),
         "PackagesObserve" or "ReleaseCheck" or "SecurityReportsPoll" => TimeSpan.FromMinutes(3),
         // A long poll waits up to 25 seconds before it answers, and may first derive what changed.
-        "Events" or "EventsSelect" => TimeSpan.FromMinutes(1),
+        "Events" or "EventsSelect" or "PresencePrompts" => TimeSpan.FromMinutes(1),
         _ => TimeSpan.FromSeconds(30),
     };
 

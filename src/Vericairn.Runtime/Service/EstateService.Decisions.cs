@@ -143,6 +143,10 @@ public sealed partial class EstateService
             var outputs = new List<DocumentOutputChange>();
             var pins = new JsonArray();
             string decisionId = Ulid.NewUlid().Value;
+            // Every document pin and the decision are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = presence.Action("decision from ask " + ask.Id, SignsWithPresence(model, request.By)
+                ? [.. change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal).Select(d => PinSignature(d.Path)),
+                    DescribeRecord(new RecordDraft("decision", request.By, JsonSerializer.SerializeToElement(body)), model)] : null);
             foreach (DesignFileChange document in change.Documents.OrderBy(d => d.Path, StringComparer.Ordinal))
             {
                 Problem? problem = PrepareDocumentPin(new(document.Path, request.By, request.Summary), model, out RecordDraft? draft, out _);

@@ -57,6 +57,9 @@ public sealed partial class EstateService
                 exitQuestion = "Has each selected document been reviewed against the publication, with findings and required changes recorded?",
                 inputs = sources, deliverables = PassDeliverables,
             }, ProtocolJson.Options);
+            // The work order and its assignment are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = presence.Action("docs pass assign " + version, SignsWithPresence(model, request.By)
+                ? [new("work-order", request.Key, "records a new work-order"), new("assignment", request.Key, "records a new assignment")] : null);
             (AuthoredRecord? order, string? refusal) = AuthorLocked(new("work-order", request.By, orderBody), model);
             if (order is null) return new([], new("refused", refusal!, []));
             string[] context = [.. selected.SelectMany(d =>

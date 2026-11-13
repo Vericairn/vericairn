@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 23, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
+
 Revision 22, November 12, 2026. Name the summary-only correction in `docs pin`'s overview and refusals, in the development build.
 
 Revision 21, November 12, 2026. Add `doctor --json`, JSON from `version`, `records describe`, `records hash`, `records format` and `recover compare`, and the commands that refuse `--json`, in the development build.
@@ -121,7 +123,8 @@ exit questions, result summaries, passing-review summaries and independence, and
 Each acceptance names its exact result and all displayed passing reviews. A changed selected
 work order, result or review, a missing passing review, an existing acceptance or a non-operator
 refuses the whole action without acceptances. `--all` also pins complete eligible membership.
-Current signing custody checks presence per acceptance when required. Exit 0 means success,
+Signing custody checks presence once per acceptance when required; from 0.9.3 the acceptances are
+announced on standard error before the first prompt, with `Signature k of n` at each. Exit 0 means success,
 1 a selection or record refusal, and 2 invalid arguments or a client failure. The
 [operator actions guide](operator-actions.md#close-finished-steps-in-one-action) describes saved
 listings, API/SDK counterparts and recovery after interrupted storage.
@@ -852,3 +855,13 @@ Three commands refuse `--json`: `runtime serve`, which serves until stopped and 
 standard output carries the MCP protocol; and `recover inspect`, whose report is text, while `status --json`, `devices list --json`
 and `estate reconcile --json` give the same facts as JSON. The refusal is a parse error: exit code 1, the reason on standard error
 and, as for any parse error, the usage help on standard output.
+
+## Presence prompts on standard error (0.9.3)
+
+From 0.9.3 (FIX-124) every command that may write follows the presence notices of the runtime that serves it, embedded or the
+daemon, while it runs. When it signs with a device that needs its owner's presence, it prints on standard error, before the first
+prompt, every record it will sign and what each authorizes; at each prompt, `Signature k of n: <type> <key>: <purpose>`; any
+signatures it adds, with why, before they are asked for; and when it ends, how many it signed. Standard output keeps the
+command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
+and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
+lists how many prompts the release and acceptance steps ask for.
