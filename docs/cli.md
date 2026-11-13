@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 24, November 13, 2026. `goal propose --flow` binds the subject an extension flow inherits from its base, in the development build.
+
 Revision 23, November 13, 2026. A command that writes announces and counts the presence prompts it asks for on standard error, in the development build.
 
 Revision 22, November 12, 2026. Name the summary-only correction in `docs pin`'s overview and refusals, in the development build.
@@ -390,7 +392,9 @@ one: its plan names the flow's exact pin, read from the templates the runtime of
 `--subject name=value` binds each field of the flow's subject by its kind: a record field by its id or `type:id`, a list field
 as comma-separated instance names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a
 flow option, `step.<key>=on|off` for an optional step or `item.<step>.<item>=on|off` for an optional item, and
-`--until <step>` names the step the run ends at.
+`--until <step>` names the step the run ends at. From 0.9.3 (FIX-127), `--subject` reads the subject of the flow resolved with
+every base it extends, the subject the goal's validation and `goal show` read, so a run of an extension, which declares no
+subject of its own, binds each field of its base's; before, it refused every field of an extension.
 
 ```sh
 vericairn goal propose --by <sponsor> --title "Release the song" --objective "Produce a song and release it." \
