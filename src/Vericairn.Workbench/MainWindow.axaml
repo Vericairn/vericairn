@@ -641,6 +641,17 @@
                         </DataTemplate>
                       </ListBox.ItemTemplate>
                     </ListBox>
+                    <TextBlock Text="Proposed work orders, waiting for the sponsor's approval before they join the goal" FontWeight="SemiBold" IsVisible="{Binding HasProposed}" />
+                    <ListBox ItemsSource="{Binding Proposed}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasProposed}" AutomationProperties.Name="Proposed work orders">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="pres:ProposedRow">
+                          <StackPanel MinHeight="32">
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
                     <TextBlock Text="{Binding Next}" TextWrapping="Wrap" />
                     <TextBlock Text="Stops: what waits on a person, in the order the flow reaches it" FontWeight="SemiBold" IsVisible="{Binding HasStops}" />
                     <ListBox ItemsSource="{Binding Stops}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasStops}" AutomationProperties.Name="Stops">

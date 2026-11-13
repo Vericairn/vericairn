@@ -52,6 +52,43 @@ public static class EstateStatus
         return acceptance ?? chain.SelectMany(id => model.About(id, "work-status")).OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
+    /// <summary>A work order proposed for a goal whose plan says sponsor-approves, waiting for who decides for the goal to approve it.</summary>
+    /// <param name="Goal">The goal's current revision.</param>
+    /// <param name="Order">The proposed work order's latest revision.</param>
+    /// <param name="Sponsor">Who approves it: the goal's sponsor when a person; null when an operator does, for a goal an agent or a service sponsors.</param>
+    public sealed record WaitingProposal(RecordEnvelope Goal, RecordEnvelope Order, string? Sponsor);
+
+    /// <summary>
+    /// The work orders proposed for open goals whose plan says sponsor-approves that wait for the sponsor's approval before they join
+    /// the goal (the estate's design/goals.md §§ 4 and 6), by goal and then by key. An achieved, impossible or abandoned goal waits for
+    /// nothing, and nothing waits on the sponsor for a work order already accepted or retired.
+    /// </summary>
+    public static IReadOnlyList<WaitingProposal> WaitingProposals(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var waiting = new List<WaitingProposal>();
+        foreach (RecordEnvelope goal in model.Current("goal").Where(GoalRules.SponsorApproves).OrderBy(g => g.Id, StringComparer.Ordinal))
+        {
+            IReadOnlyList<RecordEnvelope> proposed = Waiting(model, goal);
+            if (proposed.Count == 0 || GoalRules.Status(model, goal) is "achieved" or "impossible" or "abandoned")
+            {
+                continue;
+            }
+
+            string? sponsor = GoalRules.AccepterOf(model, goal).Principal;
+            waiting.AddRange(proposed.Select(o => new WaitingProposal(goal, o, sponsor)));
+        }
+
+        return waiting;
+    }
+
+    /// <summary>
+    /// The work orders proposed for a goal that still wait for its sponsor (<see cref="GoalRules.Proposed"/>): neither accepted, at any
+    /// revision, nor retired, since nothing waits on the sponsor for finished or withdrawn work.
+    /// </summary>
+    internal static IReadOnlyList<RecordEnvelope> Waiting(EstateModel model, RecordEnvelope goal) =>
+        [.. GoalRules.Proposed(model, goal).Where(o => StatusRecord(model, o) is not { } basis || basis.Type != "acceptance" && EstateModel.BodyString(basis, "status") != "retired")];
+
     /// <summary>Human-readable status, a run's position and its requests read now.</summary>
     public static string Render(EstateModel model, FindingList checks) => Render(model, checks, DateTimeOffset.UtcNow);
 
@@ -104,6 +141,18 @@ public static class EstateStatus
         foreach (WorkItem item in items)
         {
             text.Append("  ").Append(item.Key.PadRight(keyWidth)).Append(item.Status.PadRight(statusWidth)).Append(item.Kind.PadRight(11)).Append(item.Title).Append('\n');
+        }
+
+        IReadOnlyList<WaitingProposal> proposals = WaitingProposals(model);
+        if (proposals.Count > 0)
+        {
+            text.Append("Waiting for a goal's sponsor to approve them:\n");
+            foreach (WaitingProposal proposal in proposals)
+            {
+                text.Append("  ").Append(EstateModel.BodyString(proposal.Order, "key")).Append("  ").Append(EstateModel.BodyString(proposal.Order, "title"))
+                    .Append("  proposed for goal ").Append(proposal.Goal.Id).Append(" (").Append(EstateModel.BodyString(proposal.Goal, "title")).Append(") by ").Append(proposal.Order.By)
+                    .Append("; approved by ").Append(proposal.Sponsor is string sponsor ? $"{(model.CurrentPrincipal(sponsor) is { } person ? EstateModel.BodyString(person, "name") : sponsor)} ({sponsor})" : "an operator").Append('\n');
+            }
         }
 
         List<RecordEnvelope> releases = model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
@@ -329,6 +378,23 @@ public static class EstateStatus
         if (runs.Count > 0)
         {
             status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
+        // Work proposed for goals whose plan says sponsor-approves, waiting for the sponsor's approval (FIX-117); absent when there is none.
+        IReadOnlyList<WaitingProposal> proposals = WaitingProposals(model);
+        if (proposals.Count > 0)
+        {
+            status["proposals"] = new JsonArray([.. proposals.Select(p => (JsonNode)new JsonObject
+            {
+                ["goal"] = p.Goal.Id,
+                ["goalTitle"] = EstateModel.BodyString(p.Goal, "title"),
+                ["sponsor"] = p.Sponsor,
+                ["key"] = EstateModel.BodyString(p.Order, "key"),
+                ["title"] = EstateModel.BodyString(p.Order, "title"),
+                ["id"] = p.Order.Id,
+                ["hash"] = p.Order.ComputedHash,
+                ["by"] = p.Order.By,
+            })]);
         }
 
         using JsonDocument document = JsonDocument.Parse(status.ToJsonString());

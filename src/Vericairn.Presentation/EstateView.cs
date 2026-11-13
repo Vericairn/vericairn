@@ -48,6 +48,19 @@ public sealed record FlowRunRow(string Goal, string Title, string Status, string
 public sealed record FindingRow(string Severity, string Code, string Location, string Message);
 
 /// <summary>
+/// A work order proposed for a goal whose plan says sponsor-approves, waiting for its sponsor's approval before it joins the goal, as
+/// canonical status gives it (FIX-117).
+/// </summary>
+/// <param name="Goal">The goal's id.</param>
+/// <param name="GoalTitle">The goal's title.</param>
+/// <param name="Sponsor">Who approves it: the goal's sponsor; null when an operator does, for a goal an agent or a service sponsors.</param>
+/// <param name="Key">The work order's key.</param>
+/// <param name="Title">Its title.</param>
+/// <param name="Id">Its latest revision's id.</param>
+/// <param name="By">Who proposed that revision.</param>
+public sealed record ProposalRow(string Goal, string GoalTitle, string? Sponsor, string Key, string Title, string Id, string By);
+
+/// <summary>
 /// One attention item of the shared attention model: kind, subject, why it matters, state, freshness and the next action.
 /// Opening it goes to the subject; acknowledging it changes nothing but attention state.
 /// </summary>
@@ -133,6 +146,9 @@ public sealed class EstateView
     /// <summary>Reconcile tasks.</summary>
     public IReadOnlyList<FindingRow> Reconcile { get; private set; } = [];
 
+    /// <summary>Work orders proposed for goals whose plan says sponsor-approves, each waiting for its sponsor's approval.</summary>
+    public IReadOnlyList<ProposalRow> Proposals { get; private set; } = [];
+
     /// <summary>The runs of flows status shows, each with its stops.</summary>
     public IReadOnlyList<FlowRunRow> Runs { get; private set; } = [];
 
@@ -204,6 +220,7 @@ public sealed class EstateView
                 Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"));
         });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
+        view.Proposals = Rows(document, "proposals", e => new ProposalRow(Str(e, "goal") ?? "?", Str(e, "goalTitle") ?? "?", Str(e, "sponsor"), Str(e, "key") ?? "?", Str(e, "title") ?? "?", Str(e, "id") ?? string.Empty, Str(e, "by") ?? "?"));
         view.Attention = DeriveAttention(view);
         return view;
     }
@@ -224,6 +241,11 @@ public sealed class EstateView
         foreach (AssignmentRow assignment in view.Assignments.Where(a => a.State == "awaiting review" && !view.WorkOrders.Any(o => o.Key == a.Key && o.Status == "accepted")))
         {
             items.Add(new AttentionItem("decision needed", $"{assignment.Key}: result {Short(assignment.LatestResult)}", $"{assignment.ContributorName ?? assignment.Contributor} submitted a result ({assignment.Outcome}); it is a claim to inspect.", assignment.StateLabel, view.AsOf, "Review the exact result; accept it or request rework.", "result", assignment.LatestResult));
+        }
+
+        foreach (ProposalRow proposal in view.Proposals)
+        {
+            items.Add(new AttentionItem("decision needed", $"{proposal.Key} {proposal.Title}", $"Proposed for goal {proposal.GoalTitle} by {proposal.By}; its plan says the sponsor approves, so it joins the goal only once {(proposal.Sponsor is null ? "an operator" : "its sponsor, " + proposal.Sponsor + ",")} approves it.", "waiting for the sponsor", view.AsOf, "Read the work order; its sponsor approves it by recording its status planned.", "work-order", proposal.Id));
         }
 
         foreach (ReleaseRowView release in view.Releases.Where(r => r.Status == "candidate"))

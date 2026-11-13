@@ -653,7 +653,9 @@ public class GoalStepTests
         Grant(run, sam, "spending");
         string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(sam, RunEstate.Json($$$"""{"title":"Describe the widget","objective":"A guide to the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"S-1"},"state":"accepted"}}],"constraints":[],"kind":"finite","sponsor":"{{{sam}}}","budget":{"wallMinutes":60,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""")))).Id;
         RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(sam)));
-        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"S-1","kind":"ordinary","title":"Describe the widget","intent":"Describe it.","scope":["widget guide","path:docs/"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["guide"]}"""))));
+        RecordWritten order = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"S-1","kind":"ordinary","title":"Describe the widget","intent":"Describe it.","scope":["widget guide","path:docs/"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["guide"]}"""))));
+        // The operator proposed S-1 for Sam's goal, whose plan says the sponsor approves: Sam approves it, and it joins the goal.
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-status", sam, RunEstate.Json("""{"status":"planned","note":"Approved for Sam's goal."}"""), $"work-order:{order.Id}:{order.Hash}")));
         return (sam, goal);
     }
 

@@ -49,10 +49,18 @@ public partial class GoalJourneyTests
             CliHarness.Ok("--estate", a, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"planner","principals":["{{planner}}"]},{"role":"builder","principals":["{{builder}}"]},{"role":"decider","principals":["{{op}}"]}]}"""));
             string goal = CliHarness.Ok("--estate", a, "--json", "goal", "propose", "--by", op, "--title", "Release the widget's next version", "--objective", "Release widget 1.0.0.", "--done", """{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}""", "--done", """{"evidence":"Widget 1.0.0 builds.","check":"Read the result."}""", "--budget", "wallMinutes=120", "--budget", "attemptsPerStep=2").Id;
             CliHarness.Ok("--estate", a, "--json", "goal", "activate", goal, "--by", op);
+            JsonElement proposed = default;
             foreach ((string key, string by) in new[] { ("W-1", op), ("W-2", planner) })
             {
-                CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", by, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Build part {{key}}","intent":"The goal's work.","scope":["widget"],"exitQuestion":"Does part {{key}} build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget 1.0.0"]}"""));
+                proposed = CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", by, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Build part {{key}}","intent":"The goal's work.","scope":["widget"],"exitQuestion":"Does part {{key}} build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget 1.0.0"]}""")).Json;
             }
+
+            // The goal's plan says the sponsor approves: the planner's W-2 waits for the sponsor, who approves it.
+            string order = $"work-order:{proposed.GetProperty("id").GetString()}:{proposed.GetProperty("hash").GetString()}";
+            Assert.Contains("Proposed, waiting for the sponsor's approval before they join the goal:\n  W-2  Build part W-2  proposed by Planner", CliHarness.Ok("--estate", a, "goal", "show", goal).Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("  W-2  Build part W-2 [work-order ", CliHarness.Ok("--estate", a, "goal", "next").Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", a, "--json", "records", "new", "work-status", "--by", op, "--subject", order, "--body", CliHarness.WriteJson(scratch, "approve.json", """{"status":"planned","note":"Approved for the goal."}"""));
+            Assert.DoesNotContain("Proposed, waiting", CliHarness.Ok("--estate", a, "goal", "show", goal).Out, StringComparison.Ordinal);
 
             // The builder can carry nothing from the laptop, so the sponsor pauses the goal until the build machine is ready.
             Assert.Contains("      candidate Builder (agent): not available: it has no admitted device, so it could sign no attempt and no result\n", CliHarness.Ok("--estate", a, "goal", "next").Out, StringComparison.Ordinal);
@@ -130,6 +138,14 @@ public partial class GoalJourneyTests
             string reviewer = Principal(root, scratch, op, "Reviewer", "reviewer");
             string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Describe the widget's plug-ins", "--objective", "A guide to the widget's plug-ins.", "--done", """{"evidence":"The guide describes every plug-in of the widget.","check":"Read the guide against the widget."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=1").Id;
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string subject = $"goal:{goal}:{CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("goal").GetProperty("hash").GetString()}";
+            string confirm = CliHarness.WriteJson(scratch, "impossible.json", """{"status":"impossible","note":"Confirmed: the widget has no plug-ins."}""");
+
+            // From 0.9.3 the sponsor cannot record it impossible before the evaluator's verdict; the refusal names that verdict's command.
+            CliHarness.Outcome early = CliHarness.Run("--estate", root, "--json", "records", "new", "goal-status", "--by", op, "--subject", subject, "--body", confirm);
+            Assert.Equal(1, early.Code);
+            JsonElement verdict = early.Json.GetProperty("findings").EnumerateArray().Single(f => f.GetProperty("Code").GetString() == "goal-status.verdict");
+            Assert.Contains($"vericairn goal evaluate {goal} --by <evaluator> --verdict <n>:impossible:<reason>", verdict.GetProperty("Message").GetString(), StringComparison.Ordinal);
 
             // The evaluator judges the condition impossible: acceptance waits, and the goal stays active until who decides for it answers.
             CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the widget.", "--verdict", "1:impossible:The widget has no plug-ins to describe.");
@@ -139,8 +155,7 @@ public partial class GoalJourneyTests
             Refused(root, "condition 1 is impossible", "goal", "accept", goal, "--by", op, "--statement", "Done.");
 
             // No agent confirms it, the evaluator included; the sponsor does, and the goal ends as impossible.
-            string subject = $"goal:{goal}:{shown.GetProperty("goal").GetProperty("hash").GetString()}";
-            string confirm = CliHarness.WriteJson(scratch, "impossible.json", """{"status":"impossible","note":"Confirmed: the widget has no plug-ins."}""");
+            Assert.Equal(subject, $"goal:{goal}:{shown.GetProperty("goal").GetProperty("hash").GetString()}");
             foreach (string agent in new[] { builder, reviewer })
             {
                 CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "records", "new", "goal-status", "--by", agent, "--subject", subject, "--body", confirm);

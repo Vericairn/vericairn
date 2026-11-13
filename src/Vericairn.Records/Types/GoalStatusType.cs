@@ -31,7 +31,7 @@ public sealed class GoalStatusType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force, or by an operator when an agent sponsors the goal; impossible and abandoned by the sponsor or, for a goal an agent sponsors, an operator.", 2),
+        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force, or by an operator when an agent sponsors the goal; impossible and abandoned by the sponsor or, for a goal an agent sponsors, an operator, and from 0.9.3 impossible only when the goal's current evaluation, by a principal who authored none of its steps, judges a condition impossible.", 2),
         new("note", "string", true, "Why, and what remains.", 2),
     ];
 
@@ -65,6 +65,13 @@ public sealed class GoalStatusType : IRecordType
         else if (status is "impossible" or "abandoned" && !GoalRules.MayEnd(context.Model, goal, context.Record.By, context.Record))
         {
             context.Error("goal-status.sponsor", $"Only the goal's sponsor, or an operator for a goal an agent sponsors, records it as {status}.");
+        }
+        else if (status == "impossible" && GoalRules.ImpossibleVerdictMissing(context.Model, goal, context.Record) is string missing)
+        {
+            // Impossible is the evaluator's verdict, confirmed by the sponsor (design/goals.md § 4). From 0.9.3 the write boundary refuses a
+            // new status without that verdict; a status already in the estate keeps its reading, and validation reports it as information.
+            context.Findings.Info(GoalRules.ImpossibleVerdictCode, context.Location + "#body.status", missing
+                + " From 0.9.3 a new goal-status of impossible needs that verdict; a status already in the estate keeps its reading.");
         }
 
         // The statuses before this one that count: a status its author could not record changes nothing.
