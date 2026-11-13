@@ -236,14 +236,18 @@ are never records, and a daemon of an older release shows none.
 With a device that needs presence, the release and acceptance steps ask for these prompts, in this order. From 0.9.3 (FIX-130),
 a release step asks only for signatures it stores, at every record format. Where a signed record precedes the effect, as the
 intent precedes the dispatch, that record's signature proves the device can sign, and no trial signature is made; each piece of
-release evidence is signed once, as it is written. Before the dispatch the runtime checks, without signing, that the submitting
-principal still has an admitted device held on this machine, so a device that can no longer sign dispatches no build.
+release evidence is signed once, as it is written. Before the dispatch the runtime checks, without signing, that the device that
+signed the intent is still the submitting principal's admitted device whose key is held on this machine. A device revoked, or
+whose key is no longer held here, dispatches no build, and neither does another device of the principal that signed nothing in the
+submission; the intent then stays unsettled for you to reconcile, and nothing more is asked.
 
 | Step (release flow step) | Prompts |
 | --- | --- |
-| `release submit` (`submit`) | 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent and the dispatch receipt. One fewer before adoption (no checkpoint). An admission that changes before dispatch replaces the receipt with the intent's cancellation, or records the reserved intent again first, 4 in all. |
-| `release observe` of a finished build (`candidate`) | 2: the operation's revision, then the candidate. The revision alone when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (1 more), and is announced with the rest; while the build still runs, the observation signs that alone. |
+| `release submit` (`submit`) | 3 in an estate that has adopted history checkpoints: the release gate's history checkpoint, the intent and the dispatch receipt. One fewer before adoption (no checkpoint). An admission that changes before dispatch replaces the receipt with the intent's cancellation, 3 in all, or records the reserved intent again first, 4 in all; when no device here may sign the cancellation, it asks for nothing more. |
+| `release observe` of a finished build (`candidate`) | 2: the operation's revision, then the candidate. The revision alone when the build failed or a candidate is already recorded. An intent without a receipt is recorded as uncertain first (1 more, 3 in all), and is announced with the rest; while the build still runs, the observation signs that alone. |
 | `release observe` of the publication (`publish`) | 1: the published revision. |
+| `release observe --cancel` | 1: the intent's cancellation. |
+| `release observe --withdrawal` | 1: the withdrawn draft's observed absence, recorded under its deletion intent. |
 | The operator's acceptance of a candidate or of finished work (`accept`, `close`) with `records new` or Workbench | 1. |
 | The same acceptance with `operator record` | 22 for a new action: the record, 6 for the push (its intent, its dispatch, the 3 records of observing the pushed branch and its outcome), 3 for the opening, 3 for the first observation of the pull request's checks, and 9 for the merge (its intent, 3 for observing the pull request, its dispatch, its outcome and 3 for observing the target branch's run at the merge commit). Each further observation while the checks or that run are still running adds 3, announced before it asks. A resumed action leaves out what its records show done; finishing an earlier merged action first adds 3. |
 | `operator close` (`close`) | 1 per selected step's acceptance. |

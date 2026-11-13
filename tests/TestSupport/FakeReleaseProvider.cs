@@ -168,6 +168,14 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         releases[repository + "#" + tag] = release with { Draft = false, PublishedAt = RecordParser.FormatTimestamp(Now()), At = RecordParser.FormatTimestamp(Now()) };
     }
 
+    /// <summary>What the operator's manual deletion does at GitHub: the draft is gone.</summary>
+    public void DeleteDraft(string repository, string tag)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repository);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        releases.Remove(repository + "#" + tag);
+    }
+
     /// <inheritdoc />
     public RunObservation? ObserveRun(string destination, string runId)
     {

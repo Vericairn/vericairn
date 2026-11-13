@@ -47,7 +47,7 @@ internal sealed partial class ReleaseCoordinationService(
         lock (gate)
         {
             EstateModel model = session.Load();
-            if (model.Manifest?.RecordFormat >= 3 && recordAccess.HeldSigner(new RecordDraft(request.Type, request.By, request.Body), model) is { Signs: false } held)
+            if (model.Manifest?.RecordFormat >= 3 && recordAccess.HeldSigner(new RecordDraft(request.Type, request.By, request.Body), model) is { Device: null } held)
                 return WriteOutcome.Fail(new("refused", held.Refusal ?? "The acting principal has no admitted held signing device for the release evidence; retain and reconcile the original identity.", []));
             return writeRecord(request);
         }
@@ -385,15 +385,20 @@ internal sealed partial class ReleaseCoordinationService(
                 if (recordAccess.RequestDeviceRefusal(currentModel) is { } denied) fresh.Objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", identity, denied.Message)]);
                 if (!currentModel.IsCurrent(currentModel.ById[previousId])) fresh.Objections.Add(new("error", "release.intent-changed", identity, "The admitted intent is no longer current; reconcile its identity."));
                 // The intent was signed moments ago in this submission, with presence where the device asks for it: that signature proves
-                // the device can sign, so no trial signature is made before the dispatch (FIX-130). Found without signing, the acting
-                // principal's admitted device must still be held here and the intent's cancellation must be a valid record, so a device
-                // revoked or removed since the intent dispatches nothing.
+                // the device can sign, so no trial signature is made before the dispatch (FIX-130). Found without signing, the device that
+                // signed the intent must still be the acting principal's admitted device held here, and the intent's cancellation must
+                // be a valid record. A device revoked, or whose key is no longer held here, dispatches nothing, and neither does another
+                // admitted device of the principal, which has signed nothing in this submission.
                 var cancellation = new RecordDraft("operation", request.By, Element(ReleaseFlow.Canceled(previousBody, "Validate the current acting principal before dispatch.")),
                     new("product", request.Product, null), previousId, now());
-                (bool signs, string? signerRefusal) = recordAccess.HeldSigner(cancellation, currentModel);
-                bool cannotSign = signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && !signs;
-                if (cannotSign)
-                    fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
+                (string? signer, string? signerRefusal) = recordAccess.HeldSigner(cancellation, currentModel);
+                IReadOnlyList<string> intentSigners = [.. currentModel.ById[previousId].Signatures.Select(s => s.Device)];
+                string? signerProblem = signerRefusal
+                    ?? (intentSigners.Count > 0 && (signer is null || !intentSigners.Contains(signer, StringComparer.Ordinal))
+                        ? "The device that signed the intent is no longer the acting principal's admitted device held here, and another device does not dispatch what it did not sign; reconcile the intent."
+                        : currentModel.Manifest?.RecordFormat >= 3 && signer is null ? "The acting principal no longer has an admitted held signing device; reconcile the intent." : null);
+                bool cannotSign = signerProblem is not null;
+                if (cannotSign) fresh.Objections.Add(new("error", "release.signature", identity, signerProblem!));
                 fresh.Objections.AddRange(recordAccess.CheckReleaseRecord(cancellation, currentModel).Where(f => f.Code != "release.signature"));
                 JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
                 if (!admitted.HasSameInputsAndFindings(fresh.Assessment, [claimRevision]) && !fresh.Objections.Any(f => ReleaseBasisRetention.SizeCodes.Contains(f.Code)))
@@ -402,9 +407,13 @@ internal sealed partial class ReleaseCoordinationService(
                 if (fresh.Objections.Count > 0)
                 {
                     JsonObject canceled = ReleaseFlow.Canceled(Element(checkedBody), "Admission changed before dispatch; no provider was called. " + string.Join(" | ", fresh.Objections.Select(f => f.Message)));
-                    if (withPresence) Presence.Revise([ReleaseOperation(request.Version, "canceled")], "the admission changed before dispatch, so the intent is canceled instead");
+                    // A cancellation that no device here may sign is never announced: nothing more is asked.
+                    if (withPresence)
+                        Presence.Revise(cannotSign ? [] : [ReleaseOperation(request.Version, "canceled")], cannotSign
+                            ? "the admission changed before dispatch and no device here may sign the intent's cancellation"
+                            : "the admission changed before dispatch, so the intent is canceled instead");
                     WriteOutcome settled = cannotSign
-                        ? WriteOutcome.Fail(new("refused", signerRefusal ?? "No admitted held signer remains to record cancellation.", []))
+                        ? WriteOutcome.Fail(new("refused", signerRefusal ?? "No admitted held signer that signed the intent remains to record cancellation.", []))
                         : recordAccess.WriteLocked(new("operation", request.By, Element(canceled), new("product", request.Product, null), previousId, now()), currentModel);
                     ReleaseResponse refusal = GateRefusal(identity, settled.Ok ? "canceled" : "not-started", admitted, fresh.Objections);
                     return refusal with { Operation = settled.Written, BasisEvidence = basisEvidence, Message = refusal.Message + (settled.Ok ? " The intent was canceled before effects." : " The intent could not be canceled; reconcile it before retrying. " + settled.Problem!.Message) };

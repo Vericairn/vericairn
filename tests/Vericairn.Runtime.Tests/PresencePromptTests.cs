@@ -317,7 +317,7 @@ public sealed class PresencePromptTests
     }
 
     [Fact]
-    public void ADeviceThatCanNoLongerSignAfterTheIntentDispatchesNothingAndIsAskedNothingMore()
+    public void ADeviceWhoseKeyIsNoLongerHeldAfterTheIntentDispatchesNothingAndIsAskedNothingMore()
     {
         using var f = new HistoryTriggerTests.Fixture();
         RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
@@ -330,16 +330,201 @@ public sealed class PresencePromptTests
         f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") custody.Remove(device); };
         long start = f.Api.PresencePrompts(new()).Cursor;
 
-        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
-            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+        ReleaseResponse submitted = Submit(f, product, provider);
 
         Assert.False(submitted.Ok);
         Assert.Empty(provider.Dispatches);
         Assert.Contains(submitted.Problem!.Findings, finding => finding.Code == "release.signature");
         Assert.Equal("not-started", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
-        // The release gate's checkpoint and the intent were asked for and stored; nothing was signed to test the device or to cancel.
+        // The release gate's checkpoint and the intent were asked for and stored. No cancellation is announced that no device here
+        // may sign: the revised path asks for nothing more, and the count stays true.
+        AssertNothingMoreAsked(Since(f.Api, start), custody);
+    }
+
+    [Fact]
+    public void AnotherDeviceOfThePrincipalDispatchesNothingItDidNotSign()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        // Between the intent and the dispatch, the device that signed the intent is revoked while another admitted device of the
+        // operator is held here. That device signed nothing in this submission, so it dispatches nothing (FIX-130).
+        string? other = null;
+        f.Api.ReleaseBoundary = stage =>
+        {
+            if (stage != "before-dispatch") return;
+            other = f.PresenceDevice(f.Records.Estate.OperatorId);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope intent = Assert.Single(model.Current("operation"));
+            RecordEnvelope signed = model.ById[device];
+            f.Records.Estate.SetClock(intent.AtTime);
+            f.Records.Add("admission", new JsonObject
+            {
+                ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Withdraw the device that signed the intent.",
+                ["revokedAt"] = RecordParser.FormatTimestamp(intent.AtTime.AddSeconds(1)),
+            }, subject: signed.Reference, supersedes: SignatureChecks.AdmissionOf(model, signed)!.Id);
+            clock.Now = intent.AtTime.AddSeconds(2);
+        };
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse submitted = Submit(f, product, provider);
+
+        Assert.False(submitted.Ok);
+        Assert.Empty(provider.Dispatches);
+        // The estate stays valid: the refusal is the signer's alone.
+        FindingDto refused = Assert.Single(submitted.Problem!.Findings);
+        Assert.Equal("release.signature", refused.Code);
+        Assert.Contains("another device does not dispatch what it did not sign", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(0, f.Api.Validate().Errors);
+        Assert.Equal("not-started", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+        Assert.NotNull(other);
+        Assert.DoesNotContain(f.Api.Session.Load().Records, r => r.Type != "device" && r.Signatures.Any(s => s.Device == other));
+        AssertNothingMoreAsked(Since(f.Api, start), custody);
+    }
+
+    [Fact]
+    public void ASubmissionCanceledBeforeDispatchAsksForTheCheckpointTheIntentAndTheCancellation()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        // The product is revised between the intent and the dispatch, so the admission changes and the intent is canceled.
+        f.Api.ReleaseBoundary = stage =>
+        {
+            if (stage != "before-dispatch") return;
+            JsonObject revised = PolicyFixture.Body(product);
+            revised["summary"] = "A product, revised while its release waits.";
+            f.Records.Estate.SetClock(clock.Now.AddSeconds(-30));
+            f.Records.Add("product", revised, supersedes: product.Id);
+        };
+        List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse submitted = Submit(f, product, provider);
+
+        Assert.False(submitted.Ok);
+        Assert.Equal("canceled", submitted.Status);
+        Assert.Empty(provider.Dispatches);
+        IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(notices, asked);
+        Assert.Equal(["announced", "prompt", "prompt", "revised", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal("""
+            release submit 1.1.0 now needs 3 signatures in all, because the admission changed before dispatch, so the intent is canceled instead. The rest are:
+              3. operation release 1.1.0: records the release build as canceled
+            """.ReplaceLineEndings("\n"), notices[3].Text);
+        Assert.Equal("Signed 3 of 3.", notices[^1].Text);
+        Assert.Equal(3, custody.Reasons.Count);
+        Assert.Equal(3, SignedSince(f, before, device));
+    }
+
+    [Fact]
+    public void AnOutcomeCanceledByObservationAsksOnceForTheCancellation()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        // The provider refuses before any effect, and the refusal is recorded in the receipt's place.
+        provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
+        Assert.Equal("known-failure", Submit(f, product, provider).Status);
+        List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse canceled = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, Cancel: "The refused dispatch had no effect.", Product: product.Id));
+
+        Assert.True(canceled.Ok, canceled.Message);
+        Assert.Equal("canceled", canceled.Status);
+        IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(notices, asked);
+        Assert.Equal(["announced", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal("operation release 1.1.0: records the release build as canceled", Assert.Single(notices[0].Signatures).Describe());
+        Assert.Equal("Signed 1 of 1.", notices[^1].Text);
+        Assert.Equal(1, SignedSince(f, before, device));
+    }
+
+    [Fact]
+    public void AnIntentWithoutAReceiptIsObservedWithThreePromptsAndAWithdrawnDraftsAbsenceWithOne()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        // The release flow stamps an uncertainty and an observation from the wall clock, so this runtime keeps it. The fixture stamps
+        // its own records in the past instead, so the wall clock is past every record and the admission basis holds (FIX-133).
+        f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddMinutes(-10));
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        Assert.All(f.Api.Session.Load().Records, r => Assert.True(r.AtTime <= DateTimeOffset.UtcNow, $"{r.Type} {r.Id} is stamped {r.At}, past the wall clock."));
+        // The person declines the receipt's prompt after the dispatch: the build runs, and the intent has no receipt.
+        custody.DeclineAt = 3;
+        ReleaseResponse submitted = Submit(f, product, provider);
+        Assert.False(submitted.Ok);
+        Assert.Single(provider.Dispatches);
+        Assert.Equal("not-started", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+        provider.CompleteRun("Example/widget", "1000", success: true, "1.1.0");
+        List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        // The observation records the uncertainty first, then the build observed finished and the candidate: 3 prompts, announced together.
+        ReleaseResponse candidate = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, [], [], "unsigned developer build", Product: product.Id));
+
+        Assert.True(candidate.Candidate is not null, candidate.Message);
+        IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(notices, asked);
+        Assert.Equal(["announced", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal(
+        [
+            "operation release 1.1.0: records the release build as uncertain, to be observed before any retry",
+            "operation release 1.1.0: records the release build as observed finished",
+            "release 1.1.0: records the release candidate for your acceptance",
+        ], notices[0].Signatures.Select(s => s.Describe()));
+        Assert.Equal("Signed 3 of 3.", notices[^1].Text);
+        Assert.Equal(3, SignedSince(f, before, device));
+
+        // The operator withdraws the candidate, deletes its draft and records the deletion's dispatch; observing the draft's absence
+        // then signs one record.
+        RecordEnvelope recorded = f.Api.Session.Load().ById[candidate.Candidate!.Id];
+        ReleaseResponse withdrawn = f.Api.ReleaseWithdraw(new(recorded.Id, f.Records.Estate.OperatorId, recorded.ComputedHash, provider.Provider, "The candidate is replaced."));
+        Assert.True(withdrawn.Ok, withdrawn.Message);
+        RecordEnvelope deletion = f.Api.Session.Load().ById[withdrawn.Operation!.Id];
+        JsonObject dispatched = PolicyFixture.Body(deletion);
+        dispatched["status"] = "dispatched";
+        f.Records.Estate.SetClock(deletion.AtTime.AddSeconds(-1));
+        dispatched["dispatchedAt"] = RecordParser.FormatTimestamp(deletion.AtTime);
+        f.Records.Add("operation", dispatched, subject: deletion.Subject, supersedes: deletion.Id);
+        provider.DeleteDraft("Example/widget", "v1.1.0");
+        asked.Clear();
+        before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+        start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse absent = f.Api.ReleaseObserve(new ReleaseObserveRequest("1.1.0", null, f.Records.Estate.OperatorId) { Withdrawal = withdrawn.Operation.Id });
+
+        Assert.True(absent.Ok, absent.Message);
+        Assert.Equal("observed-success", absent.Status);
+        IReadOnlyList<PresenceNotice> observed = Since(f.Api, start);
+        AssertAnnouncedBeforeAsked(observed, asked);
+        Assert.Equal(["announced", "prompt", "finished"], observed.Select(n => n.Kind));
+        Assert.Equal("Signed 1 of 1.", observed[^1].Text);
+        Assert.Equal(1, SignedSince(f, before, device));
+    }
+
+    private static ReleaseResponse Submit(HistoryTriggerTests.Fixture f, RecordEnvelope product, FakeReleaseProvider provider) =>
+        f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+    // A submission stopped before its dispatch because no device that signed its intent may sign now: the checkpoint and the intent
+    // were asked for, the revised path asks for nothing more, and the action says it signed all it finally announced.
+    private static void AssertNothingMoreAsked(IReadOnlyList<PresenceNotice> notices, RecordingCustody custody)
+    {
+        Assert.Equal(["announced", "prompt", "prompt", "revised", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal("release submit 1.1.0 now needs 2 signatures in all, because the admission changed before dispatch and no device here may sign the intent's cancellation; it asks for no more.", notices[3].Text);
+        Assert.Equal("Signed 2 of 2.", notices[^1].Text);
         Assert.Equal(2, custody.Reasons.Count);
-        Assert.Equal(2, Since(f.Api, start).Count(n => n.Kind == "prompt"));
     }
 
     // The records written since a set of identities that the device signed.

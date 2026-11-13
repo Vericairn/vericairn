@@ -22,7 +22,7 @@ internal sealed class EstateRecordAccess(
     Func<IReadOnlyList<AuthoredRecord>, EstateModel> loadWith,
     Func<EstateModel, Problem?> requestDeviceRefusal,
     Func<RecordDraft, EstateModel, IReadOnlyList<FindingDto>> checkReleaseRecord,
-    Func<RecordDraft, EstateModel, (bool Signs, string? Refusal)> heldSigner,
+    Func<RecordDraft, EstateModel, (string? Device, string? Refusal)> heldSigner,
     Func<string, string, TriggeredCheckpoint?> writeCheckpointLocked,
     Func<EstateModel, IReadOnlyList<FindingDto>> historyObjections,
     PresenceCounter presence,
@@ -45,10 +45,10 @@ internal sealed class EstateRecordAccess(
     internal IReadOnlyList<FindingDto> CheckReleaseRecord(RecordDraft draft, EstateModel model) => checkReleaseRecord(draft, model);
 
     /// <summary>
-    /// Whether a device on this machine would sign a draft for its author, found without signing or asking for presence (FIX-130), and
-    /// the refusal that says why none would.
+    /// The device on this machine that would sign a draft for its author, by its identity, found without signing or asking for presence
+    /// (FIX-130), or null with the refusal that says why none would.
     /// </summary>
-    internal (bool Signs, string? Refusal) HeldSigner(RecordDraft draft, EstateModel model) => heldSigner(draft, model);
+    internal (string? Device, string? Refusal) HeldSigner(RecordDraft draft, EstateModel model) => heldSigner(draft, model);
 
     internal Problem? RequestDeviceRefusal(EstateModel model) => requestDeviceRefusal(model);
 
