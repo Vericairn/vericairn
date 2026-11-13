@@ -64,7 +64,7 @@ public static class WorkerEnvironment
         return CredentialMarks.Any(m => upper.Contains(m, StringComparison.Ordinal)) || CredentialPrefixes.Any(p => upper.StartsWith(p, StringComparison.Ordinal));
     }
 
-    /// <summary>This process's environment, as a source to build from.</summary>
+    /// <summary>This process's environment, as a source to build from; within a scope that has its own home, that home.</summary>
     public static IReadOnlyDictionary<string, string> Current()
     {
         var current = new Dictionary<string, string>(Names);
@@ -74,6 +74,12 @@ public static class WorkerEnvironment
             {
                 current[name] = value;
             }
+        }
+
+        // A process started from a scope with its own home finds the keys and stores that scope uses (VericairnHome.Scope).
+        if (VericairnHome.Scoped() is string home)
+        {
+            current[VericairnHome.EnvironmentVariable] = home;
         }
 
         return current;
