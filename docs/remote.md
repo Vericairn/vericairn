@@ -59,7 +59,7 @@ historical context is labeled, including when the current work view does not est
 
 **Communication**, reachable from the shell, shows the person's effective settings, inheritance, source revisions, conflicts,
 freshness and a preview using the same presentation as Workbench. These settings remain read-only in this step;
-clarifications to running attempts arrive with PROMPT-02, planned for 0.9.3.
+clarifications to running attempts arrive with PROMPT-02, planned for 0.9.5.
 
 ## Decisions and acceptances
 

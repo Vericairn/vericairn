@@ -28,18 +28,50 @@ describe what shipped and its limits.
 
 ## 0.9.3 — planned
 
+0.9.3 corrects what the estates running 0.9.2 reported and readies the release flow for the next release.
+Export and restore keep each file's executable mode, a timestamp in the wrong form is refused with the form
+required, `doctor --json` returns one documented result, a failed document check names what failed, and a goal
+is recorded impossible only after its evaluator's verdict. Every operator action announces and counts its
+presence prompts before each one, release steps make no throwaway signature with a presence key, and an estate
+with many key rotations or closings is checked in near-linear time. A change merges through a repository's
+required merge queue with its outcome recorded, an operator action's push and merge trail reaches the estate,
+and a work order whose current result is accepted reads as accepted, so a release can run on its declared
+flow. A command names an estate's first authority where its manifest needs one, a guide tells an expired,
+refused or timed-out presence prompt apart during enrollment and reconciles it safely, and an estate's root can
+hold its owner's agent instruction files. Design work prepares the releases after it: measured agent work,
+smaller milestones after M3, an opt-in estate advisor and one presence check per command.
+
+## 0.9.4 — planned
+
+0.9.4 is the first release Vericairn's own estate runs on the software pack's release flow. A flow's steps run
+on their timing, at once, after a delay, at a time, on a schedule, in a window or on an event, and a step may end
+in a decision among named paths, made by a rule, an agent in a role or a person in a role. Standard and Pro carry
+a run from step to step by themselves, stopping only where a person holds the role, while Community keeps one
+step per command. Agents keep working on a product between releases as standing agents, within their sponsor's
+caps, and every output is a possibility a person adopts. When an agent holding work goes quiet, its sponsor is
+asked and the step moves to another holder. People say when they are away and set quiet hours that hold notices,
+letting incidents through by default. Removing a person's role closes what they may still write, and an estate
+shows its progress through a target its configuration chooses, GitHub Discussions first. Installers open
+without warnings on macOS and Windows, and Vericairn installs and upgrades with one command through Homebrew,
+winget or an install script that verifies the signed release manifest before installing.
+
+## 0.9.5 — planned
+
 Remote grows from attention and decisions to supervision: from the phone you steer running work, see the
 estate's nodes and connections and hand a task to Workbench; Remote notifies you over the local network,
 reminds you before a supervised window opens, handles lost, replaced and shared phones and opens readable
 records. From Workbench or the phone, a saved prompt can be sent to a running agent in one step; it steers the
 agent without widening what the agent may do. Paired devices reach the runtime from any network through a
-relay that forwards bytes it cannot read. Agents keep working on a product between releases as standing
-agents, within their sponsor's caps, and every output is a possibility a person adopts. An estate follows the
-GitHub conversations it subscribes to and the reports it files with other projects, a release's advisories are
-drafted from its Security section for you to publish, and every release's bill of materials is checked
-against published advisories. Installers open without warnings on macOS and Windows, Vericairn installs with
-one command through Homebrew, winget or a checked install script, and you can run Vericairn as an always-on
-server for your estates.
+relay that forwards bytes it cannot read, and Remote and Workbench say whether a connection is direct or
+relayed. MCP clients that sign in only with OAuth work an estate with short-lived tokens.
+
+## 0.9.6 — planned
+
+An estate follows the GitHub conversations it subscribes to and answers only under recorded authority, and it
+follows each report it files with another project through to the release that carries the fix. A release's
+advisories are drafted from its Security section for you to publish, and every release's bill of materials is
+checked against published advisories before acceptance and daily after. You can run Vericairn as an always-on
+server for your estates, with every hosted estate keeping a replica you hold.
 
 ## 0.10.x — planned
 

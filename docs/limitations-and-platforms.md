@@ -820,7 +820,7 @@ journal's whole volume, including events that client may not read. The embedded 
 Network MCP (`MCP-03`) serves signed mode only: every request and every record is signed by an admitted
 agent's or service's device, so a client must be Vericairn-aware, through `vericairn mcp serve
 --connection` or its own signing code. Token mode for OAuth-only clients, the public endpoint and its MCP
-gateway, and MCP over the relay are planned for 0.9.3 (`MCP-04`, `REMOTE-10`, the relay); until then `/mcp`
+gateway, and MCP over the relay are planned for 0.9.5 (`MCP-04`, `REMOTE-10`, the relay); until then `/mcp`
 is reached on loopback and on the local network only, and a device on the local network pairs there first.
 A request must name the runtime by the IP address and port it listens on, or `localhost` on loopback: a
 connection paired by a host name reaches `/mcp` only when that name is the address itself. Sessions live in
