@@ -994,6 +994,8 @@ Objects are content-addressed bytes beside the records: `objects put <file>`, `o
 
 An object holds at most 8 MiB (8,388,608 bytes), and an export carries nothing held outside the estate repository. From 0.9.2, [Large private artifacts](large-artifacts.md) shows how to keep a private artifact above that limit in a private store with exact-byte custody, using existing records, and how to prove a cold recovery by reading its bytes back.
 
+An export also leaves out the housekeeping that native operations write under `.vericairn/`, such as `.vericairn/record-staging/.gitignore`, and it doesn't carry your agent instruction files at the root yet. A restored copy therefore holds three inventories: the exported payload, which `export/inventory.json` lists; supplemental private or external sources, which you restore from your own capture; and the housekeeping that writes add once you use the copy. [The three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) lists the housekeeping exactly and shows how to classify every restored file before anything writes to it, and how to reconcile a file that fits no class without skipping or deleting it.
+
 ### A damaged live store (0.9.2)
 
 Each estate has a live store on this machine, `live.db` under the Vericairn home, beside its `-wal` and `-shm` files. What it holds depends on the storage profile. For a repository-synced estate, the repository's record files are canonical and the live store is a cache derived from them, one per clone. For a local-only estate, the live store is the canonical copy of the records.
@@ -1164,6 +1166,8 @@ and how to reach it. Regenerate that directory with
 ```
 
 Your `CLAUDE.md` and `GEMINI.md` at the root can say only "Read `AGENTS.md`." [The MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) describes the arrangement.
+
+`estate export` doesn't carry your three instruction files at the root yet, so keep them with the supplemental capture a cold recovery restores from ([section 10](#10-export-restore-recovery-and-divergence)).
 
 ### An agent on another machine: network MCP (0.9.2)
 

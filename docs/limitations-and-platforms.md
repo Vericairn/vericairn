@@ -401,6 +401,11 @@ records name such a payload; they don't recover its bytes. From 0.9.2, [Large pr
 describes the store's own backup and the readback verification that a cold recovery needs. A typed custody
 descriptor and an export list of external references are planned (DESIGN-42).
 
+An export doesn't carry the owner's agent instruction files at the root yet, so keep them with the supplemental
+capture. It leaves out the machine-local housekeeping that native operations write under `.vericairn/`, on purpose.
+No command lists a restored copy's files by class; the large private artifacts guide lists that housekeeping exactly
+and shows the [classification](large-artifacts.md#the-three-inventories-of-a-cold-recovery) as a tested example.
+
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
 outside the published tree and renamed only after judgment. The gate belongs to one `EstateService`
