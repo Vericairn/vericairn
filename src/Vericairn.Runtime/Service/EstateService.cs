@@ -52,7 +52,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
             (draft, model) => AuthorLocked(draft, model),
-            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, WriteCheckpointLocked, HistoryObjections, presence, SignsWithPresence);
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord, HeldSigner, WriteCheckpointLocked, HistoryObjections, presence, SignsWithPresence);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, goal, maxBytes, recipient, assignment, promptUse, searches, agent) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),

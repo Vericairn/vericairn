@@ -97,6 +97,7 @@ public sealed class RunAdmissionServiceTests
                 return run.Service.Session.Load();
             },
             _ => null, (_, _) => throw new InvalidOperationException("Release admission is outside this fixture."),
+            (_, _) => throw new InvalidOperationException("Release evidence is outside this fixture."),
             (_, _) => throw new InvalidOperationException("No history checkpoint is written by this fixture."),
             _ => throw new InvalidOperationException("Release admission is outside this fixture."),
             new PresenceCounter(), (_, _) => false);

@@ -37,34 +37,21 @@ internal sealed partial class ReleaseCoordinationService(
 
     private PresenceCounter Presence => recordAccess.Presence;
 
+    /// <summary>
+    /// Writes release evidence through the record boundary, which announces its prompt and signs the record itself, once (FIX-124). In
+    /// record format 3 it is written only when the acting principal's admitted device held here would sign it, which is found without
+    /// signing: the stored record's own signature proves the device could sign it, so no trial signature precedes it (FIX-130).
+    /// </summary>
     private WriteOutcome WriteRecord(NewRecordRequest request)
     {
         lock (gate)
         {
             EstateModel model = session.Load();
-            string[] parts = request.Subject?.Split(':', 3) ?? [];
-            RecordReference? subject = parts.Length >= 2 ? new(parts[0], parts[1], parts.Length == 3 ? parts[2] : null) : null;
-            var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, now());
-            // Outside a release action the record states its own prompts: in format 3 its trial signature, then the record (FIX-124).
-            using IDisposable? counted = Presence.Counting ? null : Presence.Action("Writing the " + request.Type + " record",
-                recordAccess.SignsWithPresence(model, request.By) ? Evidence(model, EstateService.DescribeRecord(draft, model)) : null);
-            if (model.Manifest?.RecordFormat >= 3)
-            {
-                (AuthoredRecord? signed, string? refusal) = recordAccess.AuthorLocked(draft, model);
-                if (refusal is not null || signed?.Envelope.Signatures.Count is not > 0)
-                    return WriteOutcome.Fail(new("refused", refusal ?? "The acting principal has no admitted held signing device for the release evidence; retain and reconcile the original identity.", []));
-            }
+            if (model.Manifest?.RecordFormat >= 3 && recordAccess.HeldSigner(new RecordDraft(request.Type, request.By, request.Body), model) is { Signs: false } held)
+                return WriteOutcome.Fail(new("refused", held.Refusal ?? "The acting principal has no admitted held signing device for the release evidence; retain and reconcile the original identity.", []));
             return writeRecord(request);
         }
     }
-
-    /// <summary>
-    /// What a release record written through <see cref="WriteRecord"/> asks presence for (FIX-124): in record format 3 a trial signature
-    /// that proves the device can sign the release evidence, then the record itself.
-    /// </summary>
-    private static IReadOnlyList<PresenceSignature> Evidence(EstateModel model, PresenceSignature record) => model.Manifest?.RecordFormat >= 3
-        ? [EstateService.TrialSignature(record.Key, "that proves your device can sign this release evidence before it is written"), record]
-        : [record];
 
     private static PresenceSignature ReleaseOperation(string version, string status) =>
         EstateService.OperationSignature(ReleaseFlow.DispatchAction, status, "release " + version);
@@ -73,8 +60,8 @@ internal sealed partial class ReleaseCoordinationService(
 
     /// <summary>
     /// What a submission asks presence for, in order (FIX-124): the release gate's history checkpoint in an estate that has adopted, the
-    /// intent, a trial signature before dispatch that proves the device can still sign, and the dispatch's receipt; a dispatch that fails
-    /// records its failure in the receipt's place, and its prompt says so.
+    /// intent and the dispatch's receipt; a dispatch that fails records its failure in the receipt's place, and its prompt says so. Every
+    /// one is stored: the intent signed before the dispatch proves the device can sign, so no trial signature is made (FIX-130).
     /// </summary>
     private static List<PresenceSignature> SubmitPresence(EstateModel model, string version)
     {
@@ -82,8 +69,7 @@ internal sealed partial class ReleaseCoordinationService(
         if (global::Vericairn.Records.History.SignedHistory.Adopted(model))
             plan.Add(EstateService.CheckpointSignature("release"));
         plan.Add(ReleaseOperation(version, "not-started"));
-        plan.Add(EstateService.TrialSignature("release " + version, "that proves your device can still sign before the build is dispatched"));
-        plan.AddRange(Evidence(model, ReleaseOperation(version, "dispatched")));
+        plan.Add(ReleaseOperation(version, "dispatched"));
         return plan;
     }
 
@@ -398,11 +384,17 @@ internal sealed partial class ReleaseCoordinationService(
                     currentModel.ById[previousId].Supersedes, probe: false, excluded: excluded);
                 if (recordAccess.RequestDeviceRefusal(currentModel) is { } denied) fresh.Objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", identity, denied.Message)]);
                 if (!currentModel.IsCurrent(currentModel.ById[previousId])) fresh.Objections.Add(new("error", "release.intent-changed", identity, "The admitted intent is no longer current; reconcile its identity."));
-                JsonObject authorityProbe = ReleaseFlow.Canceled(previousBody, "Validate the current acting principal before dispatch.");
-                (AuthoredRecord? probeRecord, string? signerRefusal) = recordAccess.AuthorLocked(new("operation", request.By, Element(authorityProbe), new("product", request.Product, null), previousId, now()), currentModel);
-                if (signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && probeRecord?.Envelope.Signatures.Count is not > 0)
+                // The intent was signed moments ago in this submission, with presence where the device asks for it: that signature proves
+                // the device can sign, so no trial signature is made before the dispatch (FIX-130). Found without signing, the acting
+                // principal's admitted device must still be held here and the intent's cancellation must be a valid record, so a device
+                // revoked or removed since the intent dispatches nothing.
+                var cancellation = new RecordDraft("operation", request.By, Element(ReleaseFlow.Canceled(previousBody, "Validate the current acting principal before dispatch.")),
+                    new("product", request.Product, null), previousId, now());
+                (bool signs, string? signerRefusal) = recordAccess.HeldSigner(cancellation, currentModel);
+                bool cannotSign = signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && !signs;
+                if (cannotSign)
                     fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
-                if (probeRecord is not null) fresh.Objections.AddRange(recordAccess.LoadWith([probeRecord]).Findings.Where(f => f.Severity == Severity.Error).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
+                fresh.Objections.AddRange(recordAccess.CheckReleaseRecord(cancellation, currentModel).Where(f => f.Code != "release.signature"));
                 JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
                 if (!admitted.HasSameInputsAndFindings(fresh.Assessment, [claimRevision]) && !fresh.Objections.Any(f => ReleaseBasisRetention.SizeCodes.Contains(f.Code)))
                     Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
@@ -411,7 +403,7 @@ internal sealed partial class ReleaseCoordinationService(
                 {
                     JsonObject canceled = ReleaseFlow.Canceled(Element(checkedBody), "Admission changed before dispatch; no provider was called. " + string.Join(" | ", fresh.Objections.Select(f => f.Message)));
                     if (withPresence) Presence.Revise([ReleaseOperation(request.Version, "canceled")], "the admission changed before dispatch, so the intent is canceled instead");
-                    WriteOutcome settled = signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && probeRecord?.Envelope.Signatures.Count is not > 0
+                    WriteOutcome settled = cannotSign
                         ? WriteOutcome.Fail(new("refused", signerRefusal ?? "No admitted held signer remains to record cancellation.", []))
                         : recordAccess.WriteLocked(new("operation", request.By, Element(canceled), new("product", request.Product, null), previousId, now()), currentModel);
                     ReleaseResponse refusal = GateRefusal(identity, settled.Ok ? "canceled" : "not-started", admitted, fresh.Objections);
@@ -424,7 +416,7 @@ internal sealed partial class ReleaseCoordinationService(
                     checkedBody["dispatchedAt"] = RecordParser.FormatTimestamp(now());
                     checkedBody["reconciliation"] = "Preparation re-evaluated before dispatch; this identity is reserved and no provider has yet been called.";
                     if (withPresence)
-                        Presence.Revise([ReleaseOperation(request.Version, "uncertain"), .. Evidence(currentModel, ReleaseOperation(request.Version, "dispatched"))],
+                        Presence.Revise([ReleaseOperation(request.Version, "uncertain"), ReleaseOperation(request.Version, "dispatched")],
                             "the admission basis changed before dispatch, so the reserved intent is recorded again first");
                     WriteOutcome checkedClaim = recordAccess.WriteLocked(new("operation", request.By, Element(checkedBody), new("product", request.Product, null), previousId, now()), currentModel);
                     if (!checkedClaim.Ok) return ReleaseProblem(identity, "not-started", checkedClaim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
@@ -525,7 +517,7 @@ internal sealed partial class ReleaseCoordinationService(
                     return ReleaseProblem(identity, status, "refused", $"An operation that is {status} is not canceled; cancellation settles an intent that was never dispatched or an outcome reconciled as having had no effect.");
                 }
 
-                if (withPresence) Presence.Expect(Evidence(session.Load(), ReleaseOperation(request.Version, "canceled")), "the intent is canceled");
+                if (withPresence) Presence.Expect([ReleaseOperation(request.Version, "canceled")], "the intent is canceled");
                 WriteOutcome canceled = WriteRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.Canceled(body, request.Cancel)), $"product:{product}", current.Id));
                 return canceled.Ok ? new ReleaseResponse(identity, "canceled", $"{identity}: canceled; {request.Cancel}", true, canceled.Written) : ReleaseProblem(identity, status, canceled.Problem!);
             }
@@ -535,11 +527,7 @@ internal sealed partial class ReleaseCoordinationService(
                 // An intent without a receipt is not proof that no effect happened. Persist that uncertainty before observing it. Its
                 // prompts are announced with those of the build observed finished: the revision and the candidate.
                 if (withPresence)
-                {
-                    EstateModel model = session.Load();
-                    Presence.Expect([.. Evidence(model, ReleaseOperation(request.Version, "uncertain")), .. Evidence(model, ReleaseOperation(request.Version, "observed-success")),
-                        .. Evidence(model, Candidate(request.Version))], "the intent is observed");
-                }
+                    Presence.Expect([ReleaseOperation(request.Version, "uncertain"), ReleaseOperation(request.Version, "observed-success"), Candidate(request.Version)], "the intent is observed");
                 body = Element(ReleaseFlow.AfterUncertainty(body, "The intent has no dispatch receipt; the external effect is unknown and must be observed and reconciled."));
                 WriteOutcome uncertain = WriteRecord(new NewRecordRequest("operation", request.By, body, $"product:{product}", current.Id));
                 if (!uncertain.Ok)
@@ -634,10 +622,8 @@ internal sealed partial class ReleaseCoordinationService(
 
                 if (withPresence && recovered is null)
                 {
-                    EstateModel model;
-                    lock (gate) model = session.Load();
                     bool candidateFollows = revisionBody["status"]?.GetValue<string>() == "observed-success" && recorded is null;
-                    Presence.Expect([.. Evidence(model, ReleaseOperation(request.Version, revisionBody["status"]!.GetValue<string>())), .. candidateFollows ? Evidence(model, Candidate(request.Version)) : []],
+                    Presence.Expect([ReleaseOperation(request.Version, revisionBody["status"]!.GetValue<string>()), .. candidateFollows ? [Candidate(request.Version)] : Array.Empty<PresenceSignature>()],
                         "the build is observed");
                 }
                 WriteOutcome revision = WriteRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
@@ -775,7 +761,7 @@ internal sealed partial class ReleaseCoordinationService(
         {
             EstateModel model = session.Load();
             if (recordAccess.SignsWithPresence(model, request.By))
-                Presence.Expect(Evidence(model, new PresenceSignature("release", request.Version, "records the release's observed publication")), "the publication is observed");
+                Presence.Expect([new PresenceSignature("release", request.Version, "records the release's observed publication")], "the publication is observed");
         }
         WriteOutcome published = WriteRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id, Expected: candidate.Hash));
         if (!published.Ok)

@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
@@ -198,11 +200,11 @@ public sealed class PresencePromptTests
     }
 
     [Fact]
-    public void AReleaseSubmissionAndItsObservationAnnounceEveryPromptAndCountThemAsTheySign()
+    public void AReleaseSubmissionAndItsObservationsAskOnlyForSignaturesTheyStoreAndCountThemAsTheySign()
     {
         using var f = new HistoryTriggerTests.Fixture();
         RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
-        (FakeReleaseProvider provider, RecordingCustody custody) = PresenceRelease(f);
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
         // The fixture stamps its records with its own clock, which can run a second ahead of the wall clock. The runtime reads a
         // controlled clock past every record instead (FIX-133), and the clock turns between the admission and the dispatch, as on a
         // loaded machine: the submission-time basis is complete at both and the same, so the path announced is the path signed.
@@ -212,38 +214,69 @@ public sealed class PresencePromptTests
         f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") clock.Now = clock.Now.AddSeconds(1); };
         List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
         long start = f.Api.PresencePrompts(new()).Cursor;
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
 
         ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
             Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
 
+        // FIX-130: the submission signs no trial signature. The intent, signed before the dispatch, proves the device can sign, and the
+        // receipt is signed once, as it is stored: 3 prompts where 0.9.3's first build asked for 5.
         Assert.True(submitted.Ok, submitted.Message);
+        Assert.Single(provider.Dispatches);
         IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
         AssertAnnouncedBeforeAsked(notices, asked);
-        Assert.Equal(["announced", "prompt", "prompt", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal(["announced", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
         Assert.All(notices, n => Assert.Equal("release submit 1.1.0", n.Action));
         Assert.Equal(
         [
             "history-checkpoint trigger release: witnesses the estate's history before the release check, as the release gate requires",
             "operation release 1.1.0: records the release intent before the build is dispatched",
-            "operation release 1.1.0: a trial signature, never stored, that proves your device can still sign before the build is dispatched",
-            "operation release 1.1.0: a trial signature, never stored, that proves your device can sign this release evidence before it is written",
             "operation release 1.1.0: records the release build's dispatch receipt",
         ], notices[0].Signatures.Select(s => s.Describe()));
-        Assert.Equal(Enumerable.Range(1, 5).Select(k => $"Signature {k} of 5: " + notices[0].Signatures[k - 1].Describe()), notices.Where(n => n.Kind == "prompt").Select(n => n.Text));
-        Assert.Equal("Signed 5 of 5.", notices[^1].Text);
-        Assert.Equal(5, custody.Reasons.Count);
-        Assert.All(custody.Reasons.Select((r, i) => (r, i)), x => Assert.StartsWith($"sign Vericairn signature {x.i + 1} of 5: ", x.r, StringComparison.Ordinal));
+        Assert.Equal(Enumerable.Range(1, 3).Select(k => $"Signature {k} of 3: " + notices[0].Signatures[k - 1].Describe()), notices.Where(n => n.Kind == "prompt").Select(n => n.Text));
+        Assert.Equal("Signed 3 of 3.", notices[^1].Text);
+        Assert.Equal(3, custody.Reasons.Count);
+        Assert.All(custody.Reasons.Select((r, i) => (r, i)), x => Assert.StartsWith($"sign Vericairn signature {x.i + 1} of 3: ", x.r, StringComparison.Ordinal));
+        Assert.Equal(3, SignedSince(f, before, device));
 
-        // Observing the finished build signs the operation's revision and the candidate, each after its trial signature.
+        // Observing the finished build signs the operation's revision and the candidate, each once, as it is stored: 2 where it was 4.
         provider.CompleteRun("Example/widget", submitted.Run!, success: true, "1.1.0");
+        asked.Clear();
+        before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
         long observed = f.Api.PresencePrompts(new()).Cursor;
         ReleaseResponse candidate = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, [], [], "unsigned developer build", Product: product.Id));
         IReadOnlyList<PresenceNotice> observation = Since(f.Api, observed);
         Assert.True(candidate.Candidate is not null, candidate.Message);
-        Assert.Equal(["announced", "prompt", "prompt", "prompt", "prompt", "finished"], observation.Select(n => n.Kind));
-        Assert.Equal(4, observation[0].Count);
-        Assert.Equal("release 1.1.0: records the release candidate for your acceptance", observation[0].Signatures[^1].Describe());
-        Assert.Equal("Signed 4 of 4.", observation[^1].Text);
+        AssertAnnouncedBeforeAsked(observation, asked);
+        Assert.Equal(["announced", "prompt", "prompt", "finished"], observation.Select(n => n.Kind));
+        Assert.Equal(
+        [
+            "operation release 1.1.0: records the release build as observed finished",
+            "release 1.1.0: records the release candidate for your acceptance",
+        ], observation[0].Signatures.Select(s => s.Describe()));
+        Assert.Equal("Signed 2 of 2.", observation[^1].Text);
+        Assert.Equal(2, SignedSince(f, before, device));
+
+        // Once the operator accepts the candidate and publishes it, observing the publication signs the published revision once: 1 where
+        // it was 2.
+        RecordEnvelope recorded = f.Api.Session.Load().ById[candidate.Candidate!.Id];
+        WriteOutcome accepted = f.Api.NewRecord(new("acceptance", f.Records.Estate.OperatorId,
+            PolicyFixture.Element(new JsonObject { ["statement"] = "Accept the presence fixture's candidate.", ["basis"] = new JsonArray(), ["self"] = true }),
+            $"release:{recorded.Id}:{recorded.ComputedHash}"));
+        Assert.True(accepted.Ok, accepted.Problem?.Message);
+        provider.Publish("Example/widget", "v1.1.0");
+        asked.Clear();
+        before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+        long publishing = f.Api.PresencePrompts(new()).Cursor;
+        ReleaseResponse published = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, Product: product.Id));
+        IReadOnlyList<PresenceNotice> publication = Since(f.Api, publishing);
+        Assert.True(published.Release is not null, published.Message);
+        AssertAnnouncedBeforeAsked(publication, asked);
+        Assert.Equal(["announced", "prompt", "finished"], publication.Select(n => n.Kind));
+        Assert.Equal("release 1.1.0: records the release's observed publication", Assert.Single(publication[0].Signatures).Describe());
+        Assert.Equal("Signed 1 of 1.", publication[^1].Text);
+        Assert.Equal(1, SignedSince(f, before, device));
+        Assert.DoesNotContain(custody.Reasons, r => r!.Contains("never stored", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -257,12 +290,13 @@ public sealed class PresencePromptTests
         f.Records.Estate.SetClock(clock.Now);
         RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
         Assert.Equal(clock.Now.AddSeconds(1), product.AtTime);
-        (FakeReleaseProvider provider, RecordingCustody custody) = PresenceRelease(f);
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
         Hold(f, provider, clock);
         Assert.All(f.Api.Session.Load().Records.Where(r => r.Id != product.Id), r => Assert.True(r.AtTime < clock.Now, $"{r.Type} {r.Id} is stamped {r.At}, past the runtime's clock."));
         f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") clock.Now = product.AtTime; };
         List<PresenceNotice> asked = NewestAtEachSignature(custody, f.Api);
         long start = f.Api.PresencePrompts(new()).Cursor;
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
 
         ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
             Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
@@ -271,30 +305,60 @@ public sealed class PresencePromptTests
         Assert.Equal(2, submitted.BasisEvidence!.Count);
         IReadOnlyList<PresenceNotice> notices = Since(f.Api, start);
         AssertAnnouncedBeforeAsked(notices, asked);
-        Assert.Equal(["announced", "prompt", "prompt", "prompt", "revised", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal(["announced", "prompt", "prompt", "revised", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
         Assert.Equal("""
-            release submit 1.1.0 now needs 6 signatures in all, because the admission basis changed before dispatch, so the reserved intent is recorded again first. The rest are:
-              4. operation release 1.1.0: records the release build as uncertain, to be observed before any retry
-              5. operation release 1.1.0: a trial signature, never stored, that proves your device can sign this release evidence before it is written
-              6. operation release 1.1.0: records the release build's dispatch receipt
-            """.ReplaceLineEndings("\n"), notices[4].Text);
-        Assert.Equal("Signed 6 of 6.", notices[^1].Text);
-        Assert.Equal(["1 of 5", "2 of 5", "3 of 5", "4 of 6", "5 of 6", "6 of 6"], custody.Reasons.Select(r => r!["sign Vericairn signature ".Length..r!.IndexOf(':', StringComparison.Ordinal)]));
+            release submit 1.1.0 now needs 4 signatures in all, because the admission basis changed before dispatch, so the reserved intent is recorded again first. The rest are:
+              3. operation release 1.1.0: records the release build as uncertain, to be observed before any retry
+              4. operation release 1.1.0: records the release build's dispatch receipt
+            """.ReplaceLineEndings("\n"), notices[3].Text);
+        Assert.Equal("Signed 4 of 4.", notices[^1].Text);
+        Assert.Equal(["1 of 3", "2 of 3", "3 of 4", "4 of 4"], custody.Reasons.Select(r => r!["sign Vericairn signature ".Length..r!.IndexOf(':', StringComparison.Ordinal)]));
+        Assert.Equal(4, SignedSince(f, before, device));
     }
+
+    [Fact]
+    public void ADeviceThatCanNoLongerSignAfterTheIntentDispatchesNothingAndIsAskedNothingMore()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        // FIX-130 keeps the guarantee the trial signature gave: no build is dispatched by a device that cannot sign. Here the device's
+        // key leaves this machine after the intent is signed; before the dispatch the runtime finds, without signing, that no admitted
+        // device of the operator is held here any more.
+        f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") custody.Remove(device); };
+        long start = f.Api.PresencePrompts(new()).Cursor;
+
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+        Assert.False(submitted.Ok);
+        Assert.Empty(provider.Dispatches);
+        Assert.Contains(submitted.Problem!.Findings, finding => finding.Code == "release.signature");
+        Assert.Equal("not-started", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+        // The release gate's checkpoint and the intent were asked for and stored; nothing was signed to test the device or to cancel.
+        Assert.Equal(2, custody.Reasons.Count);
+        Assert.Equal(2, Since(f.Api, start).Count(n => n.Kind == "prompt"));
+    }
+
+    // The records written since a set of identities that the device signed.
+    private static int SignedSince(HistoryTriggerTests.Fixture f, HashSet<string> before, string device) =>
+        f.Api.Session.Load().Records.Count(r => !before.Contains(r.Id) && r.Signatures.Any(s => s.Device == device));
 
     // A release source and provider for Example/widget, and the operator signing here only with a device recorded as needing presence,
     // held by the recording stand-in for its custody.
-    private static (FakeReleaseProvider Provider, RecordingCustody Custody) PresenceRelease(HistoryTriggerTests.Fixture f)
+    private static (FakeReleaseProvider Provider, RecordingCustody Custody, string Device) PresenceRelease(HistoryTriggerTests.Fixture f)
     {
         var provider = new FakeReleaseProvider();
         f.Api.Providers = new ProviderRegistry();
         f.Api.Providers.Register(provider);
         ReleaseGateSource.Prepare(f.Api, "Example/widget", provider.HeadSha);
-        f.PresenceDevice(f.Records.Estate.OperatorId);
+        string device = f.PresenceDevice(f.Records.Estate.OperatorId);
         f.ForgetOperatorDevice();
         var custody = new RecordingCustody(VericairnHome.Path());
         f.Api.KeyStores = [custody];
-        return (provider, custody);
+        return (provider, custody, device);
     }
 
     // A controlled clock at a whole second a minute past the wall clock, and so past every record the fixture has written, whose own
