@@ -1,0 +1,1006 @@
+# API compatibility in 0.9.2
+
+## Runs of a flow (PROC-05)
+
+No route, interface member or protocol type is added or changed. `GET /v1/goals/{id}` keeps its `GoalResponse` shape; for a
+goal whose plan names a flow, its JSON adds a `flow` member with the run's position: the exact pin and the chain it extends,
+whether it resolves here, the run's work order, `until`, every configured value with its source, `complete`, `next`, and each
+step instance (`key` and, under `each`, `instance`) with its state, reasons, principal, assignment, result, review, outputs,
+`items` (each declared item with its `kind`, whether it is required, its state, reasons, hash and producing record, producer,
+review and evidence), inputs (as now and as pinned, with any change after use), done verdicts and recovery. Goals without a
+flow have no `flow` member. `GET /v1/goals/{id}/next` keeps
+`format` `vericairn.next/1`; for a run it adds `flow`, its `steps` are the flow's step instances (`key`, `instance`, `kind`,
+`status` with the step's derived state, `role`, `reasons`, `assignment` and `route` in the existing route shape), and `next`
+names a step instance as `key` or `key[instance]`. `POST /v1/goals/{id}/step` returns the same `GoalStepResponse`, whose `step` is
+that step instance for a run. Older clients ignore the added members; older servers omit them, which is not evidence that a
+goal is not a run.
+
+The SDK's and the MCP server's goal reads carry the same JSON. The `goal_get` description now names a run's position; no tool
+is added. The command line adds `goal propose --flow`, `--subject`, `--flow-option` and `--until`. The state language adds
+the `flow-step` and `flow-item` vocabularies, each with its values' words and tones.
+
+`Vericairn.Records` adds public types and members, each additive:
+
+- `Templates.FlowContract`, the content contract's vocabularies (step kinds, holders, reserved acts, review independence,
+  item kinds, routes, subject types, `StepOption`, `ItemOption`, `OnOff`), `IsFlow`, `Counted` and `ParseDuration`;
+  `Templates.FlowDefinition`, the resolved flow with `Resolve(EstateModel, TemplatePin)` and
+  `Resolve(TemplateDefinition, Func<TemplatePin, TemplateDefinition>)`, its options and the steps and items its extensions
+  turn off (`TurnedOff`, `TurnedOffItems`); and the records `FlowRole`, `FlowInput`, `FlowReview`, `FlowProvenance`,
+  `FlowEvidence`, `FlowOutput` (an item: name, kind, media or record type, `Required`, `DefaultOn`, provenance, evidence and
+  review), `FlowTrap`, `FlowBranch` and `FlowStep` (with its own review and `ItemOption`).
+- `TemplateDefinition.Kind` and `TemplateDefinition.IsFlow`; `TemplateCatalog.Resolve(TemplatePin,
+  IEnumerable<TemplateDefinition>)`, which resolves installed or retained content without reading a working directory.
+  `TemplateDefinition.Validate` and `Read` accept content of kind `flow` and validate it by the flow contract; document
+  templates may state `"kind": "document"`, and content without a kind remains a document template.
+- `Estate.FlowRuns`, a run's plan, configuration (with `ItemsOff`), policy-required steps and items, and step references
+  (`StepRef` with `Key` and `Instance`); `Estate.FlowPosition`, a run's derived position (`StepInstance`, `ItemState` with
+  `ItemStates`, `Output`, `Input`, `Check`) and its text and JSON; and `NextEligible.FlowRoutes`, `FlowRunRoutes`, `FlowStepRoute`,
+  `FlowDispatching` and the `RenderText` and `RenderJson` overloads for a run's routes.
+- `Routing.Assignments(EstateModel, RecordEnvelope, FlowRuns.StepRef?)` and `Routing.RoleOf(EstateModel,
+  RecordEnvelope)`; `GoalPredicates.Matching`, the records a predicate counts.
+
+`TemplateCatalog.All` no longer reads a `docs/templates` directory for a model without a root, such as a policy basis; such
+a model's retained content comes from the basis. The policy basis's estate inventory retains `docs/templates` JSON content
+beside its Markdown, so its digest differs from an earlier build's for an estate with templates. The foundation policy kind
+`vericairn.estate/flow-steps` is added. Record format remains 3; its additions, a goal's `plan.flow`, an assignment's
+`step`, and an optional `provenance` on results and operations, are in
+[record format 3](record-format-v3.md#runs-of-a-flow-092).
+
+The generic record reader advances its implementation identity to `vericairn.records/readers/6`: the declared `provenance`
+field of results and operations and an assignment's `step` change their schema explanations. Its hash changes;
+declarations pinned to an earlier implementation require the ordinary explicit generator update before regeneration, and
+earlier golden fixtures remain retained. The generator id and contract version 1 are unchanged.
+
+## Live-store diagnostics and the cache rebuild (FIX-93)
+
+No route, interface member, protocol type or public member is added, removed or changed. The public `LiveStore`
+operations, and with them `EstateSession` and `EstateService.Open`, now report a SQLite failure as an `IOException` whose
+message names the storage profile, the store's path and the recovery route, with the `SqliteException` as its inner
+exception. They no longer throw the `SqliteException` itself. A failed `EstateService.Open` disposes its session before the
+exception leaves. The command line, which already reported an `IOException` as a bounded `error:` line with exit code `2`,
+reports these failures the same way.
+
+A writable `EstateSession` now holds `live.lock`, beside the live store, open with shared access for its lifetime. Sessions
+coexist as before. `EstateSession.Open` fails with an `IOException` while a cache rebuild holds that lock alone. Read-only
+sessions take no lock.
+
+The command line adds `estate cache rebuild`, which is not offered over the API, the SDK or MCP. It runs only on the
+estate's own machine with no daemon serving the estate. Its JSON output is `{estate, cache, records, retained,
+retainedFiles}`. No record type, record format or generated document changes.
+
+## Review evidence route (FIX-94)
+
+No route, interface member, protocol type or command option is added or removed. `NewRecord` (`POST /v1/records`,
+`records new`) classifies a review as duty evidence only when its subject result revision carries `duties`. Before, any
+`read` list did. A review of a result without duties is written as an ordinary record, with or without `read`. It needs no
+`expected` hash and no admitted device, and it is signed only as every ordinary write is, when the author holds an admitted
+device. An `expected` supplied for an ordinary result or review is now checked against the record it supersedes, or else the
+exact current subject. A stale one is a `conflict`, where it was ignored before.
+
+Duty evidence through `NewRecord`, `Result` or `ReviewResult` that lacks its exact subject pin, its `expected` hash or an
+admitted device whose key the runtime holds now fails with a `refused` problem naming each one missing. Before, a missing
+`expected` was reported as the `conflict` used for a stale hash. A supplied hash that is no longer current remains a
+`conflict`. `ReviewResult` (`work review`, `work_review`) still always signs, whatever its result.
+
+Record validation follows the same rule: `signature.required` applies to a review only when its subject result has
+`duties`. An unsigned review of a result without duties that carries `read` is valid from 0.9.2. An earlier build reports it as
+`signature.required`, so an estate that records one should not be opened by an earlier release. Duty completion still reads
+only signed reviews of the exact duty result.
+
+The review type's summary and its `read` field description say which reviews need `expected` and an admitted device, and
+so do the `records new --expected` and `work review` help. Because the field description is part of the generic record
+reader's schema explanation, that reader advances to `vericairn.records/readers/7`. Its hash changes, and declarations
+pinned to an earlier implementation need the ordinary explicit generator update before regeneration. Earlier golden
+fixtures remain. The generator id and contract version 1 are unchanged.
+
+## Finishing an operator action after its merge (FIX-89)
+
+`IEstateApi` adds `OperatorUnfinished()` and `OperatorFinish(OperatorFinishRequest)`, with their cancellable counterparts
+`OperatorUnfinishedAsync` and `OperatorFinishAsync`; each has a default implementation, so existing implementers stay
+source-compatible. The daemon adds `GET /v1/operator/unfinished` and `POST /v1/operator/unfinished`, the SDK's `VericairnClient`
+implements all four, and `OperatorFinish` has the 15-minute deadline `OperatorRecord` has. The protocol adds
+`OperatorFinishRequest`, `OperatorUnfinishedResponse` and `OperatorUnfinishedAction`. The command line adds `operator
+unfinished`; no MCP tool is added.
+
+`IRecordCommitAdapter` in `Vericairn.Runtime` adds overloads of `Prepare` and `Branch` that take the untracked receipts to
+tolerate: those of the earlier action the runtime finished from its records. Their default implementations call the existing
+members and tolerate none, so an adapter that does not override them refuses those receipts, as before.
+`GitRecordCommitAdapter` overrides both.
+
+`POST /v1/operator/record` keeps `OperatorRecordRequest` and `OperatorRecordResponse`. Its behavior changes: an action whose
+merge is recorded resumes by observing its target run only, without branch, commit, push, opening or merge, wherever the clone
+is; and while an earlier action is unfinished, a new one first finishes it when its merge is recorded and its target checks
+pass, and otherwise is refused with `status` `refused`, naming the earlier action's record id, type and subject. The local
+checkpoint, which is machine state and no record, also keeps the action's type, subject and author and the finished action
+whose receipts the next one tolerates; checkpoints written by earlier builds are read as before.
+
+## An acceptance rests only on reviews that passed (FIX-85)
+
+No route, interface member or protocol type is added or changed. A new acceptance by a principal other than the operator
+whose `basis` names a review of its subject with outcome `findings` or `fail` is now refused at every write surface (the
+command line, the daemon, the SDK and a device-prepared record) with the finding `acceptance.basis-outcome` at severity
+`error` in the response's problem. The operator's acceptances are unchanged. Validation and the estate check report an
+acceptance already in the estate that names such a review with the same code at severity `info`; it adds no error and the
+acceptance keeps accepting its subject. Record format remains 3, and no record body changes.
+
+## A release basis keeps evidence files by hash (FIX-95)
+
+No route, interface member or protocol type is added or changed. A basis that submission retains now has format
+`vericairn.release-basis/3`, the shape of `vericairn.release-basis/2`, and `ReleaseBasisEvidence.Format` carries that value.
+The basis retains as objects only the files read from a working tree; each file of a repository read at an exact commit is
+named by path and hash. `GET /v1/release-bases/{hash}`, the SDK, the CLI and the `release_basis_get` tool still return the
+complete evidence, reading each such file's bytes from a clone registered on the serving machine at its commit. When none
+holds it and no earlier copy is retained, the file is a `release-basis.missing` finding whose message names the repository's
+Git objects at the recorded commit. Servers before 0.9.2 answer HTTP 404 for a format-3 basis, as for any unsupported object.
+
+Release admission, through `release submit --check`, `POST /v1/releases/check` and submission, adds the objection
+`release.basis-retained` with its next action when a basis would retain more than 4,096 files or 67,108,864 bytes;
+`release.basis-file-size` now applies only to files the basis retains. Bases of formats 1 and 2 read as before, and a format-2
+basis whose exact-commit copies are absent from the estate reads those files, and any evidence object of the same hash, from Git.
+
+## A workspace setup command runs with a filtered environment (FIX-96)
+
+No route or protocol type changes. `Vericairn.Runtime.Workers.WorkspaceSetupConfiguration` adds `Variables`, an optional list of
+variable names (null when none), and the constant `MaximumVariables` (64). A setup file holds `variables` only when it names some,
+so files without them keep 0.9.1's shape and read in either version; a file naming `variables` is refused by 0.9.1 as an unknown
+field. `WorkerConfigurationStore.WriteSetup` and `ReadSetup` refuse a list of more than 64 names, a name given twice, a name that is
+not a portable variable name, or one starting with `VERICAIRN_`.
+
+The setup command's environment changes: it is the one `WorkerEnvironment.Build` gives a harness, without launcher names, plus the
+worker's variables the configuration names, and never a `VERICAIRN_` variable. In 0.9.1 it was the worker's whole environment less
+the `VERICAIRN_` variables, so a setup command that relied on another ambient variable needs it named. The command line adds
+`worker configure --setup-variable <name>`, repeatable and given with `--setup-command`; `worker configure --json` adds `variables` to
+each setup entry, an empty array when the command names none and null when its file cannot be read.
+
+## Output locations carry no scheme (FIX-97)
+
+No route, interface member, protocol type or public member is added or changed. A new result whose `outputs[].location`
+begins with a URL scheme (letters, digits, `+`, `-` or `.` before a colon, such as `https:` or `file:`) is now refused at
+every write surface (`NewRecord`, `Result`, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP)
+with the finding `result.output-scheme` at severity `error` in the response's problem; before, such a location was accepted.
+Validation and the estate check report a result already in the estate with such a location under the same code at severity
+`warning`, once per result, at `#body.outputs`, naming each such output and its scheme; it adds no error and the result
+keeps its reading. Evidence locations, which may be URLs, are unchanged. Record
+format remains 3, and no record body or field description changes.
+
+## One writer at a time per working tree (FIX-99)
+
+No route, interface member or protocol type is added or changed. Every record write of a writable `EstateSession`, through
+`EstateService` in the daemon or an embedded command, now takes an exclusive write lock in the working tree's
+`.vericairn/write-lock/` directory, whatever the runtime's Vericairn home, and holds it from judging the proposed records
+until they and their companions are stored. A write that cannot take the lock within 30 seconds fails with a `conflict`
+problem whose message names the holder's process id, host, home digest and the time it took the lock; the daemon answers
+it with HTTP 409 on `WriteOutcome` routes, and a composite response carries it as its problem. The public
+`EstateSession.Write` and `EstateSession.Discard` take the same lock when their caller does not hold it, and throw an
+`IOException` naming the holder after the wait. A local-only estate, whose records live in the live store, takes the
+same lock in `write-lock/` beside that store. Read-only sessions take no lock. The lock is separate from FIX-93's
+per-home `live.lock`. The holder's description, `holder.json`, is machine-local diagnosis beside the lock and is not a
+record. No record type, record format or generated document changes.
+
+## A new record names a known principal as its author (FIX-98)
+
+No route, interface member, protocol type or public member is added or changed. A new record whose envelope `by` names no
+record, or names a record of a type other than `principal`, is now refused at every write surface (`NewRecord` and the typed
+operations, a batch, a device-prepared record, the command line, the daemon, the SDK and MCP) with the finding
+`record.author` at severity `error` in the response's problem. The check is made when the record is written, whatever `at`
+it states. Before, any well-formed ULID was accepted for a record type with no author check of its own, such as a resource.
+The root operator's self-authored principal record is unchanged. Validation and the estate check report a record already in
+the estate whose author does not resolve under the same code at severity `info`; it adds no error and the record keeps its
+reading. Type-specific author errors, such as `result.author`, are unchanged. Record format remains 3, and no record body
+changes.
+
+## An upgrade replaces an older runtime (OPS-05)
+
+No route, interface member, protocol type or public member is added, removed or changed. `GET /v1/health` keeps its
+`HealthResponse`, whose `vericairn` the command line now compares, without build metadata, with the release the estate's
+manifest pins. Comparison follows SemVer precedence, so a prerelease of the pinned version is older than it.
+
+The command line changes. `estate upgrade`, when it applies an upgrade or runs again once applied, ends with a runtime step:
+a daemon serving the estate on this machine whose release is older than the new pin is asked to stop through the existing
+`POST /v1/shutdown`, and when the command line is the pinned release's build, by version and by the source commit the
+pinned release record or dependency observation names, it starts that release's daemon as `runtime start` does. A daemon of the pinned or a newer release, of another estate or root, or one that refuses the connection is not
+stopped, and none is started where none served. Its `--json` output, the `UpgradeResponse` as before, adds `runtime` with
+`outcome`, `served`, `started`, `done` and `warning`; `--check` adds nothing. `runtime status --json` adds
+`servingRelease`, `pin`, `pinnedRelease` and `mismatch`. Human `status` adds a final `Serving runtime (this machine):` line,
+and a `Mismatch:` line, when a daemon served it; `status --json` is unchanged, with a mismatch on stderr. Older clients
+ignore the added members. The exit codes are unchanged: a warning from the runtime step leaves an applied upgrade at 0.
+No record type, record format or generated document changes.
+
+## A reconciliation settles operations that share an identity (FIX-100)
+
+No route, interface member or protocol type is added or changed. A `reconciliation` whose subject is an operation and whose
+`kept` and `withdrawn` records are not revisions of that subject now settles operations recorded independently under one
+identity: each named record must be an operation under the subject's identity and the latest revision of its own operation,
+or the finding `reconciliation.identity` is an error; it is accepted only from the operator or under the `local-engineering`
+scope (`reconciliation.author`) and only when signed by an admitted device (`signature.required`), whatever the charter's
+signature policy. The withdrawn operations then read as superseded by the kept one. Before, such a reconciliation was
+refused with `reconciliation.successor`. Reconciliations of revisions of one record are unchanged.
+`EstateStatus.ReconcileCodes` adds `operation.duplicate-identity`, so status's `reconcile` list, `estate reconcile` and the
+required-attention incidents include it. Record format remains 3; the reconciliation type's summary and field descriptions,
+and with them the generic record reader's identity, are unchanged.
+
+## Hand-offs, reviews and failure routes (PROC-10)
+
+No route, interface member or protocol type is added or changed. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds the
+run's `attention`, and each step instance adds `failure` (a work step's failure route), `rerun`, `attemptsUsed`,
+`attemptsAllowed`, `attempts` (each with its assignment, attempt, result and outcome), `reviews` (each review before hand-off
+with its items, independence, role, subject and assignment), `attention` and `failed`. `GET /v1/goals/{id}/next` keeps
+`vericairn.next/1`; for a run it adds `attention` and `held`, each step entry adds `review` and `attention`, a review before
+hand-off is a step entry of its own whose `next` name is `<step> review`, and the route vocabulary adds `attention`.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; for required attention its `outcome` is `ask` with no
+assignment, and its `step` is the step, or `the run` for the run's own attention. Older clients ignore the added members and
+values. The SDK's and the MCP server's goal reads carry the same JSON; no tool is added. The state language's `step-route`
+vocabulary adds `attention`.
+
+`Vericairn.Records` adds public types and members:
+
+- `Templates.FlowContract.FailureRoutes`; `Templates.FlowFailure` with `Stop`; `FlowStep.Failure`, an optional trailing
+  parameter, and `FlowStep.FailureRoute`; and `FlowRole.Document`, an optional trailing parameter.
+- `Estate.FlowRuns.ReviewRef`, `ReviewOf`, `ReviewRequirement`, `Consequential`, `Authors`, `Harness` and
+  `ReviewerRefusals`; `FlowRuns.StepRef` gains an optional trailing `Review` parameter and `Work`, and its `ToString` adds
+  `review` for a review's step.
+- `Estate.FlowPosition.AttentionKinds`, `RetryBackoff`, `RetryBackoffLimit` and the records `AttemptState`,
+  `PendingReview`, `Attention` and `Failure`; `StepInstance.Attempts`, `AttemptsUsed`, `AttemptsAllowed`, `Reviews`,
+  `Attention`, `Failed` and `Rerun`; `ItemState.Requirement`; and `Position.RunAttention`. `Position.Find` finds a review's
+  step by its step.
+- `NextEligible.AttentionRoute`; `FlowStepRoute.Review`, an optional trailing parameter, `Name` and `Attention`;
+  `FlowRunRoutes.Attention`, `Held` and `AttentionNext`. `NextEligible.RouteStates` and `FlowDispatching` add `attention`.
+- `AgentRuns.StepAssignments`, the assignments whose runs count as one step's attempts.
+
+Behavior changes to the runs that PROC-05 adds, each within record format 3. A run's attempts per step count every agent run
+of a step's work across all of its assignments: a stale, reopened or rerun step's fresh assignment no longer starts the
+count again, and the record type refuses a run beyond them. Findings and failures that send a run's work back count only
+from principals who judge the step. A review that names no reviewer role clears an item only when it is by a principal of
+the estate's `reviewer` role, an operator, or the contributor of a review assignment of that item; PROC-05 accepted any
+principal other than the authors. A review in a role the flow marks `person` counts only from a person. A result naming
+`unresolvedEffects` no longer closes its step, and stops it even when stale or reopened; the record type refuses an
+`agent-run` intent on any assignment of that step while such a result is current (`operation.unreconciled`). The
+consequential independent default and routed reviews apply to work steps only. A failure route that returns to an `effect`
+or `exchange` step, and a failure route through a branch whose `returnTo` is a step after the failed one, are refused with
+the flow. `goal next` and `goal step` hold a failed step's route, its backoff and the run's `limits.consecutiveFailures`; a
+run started directly with `worker start` is not held by them. Record format remains 3; its addition, an assignment's
+`step.review`, and these rules are in [record format 3](record-format-v3.md#hand-offs-reviews-and-failure-routes-092).
+
+The generic record reader advances its implementation identity to `vericairn.records/readers/8`: an assignment's `step` and
+a goal's `limits` change their schema explanations. Its hash changes; declarations pinned to an earlier implementation
+require the ordinary explicit generator update before regeneration, and earlier golden fixtures remain retained. The
+generator id and contract version 1 are unchanged.
+
+## The event journal and the API stream (WATCH-05)
+
+`IEstateApi` adds `Events(after, filter, principal, wait)` and `EventGet(key, principal)`, with their cancellable counterparts
+`EventsAsync` and `EventGetAsync`; each has a default implementation, so existing implementers stay source-compatible, and
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. `Events` has a one-minute deadline, since a long
+poll waits up to 25 seconds. The daemon adds `GET /v1/events`, which answers with server-sent events when the request accepts
+`text/event-stream` and otherwise as a long poll, and `GET /v1/events/{key}`; both are reads, with a request scope and no
+write ledger. The protocol adds `EventEnvelope` (format `vericairn.event/1`), `EventReference`, `EventFilter`,
+`EventsResponse`, `EventStreamItem` and `EventVocabulary`; the OpenAPI document adds the two routes and the schemas
+`EventEnvelope`, `EventReference` and `EventsResponse`. The SDK adds `VericairnClient.StreamEventsAsync` and
+`WatchEventsAsync`, which return `IAsyncEnumerable<EventStreamItem>`. The command line adds `events watch`; no MCP tool or
+notification is added (`MCP-05` adds those).
+
+`StatusResponse`, `ProgressResponse`, `AttentionResponse`, `AsksResponse` and `GoalResponse` add the optional `EventsCursor`
+property, serialized as `eventsCursor` only when the runtime keeps a journal, which the daemon does and the embedded runtime
+does not. It sits beside the canonical JSON, which is unchanged, so the status document stays the same on every machine. These
+are positional records, so the property takes part in their equality, and each read's cursor differs: compare their `Text`
+and `Json` instead. Older clients ignore the property and older servers omit it.
+
+`EventBatch.Closed` is true when the journal closed under a reader; a long poll then answers 503 with `unavailable`, and a stream
+ends. A state read whose derivation fails answers without `eventsCursor` instead of failing. `Vericairn.Runtime` adds
+`EstateService.EnableEvents(directory, time, capacity)`, which the daemon calls before it serves,
+`EventsEnabled`, `DeriveEvents()`, `RunEventDerivationAsync(tick, log, cancellationToken)`, `OpenEvents(after, filter,
+principal, device, devicePublicKey, profile)` and `EventByKeyFor(key, principal, device, devicePublicKey, profile)`, and in
+`Vericairn.Runtime.Events` the types `EventSubscription` and `EventBatch`. `DaemonHost` keeps the journal in `events.db`
+beside the live store, and the key that names subjects that are not records in `events.key`, kept across epochs, both
+owner-only from creation, and runs the derivation for as long as it serves. A state read through the daemon now
+also derives what that read shows and may write the journal; it writes no record. No record type, record format or
+generated document changes.
+
+## Network MCP over Streamable HTTP (MCP-03)
+
+No route, OpenAPI operation, request or response type of API version 1 is added or changed. The daemon serves the Model
+Context Protocol over Streamable HTTP at `/mcp` on its loopback and local-network listeners when the operator turned it on,
+outside the API's route table; each tool call runs the API's own route in the daemon's process for the requesting device,
+with that route's request scope. A message to `/mcp` holds at most 1 MiB, refused before authentication, and a network
+write is kept in `local-network-writes.jsonl` on loopback as on the local network. `DaemonEndpoint` gains the optional
+`Mcp`, serialized as `mcp` (the path served) only while it is on; older clients ignore it and older daemons omit it.
+
+`Vericairn.Daemon` now depends on `Vericairn.Mcp`. `DaemonOptions` adds `Mcp` and `McpAllowedOrigins`, which override the
+runtime settings when set. `RuntimeSettings` adds the init-only `Mcp` and `AllowedOrigins` and the static
+`TryNormalizeOrigin`; `runtime.json` gains `mcp` and `allowedOrigins`, written on every save, and an older build ignores
+them. A file whose `allowedOrigins` names something other than an origin is refused as unreadable settings.
+
+`Vericairn.Runtime` adds `DeviceSigning` and `DeviceSigningMode` (`Read`, `Prepare`, `Sign`), the overload
+`EstateService.ForDeviceRequest(device, publicKey, profile, signing)`, and `EstateService.ReadStandings(devices, principals)`, which
+returns a `DeviceStandingsRead`: each device's standing and each principal's kind from one reading of the records. Under a
+`DeviceSigning`, no key on the runtime's machine signs and no record is written unsigned: an operation writes nothing,
+prepares the one record it authors for the requesting device, or writes that record only with the device's signature over
+the plan's exact record, re-authored from the same request with the plan's id and time; every other store is refused.
+An attempt's `startedAt` and a completed progress phase's `completedAt` state the plan's time in both steps. Prepared
+records share one store with `POST /v1/records/prepare`, and from 0.9.2 one device holds at most 32 of them at once,
+answered `unavailable` beyond that; the store's limit of 256 is unchanged. `PrepareRecord` otherwise behaves as before.
+
+`Vericairn.Mcp` adds, each additive: `McpServer.ProtocolVersions` and `McpServer.Instructions` (init-only),
+`McpServer.NetworkDescription` and `McpServer.RespondAsync(id, method, parameters, cancellationToken)`;
+`ToolRegistry.ForNetwork(api, network)`, `ToolRegistry.Network`, `ToolRegistry.NetworkWrites`,
+`ToolRegistry.OfferedOverNetwork(tool)`, `ToolRegistry.Describe(tool)`, the `CallAsync(name, arguments, meta,
+cancellationToken)` overload and the constants `PrepareMeta`, `PlanMeta` and `SignatureMeta`; `ToolCallResult.Meta`;
+and the types `IMcpNetworkSession` and `McpSigning`. `tools/call` now refuses a `_meta` that is not an object and returns
+a result's `_meta` when it has one; over standard input and output `_meta` is not read, and every stdio answer is unchanged
+except the `search` tool's, whose `_meta` labels its trust (CONTEXT-02).
+
+The command line adds `runtime configure --mcp on|off` and `--mcp-origin`, whose `--json` output adds `mcp`,
+`allowedOrigins` and `mcpServed`, and keeps the other settings when one changes; `runtime status` adds the `mcp` line and,
+in `--json`, `mcp`; and `mcp serve --connection`, whose bridge signs only a write's prepared record and only after binding
+the call's arguments, author, subject, type, time and supersession; fields the runtime computes, such as a document
+review's subject and checks or a result's `progressClaim`, are signed on trust in that runtime. The SDK's additions for
+the bridge are internal. Record format remains 3;
+no record type changes. `AGENTS.md` gains one paragraph on reaching the estate from another machine.
+
+## MCP subscriptions and notifications (MCP-05)
+
+API version 1 adds one operation, `POST /v1/events/select`, a read with a request scope and no write ledger: a long poll
+of the event journal that also says, for each event delivered, which of up to 32 selections it passes. The protocol adds
+`EventSelectRequest` (`after`, `filter`, `selections`, `principal`, `wait`), `EventSelection` (a filter and an optional
+`since` cursor), `EventSelectResponse` (`events`, `selected`, `cursor`, `reset`, `problem`),
+`EventVocabulary.MaxSelections` and `EventVocabulary.NoJournal`, the problem code `no-journal` the read answers on a
+runtime that keeps no journal (501 from a daemon), apart from `unavailable` (503), a journal briefly unable to be read; the OpenAPI document adds the route and the schemas `EventSelectRequest` and
+`EventSelectResponse`. `IEstateApi` adds `EventsSelect(request)` and `EventsSelectAsync(request, cancellationToken)`, each
+with a default implementation, so existing implementers stay source-compatible; `CancellationBoundApi` and the SDK's
+`VericairnClient` implement both, with the one-minute deadline `Events` has. A device's read holds one of its own slots,
+as a long poll does. On the local socket a read that waits holds one of four slots kept for MCP servers, beside the
+command line's slots and reserve, taken in turns of five seconds when all four are held, and one that does not wait holds
+none. The daemon can therefore hold up to four more long connections than before, of the 32 it admits.
+
+A network MCP tool now reaches `POST /v1/events/select`, which `events_read` reads for the requesting device and which
+never streams; `GET /v1/events` and `GET /v1/events/{key}` stay out of a tool's reach. The session's server stream at
+`/mcp` reads the event journal from where the session stands (its first subscription, then where its last stream ended)
+and carries `notifications/resources/updated` and `notifications/resources/list_changed`; before sending any, it reads
+the device's standing afresh from the runtime's records.
+
+Over MCP, `initialize` declares `resources.subscribe` and `resources.listChanged` true when the connection's runtime keeps
+an event journal (the daemon), and false as before over the embedded runtime, which keeps none; what it declares holds for
+the session. `resources/subscribe` and `resources/unsubscribe` are served when they are true and answer "method not found"
+otherwise. `resources/templates/list` adds the templates `goal` and `asks` (six in all), and `resources/list` adds each
+current goal's progress and, for a connection acting for a principal, the asks put to it; both read as `goal_progress` and
+`asks_list` with `form` `json` read, with `_meta` carrying the hash, length and trust label and no `sourceHash`. The read
+tool `events_read` is added, on standard input and output and over the network at any scope. The server's instructions end
+with a sentence on subscriptions and `events_read` instead of saying they are not supported. A client that ignores
+notifications is unaffected; one that called `resources/subscribe` against a daemon now gets a result where it got an
+error.
+
+`Vericairn.Runtime` adds, each additive: in `Vericairn.Runtime.Events` the type `EventSelector`, the overload
+`EventSubscription.Read(max, selectors)`, the init-only `EventBatch.Selected`, empty unless a read named selectors (it takes
+part in the positional record's equality), and the computed `EventBatch.SelectedPerEvent`; and
+`EstateService.OpenEventSelector(filter)`, which validates and roots a filter and passes only what is observed after it
+opened, `EstateService.OpenEventSelection(after, filter, selections, principal, device, devicePublicKey, profile)` and
+`EstateService.EventsSelect(request)`, which the embedded runtime answers once without waiting. `Vericairn.Mcp` adds
+`McpServer.Subscriptions` (init-only), the types `McpResourceWatch`, `McpApiEventSource`, `IMcpEventSource`,
+`McpEventRound`, `McpEvent` and `McpEvents`, `ToolRegistry.SubscriptionFilterAsync(uri, cancellationToken)` and
+`ToolRegistry.EventsReadMaxLimit`, and `Orientation.NotificationsProfileSuffix`, `Orientation.EventsReadProfileSuffix` and
+`Orientation.Observations(api, suffix)`. The orientation's agent matrix gains the columns Notifications and events_read; a
+qualification profile that names a harness the matrix lists followed by a version now keys that harness's row, naming the
+version, where before it had a row of its own. `AGENTS.md` is regenerated. `mcp serve` gives its server a watch over the
+API. The bridge of `mcp serve --connection` holds the session's server stream while its client holds a subscription the
+runtime accepted, writes only resource notifications of at most 64 KiB to its client, and subscribes a session it reopens
+to the same resources; its additions are internal. The Python peer accepts either declaration and checks six templates.
+Record format remains 3; no record type changes.
+
+## Preparing a documentation set (DOCS-11)
+
+No route, interface member, protocol type, shipped command or record type is added or changed. `vericairn-docs`, the build
+tooling that no distributable ships, adds `assemble`, `insert`, `freeze`, `index` and `prepare`. `generate` and `compare` keep
+their options, outputs and refusals: `generate` still writes into any directory. Each new command takes a set whose
+directory is named for its version, and `assemble`, unless it keeps the references, refuses one that is not the build's.
+
+A set's manifest, references and notes keep their formats. `freeze` writes `docs/releases/frozen-sha256.json` in its existing
+format, `vericairn.frozen-docs/1`, indented by two spaces with one final line break. It adds a set's entries after the
+earlier sets and changes none of them. `index` changes `docs/releases/README.md` only by adding a paragraph under its
+documentation sets heading. The frozen-set test in the command line's suite no longer lists the frozen versions. It
+requires every set the release index links, every set directory except the build's own version until it is frozen, and
+each set before 0.6.0 to stay indexed, so freezing a set no longer edits the test.
+
+## Stops and their surfaces (PROC-06)
+
+No route or interface member is added. `GET /v1/goals/{id}` keeps its shape; a run's `flow` adds `stops`, and each step
+instance adds `stop` (why a stopped step waits: `person`, `reserved`, `attention` or `accept`) and `command` (for the reserved
+step that is next, its exact command; otherwise null). Each stop has `kind`, `name`, `title`, `step` (`key`, `instance`,
+`review`), `principal`, `principalName`, `reason`, `delivery` (`due`, `delivered`, `closed`, `queued` or `outside`), `record`,
+`act` and `command`. `GET /v1/goals/{id}/next` keeps `vericairn.next/1`; its `flow` adds the same `stops`, the route vocabulary
+adds `request`, `requested`, `closed` and `queued`, and each route adds `request`, the operator request it names.
+`POST /v1/goals/{id}/step` returns the same `GoalStepResponse`; its outcome may be `request`, and it adds the init-only `Request`,
+serialized as `request` only when this call wrote an operator request. The OpenAPI schema `GoalStepResponse` adds `request`.
+`GET /v1/status` adds `runs` to its canonical JSON when the estate has a run of a flow that is active, paused, budget-limited or
+blocked: each with its `goal`, `pin`, `asOf`, `available`, `unavailable`, `done`, `steps`, `complete`, `next` and `stops`. Its
+text adds a `Runs:` section when there is one. The operator request queue, in `GET /v1/operator/requests`, status's
+`operatorRequests` and required attention, delivers a request that names a run's step (`flowStep`) only while it is due. It adds
+`withdrawn` only when a run no longer waits on an open request: each such request with `id`, `revision`, `hash`, `state`
+(`settled` or `withdrawn`) and `reason`. Its text adds the step's command to a delivered step's request, and a line for each open
+request that is not delivered. An estate without runs therefore keeps its earlier canonical status bytes, and the `statusHash` a
+person's observation pins. Canonical status reads no clock: a run, its stops, and the delivery of its requests in
+`operatorRequests` and in status's attention are derived as of the newest record (`asOf`), so the document is byte-identical
+whenever and wherever it is read. Human status, `GET /v1/goals/{id}`, `/next`, `GET /v1/operator/requests`, `GET /v1/attention`
+and progress's attention read a run now, so a due time, backoff or watch limit shows there at once, and in canonical status once a
+later record is written. A hand-over package derives a run's position as of the newest record too. Canonical status and a
+hand-over package trust each record's claimed time, so their stops and steps carry `command` null; only the live reads show a
+reserved step's command. A step request's text in the queue, in `operator list` and in attention shows its checked command first
+and labels its recommendation and other prose as the requester's, not checked; a client that cannot read the queue, from an older
+runtime, shows no step request as open. `operator list` (`GET /v1/operator/actions`) reads the runtime's clock, and its
+operator-request items add `stepCommand` for a run's step request. `request` events follow the queue's delivery: a run's request is `open` while it is delivered, `withdrawn` or `settled` otherwise, with category
+`information` once it is not delivered. Older clients ignore the
+added members and values; older servers omit them, which is not evidence that a run has no stops. The SDK's and the MCP
+server's goal, next, status and request reads carry the same JSON; no tool is added and no description changes.
+
+The state language's `step-route` vocabulary adds `request`, `requested`, `closed` and `queued`, and it adds the `flow-stop`
+and `flow-delivery` vocabularies. `Vericairn.Presentation` adds `StopRow` and `FlowRunRow`, `GoalPresentation.Stops`, and
+`EstateView.Runs`, `Stops` and `StopsAsOf`, and `FlowRunRow.AsOf`. Workbench's `ShellViewModel` adds `Stops`, `HasStops` and
+`StopsAsOf`, its `GoalsWorkspace` `Stops` and `HasStops`, and Remote's `RemoteViewModel` `Stops`, `HasStops` and `StopsAsOf`. `Vericairn.Protocol`'s attention derivation reads the request queue when the API offers it, and
+derives it from the records otherwise.
+
+`Vericairn.Records` adds public types and members:
+
+- `Estate.FlowStops`: `Kinds`, `Deliveries`, `RequestStates` and `PerDelivery`; the records `RunStop`, `FlowStepReference` and
+  `StepRequest`; and `StepOf`, `CommandOf`, `Requests`, `Classify`, `RequestTo`, `Why`, `RecordedTime`, `Of`, `Deliver`,
+  `Runs`, `RenderJson` and `AppendText` (each with an optional `commands`), `RunsJson` and `RunsText`.
+- `Estate.FlowPosition.HoldsReservedAct` and `IsReservedAct`; `StepInstance.Stop` and `Command`; `Position.Stops`, `At` and
+  `Reaching`; and an optional `commands` on `RenderText` and `RenderJson`. `FlowPosition` is now `partial`.
+- `Estate.EstateStatus.Render` and `Estate.GoalView.RenderText` and `RenderJson` overloads at a time, the goal view's with an
+  optional `commands`; `Estate.OperatorActions.Derive` at a time.
+- `Estate.GoalPredicates.EvaluatePredicate` and `Matching` overloads taking the records a rule admits.
+- `Estate.OperatorRequests.Held`, `Waiting`, `WaitingOf`, and `Derive` and `RenderText` overloads at a time; `Open` now
+  leaves out a run's request that is not due.
+- `NextEligible.Route.Request`, an optional trailing parameter; `NextEligible.RouteStates` adds `request`, `requested`,
+  `closed` and `queued`, and `FlowDispatching` adds `request`.
+- `Templates.FlowContract.Placeholders`.
+
+Behavior changes to the runs that PROC-05 and PROC-10 add, each within record format 3. A flow's reserved step must declare its
+`action`, the exact command the operator runs, and its `done` predicates (`flow.reserved`), and the command's placeholders must
+be bindings of the run (`flow.binding`), and its done predicates name no `state` (`flow.reserved`); a flow content that lacks
+them no longer validates. A reserved step's done predicates and record items count a record only when its signatures are
+authentic and its author was a person with the operator role when it was made (`FlowPosition.IsReservedAct`), and a result only
+on the same terms: a reserved step that an agent's record, an unsigned record or a record made before its author became an
+operator satisfied under PROC-05 is no longer done, and an agent's attestation item of a reserved step is `missing` rather than
+`unproven`. A predicate evaluated with a rule that admits records never holds by a `state`. `Patterns.Slug` and the predicate
+binding pattern now end at the value's last character, refusing a value with a final newline. A reserved step whose input changed after it was done shows `stopped`, waiting on the
+operator again, rather than `stale`. A reserved step whose command cannot be bound from the records shows `blocked`. `goal step`
+records a reserved step's operator request instead of answering `none`, and queues a fourth stop to one person across every run.
+A request counts as closed only when its addressed operator's own authentic close closes it, and is delivered only when its
+author takes the run's steps and it is put to a person who holds the act. Record format
+remains 3; its addition, an operator request's `flowStep`, is in
+[record format 3](record-format-v3.md#stops-092). The generic record reader stays `vericairn.records/readers/8`, whose
+explanation of `operator-request` now includes `flowStep`.
+
+## Security reports before a release (OPS-11)
+
+Two routes are added, each with its protocol types and an `IEstateApi` member with a default implementation, so existing
+implementers stay source-compatible. `POST /v1/security-reports/poll` takes `SecurityReportsPollRequest` (`by`) and
+`POST /v1/security-reports/triage` takes `SecurityReportTriageRequest` (`by`, `advisory`, `repository`, `expected`,
+`disposition`, `reason`); both return `SecurityReportsResponse` (`ok`, `message`, `reads` of `SecurityReportRead`, `reports`
+of `SecurityReportRow`, `held`, `triage`, `problem`). Each row's `holds` says whether the advisory holds every release now:
+a report (in `triage` or `draft` state, or an unknown state) untriaged at its current revision, or a closed or withdrawn
+advisory no operator triage names at any revision; a published advisory never holds. `IEstateApi` adds `SecurityReportsPoll` and `SecurityReportsTriage`,
+which throw `NotSupportedException` by default, with `SecurityReportsPollAsync` and `SecurityReportsTriageAsync`;
+`CancellationBoundApi` and the SDK's `VericairnClient` implement all four. The daemon binds `by` to the authenticated
+acting device, and a principal other than the operator receives the same `denied` problem whatever exists.
+`ClientOperation.Deadline` gives `SecurityReportsPoll` and `ReleaseCheck` three minutes, since a check may now read GitHub;
+`ReleaseCheck` had the 30-second default.
+
+`ReleaseSubmitRequest` adds the init-only `SecurityReportsUnread` (JSON `securityReportsUnread`, default false): when true,
+declared security reports are not read and a declaration alone answers with the single `release.security-reports`
+objection. It only ever narrows what a caller learns. The MCP server's `release_submit_check` now checks the submission of
+the principal its connection acts as, falling back to the `by` argument only on a connection that acts as none, and sets
+`SecurityReportsUnread` unless that principal is the operator, so no other connection starts a read or sees which reports
+hold. `release submit`, `POST /v1/releases/check` and `release_submit_check` are otherwise unchanged in shape. While a current product
+declares `securityReports`, they read the declared repositories before admission, unless a complete read is less than a
+minute old (a check stores nothing it read, so it leaves the live store unchanged), and add the objections `release.security-report` (an advisory that holds, named) and
+`release.security-reports-unavailable` (a repository that could not be read completely, or a declared resource that is no
+longer a repository on GitHub), or, for any principal other than
+the operator, the single `release.security-reports`. These objections are never retained in a basis or written into an
+intent. Without a declaration, nothing is read and no objection is added.
+
+`AttentionGet` adds, for the operator only, notices of kind `incident` (an advisory that holds) or `information` (any other new or
+changed advisory, for seven days) with subject type `security-report` (subject id
+`<owner/name>:<GHSA identifier>`, target the repository resource) and of kind `failed check` with subject type
+`security-reports` (subject id `<owner/name>`). They come from this machine's observations, so canonical `status --json`
+and `GET /v1/status` are unchanged. Through WATCH-05's event journal they become attention events for the operator alone,
+categories `incident`, `information` and `failed-check`, whose subjects are opaque keyed names rather than these ids; a
+stored read asks the journal to derive at once. `GET /v1/providers` adds rows of kind `security-advisories`.
+
+`Vericairn.Runtime` adds the contract `vericairn.provider.security-advisories/1`: `Providers.ISecurityAdvisoryReader`,
+`SecurityAdvisory` (with `States`, `Severities`, `SettledStates` and `Validate`), `SecurityAdvisoryListing` and the in-memory
+`MemorySecurityAdvisoryReader`; `ProviderRegistry.Register(ISecurityAdvisoryReader)`, `RegisterIfAbsent`,
+`SecurityAdvisories(string)` and `SecurityAdvisoryReaders`; and `EstateService.SecurityReportsScheduled` and
+`SecurityReportsInterval`, which the daemon uses to read every five minutes, 30 seconds after it starts.
+`Vericairn.Providers.GitHub` adds `GitHubSecurityAdvisoryReader`, provider id `github-security-advisories`, registered by
+the command line. It runs `gh api -i rate_limit` to confirm the token's `X-OAuth-Scopes` (`repo` or `repository_advisories:read`)
+and the allowance, then reads the listing page by page with `gh api -i`, following each `Link` header's `after` cursor, each
+page and the whole listing bounded. It follows a next page only on `api.github.com`'s own advisory listing, with exactly one
+`after` cursor of base64 characters, which it decodes, checks and encodes again; anything else fails closed. `Vericairn.Records` adds `Types.Patterns.GitHubAdvisory` and `Types.SecurityReportRules` (`ProductField`,
+`TriageKind`, `MaxRepositories`, `MaxReason`, `Dispositions`, `TriageFacts`, `Product`, `Triage` and `GitHubLocation`).
+`ObservationType.Kinds` adds `security-triage`, and `ProductType.Fields` adds `securityReports`. `ResourceType` judges each
+revision against the declarations and grants in force at its time: while a security-reports declaration names a resource,
+only the operator changes its kind or location (`resource.security-reports-author`), and a repository's location moves only
+by the operator or an `administer` grant, as before (`resource.location-author`). Validation reports, as information under
+the same codes, a revision already in the estate that turns a resource into or out of a repository without that authority,
+or that a later declaration would forbid; the write boundary refuses such a revision when it is new, as it does for
+FIX-97's and FIX-98's rules. `ResourceType` adds the constants `LocationAuthorCode` and `SecurityReportsAuthorCode`, and
+`SecurityReportRules` adds `DeclaresAt`. Record format remains 3; the record
+additions are in [record format 3](record-format-v3.md#security-reports-092). The generic record reader's
+`vericairn.records/readers/8`, unreleased and introduced for PROC-10, also explains the product's new field; its golden
+fixtures include it. The command line adds `security-reports poll` and `security-reports triage`
+([CLI](cli.md#vericairn-security-reports-092)).
+
+## History checkpoints (ID-05)
+
+No route, interface member of `IEstateApi` or protocol type is added or removed. Record format remains 3; it gains the record
+type `history-checkpoint` ([record format 3](record-format-v3.md#history-checkpoints-092)), which `records describe`,
+`records new` and the readable companions cover. An earlier format-3 reader reports it as `record.unknown-type`. The generic
+record reader's implementation identity is unchanged: no existing rendition changes.
+
+The canonical status JSON (`status --json`, `GET /v1/status`, the `estate_status` tool) adds a `history` member:
+`{adopted, heads: [{id, hash}], witnessed, tail, problems: [{code, location, message}]}`. Its bytes, and so a new estate
+observation's `statusHash`, change for every estate; observations already recorded keep their facts. The text status lists
+standing history problems first. `estate check` (`GET /v1/check`) adds the check-time warning `history.deleted-in-git`, or
+information when the clone is shallow; the canonical status does not include it. The command line adds `estate check
+--expect <checkpoint>`, evaluated by the client against `Records("history-checkpoint")` and `Record(id)`, and the estate
+bootstrap scripts accept `--expect <checkpoint>` before their other arguments.
+
+`NewRecord` (`POST /v1/records`, `records new`) refuses `at` and `id` for a history checkpoint, and every write surface,
+a device-prepared record included, refuses a checkpoint that does not follow exactly the copy's heads, list exactly the
+records no head witnesses in objects held here, and state their count and set hash, or that anchors a record not present
+unsigned with that hash or acknowledges the removal of a record that is not witnessed and absent. New findings, each an
+error unless stated: `history.removed`, `history.altered`, `history.checkpoint-missing`, `history.checkpoint-invalid`,
+`history.anchor-author`, `history.adoption-author`, `history.unanchored`, `history.expected-missing`,
+`history.listing-mismatch` (a warning, only for a record that the root operator or a person holding administer signed, or
+that is anchored with its present bytes; any other record a checkpoint lists with other bytes is `history.altered`, an agent's
+own signed record included), `record.subject-not-counting` and
+`record.reference-not-counting`; `history.deleted-in-git` is a warning and `history.expected` information.
+`signature.required` now also reports an unsigned history checkpoint or device revision. Status lists the history errors,
+`history.unanchored`, and, once the estate has adopted checkpoints, `signature.required`, first. `estate check --expect`
+accepts a record id, a full content hash or at least sixteen hexadecimal digits of it. A device's recovery purpose is
+read from its latest revision that counts.
+
+What counts changes in every estate, without a format step. `EstateModel.OfType`, `Current`, `About`, `IsCurrent`,
+`SupersededBy`, `RolesOf`, `HasRole` and `HasScope` read only records that count. `Latest` follows only counting
+successors and returns the record it starts from when none follows it, which may itself not count; `CurrentPrincipal`
+returns the newest counting revision of a principal's line that its author may write
+([below](#authority-records-and-policy-authority-fix-110-fix-111)), or null when there is none, so a principal record that does
+not count grants no role. `Records` and `ById` keep every record read, as evidence. A record that does not count is, among others, an unsigned record the signature
+policy refuses (after adoption, any unanchored unsigned record under required signatures), an unsigned policy record,
+checkpoint or device revision, or a witnessed record present with another hash. `SignatureChecks.Anchored` includes anchoring checkpoints'
+anchors; a device revision changes the device's key or name only when its device signed it. A policy basis
+holds only records that count, and its recorded time is the greatest `at` among them. An estate without checkpoints and
+without signature errors, such as the first-party estate, reads as before.
+
+`SignatureChecks.Counts`, `IsAdmitted`, `AdmissionOf` and `AdmissionStateAt` count a signed admission only when its signatures
+verify by devices admitted at its time through admissions that count in turn, from the estate's first authority outward, and its
+author is the root operator, an operator or a person holding `administer` at its time, read from the principal and grant
+revisions their authors may write as the records that give roles read them (signed revisions that verify that way, anchored ones,
+and, before adoption, unsigned ones dated no later than the charter first required signatures), each following the nearest such
+revision below it, never a principal's own record, and not through a grant revision a closing closed without witnessing the
+admission, judged the same whatever order records are read in. Whether a holder of `administer` is a person is read only from
+signed or anchored revisions. An admission that would unseat what its own signature or its author's authority rests on is left
+out and the others are judged again without it. An admission that an earlier build counted because it was signed, though its
+signature did not verify, its signer's admission did not count, its author may not admit at its time, or it unseats its own
+support, now admits and revokes nothing. Its existing `signature.*` or `admission.author` finding is unchanged; the estate check
+adds `admission.author` as a warning where only this reading refuses the author, as in an estate that has not adopted
+checkpoints, which reads roles and grants as they are now, and the new warning `admission.unseats-support`, so an estate holding
+such an admission stays valid. `NewRecord`, `DeviceAdmit` and `DeviceRevoke` refuse a new admission or revocation that would
+carry either warning, with problem code `rejected` and the finding as an error. Before adoption, while the charter requires
+signatures, an admission that counts only because its author's role or grant rests on an unsigned record that no checkpoint
+anchors is the new warning `admission.author-unanchored`. Adoption's check (`estate checkpoint --adopt
+--check`) no longer lists, among the records whose roles and grants read otherwise at their own time, a record that counts for
+nothing in both readings, such as such an admission. A record that does not count also includes one whose signature does not
+verify by a device admitted when it was signed.
+
+`EstateModel.FirstEstate`, `RootOperator` and `CurrentEstate` read the first charter as follows. It is the charter the manifest
+names when the model has a manifest, and a model without one keeps the first charter by id; `CurrentEstate` is null when the
+manifest names no first charter the estate holds, which the estate check reports as before. Witnessed history only confirms it:
+when any charter that supersedes nothing other than the manifest's is witnessed first by the counting checkpoints judged under
+its own operator, alone or beside the manifest's, all three are null and no record counts (`CountingRecords` is empty). The
+estate check adds two error codes, `history.root-ambiguous` (at `records`) and `history.manifest-root` (at
+`estate/manifest.json`, when the manifest's own charter or first authority is not witnessed while another is), and
+`EstateStatus.HistoryProblems` and the status history problems include them.
+
+`SignatureChecks.FirstAuthority` no longer returns the earliest self-admission by date. For the root operator it returns the
+self-admission the manifest names, or the only one when it names none; for any other principal, null. Only admissions with
+status `admitted` are candidates. Several with none named, or a manifest naming an admission that is not one, give null and the
+error `manifest.first-authority` (at `estate/manifest.json`), which `EstateStatus.HistoryProblems` includes; another witnessed
+first by checkpoints judged with it as the first authority gives null and `history.root-ambiguous`, with no record counting.
+`EstateManifest` gains the optional `FirstAuthority` (the manifest's `firstAuthority`, a ULID) and `NamingFirstAuthority(bytes,
+admission)`; `UpgradePlan` gains `FirstAuthority`, which `EstateUpgrade.ManifestAfter` writes, and the migration's `changes` say
+so when the manifest named none. When the root operator's first device admits itself through `NewRecord` or `DeviceAdmit`, the
+runtime adds `firstAuthority` to the manifest after storing the admission. A build before 0.9.2 refuses a manifest that carries
+the field (`body.unknown-key`). Estates with one first charter and one self-admission of the root operator's device, which their
+manifest names or leaves unnamed, such as the first-party estate, read exactly as before.
+
+`Vericairn.Records` adds, each additively: the namespace `Vericairn.Records.History` with `HistoryInventory`,
+`InventoryEntry`, `InventoryObject`, `RecordSets`, `HistoryState`, `CheckpointDraft` and `SignedHistory` (`Of`,
+`Adopted`, `Prepare`, `AuthoringRefusal`, `Expect`); `Types.HistoryCheckpointType`;
+`EstateModel.CountingRecords` and `EstateModel.Counts`; `EstateLoader.Load(string, IReadOnlyList<RecordFile>,
+Func<string, byte[]?>)`, which reads checkpoint inventories through the given object reader, and `EstateLoader.FileObjects`;
+and `EstateStatus.HistoryProblems` and `EstateStatus.HistoryJson`. `Vericairn.Runtime` adds the default interface member
+`ISourceAdapter.DeletedRecordFiles(string)` with the records `RecordDeletion` and `RecordDeletions`, implemented by the git
+adapter; existing implementations compile unchanged and report the warning unavailable by returning null.
+
+## Closings and authority at a record's time (ID-06)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In an estate
+that has adopted history checkpoints, a `history-checkpoint`'s `closes` now acts
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)): from a closing that acts on, a record
+signed by the closed device or with the closed key, or written by the grantee while a closed grant revision was in force,
+counts only when the closing or a checkpoint it follows witnesses it. A grant closing closes the revision it names and every
+revision of its line dated at or before it. Such an admission or revocation admits or revokes
+nothing, such a device revision changes no key or name and leaves the device's line, and such a checkpoint witnesses nothing,
+until anchored; an anchoring checkpoint may now list a signed record a closing refuses, and `SignedHistory.AuthoringRefusal`
+refuses an anchor of a signed record no closing refuses and of a device revision a closing refused. An operator's recovery
+device may sign a device closing; any other checkpoint it signs is still `signature.recovery-scope`. The checkpoint type's descriptions of `closes` and `anchored`
+change within `vericairn.records/readers/8`, which 0.9.2 introduces, so no published reader's descriptions change.
+
+New findings: `history.after-closing` and `history.closing-author`, errors that status lists first and that hold release
+submission, and the warnings `history.closing-unfollowed`, `history.dated-after-witness` and `history.closing-missing`.
+`history.closing-missing` stands on a revocation, a key rotation or a narrowing grant revision that counts in an adopted
+estate, that the adoption checkpoint does not witness, and whose device, key or grant revision no closing that acts names,
+as when such an act arrives as a file from a copy that had not adopted yet or is added by hand: the act takes effect, and
+what its target signs with an earlier date still counts. A closing written later, with `records new history-checkpoint`,
+ends the warning. Acts the adoption witnesses and estates that have not adopted have none. `history.checkpoint-invalid` also
+reports a closing that names a record of another type.
+
+In an adopted estate, roles and grants are read at a record's authority time: its own `at`, or the adoption checkpoint's for a
+record the adoption witnesses. `ValidationContext.HasRole` and `HasScope` read this way, so every validator does, and so do the
+operator-acceptance checks of `AcceptanceType`, `ReleaseType`, the operator queue and the progress report, the recovery-use
+review, generated-document retirement and migration reviews, living-document clearance, the security-reports declaration and
+the goal rules that judge a status, revision, acceptance or custody exception, a hand-over (`Routing.MayHandOver`,
+`DecidesForStep`), a flow review assignment (`FlowRuns.ReviewerRefusals`), an operator request's step (`Routing.MayTakeStep`)
+and who cleared a flow step's review. Anchoring, acknowledging a removal, rooting an adoption and signing a device's or a grant's
+closing keep the stricter reading of before: the signer's operator role or `administer` grant stands at the checkpoint's time
+and still stands, closed by no closing that does not witness the checkpoint, so a later narrowing withdraws those powers for
+every checkpoint. `FlowStops.RecordedTime` takes the greatest `at` among records that count. In an estate that has not adopted, every one of these
+reads as before.
+
+`NewRecord` (`POST /v1/records`, `records new --at`) and `Attempt` (`POST /v1/work/attempt`, `work attempt --at`) refuse, in every
+estate, a stated time more than five minutes past the runtime's clock, before anything else is judged.
+
+`Vericairn.Records` adds, each additively: `EstateModel.PrincipalAt`, `RolesAt`, `HasRoleAt` and `HasScopeAt`, which read a
+principal, its roles and its scopes as they stood at a record's place, and read them as `CurrentPrincipal`, `RolesOf` and
+`HasScope` at the record's time in an estate that has not adopted; and overloads taking the record judged of
+`GoalRules.HoldsSpending`, `ActivationRefusals`, `MayRevise`, `RevisionRefusals`, `MayEnd`, `Accepter.Decides`,
+`Accepter.Allows`, `Routing.MayTakeStep` and `FlowRuns.ReviewerRefusals`, whose existing signatures keep reading authority as it
+is now. `Routing.MayHandOver` and `DecidesForStep` read authority at the record they are given as `before`.
+
+## Writing and adopting history checkpoints (OPS-07)
+
+The API adds one route, `POST /v1/history/checkpoints` with `HistoryCheckpointRequest` `{by, adopt, check, expectPlan}`,
+returning `HistoryCheckpointResponse` `{trigger, applied, adopted, witnessed, listed, heads, anchored, notCounting,
+byRevokedDevices, deletedInHistory, unavailable, written, planHash, uncommitted, authorityChanges}`, or a `Problem` with status 409 when refused.
+Each `HistoryRecordItem` gives `{id, type, at, path, commit, device, commitAt, note}`. An adoption that anchors anything needs
+`expectPlan`, the `planHash` its check returned, and is refused when the anchored set differs. For adoption, `authorityChanges`
+lists the records whose findings differ when roles and grants are read at each record's own time, as an adopted estate reads the
+records its adoption does not witness, each with a `note` saying what differs; adoption keeps for every record it witnesses the
+reading it has then. The list is advisory: `planHash` does not cover it, and adoption computes it again from the copy it
+signs, so the adoption's list can differ from its check's under the same plan hash. Adoption and its check are refused
+while the machine's memory holds a checkpoint the copy no longer holds. `IEstateApi` adds the default members
+`HistoryCheckpoint` and `HistoryCheckpointAsync`; an implementation that does not override them answers `unsupported`, so
+existing implementations compile unchanged. The SDK client and `CancellationBoundApi` implement both. With `check` it signs and
+writes nothing and needs no `by`. Without `adopt` it writes a checkpoint with trigger `manual` and is refused before adoption;
+with `adopt` it writes the adoption checkpoint, anchoring the unsigned records that count, and is refused for any principal
+other than the root operator or a human holding `administer`, and over the local network, where only its check is served. A
+device-signed request (MCP-03) cannot write one. Protocol adds `HistoryCheckpointRequest`, `HistoryCheckpointResponse`,
+`HistoryCheckpointPin`, `HistoryRecordItem`, `HistoryDeletedFile` and `TriggeredCheckpoint` `{trigger, written, skipped}`.
+
+`WriteOutcome`, `UpgradeResponse` and `ReleaseResponse` add an optional `checkpoint` member, a `TriggeredCheckpoint`, omitted
+when no trigger applied: the checkpoint the runtime wrote in the same batch as the record, the migration or before the release
+submission's check, or, with `written` null, why none was. In an estate that has adopted checkpoints, a record write sets off
+trigger `charter` for a charter revision, whose checkpoint, for a revision to required signatures by the root operator or a
+human holding `administer`, anchors the unsigned records that count before it, and trigger `interval` once the unwitnessed tail holds 500 records or its oldest
+record is 24 hours old, when the write is signed by this machine's device for its author and that device is not a person's
+with presence; `estate upgrade --to` sets off `upgrade`, and `release submit` writes `release` before its own admission check. The root
+operator's first device admitting itself in an estate that holds only what `estate init` wrote, the root operator's devices
+and no checkpoint sets off `adoption`, anchoring the unsigned records init wrote. Only a write the runtime signs for its author sets one off: a
+device-signed request, a record presigned on a phone (`POST /v1/records/signed`) and a write signed with keys the caller names
+set off none, so a presigned charter revision to required signatures is refused while unsigned records would stop counting. A
+checkpoint that cannot be written never refuses the record or the upgrade, and leaves no inventory object behind; it refuses
+the release submission with the objection `history.checkpoint`. `release submit` and `release submit --check` also object with
+`history.rolled-back` while the machine's memory holds a checkpoint and the copy has not adopted or its main line no longer
+holds that checkpoint. `release submit
+--check` (`POST /v1/releases/check`) writes nothing, as before. The command line prints a written checkpoint after its record,
+marked `(history checkpoint, trigger <trigger>)`, and a skipped one as a warning on standard error; with `--json`, `records new`
+and the other writes add `checkpoint` beside `path`, `id` and `hash` when present.
+
+The text status (`status`, `GET /v1/status` `text`) always shows the history line after the pinned release, `History:
+adopted|not adopted · head(s) <16 hex digits> · <n> witnessed · tail <n> · no problems|<n> problems`; standing history
+problems follow it as before. The canonical JSON is unchanged. The state language adds the `history` vocabulary, `not adopted`
+and `adopted`. `EstateView` adds `History`, `HistoryState` and `HistoryLabel`; Workbench's home and Remote's home show the
+line. `operator list` (`GET /v1/operator/actions`) adds an item of kind `history-adoption`, state `not adopted`, in an estate
+pinned in release mode to a version after 0.9.1 that has not adopted; it names the check and the signing command in `inspect`
+and `waitsOn` and carries no record command. `estate check` (`GET /v1/check`) adds `history.rolled-back`, a warning when the
+main line no longer holds the newest checkpoint this machine verified or the memory cannot be read or kept, or information when
+there is no main line, and `history.remembered`, information naming what the machine remembers; neither is in the canonical
+status. A batch journal treats a stored record whose history checkpoint was not stored as complete, except a birth adoption's
+admission while the estate has not adopted and a charter revision while an unsigned record is left unanchored; its
+`batch.incomplete` warning then says how to settle it, and the task ends once that holds. A closing stored without its act
+stays a task too, beside `history.closing-unfollowed`, while it counts, acts and no act follows it: its warning says to write
+the act again, which then follows that closing, and the task ends once an act follows. A key's closing is followed as well by
+a revocation of its device that counts or by a closing of its device that acts, so for a key the warning also names revoking
+the device instead, and the task and `history.closing-unfollowed` end once the device is revoked or closed. An admission that would set off the birth adoption
+writes none while the machine's memory holds a checkpoint the copy no longer holds; the admission is written alone, and its
+`checkpoint` says why.
+
+**Closings with their acts.** In an estate that has adopted, a revocation (`POST /v1/devices/revoke`, with or without the
+recovery key), a key rotation (`POST /v1/devices/rotate`) and an authority revision that narrows a grant (`POST /v1/records`
+superseding an `authority` record: another grantee, a dropped scope, another reserved action, an added condition, an added or
+shorter expiry, or any change to `bounds`) are stored after a closing checkpoint in the same batch, its `closes` naming the
+device, the device revision whose key is replaced or the grant revision, signed by the key that performs the act and dated no
+later than it. The outcome's `checkpoint` has trigger `closing`. The act is refused, and nothing is written, when the closing
+cannot be written or the batch with it is invalid, as when an agent holding `administer` revokes a device, since its closing
+would close nothing (`history.closing-author`). A device-signed request (MCP-03) and a presigned record (`POST
+/v1/records/prepare` and `POST /v1/records/signed`) cannot carry a closing, so such an act is refused, at preparation once the
+estate has adopted. Nor can `operator record` (`POST /v1/operator/record`), which carries one signed record through a checked
+merge: it refuses such an act before anything is signed, with `status` `refused`, a message saying why and `nextStep` naming
+`devices revoke`, `devices rotate` or `records new authority --supersedes`. Every runtime store refuses a batch that holds such
+an act without a closing before it naming what it closes, unless the act's author stored such a closing earlier that counts,
+acts and no act follows yet; an act that arrives as a file is not judged by a store, and is the warning
+`history.closing-missing` instead. An admission, a rename and a widening grant revision carry none, and an estate that has
+not adopted writes all of these as before.
+
+An act stated more than five minutes before the newest record its closing would witness, or before the head checkpoint, is
+refused with nothing written, since its closing, dated no later than the act, would be dated before what it lists; the
+message names that record and says to write the act at the present time. A device's revocation of itself with a `revokedAt`
+before its closing is refused with a message saying so, since a closed device's signature counts only on its own revocation
+from the closing's time on. When a batch stops after its closing and before its act, the runtime removes the closing again
+when that can be done cleanly (the act surely absent, the closing's file removed, the batch's journal closed) and refuses the
+act with nothing written. A closing it cannot remove, or one a stopped process left, stays and closes: the outcome then has
+`written` null, `problem` code `closing-stored`, whose message says that writing the act again uses the stored closing, and
+`checkpoint` naming the stored closing (HTTP 422). Writing the act again by the same author, through the same route, stores it
+alone after that closing, which counts, acts and no act follows yet, and its `checkpoint` has trigger `closing`, `written` null
+and `skipped` naming the closing it follows; no new checkpoint witnesses what was written meanwhile. The command line prints a
+stored closing before the error, as `<path>  <id>  <hash>  (history checkpoint, trigger closing)`, and with `--json` as
+`{"code":"closing-stored","checkpoint":{...}}` on standard output.
+
+A batch whose store fails part-way now describes the failure by its kind and exception type, as `Not written: <type> record
+<id> could not be stored (the file system refused the write, IOException).`, never by the exception's message, which may name
+a path on this machine; the same holds for a batch journal that cannot be written. A record whose signature fails on this
+machine is described the same way, as `The record could not be signed on this machine (the signing key could not be read,
+IOException).`; a record's own refusals, which name its fields and values, and a presigned signature's keep their text. These
+texts reach a write's `problem` and a triggered checkpoint's `skipped`, a closing's refusal among them.
+
+`Vericairn.Records` adds, each additively: `SignedHistory.IntervalRecords`, `IntervalAge`, `IntervalDue`, `TailRecords`,
+`PlanAdoption`, `Follows` and `ExpectMatch`; `AdoptionPlan` with `AlreadyAnchored` and `AnchoredHash`; `HistoryState.OldestTailAt`; and `History.HistoryLine` (`States`,
+`ShortDigits`, `ShortHash`, `Render`, `FromStatus`). `Vericairn.Runtime` adds `Store.HistoryMemory` and the default interface
+members `ISourceAdapter.RecordFileOrigins`, `MainLine` and `FileAtCommit` with the records `RecordOrigins` (with `AddedAt`) and
+`EstateMainLine`, implemented by the git adapter; existing implementations compile unchanged and report what they cannot tell
+as unavailable. The command line adds `estate checkpoint` with `--by`, `--adopt`, `--check` and `--expect-plan`
+([CLI](cli.md#vericairn-estate-checkpoint-092)). Record format remains 3; no record type or field changes.
+
+## Keyword search and search-selected context (CONTEXT-02)
+
+`IEstateApi` adds `Search(SearchRequest)`, `SearchIndex(SearchIndexRequest)`, `SearchReplay(SearchReplayRequest)`,
+`Context(ContextRequest)` and `BriefContext(BriefContextRequest)`, with their cancellable counterparts `SearchAsync`,
+`SearchIndexAsync`, `SearchReplayAsync`, `ContextAsync(ContextRequest, CancellationToken)` and
+`BriefContextAsync(BriefContextRequest, CancellationToken)`. Each has a default implementation: the three search members
+refuse with `unsupported`, and the two context members answer exactly as `Context(string, long?)` and
+`BriefContext(string, long?, string?, string?, CommunicationValues?)` when the request names no search and no principal, and
+refuse with `unsupported` otherwise. Existing implementers stay source-compatible. `EstateService`, `VericairnClient` and
+`CancellationBoundApi` implement all ten. The SDK sends a request without search or principal on the existing GET routes.
+
+The daemon adds `POST /v1/search`, `POST /v1/search/index`, `POST /v1/search/replay`, `POST /v1/context/prepare` and
+`POST /v1/context/brief`, each a read: no signing key, presence or local-network write ledger. Each has a request scope rule;
+a device-signed request may name its own principal or none in `SearchRequest`, `ContextRequest` and `BriefContextRequest`.
+The OpenAPI document describes each route, request and response.
+
+The protocol adds `SearchRequest` (with the init property `Method`), `SearchResponse` (with `Trust`), `SearchCandidate` (with
+`Reason` and `Key`), `SearchExcerpt`, `SearchIndexRequest`, `SearchIndexResponse` (with `Unavailable`), `SearchSegment`,
+`SearchReplayRequest`, `SearchReplayResponse`, `SearchReplayOutcome`, `ContextRequest` (with `Principal`) and
+`BriefContextRequest` (with `Principal`). `RunStartRequest` and `GoalStepRequest` add the init property `Search`, up to five
+queries for the run's package; older servers ignore it.
+
+A context package that used search has manifest format `vericairn.context-manifest/2`: format 1 with the basis's
+`selections`, a `search` member (`selection`, `rank`) on each search-selected source entry, and search candidates after the
+explicit selection. A package without search keeps format 1 and its hash. An excerpt's `extent.start` may now be greater than
+zero, at a UTF-8 boundary. The human rendering of a package adds a section with search candidates' excerpts as text only when
+it has some.
+
+`Vericairn.Records` adds `Search.SearchSelections`: the selection format and keyword method identities, the candidate and
+selection limits, `Hash`, `ListDigest`, `Validate` and `ValidateObserved`. `Validate` reports a selection canonical JSON
+cannot hold as a finding rather than throwing, and for a record refuses a restricted audience or segment named in
+`reader.audiences` or `index.segments`; a record names those only as one opaque `Restricted` entry. Record format remains 3;
+the additive `execution.contextSelections` and `searchesObserved` of `agent-run` operations are in
+[record format 3](record-format-v3.md#search-selections-in-agent-runs-092). The operation type's field descriptions change
+within `vericairn.records/readers/8`, the implementation identity this release already advances to, so its hash and golden
+fixtures are this release's final ones; neither has shipped. The generator id and contract version 1 are unchanged.
+
+`Vericairn.Records` also adds an internal `Text.UnicodeFolding`: NFC, NFD, NFKC and NFKD normalization, full case folding and
+general categories from Unicode 16.0.0 tables generated into the assembly by `tools/generate-unicode-folding.py`, so they
+never depend on the platform's ICU or the invariant-globalization mode the product ships in (where `string.Normalize` does
+nothing). Search's analyzer uses it, and its identity names the Unicode version; no other caller changes in this release.
+The index layout becomes `vericairn.search-index/3`, and an index from an earlier layout, method or analyzer is rebuilt in
+place.
+
+`Vericairn.Runtime` adds `SourceFile` and the `ISourceAdapter.ReadTreeAtCommit` member, whose default implementation returns
+null; `GitCommandAdapter` implements it, reading an exact commit's files from local history without checkout or fetch.
+`RunDirectory` adds `SearchesFile`, which the worker creates empty as a run starts. A run's MCP server is now configured as
+`mcp serve --as <agent> --run <run id>`; `mcp serve` adds `--run`, and with it keeps each served search in the run's directory
+for settlement, as logged, not tamper-evident under a harness that does not sandbox the agent. `Vericairn.Mcp` sets
+`ToolCallResult.Meta` (added with MCP-03) on the `search` tool's result, sent as its `_meta` over every transport, and adds
+`ToolRegistry.SearchObserved`; the server lists the `search` read tool, and `context_prepare` and `work_brief` take an optional
+`search` argument.
+
+The command line adds `search`, `search index`, `search replay` and `search measure`, and `--search` on `context prepare`,
+`work brief`, `worker run` and `goal step`. `doctor` adds a `search` line. The index, `search.db` beside the live store, is
+machine-local derived state: no export, push, record or generated document contains it. Processes sharing it hold a shared
+lock on `search.db.lock`, and a failed process deletes the index only when no other has it open. `SearchIndex` with `rebuild`
+is `denied` to a device-signed request whose principal is not an operator, and for a caller that cannot read every segment
+answers null `indexBytes` and `sourceBytes`. `SearchReplay` replays at most 20 selections per request.
+
+## The software pack's release and upgrade flows (PROC-07)
+
+`IEstateApi`, the daemon's routes, the OpenAPI document and the SDK are unchanged. The template catalogue adds two built-in flow
+versions, `vericairn.software/release` 1.0.0 and `vericairn.software/upgrade` 1.0.0, which `GET /v1/templates`, `templates list`
+and `templates show` now include. The upgrade flow's `adopt` step reads ID-05's `history-checkpoint` records: it is done by an
+adoption checkpoint that counts.
+
+`Vericairn.Records` adds public types and members:
+
+- `Templates.SoftwareFlows`: `Release`, `Upgrade`, `Version`, `Definitions`, `ReleaseFlow` and `UpgradeFlow`.
+- `Templates.FlowTrap.Check`, an optional trailing parameter: a check a step's action runs, for a trap with or without `holds`.
+- `Estate.GoalPredicates.FieldString` and `MaximumPathDepth`: a predicate's `fields` may name a nested field by a dotted path.
+- `Estate.FlowRuns.PolicyRequired`, an overload taking a resolved `FlowDefinition`.
+- `Estate.FlowStops.ClosedRequest` and `ClosesByRequest`; `Estate.FlowPosition.StepInstance.AskedSince`.
+- `Estate.ReleaseHistory`: `Previous` and `Joined`; `Templates.FlowContract.BindsPrevious` and `UnclosableCode`.
+
+Behavior changes, each within record format 3:
+
+- A predicate field name with dots, such as `placement.carrier`, reads the nested field; before, it matched no record. Record
+  bodies have no keys with dots, so a top-level field and a path never collide.
+- Flow content may bind `{input.<name>.id}` in a step's own predicates, `{request}` as a reserved step's done predicate's
+  subject, and `{previous}` in a field of a flow about a product's version; content that names any of them did not validate
+  before. A trap may declare `check` instead of, or beside, `holds`.
+- A reserved step's closed request (route `closed`) is one its addressed operator closed for the step's current ask: with the
+  command the records give now, recorded by a principal who takes the run's steps, pinning a revision that names the same step
+  and command, and closed no earlier than the goal revision that last changed the run's flow pin, subject or options and every
+  step it waits on done, the latter at a time the records give, and no later than the time the position is derived at. An
+  earlier close no longer keeps `goal step` from asking again; a close after a revision of the budget alone still does.
+- A sprung trap's reason ends with the summary of the record that sprang it, when it has one.
+- An input whose record is now the published revision of the candidate a step used, as `ReleaseType.IsPublicationOf` defines
+  it, is no change after use: a step that used the candidate stays done.
+- An estate policy's `vericairn.estate/flow-steps` rule holds for runs of every flow that extends the flow it names, in goal
+  validation and in policy evaluation, which now reports those runs too.
+- For a reserved step whose done predicate names `{request}`, only the addressed operator's own operator-request-close keeps
+  `goal step` from asking again; an agent's close citing the operator's words, or an observation, leaves it due.
+- A sprung trap quotes a record's summary only when a principal who takes the run's steps recorded it, as plain text on one line.
+- Flow content, and a flow's resolution with its extensions, refuses `flow.reserved-unclosable`: a reserved step whose done
+  predicate names `{request}` and that waits, directly or through optional or branch steps, on a non-work, non-review step
+  without items whose done predicates all say `max: 0`. Such a step is done at no time the records give, so the reserved step
+  could never close. The shipped flows and the first-party extension declare none.
+
+The command line adds `docs pass --before`, with `--documents`, `--guides`, `--previous` and `--record` (not with `--previous`),
+and `estate verify`, which needs the principal's admitted device on this machine and records it as `environment.device`.
+Each records ordinary `verification` records through the existing record route, with methods
+`vericairn.software/prior-version-tokens`, `vericairn.software/preparation-wording`, `vericairn.software/serving-runtime` and
+`vericairn.software/estate-check`. No record type, field or MCP tool is added.
+
+## Authority revisions (FIX-108)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In every estate,
+a `principal` or `authority` revision dated before the nearest record below it in its line that counts now counts for nothing,
+a record below that does not count being skipped, and a revision on top of one that does not count follows the line there, so
+`EstateModel.Current`, `IsCurrent`, `CurrentPrincipal`, `HasRole`, `HasScope` and `HasScopeAt` read one current record of that
+line. Anchoring, acknowledging a
+removal, rooting an adoption and signing a device's or a grant's closing read a grant or principal revision as written when the
+root operator wrote it, or an operator who held the role at its time and still holds it; as a removal when its author had been
+given the role by then but had lost it or no longer holds it; and not at all when its author had never been given it
+([record format 3](record-format-v3.md#closings-and-authority-at-a-records-time-092)). A revision read as a removal reads as
+written, except that it gives no operator role or `administer`, and that on top of a revision read below it, it describes a
+human only where that revision does too. Each closing's author is read against the closings before it in checkpoint order and
+never against that closing, and the adoption checkpoint against the closings that act, so a revision a closing refuses no longer
+takes the standing of a later closing's author or unroots the adoption. Removing an operator's role therefore takes, for those
+acts, what that person appointed, granted and closed. Other records keep reading roles and grants as they stood at their time.
+
+New finding: the warning `history.revision-author`, only in an estate holding a history checkpoint, on each grant revision
+giving `administer`, and each principal revision giving the operator role or describing a human those acts do not read as one,
+that counts but that those acts read as a removal.
+
+An estate holding no history checkpoint reads as before, apart from revisions dated before the nearest counting record below
+them. In an estate holding one, those acts read differently only where a grant or principal revision is dated before the record
+below it, sits on top of a revision they do not read, was written by someone other than the root operator who did not hold the
+operator role at its time or does not hold it now, or is refused by a closing. The first-party estate, which holds no checkpoint and no revision dated before the record
+it supersedes, reads exactly as before.
+
+## Authority records and policy authority (FIX-110, FIX-111)
+
+No route, interface member of `IEstateApi`, protocol type, record field or record format is added or removed. In every estate,
+`EstateModel.CurrentPrincipal`, `RolesOf`, `HasRole`, `PrincipalAt`, `RolesAt`, `HasRoleAt`, `HasScope` and `HasScopeAt` read only
+principal and authority records whose authors may write them, judged in time order from the root operator: a principal record by an
+operator or a principal holding `administer`, one giving the operator role only by an operator, an amendment by a holder of
+`administer` only of a line whose revision it wrote, a grant by an operator, and a removal or a narrowing by anyone who held the
+operator role earlier. A principal record written by the principal it describes, other than the root operator's, at any revision,
+counts for nothing in every read, admissions, anchoring and closings included, and is `principal.self-authored`: an error when it
+would give a role or change the kind of principal, a warning when it would give nothing; before, only a principal's first record was
+held to this. An agent's or a service's principal record gives no operator role. Harness qualifications and repository-change
+operations read their author's role and grants this way, as do the runtime's repository writes, routing's grant of a reserved
+scope, pairing and a release's uncompared-document exception. `GET /v1/records` and `GET /v1/records/{id}` report a principal
+record as current only when it is the revision that gives its principal's roles, so one current record describes each principal.
+`NewRecord` (`POST /v1/records`, `records new`) refuses `at` and `id` for principal and authority records.
+
+`PolicyAuthority`, which every policy, exception, writing entry, policy reconciliation, prompt preference, policy requirement, duty
+proof, operator review of duty evidence, saved prompt and reserved step reads, counts a person as the operator at a record's time
+only while the role still stands or when a counting checkpoint signed by the root operator or a standing operator lists the record,
+or follows a counting checkpoint that lists it, is dated no later than the revision that took the role away and precedes every
+checkpoint that lists that revision. Only signed principal records give the role there; a revision that takes it away keeps
+counting, signed or not, after its author loses the role; and an appointment by a person who no longer stands counts only where
+such a checkpoint places it before that person's removal. A policy, exception or writing record, a prompt preference, a saved
+prompt or a reconciliation whose own validation finds its approval or authority missing counts for nothing. `PolicyAccess` lists
+only actions under grants whose authors act as the operator for them.
+
+New finding: the warning `policy.operator-removed`, on a policy record that fails only because an operator role it rests on was
+taken away where no checkpoint could place it earlier: in an estate that has not adopted checkpoints, or for a record its adoption
+checkpoint witnesses when someone else than the root operator or a standing operator signed that adoption and no checkpoint by one
+of them follows it before the removal. Such a record counts for nothing, and so do the policy records of a person the removed
+operator appointed, directly or through another appointee, each reported the same way. When `NewRecord` writes a revision that
+takes away the operator role or `administer` in an estate that has adopted checkpoints, it first stores a checkpoint signed by the
+acting principal's device on the runtime's machine, which follows every checkpoint before it, and `WriteOutcome.Checkpoint` names
+it: with trigger `closing` for a grant revision that needs a closing, the closing OPS-07 writes with it, and with trigger `manual`
+for a principal revision and for a grant revision that OPS-07 does not read as narrowing, which is written alone when signed
+elsewhere, as a principal revision is. In an estate that has not, it refuses the revision, with problem code `refused` and nothing
+written, when any record would fail with it: the message names the records with their finding codes, the first twenty of them, and
+says that adopting checkpoints first keeps them, and the problem's findings carry every finding, `policy.operator-removed` warnings
+and errors such as `decision.operator` alike. A removal no record fails with is written, and a device-signed removal is judged the
+same way when it is written. `OperatorRecord` (`POST /v1/operator/record`, `operator record`) refuses, with status `refused` and
+nothing written, committed or pushed, a revision that takes a role away in an estate that has adopted checkpoints, before anything
+is signed, since one signed record carried through a checked merge cannot carry the checkpoint; its message and next step name
+`records new`, which writes the checkpoint and the revision together. In an estate that has not, it refuses such a revision when
+any record would fail with it, with the message and findings `NewRecord` gives, and its next step names adopting checkpoints and
+then `records new`; one no record fails with is recorded as before. An action stopped at its record stage is judged again when it
+resumes, against what arrived since it was prepared; a refused one is no longer the clone's unfinished action. The first-party
+estate, all of whose principal and authority records the root operator wrote, reads exactly as before.
+
+## Per-user state is owner-only on every path (FIX-104)
+
+No route, interface member or protocol type is added or changed. On Linux and macOS, a writable `LiveStore` or
+`SqliteObjectStore` creates its directory 0700 and its database as an empty 0600 file before SQLite opens it, so SQLite gives its
+`-wal` and `-shm` files the same mode, and narrows an existing database, `-wal`, `-shm` and `-journal` to 0600. A writable
+`EstateSession` creates the Vericairn home and every directory down to the live store's 0700, or narrows them; a home that belongs
+to another user is left as it is. A live store directory or database (and a `FileKeyStore` `keys/` directory) that belongs to
+another user throws an `IOException` that says so, before anything is changed or created there. The keyword search index
+(`search.db`, CONTEXT-02) follows the same rule: an existing index that others could read is narrowed and kept rather than
+replaced, one that others could write is rebuilt once it is owner-only, and a link is replaced as before. On a filesystem where a
+mode change is refused or does not hold, the user's own state, the search index included, is used as it is (the index is no longer
+replaced at every opening); the command line reports it once per process on standard error, and `doctor` reports it on a `state`
+line. Canonical output, `status --json` included, is unchanged. `FileKeyStore.Create` narrows the home that holds `keys/` too.
+Batch journals beside the live store are written 0600 in a 0700 directory. Read-only sessions create and change nothing. Windows
+is unchanged.
+
+## Matching held work and blocked terms (FIX-105)
+
+No route, interface member or protocol type is added or changed. `DisclosureHolds.Active` and `DisclosureHolds.Disclosed` compare
+keys and phrases, and `BlockedTerms` (`In`, `TermsOf`, `Validate`, `Introduced`, `IntroducedInRecord`, `IntroducedInFiles`)
+compare terms and text, after `UnicodeFolding.NfkcCaseFold`: Unicode 16.0.0 NFKC, full case folding and NFKC again, computed from
+tables in the assembly, independent of ICU and of the process's globalization mode. Before, they used
+`string.Normalize(NormalizationForm.FormKC)` and `ToLowerInvariant()`, and the normalization did nothing in a process with
+invariant globalization, which the shipped builds use. ASCII text folds as before. Non-ASCII terms returned by `In` and `TermsOf`
+are now in folded form (for example `ss` for `ß`), and `Validate` reports two terms that fold alike as duplicates.
+
+## Device standing from a kept model (FIX-106)
+
+No route, interface member or protocol type is added or changed. `EstateService.Standing` and
+`EstateService.AdmittedDevicePublicKey` read from a model kept with a stamp of the canonical records: the live store's snapshot for
+a local-only estate, or every record file's path, size and modification time for a repository-synced one, with the manifest's size
+and modification time. The records are read again only when the stamp changes, so each call gives the same answer as before, and a
+change by any process counts from the next call. Neither refreshes the live cache or its metadata; `AdmittedDevicePublicKey` no
+longer updates `lastLoadedAt`. For a repository-synced estate whose records are unchanged, neither waits for the service's lock. A
+local-network request without a client certificate is refused before standing is read.
+
+## The MCP server's registry name (FIX-101)
+
+No route, interface member, protocol type or record changes. The `dotnet-vc` package's embedded `.mcp/server.json` and the
+`mcp-name` line of its README name the server `io.github.Vericairn/vericairn`, in the organization's exact case, where the 0.8.2
+to 0.9.1 packages named it `io.github.vericairn/vericairn`, which the official MCP Registry refuses. A client configuration that
+names the server by its registry name uses the new spelling. The package verifier still accepts the lowercase name when it
+verifies a release before 0.9.2 again.
+
+## The embedded runtime (FIX-115)
+
+No route, interface member, protocol type or record changes. The self-contained distributables are built with SDK 10.0.404 and
+embed the .NET and ASP.NET Core 10.0.15 runtimes in place of 10.0.14; the distributable lock files pin the SDK's implicit
+`Microsoft.NET.ILLink.Tasks` at 10.0.15, the only package change. The NuGet packages still target `net10.0` and run on the shared
+runtimes the installed .NET 10 SDK supplies.

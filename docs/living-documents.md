@@ -202,9 +202,11 @@ nothing. For a converted history or a template instance, `docs pin <path> --by
 correction with the authored bytes unchanged and regenerates the history line.
 
 A correction does not rewrite what was found in the record it corrects. From 0.9.3
-(FIX-120), `estate check` reports a finding on a superseded record, such as
+(FIX-120), `estate check`, `status` and the progress report give a finding of the
+estate's repository and policy checks on a superseded record, such as
 `writing.spacing` in its summary, as historical: the finding keeps its code,
 severity and location, and its message names the record that supersedes it.
+Record validation's own findings are not marked.
 Every occurrence stays reported, and history is scanned in full. A finding on the
 current record is reported as before, so a new mistake in the correction is never
 hidden by the historical one. A writing exception is for an intentional token, not

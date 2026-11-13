@@ -2,9 +2,10 @@
 
 `vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; estate state comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings). The shell also shows separately labelled machine-local release information.
 
-This guide describes Workbench in 0.9.2: cancellable client commands, readable companion views
-and release submissions with an exact commit, expected product hash and visible policy holds, and from 0.9.2 the
-stops of the estate's runs and its history line. From 0.8.2
+This guide describes Workbench in 0.9.3: cancellable client commands, readable companion views
+and release submissions with an exact commit, expected product hash and visible policy holds, from 0.9.2 the
+stops of the estate's runs and its history line, and from 0.9.3 the presence prompts of what it sends and the
+work proposed for a goal. From 0.8.2
 (FIX-39), a record stored while its companion publication was interrupted keeps its identity beside the
 recovery action in the assignment, review, acceptance and document-review views.
 It retains UPDATE-01's release notices and FIX-22's compact current attention. The shared runtime includes FIX-19's independent worker repositories,

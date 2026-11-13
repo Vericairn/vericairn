@@ -31,16 +31,26 @@ instead; see [release-basis diagnostics](#release-basis-diagnostics-083).
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.9.2. It adds, in `IEstateApi` and over the daemon, the event journal: `GET /v1/events`,
+This document describes 0.9.3. It adds, in `IEstateApi` and over the daemon's local socket, the presence notices of
+operator actions, `POST /v1/presence/prompts` (FIX-124), and naming the estate's first authority,
+`POST /v1/estate/first-authority` (CODE-72). `POST /v1/changes/merge` enqueues into a target branch's required merge
+queue and `POST /v1/changes/observe` records the queue's outcome (CODE-71), with `checkStatus` `queued` and the
+unfinished stage `merge-queued`; status and the goal reads add the work proposed for a goal that waits for its sponsor
+(FIX-117); and a work order whose current result is accepted reads as accepted (FIX-128). New writes are refused with
+`goal-status.verdict` (FIX-116), `operation.intent-kept` and `operation.target-kept` (FIX-109), `document.pin-content`
+(FIX-120) and `body.timestamp` (FIX-114), and a release dispatches only from the device that signed its intent
+(FIX-130). Each added `IEstateApi` member has a default implementation, so existing implementers stay
+source-compatible, and [API compatibility for 0.9.3](api-compatibility-0.9.3.md) lists every change. 0.9.2 added, in
+`IEstateApi` and over the daemon, the event journal: `GET /v1/events`,
 as server-sent events or a long poll, `GET /v1/events/{key}` (WATCH-05) and `POST /v1/events/select` (MCP-05);
 keyword search and search-selected context, `POST /v1/search`, `/search/index`, `/search/replay`,
 `/context/prepare` and `/context/brief` (CONTEXT-02); security reports' `POST /v1/security-reports/poll` and
 `/triage` (OPS-11); history checkpoints, `POST /v1/history/checkpoints` (OPS-07); and an operator action finished
 after its merge, `GET` and `POST /v1/operator/unfinished` (FIX-89). The daemon serves the Model Context Protocol
 at `/mcp` over Streamable HTTP (MCP-03), a run of a flow adds its position and stops to the goal reads (PROC-05,
-PROC-06 and PROC-10), and records read as signed history decides (ID-05, ID-06 and FIX-108). Each added
-`IEstateApi` member has a default implementation, so existing implementers stay source-compatible, and
-[API compatibility for 0.9.2](api-compatibility-0.9.2.md) lists every change. 0.9.1 added, in `IEstateApi` and
+PROC-06 and PROC-10), and records read as signed history decides (ID-05, ID-06 and FIX-108), each added
+`IEstateApi` member with a default implementation; [API compatibility for 0.9.2](api-compatibility-0.9.2.md)
+lists every change. 0.9.1 added, in `IEstateApi` and
 over the daemon, `POST /v1/runs/prepare`, which prepares a run's workspace alone before the agent starts, and a
 workspace setup command observed before a run's intent (FIX-86), and refusal of a new decision or revision dated
 after its own record (FIX-87), each added member with a default implementation. 0.9.0 added, in `IEstateApi` and over
@@ -67,13 +77,13 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds, and [for 0.9.2](api-compatibility-0.9.2.md), for the members and records 0.9.2 changes.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change, [for 0.8.3](api-compatibility-0.8.3.md), for the members 0.8.3 adds, [for 0.8.4](api-compatibility-0.8.4.md), for the members 0.8.4 adds, [for 0.9.0](api-compatibility-0.9.0.md), for the members 0.9.0 adds, [for 0.9.1](api-compatibility-0.9.1.md), for the members 0.9.1 adds, [for 0.9.2](api-compatibility-0.9.2.md), for the members and records 0.9.2 changes, and [for 0.9.3](api-compatibility-0.9.3.md), for the members and records 0.9.3 changes.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.9.2's packages are
-available on nuget.org, pushed by the package workflow that its publication started.
+API route and ordinary SDK calls do not initiate the daily release check. 0.9.3 package availability
+requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
