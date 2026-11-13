@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 26, November 13, 2026. Add `estate first-authority`, which lists the self-admissions that could be the estate's first authority with their evidence and names one of the root operator's devices in the manifest, in the development build.
+
 Revision 25, November 13, 2026. `docs pass --before` passes an earlier release named as a source or predecessor and names the rule each location matched, in the development build.
 
 Revision 24, November 13, 2026. `goal propose --flow` binds the subject an extension flow inherits from its base, in the development build.
@@ -880,3 +882,43 @@ signatures it adds, with why, before they are asked for; and when it ends, how m
 command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
 and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
 lists how many prompts the release and acceptance steps ask for.
+
+## `vericairn estate first-authority` (0.9.3)
+
+From 0.9.3 (CODE-72), `vericairn estate first-authority` names the estate's first authority in the manifest's
+`firstAuthority`, which an estate holding more than one self-admission of the root operator's device needed by hand before.
+Without `--device` or `--admission` it lists every self-admission that could be the first authority and writes nothing:
+
+```sh
+vericairn estate first-authority
+vericairn estate first-authority --device <device id> --check
+vericairn estate first-authority --device <device id> --expect-plan <plan> --by <root operator id>
+vericairn estate first-authority --admission <admission id> --check
+```
+
+The listing names the root operator, what the manifest names, the first authority the estate reads and the findings about it
+(`manifest.first-authority`, `history.root-ambiguous`, `history.manifest-root`). For each candidate it gives the admission, the
+device with its name, platform, custody, presence and principal, and the time the admission states, which is a claim and never
+evidence of order. It says whether the manifest names it and whether the estate reads it, and, judged as the first authority,
+whether history checkpoints witnessed it before every other candidate, whether its device stands revoked, how many other devices
+an admission that counts admits and how many records its device signed. Each line ends `nameable` or `not nameable:` with why.
+
+`--device` names a device by its id or any revision of its line; `--admission` names the self-admission itself, which a device
+that admitted itself more than once needs. With `--check` the command prints the change,
+`change: estate/manifest.json firstAuthority <before or (none)> -> <admission>`, and `plan: sha256:<hash>`, the hash of the change,
+the manifest's bytes and every candidate as read, and writes nothing. `--expect-plan <hash> --by <root operator id>` writes it:
+refused unless `--by` is the root operator the first charter names and the estate still reads as that check read it. It writes
+only `firstAuthority`, through a file beside the manifest moved into place, and prints `changed:` with each error about the root of
+trust that remains. Each remaining `signature.self-admission` is another self-admission still in the copy: remove its record file
+yourself and commit it with `estate/manifest.json`; the command removes nothing.
+
+It names only an admission by the root operator of one of the root operator's own devices, signed by that device. A device of an
+agent or another person, a recovery device, a device with no such admission and any other record are refused, each with why. A
+revoked device stays nameable, and the listing shows it revoked: the first device admitting itself is the root, revoked or not.
+It refuses, writing nothing, when the estate's first authority already works, because the manifest names it or the estate's adopted
+history settles it, since it never moves a working first authority; when the copy reads unsettled; and when history checkpoints
+witness a self-admission first while it is read as the first authority, the one so witnessed included, since such history could
+have come into the copy with it: compare the copy with a head known elsewhere (`vericairn estate check --expect <checkpoint>`) and
+remove what does not belong. The manifest is not signed, so the command is the root operator's at the runtime's machine: over the
+daemon it is `POST /v1/estate/first-authority`, refused for every device-signed request and over the local network. `--json`
+writes `FirstAuthorityResponse`.

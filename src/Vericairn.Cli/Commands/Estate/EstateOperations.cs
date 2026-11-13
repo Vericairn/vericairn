@@ -188,6 +188,59 @@ internal sealed class EstateOperations(CommandContext context)
         }
     }
 
+    /// <summary>
+    /// Lists the self-admissions that could be the estate's first authority, or shows or writes the change naming one in the manifest
+    /// (0.9.3; CODE-72).
+    /// </summary>
+    public int FirstAuthority(string root, string? device, string? admission, bool check, string? expectPlan, string? by, bool json)
+    {
+        bool names = device is not null || admission is not null;
+        if (names && !check && (by is null || expectPlan is null))
+            return context.Fail("Naming the first authority writes the manifest: read the change with --check first, then pass the plan hash it prints with --expect-plan and the root operator with --by.");
+        return context.WithApi(root, api =>
+        {
+            (FirstAuthorityResponse? response, Problem? problem) = api.FirstAuthority(new FirstAuthorityRequest(by, device, admission, check, expectPlan));
+            if (response is null) return context.Fail(problem?.Message ?? "refused");
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+                return Clean;
+            }
+
+            context.Output.WriteLine($"root operator     {response.RootOperator ?? "none read"}");
+            context.Output.WriteLine($"manifest names    {response.Named ?? "no first authority"}");
+            context.Output.WriteLine($"first authority   {response.FirstAuthority ?? "none"}{(response.Adopted ? " (the estate has adopted history checkpoints)" : string.Empty)}{(response.Unsettled ? " (the copy reads unsettled)" : string.Empty)}");
+            foreach (FindingDto finding in response.Findings) context.Output.WriteLine($"{finding.Severity}: {finding.Code} {finding.Location}: {finding.Message}");
+            context.Output.WriteLine(response.Candidates.Count == 0 ? "candidates: none" : "candidates:");
+            foreach (FirstAuthorityCandidate candidate in response.Candidates)
+            {
+                context.Output.WriteLine($"  {candidate.Admission}  device {candidate.Device ?? "none"}{(candidate.Name is null ? string.Empty : $" \"{candidate.Name}\"")}  {candidate.Platform ?? "unknown platform"}, {candidate.Custody ?? "unknown custody"}, presence {candidate.Presence ?? "unknown"}  principal {candidate.Principal ?? "none"}");
+                context.Output.WriteLine($"    states {candidate.At} (a claim, not evidence of order); named by the manifest: {YesNo(candidate.Named)}; the estate reads it as its first authority: {YesNo(candidate.Reads)}");
+                context.Output.WriteLine($"    were it the first authority: witnessed first by history checkpoints: {YesNo(candidate.WitnessedFirst)}; its device revoked: {YesNo(candidate.Revoked)}; admits {candidate.Admits} other {(candidate.Admits == 1 ? "device" : "devices")}; its device signed {candidate.RecordsSigned} {(candidate.RecordsSigned == 1 ? "record" : "records")}");
+                context.Output.WriteLine(candidate.Nameable ? "    nameable" : $"    not nameable: {candidate.NotNameable}");
+            }
+
+            if (response.Change is { } change)
+                context.Output.WriteLine($"{(response.Applied ? "changed" : "change")}: {change.Manifest} firstAuthority {change.Before ?? "(none)"} -> {change.After}");
+            if (response.PlanHash is { } plan && !response.Applied) context.Output.WriteLine("plan: " + plan);
+            if (response.Change is not null && !response.Applied)
+                context.Output.WriteLine($"Nothing was written. The root operator writes it with vericairn estate first-authority --{(admission is null ? "device " + device : "admission " + admission)} --expect-plan <plan> --by <root operator>.");
+            if (response.Applied)
+            {
+                foreach (FindingDto finding in response.Remaining) context.Output.WriteLine($"remaining {finding.Severity}: {finding.Code} {finding.Location}: {finding.Message}");
+                context.Output.WriteLine(response.Remaining.Any(f => f.Code == "signature.self-admission")
+                    ? "Each remaining signature.self-admission is another self-admission still in the copy. Remove its record file yourself, as the operator, and commit; this command removes nothing. Then run vericairn estate check."
+                    : "Run vericairn estate check.");
+                if (response.Remaining.Count == 0 || response.Remaining.All(f => f.Code == "signature.self-admission"))
+                    context.Output.WriteLine("Commit estate/manifest.json with the estate's records, so that every clone reads the same first authority.");
+            }
+
+            return Clean;
+        }, readOnly: !names || check);
+
+        static string YesNo(bool value) => value ? "yes" : "no";
+    }
+
     private static List<(string Id, string Hash, string Path, bool Counts)> ExpectedCandidates(IEstateApi api, string? expect)
     {
         List<(string Id, string Hash, string Path, bool Counts)> counting = [.. api.Records("history-checkpoint").Select(r => (r.Id, r.Hash, r.Path, true))];

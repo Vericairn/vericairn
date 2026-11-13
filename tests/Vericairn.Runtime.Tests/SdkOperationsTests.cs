@@ -208,7 +208,11 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(150, synchronous.Length);
+        Assert.Equal(151, synchronous.Length);
+        // From 0.9.3 (CODE-72) naming the estate's first authority, with its default and its cancellable counterpart.
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.FirstAuthority));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.FirstAuthority))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.FirstAuthorityAsync))!.IsAbstract);
         // From 0.9.3 (FIX-124) the presence notices' long poll, with its default and its cancellable counterpart.
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.PresencePrompts));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.PresencePrompts))!.IsAbstract);

@@ -290,7 +290,7 @@ internal sealed partial class EstateTrust
             if (match is null)
             {
                 RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
-                    $"The manifest names {named} as the estate's first authority, and that is not an admission by the root operator of its own device, signed by that device ({candidates}). No admission counts from a first authority until the manifest's firstAuthority names one that is."));
+                    $"The manifest names {named} as the estate's first authority, and that is not an admission by the root operator of its own device, signed by that device ({candidates}). No admission counts from a first authority until the manifest's firstAuthority names one that is: vericairn estate first-authority lists each with its evidence and names one."));
             }
 
             return match;
@@ -298,7 +298,7 @@ internal sealed partial class EstateTrust
 
         if (AuthorityCandidates.Count <= 1) return AuthorityCandidates.Count == 0 ? null : AuthorityCandidates[0];
         RootFindings.Add(new Finding(Severity.Error, "manifest.first-authority", EstateLayout.ManifestPath,
-            $"The root operator's devices admitted themselves more than once ({string.Join(", ", AuthorityCandidates.Select(DescribeCandidate))}), and the manifest names none of them as the estate's first authority. A first authority is never chosen by its date or id, so no admission counts from one until the manifest's firstAuthority names the admission that is."));
+            $"The root operator's devices admitted themselves more than once ({string.Join(", ", AuthorityCandidates.Select(DescribeCandidate))}), and the manifest names none of them as the estate's first authority. A first authority is never chosen by its date or id, so no admission counts from one until the manifest's firstAuthority names the admission that is: vericairn estate first-authority lists each with its evidence and names one."));
         return null;
     }
 

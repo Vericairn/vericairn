@@ -181,6 +181,12 @@ public static class ApiRoutes
             (HistoryCheckpointResponse? checkpoint, Problem? problem) = service.HistoryCheckpoint(request);
             return checkpoint is not null ? Results.Json(checkpoint, ProtocolJson.Options) : Results.Json(problem, ProtocolJson.Options, statusCode: StatusCodes.Status409Conflict);
         });
+        // From 0.9.3 (CODE-72): the first-authority candidates and evidence, or the manifest change naming one; machine-local, never device-signed.
+        app.MapPost($"{v}/estate/first-authority", (FirstAuthorityRequest request) =>
+        {
+            (FirstAuthorityResponse? firstAuthority, Problem? problem) = service.FirstAuthority(request);
+            return firstAuthority is not null ? Results.Json(firstAuthority, ProtocolJson.Options) : Results.Json(problem, ProtocolJson.Options, statusCode: StatusCodes.Status409Conflict);
+        });
         app.MapPost($"{v}/estate/export", (ExportRequest request) =>
         {
             (ExportResponse? export, Problem? problem) = service.Export(request);

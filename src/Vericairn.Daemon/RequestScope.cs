@@ -322,6 +322,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/history/checkpoints"] = typeof(HistoryCheckpointRequest),
+        ["POST /v1/estate/first-authority"] = typeof(FirstAuthorityRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
         ["GET /v1/reconcile"] = null,
         ["GET /v1/recover/inspect"] = null,
@@ -438,6 +439,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(HistoryCheckpointRequest)] = (_, r, d) => ((HistoryCheckpointRequest)r).Check ? Optional(((HistoryCheckpointRequest)r).By, d) : Acting(((HistoryCheckpointRequest)r).By, d) ?? Adoption((HistoryCheckpointRequest)r, d),
+        // From 0.9.3 (CODE-72): the manifest is no record and nothing signs it, so naming the first authority is the root operator's act at the
+        // runtime's local socket, where the operating system's identity of the caller stands for it; no device lists or writes it.
+        [typeof(FirstAuthorityRequest)] = (_, _, _) => "Naming the estate's first authority writes its manifest on the runtime's own machine and is the root operator's act over the local socket there; a device-signed request neither lists the candidates nor names one.",
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
