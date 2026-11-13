@@ -1189,7 +1189,7 @@ Every write it makes is kept in `local-network-writes.jsonl`, which `vericairn d
 (`vericairn devices revoke <device> --by <administrator> --reason <why>`) refuses its next request and ends its sessions
 and server stream. A request whose `Host` does not name the runtime's own address, or whose `Origin` the operator did
 not allow with `--mcp-origin`, is refused before it is authenticated; no origin is allowed by default. Token mode for
-OAuth-only clients and MCP over the relay come in 0.9.3. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
+OAuth-only clients and MCP over the relay are planned for 0.9.5. See [The MCP server](mcp.md#network-mcp-over-streamable-http-092).
 
 ### Agents hear what changed: MCP subscriptions (0.9.2)
 

@@ -501,7 +501,7 @@ claude mcp add vericairn -- vericairn mcp serve --connection <connection id>
 ```
 
 Token mode for OAuth-only clients, the public endpoint and MCP over the relay are `MCP-04`, `REMOTE-10`
-and the relay's work in 0.9.3; `<harness> over MCP HTTP` rows stay non-claims until qualified. See
+and the relay's work, planned for 0.9.5; `<harness> over MCP HTTP` rows stay non-claims until qualified. See
 [limitations](limitations-and-platforms.md#network-mcp-limits-092) and
 [API compatibility for 0.9.2](api-compatibility-0.9.2.md#network-mcp-over-streamable-http-mcp-03).
 
