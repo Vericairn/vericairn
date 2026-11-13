@@ -449,6 +449,8 @@ public sealed partial class EstateService
 
         if (stage is "prepared" or "recorded" or "committed") plan.AddRange(Step("change-push") ?? PushPresence(branch));
         if (stage is "prepared" or "recorded" or "committed" or "pushed") plan.AddRange(Step("change-open") ?? OpenPresence(branch));
+        // A queued merge settled unmerged is observed once more before the pull request's checks, since the queue may have merged it (CODE-71).
+        if (stage == "merge-failed" && progress?.Merge is { } settled && QueuedMerge(settled)) plan.AddRange(ObservationPresence(pull, "pull-request"));
         plan.AddRange(ObservationPresence(pull, "pull-request"));
         if (stage is "merge-uncertain" or "merge-queued" || stage == "merge-failed" && string.IsNullOrWhiteSpace(request.Reconciliation)) return plan;
         plan.AddRange(MergePresence(pull));

@@ -773,6 +773,34 @@ public sealed class OperatorRecordTests
     }
 
     [Fact]
+    public void ARerunOfAQueuedMergeSettledUnmergedAnnouncesItsObservationBeforeTheChecksAndSignsNoMore()
+    {
+        using var f = new Fixture();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        f.Remote.Memory.QueueRequired = true;
+        Assert.Equal("waiting", f.Run().Status);
+        f.Remote.Memory.SettleQueue("Example/widget", "1", "removed", "MANUAL");
+        Assert.Equal("known-failure", f.Run().Change!.Status);
+        Assert.Equal("merge-failed", f.Service.OperatorUnfinished().Action!.Stage);
+        long start = f.Service.PresencePrompts(new()).Cursor;
+        int signed = custody.Reasons.Count;
+
+        // A plain rerun observes the queued merge again, then the pull request's checks, and stops before any retry.
+        OperatorRecordResponse rerun = f.Run();
+        Assert.False(rerun.Ok);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        PresenceNotice announced = Assert.Single(notices, n => n.Kind == "announced");
+        Assert.Equal(6, announced.Count);
+        Assert.Equal(6, custody.Reasons.Count - signed);
+        Assert.Equal(6, notices.Count(n => n.Kind == "prompt"));
+        Assert.DoesNotContain(notices, n => n.Kind is "added" or "revised");
+        Assert.Equal("Signed 6 of 6.", notices[^1].Text);
+        Assert.Equal(2, f.Remote.Memory.Effects);
+    }
+
+    [Fact]
     public void AQueuedMergeShowsItsQueueStageOnlyOnceItsPlaceIsConfirmed()
     {
         using var f = new Fixture();

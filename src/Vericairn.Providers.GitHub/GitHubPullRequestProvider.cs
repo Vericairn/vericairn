@@ -293,7 +293,9 @@ public sealed class GitHubPullRequestProvider : IPullRequestProvider
             foreach (JsonElement push in pushes.RootElement.EnumerateArray().Take(LandingPushes))
             {
                 string before = Text(push, "before"), after = Text(push, "after");
-                if (Text(push, "ref") != "refs/heads/" + branch || !Patterns.Commit.IsMatch(before) || !Patterns.Commit.IsMatch(after)) return null;
+                // Only the merge queue's own pushes can name a group: a host that ignored the filter establishes none.
+                if (Text(push, "activity_type") != "merge_queue_merge" || Text(push, "ref") != "refs/heads/" + branch
+                    || !Patterns.Commit.IsMatch(before) || !Patterns.Commit.IsMatch(after)) return null;
                 if (after == commit) return after;
                 if (Contains(destination, after, commit) && !Contains(destination, before, commit)) return after;
             }

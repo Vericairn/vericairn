@@ -236,8 +236,10 @@ public sealed class PullRequestProviderTests
         Assert.Equal(reason is null ? null : new DateTimeOffset(2026, 11, 13, 7, 15, 30, TimeSpan.Zero), observed.RemovedAt);
     }
 
-    [Fact]
-    public void TheGitHubQueuedTargetOfACommitLandedInsideAGroupReadsTheRunsOfTheGroupThatLandedIt()
+    [Theory]
+    [InlineData("merge_queue_merge")]
+    [InlineData("push")]
+    public void TheGitHubQueuedTargetOfACommitLandedInsideAGroupReadsTheRunsOfTheGroupThatLandedIt(string kind)
     {
         string before = new('d', 40), group = new('e', 40), newer = new('f', 40);
         var calls = new List<string[]>();
@@ -249,7 +251,9 @@ public sealed class PullRequestProviderTests
             if (route.StartsWith("repos/Example/widget/activity?", StringComparison.Ordinal))
             {
                 Assert.Contains("activity_type=merge_queue_merge", route, StringComparison.Ordinal);
-                return Success(JsonSerializer.Serialize(new[] { new { before = group, after = newer, @ref = "refs/heads/main" }, new { before, after = group, @ref = "refs/heads/main" } }));
+                // A host that ignored the filter could answer with a direct push, which names no group.
+                return Success(JsonSerializer.Serialize(new[] { new { before = group, after = newer, @ref = "refs/heads/main", activity_type = "merge_queue_merge" },
+                    new { before, after = group, @ref = "refs/heads/main", activity_type = kind } }));
             }
             if (route.StartsWith("repos/Example/widget/compare/", StringComparison.Ordinal))
             {
@@ -272,6 +276,14 @@ public sealed class PullRequestProviderTests
         });
         TargetObservation target = provider.ObserveQueuedTarget("Example/widget", "main", MergeCommit);
         Assert.True(target.Complete);
+        if (kind == "push")
+        {
+            // No group is established, so the merge commit's own empty inventory stands and its checks stay pending.
+            Assert.Null(target.Group);
+            Assert.Empty(target.Checks);
+            Assert.DoesNotContain(calls, c => c[1].Contains("head_sha=" + group, StringComparison.Ordinal));
+            return;
+        }
         Assert.Equal((MergeCommit, group), (target.Head, target.Group));
         Assert.All(target.Checks, c => Assert.Equal(group, c.Head));
         Assert.Empty(ChangeGate.QueuedRefusals(group, ["tests"], target.Checks, target.Complete));
