@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 21, November 12, 2026. Add `doctor --json`, JSON from `version`, `records describe`, `records hash`, `records format` and `recover compare`, and the commands that refuse `--json`, in the development build.
+
 Revision 20, November 12, 2026. Describe 0.9.2's command additions as released commands rather than development builds.
 
 Revision 19, November 8, 2026. Add `estate checkpoint`, the history checkpoints the runtime writes, closings with `devices revoke`, `devices rotate` and narrowing grant revisions, a closing stored without its act and the act written again after it, and this machine's memory of the estate's history in `estate check`, in the development build.
@@ -814,3 +816,37 @@ upgrade's runtime step does that. An estate pinned to a source commit is refused
 ran on: the runtime by its release and process, another estate by its id, the commands as run in the estate's directory, and any
 other path in a finding's message as `<path>`; the exact commands for this machine are printed after the check, and `--json`
 gives them as `here`, never recorded.
+
+## `vericairn doctor --json` and JSON from every command (0.9.3)
+
+From 0.9.3 (FIX-119), every command that accepts the global `--json` writes decodable JSON on standard output with it, or
+refuses the option before it runs. `doctor --json` writes one object with the facts of its text report under stable names.
+`version`, `runtime`, `git`, `dotnet`, `estate`, `custody`, `enclave`, `records`, `search` and `daemon` are each an object of
+`state`, `value` and `detail`, and `stateWarnings` lists the per-user state whose permissions cannot be restricted, the report's
+`state` lines. `state` is `present`, `missing`, `unavailable` or `not-applicable`. `value` is the probe's main fact or `null`,
+such as the version, the tool's version line, the estate's path, the default custody or the serving daemon's process id.
+`detail` is the rest of the report's line or `null`.
+
+| Field | States |
+|---|---|
+| `version`, `runtime`, `custody`, `records` | `present` |
+| `git`, `dotnet` | `present`, or `missing` when the tool is not on `PATH` |
+| `estate` | `present`, or `missing` for a path that is not an estate root; `value` is the path either way |
+| `enclave` | `present` or `unavailable` on macOS, with the reason in `detail`; `not-applicable` elsewhere |
+| `search` | `present`, or `unavailable` with the reason |
+| `daemon` | `present` with its process, `missing` when commands run the embedded runtime, `not-applicable` outside an estate |
+
+```sh
+vericairn --json doctor
+```
+
+The text report is unchanged, and the release check's disclosure and notices stay on standard error with or without `--json`.
+`version --json` writes `{"version": "..."}`. `records describe --json` writes the type list (`reads`, `writesAtMost`, `types` with
+`name`, `sinceFormat` and `summary`, and `reserved`) or one type with its `fields`. `records hash --json` writes `{"hash": "..."}`,
+`records format --json` writes the files it `formatted` and those left `unchanged`, and `recover compare --json` writes
+`thisEstate`, `otherEstate`, `sameEstate` and the `onlyHere`, `onlyThere` and `differing` records by `type` and `id`.
+
+Three commands refuse `--json`: `runtime serve`, which serves until stopped and writes the service's log; `mcp serve`, whose
+standard output carries the MCP protocol; and `recover inspect`, whose report is text, while `status --json`, `devices list --json`
+and `estate reconcile --json` give the same facts as JSON. The refusal is a parse error: exit code 1, the reason on standard error
+and, as for any parse error, the usage help on standard output.

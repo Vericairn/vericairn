@@ -12,6 +12,6 @@ internal sealed class RecordsHashCommand : Command
     {
         var hashFileArgument = new Argument<string>("file") { Description = "Record file." };
         Arguments.Add(hashFileArgument);
-        SetAction(result => RecordFiles.Hash(context, result.GetValue(hashFileArgument)!));
+        SetAction(result => RecordFiles.Hash(context, result.GetValue(hashFileArgument)!, result.GetValue(context.JsonOption)));
     }
 }

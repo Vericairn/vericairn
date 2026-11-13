@@ -74,6 +74,16 @@ internal static class CliApp
                         result.AddError("The root --as option applies only to mcp serve. Use other commands' own identity options.");
                 });
             }
+            // Every command writes JSON with the global --json, except the few whose standard output cannot be one JSON result:
+            // they refuse the option before they run, so none accepts it and writes text.
+            if (command is ITextOutputCommand text)
+            {
+                command.Validators.Add(result =>
+                {
+                    if (result.GetValue(context.JsonOption))
+                        result.AddError($"--json does not apply to vericairn {Path(command)}: {text.WhyNotJson}");
+                });
+            }
             if (command.Action is SynchronousCommandLineAction action)
             {
                 command.SetAction(parseResult => context.Invoke(() => action.Invoke(parseResult)));
@@ -81,4 +91,20 @@ internal static class CliApp
             foreach (Command child in command.Subcommands) Bind(child);
         }
     }
+
+    /// <summary>The command's words after vericairn.</summary>
+    internal static string Path(Command command)
+    {
+        var words = new List<string>();
+        for (Command? current = command; current is not null and not RootCommand; current = current.Parents.OfType<Command>().FirstOrDefault())
+            words.Insert(0, current.Name);
+        return string.Join(' ', words);
+    }
+}
+
+/// <summary>A command whose standard output cannot be one JSON result, so it refuses the global --json before it runs.</summary>
+internal interface ITextOutputCommand
+{
+    /// <summary>Why, and where the same facts are available as JSON when they are; a whole sentence.</summary>
+    string WhyNotJson { get; }
 }
