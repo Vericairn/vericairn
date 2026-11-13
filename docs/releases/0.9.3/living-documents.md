@@ -1,0 +1,292 @@
+# Living documents
+
+A living document follows facts that can change: a README, an operator guide or an
+authored page with generated regions. Declare its repository-relative path, source,
+triggers and review requirements with `vericairn docs declare`. Frozen release
+documentation sets keep their issued bytes and are never declared living.
+
+## The document covers its own file
+
+In 0.8.3, FIX-50 makes the document's own file one of its covered paths, even when
+the declaration names only `release` and `decision` triggers. If its bytes differ
+from its latest clearance, `docs living` shows it due with a `covers` reason that
+names the document, the clearance and the changed content hashes. Missing content
+also makes it due. Byte equality is exact, including line endings.
+
+An own-file change uses the highest level in the declaration: `remind`, `warn` or
+`refuse`. Thus a document declared at `refuse` for releases becomes due at `refuse`
+when its own text changes, even if its explicit `covers` trigger has a lower level.
+`status` shows the same reasons; `estate check` and `progress` include them as
+`document.due` findings at `warn` or `refuse`. The API, MCP and Workbench use the
+same document state. Release submission uses that derivation too: an applicable
+document due at `refuse` holds the release before intent or dispatch.
+
+A clearing `document-review` has outcome `current` or `revised` and pins the exact
+bytes. Reviewing the new bytes clears the own-file reason everywhere; `needs-change`
+does not. For an estate file, a newer `document-revision` can also clear its own
+content when its author meets the declaration's `clearedBy` (never for
+`independent`) and the declared checks pass. Explicitly declared covered paths still require a clearing review of
+their content identity. Existing reviews remain usable: their `content` pin covers
+the document itself, and their separate `covered` pin covers the declared paths.
+No declaration rewrite or replacement review is required merely to adopt this rule.
+
+```sh
+vericairn docs living
+vericairn docs review docs/guide.md --by <principal id> --outcome current --summary "Checked the revised claims."
+```
+
+The declared checks and `clearedBy` requirement still apply. A failed required
+check prevents clearance. Whole generated documents under the strict generation
+contract prove currency through fresh generation; authored clearance does not
+replace that check.
+
+## What each outcome declares
+
+A review's outcome says what the reviewer did, not whether the document changed.
+`current` is the reviewer's judgement of the current exact bytes, whoever revised
+them: a reviewer who reads another principal's revision and finds that it holds
+records `current`. `revised` declares that the reviewer revised the content itself,
+so it counts as self review, whoever pinned the bytes. `needs-change` finds the
+document stale and leaves it due.
+
+So a document declared `clearedBy: independent` is cleared by a separate reviewer's
+`current`. In this example a builder revises the guide and pins its bytes, and a
+separate reviewer reads those exact bytes and clears them:
+
+```sh
+vericairn docs pin docs/guide.md --by <builder id> --summary "Describe the revised workflow."
+vericairn docs review docs/guide.md --by <reviewer id> --outcome current --summary "Checked the builder's revision."
+```
+
+The review records `independence: independent-agent` for an agent reviewer, or
+`operator` for the operator. The builder's own review is self review whichever
+outcome it records. From 0.9.3 (FIX-113), when a separate reviewer records `revised`
+on such a document, the `document.cleared-by` refusal names the `revised` outcome as
+its cause and points to `current`. The independence rule is unchanged: nothing
+relabels a self review or clears a document for it.
+
+## When a declared check fails
+
+A failed declared check refuses a clearing review with `document.check-failed`,
+and nothing is written; `needs-change` is still recorded with the failed check, and
+the document stays due. From 0.9.3 (FIX-122), the refusal names what failed. Its
+message gives each failed check with what it found, and the refusal carries one
+`document.check-detail` child finding per problem, as information beside the
+refusal's error, in the text output and in the `findings` of `--json`.
+
+For `links-resolve`, each link that does not resolve is a child finding located at
+the document's repository-relative path with the link's line and column, such as
+`docs/guide.md:3:17`. It names the link as the document writes it and why it fails:
+the link leads outside the repository, or it names a path in the repository that
+holds nothing. Columns count characters from 1. The check's summary, which a review
+records, names the first links that fit in it and counts the rest; the refusal's
+child findings name every one. Neither names an absolute path or quotes the
+document beyond its links.
+
+```text
+ERROR document.check-failed records/document-review/...: A failed check refuses the clearance (links-resolve: Links in docs/guide.md that do not resolve within the repository (1): ../../other-repo/example.md at line 3, column 17, which leads outside the repository.); record needs-change, or fix the document and review it again.
+INFO document.check-detail docs/guide.md:3:17: links-resolve: ../../other-repo/example.md does not resolve, which leads outside the repository.
+```
+
+A failed check other than `links-resolve` has one child finding at the document's
+path with its summary. The refusal, `document.check-failed` and the clearance
+rules are unchanged.
+
+## Which bytes are compared
+
+For a revision with `hashMode: authored-revisions-v1`, `hash` and `bytes` describe
+the authored content with only the generated revision payload removed. Both marker
+lines, the title, body, line endings outside the payload and any byte-order mark
+remain part of that identity. Older pins without `hashMode` still compare the
+whole file. Document reviews continue to pin the complete reviewed file.
+
+A generated history is also compared with its records. Changing only a generated
+line leaves the authored hash alone, but makes `docs living` due and produces a
+`document.revisions` finding in `estate check`. Refreshing restores the lines from
+their records. A missing, repeated or misplaced marker is a failure, never an
+instruction to hash the whole file instead.
+
+Estate files use the working tree, including uncommitted changes. Other repositories
+use their registered clone's HEAD, or the latest clearing review's commit when Git
+proves that HEAD is its ancestor. A newer or divergent HEAD with changed content
+is due. This is FIX-23's rule, shared by ordinary document views and the gate.
+
+For a release's own repository, submission compares the exact prepared release
+commit and observation compares the actual build commit. Both the document and its
+declared covered paths use that selection. When the selected release commit differs
+from the commit shown by ordinary `docs living`, the same derivation runs against
+those selected bytes. No gate substitutes a different HEAD, fetches or checks out
+files. Documents in other repositories retain their own commit selection.
+
+An external document without a clearing review is due. An unreadable comparison
+is also shown as due with its cause; the applicable refuse-level gate holds. A
+missing registered commit requires the clone to be supplied with that commit.
+Only the operator's existing signed, expiring grant for one document, version and
+submitting principal can except an unregistered clone's comparison. The release
+evidence names that grant, and other due reasons still hold the gate.
+
+See the [operator guide](operator-guide.md#16-living-documents)
+and the [record-format guide](record-format-v2.md#living-documents-due) for declarations,
+review fields and the other triggers.
+
+## Generated revision histories
+
+From 0.9.0, `docs pin --convert-revisions` converts one
+Markdown document's opening hand-written history from its existing revision pins.
+The builder performs this migration explicitly; installing the build changes no
+estate document. Conversion requires the exact current whole-file pin, preserves
+every historical line's date and wording in the conversion record, and refuses
+a line with no record or an ambiguous match. No old record is rewritten.
+Generated payloads use LF line endings, like other template regions; conversion
+metadata retains the original line text and its line endings.
+
+The generated `revisions` region follows the level-one title. Its lines are newest
+first: `Revision N, Month D, YYYY: carries decision X: summary` when a decision is
+named, or the same dated line with its summary otherwise. The design-revisions
+policy applies its existing date, ordinal and explanation rules to the first line
+inside the region. The region uses the template marker convention and the
+`vericairn.estate/revision-history-v1` generator with `version=1`; existing pinned
+template definitions and their single-line generator remain available.
+
+Each pin regenerates this region. The displayed ordinal comes from all the path's
+revision records in time order, with id breaking ties. Concurrent authored-content
+pins are retained together, so regenerating after a merge gives each a distinct
+ordinal. The stored `revision` integer is advisory for this mode. Generated text
+can be replaced without changing the bytes that its pin hashes, including the
+pin's own revision line. Whole generated companions keep their source-based
+verification and do not receive authored revision regions.
+
+Context packages and exact original reads return the bytes selected by the pin's
+mode. For authored-content pins this means empty revision markers and the complete
+authored body; generated history can be rendered from the records. The Git adapter
+can retrieve those same hashed bytes from local history, while old whole-file pins
+still retrieve their exact complete files.
+
+## Correcting a revision's summary
+
+A revision's summary is part of its signed record, so a mistake in it is corrected
+by a successor record, never by editing the record. The document's bytes stay as
+they are. `docs pin` refuses unchanged bytes for a whole-file document, and its
+`--render-template` refreshes only an estate template instance or a converted
+revision history; from 0.9.3 both refusals name this route.
+
+For a whole-file document, write the successor yourself:
+
+1. Read the current pin. `docs pin` with the unchanged bytes is refused and names
+   it (`current pin <pin id>`); `records show` prints it.
+2. Check the file against it: its SHA-256 (`shasum -a 256 docs/guide.md`, or
+   `Get-FileHash docs/guide.md` in PowerShell, written as `sha256:` and the
+   lower-case digest), its byte count (`wc -c < docs/guide.md`) and its path all
+   match the pin.
+3. Write the successor's body with the pin's own `path`, `title`, `hash`, `bytes`
+   and `mediaType`, the next `revision` and the corrected `summary`, and record it
+   with `--supersedes` naming the current pin.
+
+```sh
+vericairn docs pin docs/guide.md --by <author id> --summary "Corrected summary."
+vericairn --json records show <current pin id>
+vericairn records new document-revision --by <author id> --body successor.json --supersedes <current pin id>
+```
+
+```json
+{"path": "docs/guide.md", "title": "Guide", "hash": "sha256:<the pin's hash>", "bytes": 1234,
+ "mediaType": "text/markdown", "revision": 3, "summary": "Corrected summary."}
+```
+
+The original record keeps its bytes and signatures; the successor supersedes it.
+A successor of any pin but the current one forks the document and is refused with
+`document.multiple`. From 0.9.3, a successor whose `hash` or `bytes` differ from
+the file it names is refused with `document.pin-content`. Either refusal writes
+nothing. For a converted history or a template instance, `docs pin <path> --by
+<author id> --summary "Corrected summary." --render-template` records the
+correction with the authored bytes unchanged and regenerates the history line.
+
+A correction does not rewrite what was found in the record it corrects. From 0.9.3
+(FIX-120), `estate check`, `status` and the progress report give a finding of the
+estate's repository and policy checks on a superseded record, such as
+`writing.spacing` in its summary, as historical: the finding keeps its code,
+severity and location, and its message names the record that supersedes it.
+Record validation's own findings are not marked.
+Every occurrence stays reported, and history is scanned in full. A finding on the
+current record is reported as before, so a new mistake in the correction is never
+hidden by the historical one. A writing exception is for an intentional token, not
+for an accidental spelling since corrected.
+
+## Template sections (0.8.4)
+
+[Templates](templates.md) add exact version pins and per-section states to authored
+living documents in record format 3. `docs new` creates an instance; `docs sections`
+shows each part's evidence; `docs brief --section` supplies complete measured
+context; `docs review --section --fidelity` reviews a selected part. A passing
+review clears no sibling. Required sections must be reviewed at sufficient
+fidelity, and no section may be due or failing before the document is current.
+Existing triggers, covered paths, policy rules and release gates still apply.
+Generated parts keep their generated-region comparison, quoted parts preserve
+exact record text, and neither synthesis nor a template grants acceptance or
+other authority. Existing non-template living-document behavior is unchanged.
+
+## After a publication
+
+`vericairn docs pass <version>` gathers the documents still due for that publication.
+It uses the same due-state evaluation as `docs living` and the release gate, selecting
+only documents with a release reason that names the exact publication record.
+Documents already cleared for it and documents due only for other reasons are absent.
+After another publication supersedes the release reason, its remaining documents
+appear in the newer publication's pass. The pass is a current review queue, not a
+historical snapshot of the queue on publication day.
+
+Each entry names its declaration, repository, covered paths (including its own file),
+reasons and existing review assignments. Registered clones supply added, modified
+and deleted paths between this publication's commit and the preceding publication
+of the same product. The first publication lists covered files as added. Later work
+at clone HEAD is not attributed to the release. Missing commits, missing sources
+and documents in other repositories have explicit comparison notes; no clone is
+fetched or checked out. Record summaries from the release window provide context,
+with matching estate document revisions, decision document lists and estate result output paths
+also identified beside each document.
+
+```sh
+vericairn docs pass 0.2.0 --product widget
+vericairn docs pass 0.2.0 --product widget --json
+vericairn docs pass 0.2.0 --product widget --output artifacts/docs-pass
+vericairn docs pass 0.2.0 --product widget --document README.md --document ROADMAP.md \
+  --assign-to <reviewer id> --by <assigning principal id> --key DOCS-REVIEW-1
+```
+
+Use `--product` when more than one product published that version. The optional
+assignment selects all listed documents unless `--document` is supplied; repeat it
+for a group. A declaration id distinguishes identical paths in different repositories.
+The reviewer can be a person or agent, including the builder. The assigning principal
+needs operator or local-engineering authority. A new work-order key identifies the
+review task. The runtime validates its ordinary work order and assignment together,
+pins their publication and document sources, and rechecks that every selected document
+is still due before storing. `work brief <key>` gives the reviewer the covered paths,
+file changes, comparison gaps and pinned record context. The reviewer uses the ordinary
+attempt and result flow and `docs review` for each document. Assignment clears nothing;
+the declaration's checks and independence requirement still apply.
+
+The pass also prepares unified patches for declared authored `README.md`, `ROADMAP.md`
+and `docs/releases/README.md` front documents. The README's current-release sentence
+and date are updated; the roadmap moves its current marker to the published version;
+the releases index gains a current entry while retaining the earlier publication's
+text. The supported README forms are the sentence “The current published release is
+0.1.0, from” followed by its date on the next line, and a `Current release: 0.1.0` line.
+Roadmap headings use `## 0.1.0 — current published release` and
+`## 0.2.0 — planned`; the index uses `The current published release is **0.1.0**`.
+Missing or ambiguous markers need a manual update and are reported as notes.
+
+`--json` includes each patch, its base commit when applicable, and before/after hashes.
+`--output` writes one `<declaration id>.patch` per selected front document. It refuses
+existing patch files. Inspect the proposed changes and their source basis before
+applying them. The pass never edits source documents, clears a review, commits a file
+or changes a frozen version directory or its checksum index. Applying, committing
+and reviewing a proposed update remain separate actions. A partial assignment store
+returns its receipts with a reconciliation problem; inspect the original work order
+and batch before retrying.
+
+The API provides `GET /v1/documents/pass/{version}?product=<id or slug>` and
+`POST /v1/documents/pass/{version}/assignments`. The latter accepts `by`, `reviewer`,
+`key`, the displayed `release` pin and an explicit `documents` array of declaration
+pins. Both return typed responses, including problems; SDK callers use `DocumentPass`
+and `DocumentPassAssign`, or their cancellable asynchronous counterparts. See
+[API compatibility](api-compatibility-0.8.4.md#publication-documentation-pass-docs-12).

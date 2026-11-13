@@ -1,0 +1,707 @@
+# The MCP server
+
+From 0.8.4, the server offers estate briefs, records, pinned documents and
+context packages as read-only MCP resources, alongside standard `prompts/list`
+and `prompts/get` and the prompt library tools. Prompt offers carry categories
+and arguments and are filtered for the connected principal. Hidden,
+estate-disabled and retired prompts are omitted. `prompts/get` records a use
+with a new assignment, run or ask answer before returning its message, under
+the same admitted-operator permission as `prompt_use`. See
+[MCP prompts](prompts.md#mcp-prompts) for the required target and exact-definition
+arguments. Serving a resource or prompt gives its content no authority.
+
+From 0.8.3, `release_submit_check` is a read tool available without an admitted
+signing device or presence. Required inputs are `product`, `version`, `by` (the intended submitter),
+`commit`, `expected` (the product hash) and `clientBuild` (the full submitting client build identity).
+Optional inputs are `provider`, `repository`, `ref`, `workflow`, `settings` and `reconciliation`, as on
+submission. It returns the API's `ReleaseResponse` with `check.objections`, each naming a reason and
+`nextAction`, and marks a refused check as a tool error. It reports all admission objections, signs
+nothing, creates no record or retained object, calls no release provider and never fetches. A passing
+check grants no authority; submission evaluates again. See [API v1](api-v1.md#release-submission-check-083).
+
+Vericairn 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
+`policy_evaluate`, `writing_exceptions_list` and `writing_exception_show`.
+They return the same basis, findings, duty evidence and writing locations as the API.
+`release_basis_get` reads a retained release-admission evidence hash, including the original
+source bytes, duty findings and exact proof references. It creates no record and grants no authority.
+`work_result` preserves optional `duties` with their exact scope and proof bindings; those submissions
+require `expected`, the current attempt hash. The operator-only `work_review` tool takes `result`,
+`expected` (the current result hash) and the ordinary review `body`, including exact `read` references.
+The server checks current operator roles and device admission when listing and calling `work_review`;
+workers cannot list or call it. The runtime signs as the connection principal and validates the evidence and review independence.
+Neither tool accepts work or a release. See [duty evidence transport](policies.md).
+`policy_evaluate` accepts optional `asOf` and `release` preview inputs. Reads create no record
+and offer no release acceptance operation. See [Inspecting estate policies](policies.md).
+
+`vericairn mcp serve` exposes an estate to a coding agent over the Model Context Protocol: newline-delimited JSON-RPC 2.0 on standard input and output, the stdio transport used by compatible agent harnesses. The server is a client adapter over the estate API: the adapter itself opens no live store, holds no key of its own and adds no permission; every tool is a call through the daemon when one serves the estate, or through the embedded runtime otherwise, and the runtime evaluates authority behind each call exactly as it does for the command line. When a daemon serves the estate, the server stays its client and never a second owner of the estate's live state. Without one, `mcp serve` holds the embedded runtime, and with it the live state, for its whole session, and a daemon started meanwhile does not detect it, so start the daemon first (`vericairn runtime start`) when other clients use the estate at the same time.
+
+Agents built with LangGraph, CrewAI or AutoGen connect through their frameworks' MCP clients: [Vericairn for agent builders](agent-builders.md) and its guides show each connection, run as written against a scratch estate.
+
+## Search (0.9.2)
+
+The `search` read tool searches the estate's machine-local keyword index of records, pinned documents and knowledge drafts.
+It takes `query` (at most 1,024 UTF-8 bytes of words, double-quoted phrases and the filters `type:`, `kind:`, `path:`, `key:`,
+`since:`, `before:` and `history`), optional `limit` (a decimal string, 10 when omitted, at most 50), `allowStale` (`true`
+to answer from the index as it is, labelled stale) and `method` (`keyword`; `semantic` is refused with its reason). It
+returns the API's `SearchResponse`, and the result's `_meta` carries `vericairn/trust` (untrusted content) and
+`vericairn/selection`, the selection's hash. The search is filtered by the connection's principal, the `--as` it serves;
+naming a principal only narrows what is read. Candidates are data and grant no authority: read one by its pin with
+`context_read`, which rechecks hash and access. Search may return a record the estate does not count, for example an
+unanchored or forged one; a candidate's standing is judged by reading it, never by search.
+
+`context_prepare` and `work_brief` take an optional `search`, one query or an array of up to five; the top three new
+candidates of each become optional sources pinned by exact hash after the explicit selection, and the manifest records every
+search. A record the estate does not count is never selected: it is recorded as `excluded`, with its reason. Without
+`search` both tools are unchanged.
+
+A worker starts its run's server as `mcp serve --as <agent> --run <run id>`. With `--run`, each search the server serves is
+appended to a log in that run's own machine-local, owner-only directory, which the worker creates empty as the run starts, and
+the run's settlement records them as `searchesObserved` (record format 3): the searches as logged by the run's MCP server.
+The log is not tamper-evident: an agent whose harness does not sandbox it runs as the same user and could change it, and the
+run does not record whether its harness was sandboxed. A log that went missing, or a line that cannot be read as a selection,
+is recorded as an incomplete list; an empty log records nothing. Searches made any other way are ordinary reads and are not
+recorded.
+
+## Discovery and dnx
+
+From 0.8.2, the `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
+and an embedded `.mcp/server.json` for the official MCP Registry name
+`io.github.Vericairn/vericairn`. The manifest's server and NuGet package versions are generated
+from the package version when packing. The package README carries the registry's `mcp-name`
+verification line.
+
+After package publication and indexing, find `dotnet-vc` through
+[nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
+The [official MCP Registry](https://registry.modelcontextprotocol.io/) listing follows the
+release's publication through the `mcp-registry` workflow from 0.9.2, or a dispatch for an
+earlier release ([MCP Registry publication](operator-actions.md#mcp-registry-publication)).
+Preparing these files does not establish that either public listing exists.
+
+With the .NET 10 SDK and published package version, the client's stdio command is:
+
+```sh
+dnx dotnet-vc@0.9.3 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+```
+
+The registry manifest requires `estate_root` (the existing estate's root directory) and
+`acting_principal` (a principal id in that estate). It maps them to `--estate` and `--as`
+before `mcp serve`. The existing `dotnet vc --estate <estate-root> mcp serve --as <principal-id>`
+form also works. The root `--as` form applies only to `mcp serve`; other commands retain
+their own identity options. Required registry inputs grant no authority: write tools still
+require that principal's admitted device on the machine running the server. A connection
+without that device has the read-only tools.
+
+The manifest also sets the dnx runtime's `--verbosity quiet` so package installation messages
+do not enter the JSON-RPC output stream. Keep that option when configuring a client by hand.
+
+## Protocol subset
+
+`initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
+
+Initialization declares `prompts: { listChanged: false }` and `tools: { listChanged: false }`, and
+`resources: { subscribe: true, listChanged: true }` (0.9.2) when the estate's runtime is running and keeps the
+event journal, or `resources: { subscribe: false, listChanged: false }` on the embedded runtime, which keeps
+none; there `resources/subscribe` answers "method not found". Listings return their complete
+current result without a continuation cursor; an unknown cursor is refused.
+Clients refresh a listing when needed. Reads and listings support request
+cancellation through the existing transport.
+
+## Resources (0.8.4)
+
+`resources/list` returns current records of every type, work briefs, assignment
+briefs, pinned estate documents and work context packages. It lists metadata
+without assembling every brief or reading every document body. A listed document
+can be unavailable in a copy that lacks its exact original; a read reports that
+failure without substituting a newer revision. Superseded records and older
+document pins remain addressable through `resources/templates/list`.
+
+The URI authority is the estate's identifier. Each path component is percent
+encoded; `key` means a record identifier or work-order key, except for documents,
+where it is the self-contained `vc1_` pin returned by context preparation.
+An assignment brief adds its exact `assignment` query parameter.
+
+| URI template | Matching read and bytes |
+| --- | --- |
+| `vericairn://{estate}/brief/{key}{?maxBytes,recipient,assignment}` | `work_brief`: the complete measured Markdown as UTF-8. CLI: `work brief <key> --agent-context`, with `--max-bytes`, recipient and assignment when selected. |
+| `vericairn://{estate}/record/{key}` | `record_get`: its complete envelope, rendered as canonical pretty UTF-8 JSON, identical to `records show <id>`. The tool's response wrapper is excluded. |
+| `vericairn://{estate}/document/{key}` | `context_read`: the original bytes at that pin, identical to `context read <pin> --original --out <new-file>`. |
+| `vericairn://{estate}/context/{key}{?maxBytes,form}` | `context_prepare`: by default, the exact canonical pretty UTF-8 package payload whose hash and size the API and CLI report. `form=text` returns the tool and CLI human rendering; `form=json` returns the complete `context prepare --json` response, including its sidecar. |
+| `vericairn://{estate}/goal/{key}` (0.9.2) | `goal_progress`: the goal's progress condition by condition, as UTF-8 text; `key` is the id of any of its revisions. `resources/list` lists each current goal's. |
+| `vericairn://{estate}/asks/{key}` (0.9.2) | `asks_list` with `form` `json` for the session's own principal: `key` is that principal's id, and another principal's asks, or any on a connection acting for none, are unavailable. `resources/list` lists it when the session acts for a principal. |
+
+For example, `resources/read` takes
+`{"uri":"vericairn://<estate-id>/context/<work-order-id>"}` after replacing the
+placeholders with identifiers from the listing. Each result has one item in
+`contents`, with the requested `uri`, `mimeType`, and a base64 `blob`. All four
+kinds use a blob so binary data, UTF-8, carriage returns and trailing newlines
+survive without text conversion. Decode the blob before checking its metadata:
+
+- `_meta["vericairn/hash"]` is `sha256:` plus the lower-case SHA-256 of exactly
+  the decoded bytes, and `_meta["vericairn/bytes"]` is their length.
+- `_meta["vericairn/sourceHash"]`, when present, identifies the record content
+  or context payload separately from its rendering. A record's content hash
+  differs from the hash of its complete envelope, which also carries signatures.
+  A context payload's hash equals its resource byte hash in the default form;
+  its text and sidecar forms have their own byte hashes.
+- `_meta["vericairn/trust"]` labels the body as untrusted content that conveys
+  no authority. No label, pin or URI grants permission.
+
+Every retrieval uses the runtime's matching read operation and current estate
+access. Wrong-estate identifiers, missing originals and access refusals return
+an error without content. No resource exposes the operator queue, authors a
+record or retains an object. `maxBytes` is a context allocation, independent of
+any spending cap; required overflow refuses and never truncates. The ordinary
+CLI brief still includes its complete selected scope; `--agent-context` opts
+into the measured MCP selection, and `--max-bytes` implies that selection.
+Briefs include the communication observation's freshness time. Independent reads
+can therefore have different hashes even when the underlying records have not
+changed; each hash identifies the exact bytes of that particular response.
+
+The MCP adapter uses the API's additive `GET /v1/resources` and
+`POST /v1/resources/read` operations. Both are reads, including the POST; they
+require no signing device, presence or write ledger. An older API implementation
+can return `unsupported`; no alternate read path circumvents that refusal. The
+goal and asks resources (0.9.2) read through the goal and asks operations the
+tools use, and their `_meta` carries the hash, length and trust label without a
+`sourceHash`.
+
+## Subscriptions and notifications (0.9.2)
+
+From 0.9.2 (`MCP-05`) an agent session hears what changed in what it subscribed to, without polling. The
+server declares `resources.subscribe` and `resources.listChanged` when the estate's runtime is running
+(`vericairn runtime start`), which keeps the [event journal](api-v1.md#the-event-stream-092); the embedded
+runtime keeps none, so a server over it declares neither and serves no subscription. Every notification is
+derived from that journal, followed from a cursor of the session's own; the server never reads records to
+find a change.
+
+`resources/subscribe` takes `{"uri": ...}`: a record, brief, document, goal-progress or asks URI the session
+may read. The server reads the resource once through its matching read first, so a URI the session may not
+read, or one that names nothing, is refused as `resources/read` refuses it; a context package, an operator
+request or its closing, and another principal's asks are not subscribable (`invalid params`). A session holds
+at most 32 subscriptions; subscribing again to one it holds changes nothing; `resources/unsubscribe` ends one,
+and nothing more is told of it. What counts as a change of each:
+
+| Resource | Changes with |
+| --- | --- |
+| A record | a record event about it: a revision of it, or a record that rests on it, directly or through what it rests on (for a work order, its assignments, attempts and results; for a goal, its work orders) |
+| A brief (with or without `assignment`) | a record event about its work order, in the same sense |
+| A document pin | a record event about the pinned revision: chiefly a later revision of the document, which supersedes it, though the pinned bytes never change |
+| Goal progress | a record event about the goal, or a change of one of its flow steps |
+| The session's asks | a change of an ask put to the session's principal: raised, changed or cleared |
+
+A subscribed resource yields `notifications/resources/updated` with the URI exactly as subscribed, at most once
+a second per URI, and any write the session may read yields `notifications/resources/list_changed` at most every
+five seconds, since it changes what `resources/list` returns; a change inside either interval is told once, when
+it ends. Only changes observed after the subscription count. A notification is a hint, never authority, and
+carries no content: read the resource again to see what changed. After a gap the journal cannot honor (more
+than seven days, a lost journal), every subscribed resource and the listing are told once.
+
+**Over standard input and output** the notifications are lines between responses, never inside one. The server
+follows the journal with one selecting long poll, `POST /v1/events/select` on the local socket for the acting
+principal (or for the operator when the session acts for none), only while the session holds a subscription: the
+runtime says for each event which of the session's subscriptions it concerns, so a round costs one read however
+many there are. These reads take the MCP servers' own four slots of the local socket, never the command line's,
+so `vericairn events watch` and the command line's other reads are never locked out by MCP sessions. Beyond four
+following sessions they take turns: a session waiting for a slot asks the one that has held its slot longest, once
+it has held it five seconds, to answer at once with what it has, and takes its place; nothing is lost, since each
+reads on from its own cursor, but a notification can come up to a turn later. A read that does not wait, as the
+check behind initialization and each subscription's start, takes no slot, so a session declares subscriptions and
+subscribes even while every slot is held; a busy runtime is retried, never taken for one without a journal.
+
+**Over Streamable HTTP** they ride the session's server stream, the one GET opens, bound to the session's device
+and profile (see [the server stream](#network-mcp-over-streamable-http-092)). The stream reads from where the
+session stands: from its first subscription, and after a stream ends, from where it ended, so a client that
+opens it again within the journal's seven days misses nothing. The bridge, `vericairn mcp serve --connection`,
+holds that stream for its client while the client holds a subscription the runtime accepted, and lets it go when
+the last one ends, so a session that subscribes to nothing holds none of its device's stream slots. It writes
+each resource notification to standard output as a line between responses, passes on nothing else the stream
+carries, discards a message over 64 KiB unread, and signs nothing a notification says; when the runtime ends a
+session and the bridge opens another, it subscribes the new one to the same resources.
+
+**The audience check.** Every notification passes the same check at delivery as `GET /v1/events`: the
+session's principal must be able to read the event's subject and every source under the matching read's rule,
+and per-principal state, such as attention, reaches only its own principal. A withheld change yields nothing,
+and no notification, interval, count or timing tells it from none. On the network, before any notification
+is sent, including one that waited for its interval, the device must still be admitted with the key that
+opened the session and still permitted its profile, read afresh from the records as the runtime holds them then,
+not from the last derivation pass: a revocation, a rotated key or a withdrawn profile ends the session and its
+stream first. Operator-request events never reach MCP on any path: a request event, an
+operator request's record, its closing and the attention it raises yield no notification, list change or
+`events_read` envelope, since the operator queue stays off MCP.
+
+**`events_read`**, a read tool for harnesses that hide notifications, reads the same envelopes
+(`vericairn.event/1`, identities, hashes, kinds, states and categories only) after a cursor:
+
+| Argument | Meaning |
+| --- | --- |
+| `after` | The cursor to continue from: the `cursor` an earlier `events_read` returned, or a state read's `eventsCursor`; omitted, the journal's head |
+| `kinds`, `types`, `subjects`, `to`, `categories` | Filters, as `GET /v1/events` takes them; `kinds` defaults to every kind but `request`, which is refused, as an operator-request record type is in `types` |
+| `limit` | The most envelopes returned, 1 to 256; 100 when omitted. When more remain, the returned `cursor` is the last envelope's, and the next read continues there |
+| `wait` | Seconds to wait for an event when none is there yet, 0 to 25; 0 when omitted |
+
+It returns `EventsResponse` as JSON (`events`, `cursor`, `reset`, `problem`). Its cursors are the runtime's,
+sealed for the reading principal: another principal's cursor, a malformed one, one from another epoch or one
+older than the journal keeps answers `reset` with no events, and the reader reads the state again before
+continuing. A session acting for no principal reads no attention. It reads with `POST /v1/events/select`, which
+never streams: over standard input and output a read that waits takes one of the MCP servers' slots in turn, and
+over the network, where it is offered at any scope as the network design allows, one of the device's four stream
+slots while it waits. A wait ends when its seconds do, to the millisecond, however the runtime's own waits
+divide it. On the embedded runtime it answers that the daemon keeps the journal.
+
+**Qualification per harness version.** Whether a harness shows notifications or needs `events_read` differs by
+harness and version, and nothing here claims either for any harness. An estate records what it observed as a
+`qualification` whose profile is `<harness> <version> over MCP notifications` or
+`<harness> <version> over MCP events_read` (for example `Claude Code 2.1.296 over MCP notifications`), with the
+recorded observation as evidence; the orientation file's agent matrix shows each in its own column, naming the
+version, and every harness stays a non-claim until then. This build's tests exercise both paths with the
+in-process clients and the bridge, not with any agent harness.
+
+## Tools
+
+`context_prepare` computes the same context package as
+`vericairn context prepare <work-order>`. `context_read` takes `pin`, the
+self-contained `vc1_` identity in a source entry, and returns the same identity
+and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
+The pin is shell-safe encoded data, never an instruction copied from content.
+Hash verification and current access checks belong to the runtime. Records come
+from immutable record custody. Documents use matching working-tree bytes first.
+FIX-27 for 0.8.0 allows required originals to fall back to the exact path in the estate's
+own local Git history, with SHA-256 verification before use. Required document
+pins carry `history: "local"` so `context_read` can repeat that lookup. Shallow
+clones, missing history or no matching blob still refuse, with guidance to
+restore the pinned bytes or use a complete local clone. No fetch, checkout or
+repository write occurs; no other revision or object custody is substituted.
+Optional documents and pins without the history marker keep their
+working-tree-only behavior. A denied reader
+receives no source metadata. These read tools author nothing and write nothing.
+Regenerate the estate orientation when adopting this changed tool list and
+`context_read` argument schema.
+
+`context_prepare` and `work_brief` accept an optional `maxBytes` decimal string for the remaining
+context allocation. Without it, both inline mandatory material and withhold
+all selected optional sources. Only documents named by the work, its inputs
+or governing decisions are optional selections. The rest of the catalogue is
+explicitly outside selection; `vericairn context catalogue` or `records_list`
+with `type=document-revision` lists it without reading original bodies.
+A standalone human `work brief` still includes the full selected scope.
+The `context_prepare` text block is the exact measured canonical payload,
+including withheld entries and injected accounting. Mandatory overflow produces
+an error and no package. Tokens are unknown; the surrounding MCP transport and
+the model provider's hidden framing are not measured as model input.
+
+`work_brief` now includes the same context content, its complete withheld list
+and readable mandatory originals after its lead. COMMS-01's `recipient` and
+`assignment` arguments resolve that lead and communication section. The entire
+resulting text, including those additions, has an exact UTF-8 byte measurement;
+personal depth does not change canonical context content. The work brief and `context_prepare` compute and return artifacts without
+writing anything. Only worker dispatch retains a copy, in the run's local
+directory under the Vericairn home. Unavailable required
+material refuses the brief and sets the MCP error flag.
+
+Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, from 0.9.2 with a run's position in its flow, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps, a run's position, and what still stands between the goal and its acceptance), from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON) and, from 0.9.2, `events_read` (the events after a cursor that the connected principal may read, for a harness that hides notifications; see [Subscriptions and notifications](#subscriptions-and-notifications-092)).
+Status and progress include repository checks, documents read local covered files and installed contributions, and device availability depends on keys held here. Those portions are observations from this runtime, not solely from the shared records.
+
+From 0.7.3, `estate_status` and the JSON form of `estate_progress` include
+[compact current attention](required-attention.md), with complete source and
+subject references, current state, freshness and an inspection command. Status
+attention reads records alone, preserving the machine-independent status JSON.
+Progress additionally includes runtime-local worker attention, labelled
+`Local worker observations`, which can differ by runtime. The text progress report retains its existing
+sections; `record_get` and other original read routes retain complete records.
+
+Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. No tool proposes, activates, pauses, resumes, stops, funds, evaluates or accepts a goal: a worker reads its goal and reports through its attempts and results, an evaluator who did none of the work evaluates it, and its sponsor, or the principal the sponsor delegated an ordinary goal's acceptance to, or an operator for a goal an agent sponsors, accepts it, through the command line or the API, whose rules refuse an agent that tries to activate a goal or accept one it sponsors or worked on. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. No tool launches, stops or settles an agent run either: the worker (`vericairn worker`, [software.md](software.md#coding-agents-the-worker-and-its-launchers)) starts a coding agent with this server configured for the agent's principal, and records the run's cap, usage and stop itself, while the agent reports through `work_attempt` and `work_result`.
+
+Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
+
+## Readable companions (0.8.0)
+
+Four read tools share the runtime's companion operations: `docs_companions` lists
+coverage, generator contracts, exact snapshots and adopted destinations;
+`docs_render` reads an explicit revision or snapshot; `docs_sources` inspects the
+same source basis without generating; `docs_compare` compares bytes and complete
+membership without repairing. All four use the asynchronous API and its cancellation
+boundary. They author no record and grant no review clearance.
+
+Render and sources require `generator` and `selection`. Supply `revision` for an
+exact record item or nested list, `snapshot` for a current or all-revisions
+collection, or `declaration` and an exact `commit` for a retained software item.
+Optional `page`, `field`, `index`, `audience` and `contract` have the same meaning
+as the [docs commands](readable-companions.md); page and contract are decimal strings.
+Compare requires `selection` (a declaration id or declared path), with `commit`
+for an external repository. Read the response's currentness, completeness and
+differences; a successful comparison can still report differing bytes.
+
+The runtime resolves current device and source access before generation. This
+build admits Internal projections only and returns unavailable for Public or
+Members-only requests without source metadata or a digest. Local-only inspectors
+cannot be rendered through MCP, even when their safe coverage metadata is listed.
+An unavailable or unsupported basis returns an error result, not an empty view.
+The existing context tools retain their original, derivative and withheld-source
+contracts; a companion does not replace required original evidence.
+
+## Running it
+
+After 0.9.3 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+
+```sh
+dotnet tool install --global dotnet-vc --version 0.9.3
+dotnet vc --estate <estate root> mcp serve --as <principal id>
+```
+
+Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp serve --as <principal id>`. Other harnesses use executable `dotnet` with `vc` as the first argument, followed by the arguments above. The self-contained archives still use executable `vericairn` with no `vc` argument. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`). Generic worker dispatch is refused because it cannot establish a complete inventory. Diagnostics go to standard error; the output stream carries only protocol messages. `dotnet vc mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `dotnet vc status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
+
+## Owner instructions at the estate root (0.9.3)
+
+Agent tools look for their instructions in the repository they start in. From 0.9.3 an estate's root may hold the
+owner's own `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`, each a file of exactly that name. They are owner-written: no estate
+operation reads them and Vericairn never writes them. `estate check` scans them as text, as it scans `README.md`, and
+every other unexpected entry at the root, a differently cased `agents.md` or an `AGENTS.override.md` among them, stays
+`layout.unexpected`.
+
+`mcp orientation` writes its generated files only into the directory `--out` names and refuses an estate's root, any
+directory holding `estate/manifest.json` however the path names it, so the owner's files there are never overwritten.
+`--check` compares the copies in a directory byte for byte, as before. The generated orientation keeps a directory of
+its own, and the owner's files point to it:
+
+```sh
+vericairn mcp orientation --out docs/vericairn-orientation
+vericairn mcp orientation --out docs/vericairn-orientation --check
+```
+
+The owner's `AGENTS.md` at the root, for example:
+
+```markdown
+# Working in this estate
+
+These are the owner's instructions for agents working in this estate. Read them first, then read
+[the generated orientation](docs/vericairn-orientation/AGENTS.md), which says how the estate works
+and how to reach it. Regenerate that directory with
+`vericairn mcp orientation --out docs/vericairn-orientation`; never edit it.
+
+- The owner's own instructions follow here.
+```
+
+The owner's `CLAUDE.md` and `GEMINI.md` at the root can say only "Read `AGENTS.md`." An agent tool started at the root
+reads the owner's instructions first, and they lead it to the generated orientation, which stays byte-exact in its own
+directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from the root `README.md`; that arrangement
+still works.
+
+`estate export` doesn't carry the owner's files at the root yet. A cold recovery restores them from the supplemental
+capture and checks them against its list, as
+[the three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) describe.
+
+## Qualification
+
+The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) has two test paths: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing in the three-platform workflow, and a different peer, `tests/mcp-peer/mcp_peer.py`, a Python script driving the built binary end to end over the real stream framing (`python3 -I tests/mcp-peer/mcp_peer.py artifacts/bin/Vericairn.Cli/release/vericairn.dll <estate root>`; the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, otherwise the first work order the estate's status lists, and is skipped in an estate without work orders, the output saying which; the command line's tests run the peer against fresh estates wherever Python 3 is on the path). Every agent harness is a non-claim in the orientation file's matrix until the estate qualifies it: a `qualification` record (available from record format 2) about the release the session used, whose profile is `<harness> over MCP` with the harness named as the matrix names it (for example `Claude Code over MCP`) and whose evidence is the recorded observation of the session. The harness's row then shows the outcome of its latest current qualification and the version of the release it is for, and a harness the matrix does not list by default gets a row of its own. Regenerate the files after a qualification is recorded; `--check` names the copies it leaves out of date. An estate at record format 1 holds no qualification records, so its matrix stays all non-claims. From 0.9.2 the matrix has two more columns, for the profiles `<harness> over MCP notifications` and `<harness> over MCP events_read`, where the harness's version may follow its name ([Subscriptions and notifications](#subscriptions-and-notifications-092)).
+
+## Limitations
+
+- The five write tools are limited to attempts, progress claims, results, amendments and reviews of the estate's own living documents. Goals and asks are read views here; their lifecycle and decisions use the CLI or API under its authority rules.
+- The stdio server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one. Network MCP is the daemon's own `/mcp` (0.9.2), which authenticates every request as a device instead.
+- Long outputs (a large status document, a long brief) are returned whole; no paging.
+
+## Network MCP over Streamable HTTP (0.9.2)
+
+From 0.9.2 (`MCP-03`) an agent or service on another machine works an estate's MCP tools over the
+network. The daemon serves the Streamable HTTP transport at `/mcp` on its loopback and local-network
+listeners once the operator turns it on with `vericairn runtime configure --mcp on` and the runtime
+starts again. It is off by default and never served on the local socket, where the operating-system
+user acts for any principal. `vericairn runtime status` shows `/mcp` while a daemon serves it.
+
+**Who may connect.** Every request on `/mcp` is signed by one device, as the API's requests are: the
+loopback scheme `vericairn-request/1`, or on the local network mutual TLS and `vericairn-request/2`,
+with the same freshness and replay rules; a message holds at most 1 MiB, refused before it is authenticated. The device must be admitted now, permitted the
+profile it arrived on (`loopback` or `local-network`) and belong to an agent or service principal; a
+person connects an MCP client as an agent principal of their own, so its writes are never attributed
+to them. On loopback the device needs the `loopback` profile (`vericairn devices create --profile embedded
+--profile loopback`), which the API's own loopback requests do not ask for. A revoked device is refused at its next request, its sessions end and its server stream
+closes. Before anything is authenticated, the request's `Host` must name the listener it reached, its
+IP address and port (or `localhost` on loopback), and an `Origin` it names must be one the operator
+allowed with `--mcp-origin`; none is allowed by default. A name an attacker's DNS points at the
+runtime therefore reaches nothing.
+
+**The transport.** Each message is one POST of one JSON-RPC message, `application/json`, and each
+request is answered with one JSON body; a notification or a response gets `202` and no body. Batches
+and the older HTTP transport are not served: `initialize` negotiates 2025-06-18 or 2025-03-26.
+`initialize` opens a session and returns its `Mcp-Session-Id`, 256 random bits; every later request
+names it and may carry `MCP-Protocol-Version`, which must be the negotiated revision. A request
+without a session gets `400`, and one naming a session its device does not hold, or one that ended,
+gets `404`, after which a client initializes again. DELETE ends a session. A session is bound to the
+device, principal and profile that opened it and is never authentication: it ends on DELETE, an idle
+hour, its device's revocation or loss of the profile, or the runtime's restart. A device holds at most
+four sessions, a new one ending its least recently used, and the runtime 64; a device runs at most four
+requests at once and all devices eight (notifications, a cancellation above all, and `initialize` are never held back by
+that count), so network MCP never takes the connections the API and the
+event streams need. A dropped connection cancels nothing: a write whose answer is lost is reconciled
+by reading. `notifications/cancelled` stops observing the named request and undoes no effect.
+
+**One authorization model.** Each tool call runs as its API operation for the requesting device: the
+daemon runs the very route the API maps, in its own process, with that route's request scope, so a
+call is judged exactly as the same request sent to the API by that device, and machine-local
+operations stay refused. The tools act only as the device's principal. Over the network the server
+offers every read tool, the resources, `prompts/list`, and the contributor writes `work_attempt`, `work_progress`,
+`work_result` without duties, `work_amend` and `document_review`. The operator's judgments
+(`work_review`, the prompt writes and `prompts/get`), policy and writing-exception writes and duty
+evidence are absent from `tools/list` and answered as unknown, naming no hidden tool; the operator
+queue, publication, spending, credentials, admissions, runs, goals and answering asks have no tool.
+`requests_list` and `asks_list` stay reads.
+
+**Signed mode: two calls per write.** No key on the runtime's machine signs a network write and
+nothing is written unsigned. The client calls the write with `_meta` `{"vericairn/prepare": true}`;
+the runtime runs the operation's authoring checks and returns the prepared record
+(`RecordPrepareResponse`, as the API's prepared records have it) in the result's `_meta["vericairn/plan"]`,
+writing nothing. The client checks that record, signs the record-signing digest of its `hash` with its
+device key, and repeats the call with the same arguments and `_meta` `{"vericairn/plan": <plan>,
+"vericairn/signature": <signature>}`. The runtime checks that the plan is this device's, unused and
+under ten minutes old, that the arguments yield the same record and that the signature verifies, then
+writes it with that signature alone; each write is kept in `local-network-writes.jsonl`, on loopback
+as on the local network. A write in one call is a tool error. An active progress note keeps live state and no
+record, so it needs no plan. A device holds at most 32 prepared records at once. Tools that write
+carry `_meta["vericairn/prepared"]: true` in `tools/list`.
+
+**The server stream.** A GET with `Accept: text/event-stream` opens the session's server stream, one
+per session, bound to the session's device: it shares the event streams' slots (four per device, eight
+per principal, sixteen per runtime), closes before the next message once the device is no longer
+admitted with its key and profile, and lasts at most an hour before the client opens another with a
+fresh signature. It carries the session's own messages to that device alone, with keep-alive comments
+between. From 0.9.2 (`MCP-05`) it carries the session's resource notifications, derived from the event
+journal read for that device; see [Subscriptions and notifications](#subscriptions-and-notifications-092).
+
+**The bridge.** `vericairn mcp serve --connection <connection>` serves standard input and output to a
+local harness, as `mcp serve` does, and forwards each message to the remote estate's `/mcp` over a
+connection this machine paired (`vericairn connections`), named by its id or its estate's name. Every
+request is signed by the connection's device. Only for the five writes does the bridge first ask the
+runtime to prepare; when a record comes back it checks that the record hashes to the hash it is asked
+to sign, names the device's principal as author, is the record type the tool writes, supersedes no
+record, is dated within a plan's ten minutes of this machine's clock (allowing the five minutes' skew a
+signed request may have), is about the assignment or attempt the call names, and holds every field the
+call supplies unchanged with nothing beyond what the runtime adds, then signs it with the same key and
+repeats the call, returning only the final answer. Any other call is forwarded once as it came, and
+nothing it returns is signed. A session the runtime ended is opened again once; when its input ends,
+the bridge ends its session. While its client holds a resource subscription the runtime accepted, the bridge also
+holds the session's server stream and writes each resource notification on it to its client as a line, opening the
+stream again after the runtime ends it. Any other client doing the same, with the SDK's `DeviceRequestSigner` and
+`DeviceSignedRecords` or its own code, is Vericairn-aware.
+
+**What a device's signature vouches for.** The bridge binds what the call itself supplies: its
+arguments, the author, the subject an assignment or attempt argument names, the record type, its time
+and that it supersedes nothing. A prepared record also holds fields the runtime computes, which the
+bridge cannot check without trusting that same runtime, and the device signs them too: a document
+review's subject (the living-document declaration the runtime finds for `path`, which no argument names
+by id), its independence, checks, content identity, answers and section contents, an attempt's or
+progress phase's time within those bounds, and a result's `progressClaim`, the attempt's last claim the
+runtime retains. Binding a review's subject to `path` would need the declaration from that same runtime,
+so it adds nothing against a runtime that lies. Do not sign through a runtime you do not trust: reach
+only estates whose runtime you rely on to compute those fields honestly.
+
+```sh
+# On the runtime's machine, as the operator:
+vericairn runtime configure --local-network 192.168.1.20:7443 --mcp on
+vericairn runtime stop && vericairn runtime start
+vericairn devices pair --principal <agent principal id> --by <operator id>
+# On the agent's machine:
+vericairn connections add 192.168.1.20:7443 --code <code> --name "Agent laptop"
+claude mcp add vericairn -- vericairn mcp serve --connection <connection id>
+```
+
+Token mode for OAuth-only clients, the public endpoint and MCP over the relay are `MCP-04`, `REMOTE-10`
+and the relay's work, planned for 0.9.5; `<harness> over MCP HTTP` rows stay non-claims until qualified. See
+[limitations](limitations-and-platforms.md#network-mcp-limits-092) and
+[API compatibility for 0.9.2](api-compatibility-0.9.2.md#network-mcp-over-streamable-http-mcp-03).
+
+## Agent progress claims (0.7.0)
+
+`work_progress` takes `attempt`, a stable lower-case `phase`, `note`, and `state` (`active` or `completed`). It is available to an admitted contributor and publishes only that contributor's own attempt. Active notes replace local live state; completion creates one signed `work-progress` record for the phase. Retrying the identical completion returns that record. A completed phase cannot be reopened or recorded twice. A result closes further progress submissions, except an identical completion retry returning its existing record. Notes must pass the same portable-content checks as records.
+
+`estate_progress` includes the latest claim for each attempt, labelled as a claim. It is never evidence of liveness, permitted scope, or acceptance. Interim notes are local to this runtime and survive its restart; another machine sees recorded phase completions only.
+
+From 0.7.0, `estate_progress` also shows worker-observed command, rate and loop signals with their severity and attention records. These observations come from the worker's harness-event audit, not from `work_progress`. No progress tool changes a stop, a budget, an acceptance, or the worker's liveness clock.
+
+Watching thresholds are recorded in goal and roster `limits.watch`, with bounded integer fields and goal-over-roster-over-launcher precedence. MCP progress notes cannot change those thresholds or the worker's observations. The run intent pins the settings and roster revision current at launch; [the software guide](software.md#recorded-watching-settings-070) gives defaults, ranges and examples.
+
+### Requested typed claims (0.9.0)
+
+In a format-3 estate, `work_progress` also accepts optional `progress` (an object)
+and `statusText` (a short sentence). Its existing required arguments remain
+`attempt`, `phase`, `note` and `state`. For example:
+
+```json
+{
+  "attempt": "<attempt-id>",
+  "phase": "review",
+  "note": "Reading the widget.",
+  "state": "active",
+  "progress": {
+    "type": "accurate",
+    "done": 7,
+    "total": 20,
+    "unit": "files",
+    "estimatePercent": 60
+  },
+  "statusText": "Read seven of twenty files; checking the dependencies."
+}
+```
+
+`accurate` requires a nonnegative integer `done` and a nonblank `unit`; `total`
+is optional when unknown and otherwise an integer at least `done`. Its optional
+`estimatePercent` is a separate best-effort estimate. `best-effort` requires only
+`percent` beside its type; `not-measurable` admits only its type and means in
+progress. Percentage estimates are integers from 0 to 100 and stay labelled as
+estimates; counts use format 3's safe integer range. Values for another type or
+unknown fields are refused. `statusText` is nonblank, on one line and at most
+500 characters; the accurate unit is nonblank, on one line and at most 100.
+
+The effective request comes from the most specific configured scope: assignment
+`brief.progressRequest`, goal `progressRequest`, the matching roster role's
+`progressRequest`, then estate `progressRequest`. A complete request replaces
+broader ones. It has optional `types` (all three by default), `statusText` (false
+by default), and required `cadence` (`perStep: true`, positive integer `minutes`,
+or both). The work brief includes that request and its source. A configured
+request requires a typed claim, an admitted type and any required status text.
+A count accompanied by an estimate requires both `accurate` and `best-effort`.
+With no request anywhere, voluntary WATCH-01 notes remain valid.
+
+Malformed claims, disallowed types and missing required status text return an
+MCP error without changing live state or writing a record. Interim typed claims
+retain both values and status locally across restart. A completed phase adds
+only optional `progress` and `statusText` to its existing format-3 record.
+Identical retries return that record; changing the value or status is refused.
+`work_progress_get` is available to read-only connections. Pass
+`{"id":"<attempt-or-run-id>"}` to read the effective request and its exact source,
+the current agent `claim`, `freshness`, observation time (`asOf`), quiet duration
+and overdue state. Worker `liveness` and `workerObserved` are separate fields;
+no liveness is inferred from a claim. An unknown identity returns a not-found
+error. The tool writes nothing.
+
+Timed reporting is fresh until its cadence boundary. A missing claim becomes
+`overdue` after that cadence; an old claim is `stale`, with `overdue: true`.
+Per-step-only reporting has no invented minute deadline. The progress report's
+`requestedProgress` array carries the same status, and `progress-overdue`
+attention names the agent and attempt or run with its quiet duration. It clears
+on the next fresh claim. It never stops a run or changes the worker's stall
+limit. Required status and values remain visible even at minimal narration.
+Canonical `estate_status` remains portable record-derived JSON; use
+`estate_progress` or `work_progress_get` for these local observations.
+
+`work_result` retains the last claim in `progressClaim`, including its typed
+value, status and time. The runtime fills this context field; callers supply
+ordinary result fields. The retained claim survives local state loss and is
+labelled context, never evidence of completion. A result closes overdue
+reporting without changing the outcome or acceptance rules.
+
+The API and SDK use the same fields in `WorkProgressRequest` and
+`WorkProgressClaim`. The CLI counterpart is `work progress` with `--progress`
+(a JSON file or `-` for standard input) and `--status-text`.
+See [requested progress](software.md#requested-progress-090) for the complete
+scope, replacement, value and compatibility rules.
+
+These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
+
+## Communication read (COMMS-01)
+
+The additive `communication_get` tool takes optional `recipient` and
+`assignment` ids. It returns the effective progress frequency and four depths,
+all contributing revisions and authors, conflicts and freshness. No recipient
+means estate defaults, without inventing a personal choice. It is visible on
+read-only connections and writes nothing. There is no MCP setting-write or
+delegation tool. Unsupported runtimes return an explicitly unavailable profile.
+
+`work_brief` accepts optional `recipient` and `assignment` ids. Its complete
+original brief remains present, with the effective communication values and
+their sources in a separate section. A worker's exported brief captures the
+same values and asks it to refresh them at the next settled boundary.
+
+This changes the MCP tool list. Regenerate `AGENTS.md` with
+`vericairn mcp orientation` from the updated runtime; pointer files retain their
+usual role. Remote is not qualified by this tool.
+
+## Explicit run execution (RUN-01)
+
+RUN-01 does not change the MCP tool list. No tool selects a model, enables the efficiency Adapter,
+launches a run or expands a tool inventory. The worker reads the recorded roster, goal and assignment
+execution policies and admits explicit run overrides through the existing CLI/API authority boundary.
+`record_get` exposes the intent's immutable `execution` and settlement's `executionObserved`, including
+selection provenance, admitted component identities, discrepancies and unknown facts. `estate_progress`
+retains WATCH-01's execution and unexpected-tool signals without filtering the original command audit.
+MCP servers and their dependencies are themselves part of the launcher's complete environment admission.
+
+The stock CLI and daemon load machine-local model and effort defaults and optional allowlists for each
+native worker run, including agent goal steps. Set or show them on the worker's machine with
+`vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`);
+omit model and effort to show it. FIX-18 adds Codex's `max` effort for 0.7.2; the
+[launcher guide](software.md#explicit-execution-and-environment-admission-run-01-070) lists the vocabulary and limits of validation at launch.
+Repeated `--allow-model` and `--allow-effort` options narrow the choices
+and must include their defaults. Configuration is per machine and is never recorded in the estate.
+The owner-only files stay under `VericairnHome`; reads and writes are refused if that home is inside a
+Git repository or estate. If the user's home directory is a repository, set `VERICAIRN_HOME` outside all
+repositories and estates for the CLI and daemon before starting them. Configuration narrows and never
+widens the qualified inventory. It cannot grant tools, MCP servers, environment variables or routes:
+native inventory admission still requires
+the shipped baseline or a matching current harness qualification. No MCP tool is added or changed;
+there is no configuration write tool, and configuration does not launch an agent or run probes.
+FIX-12 adds the separate machine-local setting
+`vericairn worker configure --workspaces <absolute-directory>`; omit arguments to show its root.
+Choose a root outside repositories, estates and a home holding harness configuration. The root and its
+ancestors cannot contain `.claude`, `.codex`, `.agents` or `.mcp.json`. This setting has no MCP or HTTP route,
+applies to every launcher, is reread for each run and is never recorded. It does not remove Codex's separate
+check of the user's own `~/.agents` customization; use a worker account without that discovery root.
+The native scan permits an empty ordinary directory or recognized instruction files alone, but refuses
+skills, other entries and uninspected links. Every run also rechecks its assignment's current holder before preparation
+and intent; an assignment displaced by hand-over cannot launch explicitly or through routing.
+Harness qualification also remains outside the MCP tool list. Its API operation is machine-local:
+paired local-network devices are refused before probes; local socket and signed loopback requests
+retain the existing human authority checks.
+
+`estate_check` keeps signature verification and machine-path checks. FIX-12 exempts only validated device
+public-key and envelope signature values from credential-pattern matching, not other fields or invalid
+encodings. Settlement withdraws still-waiting process attention asks and pins those withdrawals to the exact
+settlement, preserving observations and leaving answered asks answered. Closed asks no longer report a stale
+subject. New `attempt-missing` and `scope-settlement` asks remain open for review at that exact settlement;
+reads and progress claims never answer them. An unreadable recovery journal appears as `batch.unreadable`
+and holds record writes, including these MCP writes, with `reconcile-required`; interim live progress stays
+available. Single records are judged before publication, just as grouped records are.
+
+Only portable identities, hashes and variable names enter these records; MCP configuration paths and
+secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
+The [local efficiency adapter](efficiency-adapter.md) is built and disabled by default. Only the operator's machine configuration can admit it; no MCP tool enables it. 0.9.0's release security review covers it. Native worker
+dispatch requires a complete inventory and either an exact codex-cli baseline (`0.159.0-alpha.12.1`, and from 0.9.0
+`0.163.0-alpha.10.2` and `0.163.0`) or the Claude Code `2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
+the release-specific MCP matrix above; the admission protocol alone establishes no live-agent or sign-in
+qualification. FIX-18's five live Codex runs exercised max effort, tools and corrected audits; the fifth
+recorded its cap, execution, usage, signed attempt/result and permitted file change through estate-only MCP
+pre-approval. The baseline's MCP list omits approvals and tool lists, so that approval check rests on the exact
+generated configuration and isolation checks. Other accounts, versions and platforms remain unqualified
+by these runs. In 0.7.3, FIX-19 gives the workspace its own repository and adds only its `.git` to Codex's
+writable roots. The seventh live run committed on macOS and settlement fetched its audited branch into
+the registered clone; this live qualification is macOS-only. FIX-20 requests a stop for recognized
+credential and outside-write commands, while null-device output is exempt and unverified effects remain
+warnings. The audit is a signal, not an enforcement boundary. UPDATE-01 does not initiate release checks
+through MCP; `estate_check` can report the cached `manifest.release-behind` warning. FIX-21's certificate
+preparation and handshake diagnostics apply when MCP reaches a daemon through TLS. The stock
+CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
+Remote is not qualified by these features.
+
+## Template sections (0.8.4)
+
+`document_sections` reads a template instance's sections by `document` declaration
+id or estate path, optionally at an exact repository `commit`. `section_brief`
+reads `document` and `section`, with optional `commit` and `maxBytes` as a positive
+decimal string. It returns complete source material with measured canonical
+bytes. Unavailable originals or insufficient allocation return an error result
+and explicit incomplete context; source text is never silently truncated.
+
+The existing `document_review` tool accepts an optional `sections` array with
+`id`, `outcome`, `fidelity` and optional `judgments`. Each judgment names `rule`,
+`verdict`, `summary` and exact `evidence` hashes. Existing admission, signing,
+recorded roles and reviewer independence still apply. Agents identify produced
+section bytes in ordinary result outputs. These additions introduce no new MCP
+write capability and never supply acceptance. See [Templates](templates.md).
+
+`template_render` prepares or checks a communication, context brief, commit or
+review from an explicitly adopted exact template. Its `request` object is a
+`TemplateRenderRequest`; `candidate` asks for checks against the separately
+prepared source basis. Missing required facts or references fail at every depth,
+and a byte allocation cannot truncate required content. This is a read: it records
+no adoption, review, result or acceptance and adds no worker write capability.
+See [presentation templates](presentation-templates.md) for the complete request
+forms and explicit adoption through existing `template-defaults` records.
