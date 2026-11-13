@@ -315,6 +315,32 @@ public static class GoalRules
         return evaluations.Count == 0 ? null : evaluations[^1];
     }
 
+    /// <summary>The code of a goal-status of impossible that no evaluator's verdict of impossible stands behind.</summary>
+    internal const string ImpossibleVerdictCode = "goal-status.verdict";
+
+    /// <summary>
+    /// Why a goal may not be recorded impossible now, or at a status record's place: impossible is the evaluator's verdict, confirmed by
+    /// the sponsor (design/goals.md § 4), so the current evaluation of the goal's exact revision, by a principal who authored none of its
+    /// steps, judges at least one condition impossible. Names what is missing and the command that records an evaluation; null when
+    /// such a verdict stands.
+    /// </summary>
+    internal static string? ImpossibleVerdictMissing(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        RecordEnvelope? evaluation = CurrentEvaluation(model, goal, before);
+        if (evaluation is not null && Verdicts(evaluation).Contains("impossible", StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        string missing = evaluation is null
+            ? $"No evaluation of goal {goal.Id}'s exact revision is recorded, so no evaluator has judged it impossible"
+            : $"The current evaluation of goal {goal.Id}, {evaluation.Id}, judges no condition impossible ({string.Join(", ", Verdicts(evaluation).Select((v, i) => $"condition {i + 1} {v}"))})";
+        return $"{missing}. A goal is recorded impossible only on its evaluator's verdict of impossible, which its sponsor then confirms: "
+            + $"a principal who authored none of its steps records that verdict first with vericairn goal evaluate {goal.Id} --by <evaluator> --verdict <n>:impossible:<reason>.";
+    }
+
     /// <summary>An evaluation's verdict on each condition, in the goal's order.</summary>
     public static IReadOnlyList<string> Verdicts(RecordEnvelope evaluation)
     {

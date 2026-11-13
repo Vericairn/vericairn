@@ -130,6 +130,14 @@ public partial class GoalJourneyTests
             string reviewer = Principal(root, scratch, op, "Reviewer", "reviewer");
             string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Describe the widget's plug-ins", "--objective", "A guide to the widget's plug-ins.", "--done", """{"evidence":"The guide describes every plug-in of the widget.","check":"Read the guide against the widget."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=1").Id;
             CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string subject = $"goal:{goal}:{CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("goal").GetProperty("hash").GetString()}";
+            string confirm = CliHarness.WriteJson(scratch, "impossible.json", """{"status":"impossible","note":"Confirmed: the widget has no plug-ins."}""");
+
+            // From 0.9.3 the sponsor cannot record it impossible before the evaluator's verdict; the refusal names that verdict's command.
+            CliHarness.Outcome early = CliHarness.Run("--estate", root, "--json", "records", "new", "goal-status", "--by", op, "--subject", subject, "--body", confirm);
+            Assert.Equal(1, early.Code);
+            JsonElement verdict = early.Json.GetProperty("findings").EnumerateArray().Single(f => f.GetProperty("Code").GetString() == "goal-status.verdict");
+            Assert.Contains($"vericairn goal evaluate {goal} --by <evaluator> --verdict <n>:impossible:<reason>", verdict.GetProperty("Message").GetString(), StringComparison.Ordinal);
 
             // The evaluator judges the condition impossible: acceptance waits, and the goal stays active until who decides for it answers.
             CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the widget.", "--verdict", "1:impossible:The widget has no plug-ins to describe.");
@@ -139,8 +147,7 @@ public partial class GoalJourneyTests
             Refused(root, "condition 1 is impossible", "goal", "accept", goal, "--by", op, "--statement", "Done.");
 
             // No agent confirms it, the evaluator included; the sponsor does, and the goal ends as impossible.
-            string subject = $"goal:{goal}:{shown.GetProperty("goal").GetProperty("hash").GetString()}";
-            string confirm = CliHarness.WriteJson(scratch, "impossible.json", """{"status":"impossible","note":"Confirmed: the widget has no plug-ins."}""");
+            Assert.Equal(subject, $"goal:{goal}:{shown.GetProperty("goal").GetProperty("hash").GetString()}");
             foreach (string agent in new[] { builder, reviewer })
             {
                 CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "records", "new", "goal-status", "--by", agent, "--subject", subject, "--body", confirm);

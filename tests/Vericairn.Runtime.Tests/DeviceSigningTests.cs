@@ -86,6 +86,34 @@ public sealed class DeviceSigningTests
     }
 
     [Fact]
+    public void ADeviceIsNotPreparedAGoalStatusOfImpossibleWithoutTheEvaluatorsVerdict()
+    {
+        using var estate = new TestEstate(3);
+        RecordEnvelope goal = estate.Add("goal", estate.OperatorId, $$"""
+            {"title":"Release the widget","objective":"Ship the widget.","completion":[{"evidence":"The guide describes the widget.","check":"An evaluator reads the guide."}],"constraints":[],"kind":"finite","sponsor":"{{estate.OperatorId}}",
+             "budget":{"wallMinutes":600,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}
+            """);
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Activated."}""", goal.Reference);
+        using EstateService service = EstateService.Open(estate.Root);
+        string device = service.DeviceCreate(new(estate.OperatorId, "Operator device", "file")).Written!.Id;
+        Assert.True(service.DeviceAdmit(new(device, estate.OperatorId, "Admit the operator's own device.")).Ok);
+        int before = service.Session.Load().Records.Count;
+        using JsonDocument body = JsonDocument.Parse("""{"status":"impossible","note":"The widget cannot be built."}""");
+        DeviceSigning preparing = DeviceSigning.Prepare();
+        using (service.ForDeviceRequest(device, EstateModel.BodyString(service.Session.Load().ById[device], "publicKey")!, null, preparing))
+        {
+            WriteOutcome refused = service.NewRecord(new("goal-status", estate.OperatorId, body.RootElement.Clone(), $"goal:{goal.Id}:{goal.ComputedHash}"));
+            Assert.Equal("rejected", refused.Problem?.Code);
+            FindingDto finding = Assert.Single(refused.Problem!.Findings);
+            Assert.Equal("goal-status.verdict", finding.Code);
+            Assert.Contains($"vericairn goal evaluate {goal.Id} --by <evaluator>", finding.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Null(preparing.Prepared);
+        Assert.Equal(before, service.Session.Load().Records.Count);
+    }
+
+    [Fact]
     public void OneDeviceHoldsAtMostThirtyTwoPreparedRecordsAndAnotherIsNotKeptOut()
     {
         using var estate = new TestEstate(3);

@@ -191,6 +191,38 @@ public class GoalServiceTests
         Assert.Equal(0, service.Check().Errors);
     }
 
+    [Fact]
+    public void AGoalIsRecordedImpossibleOnlyOnItsEvaluatorsVerdict()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        (string goal, string reviewer, string result) = Work(estate, service);
+        JsonElement shown = service.Goal(goal)!.Json.GetProperty("goal");
+        var confirm = new NewRecordRequest("goal-status", estate.OperatorId, Json("""{"status":"impossible","note":"The widget cannot be built."}"""),
+            $"goal:{goal}:{shown.GetProperty("hash").GetString()}");
+
+        // No evaluation, then one that judges nothing impossible: the sponsor's confirmation is refused, naming the missing verdict and its command.
+        foreach (string missing in new[] { $"No evaluation of goal {goal}'s exact revision is recorded", "judges no condition impossible (condition 1 not-yet, condition 2 met)" })
+        {
+            if (missing.StartsWith("judges", StringComparison.Ordinal))
+                Ok(service.GoalEvaluate(goal, new GoalEvaluateRequest(reviewer, "Read the result.", [new GoalVerdict(2, "met", "The guide covers the widget.", [result])])));
+            WriteOutcome refused = service.NewRecord(confirm);
+            Assert.False(refused.Ok);
+            FindingDto finding = Assert.Single(refused.Problem!.Findings, f => f.Code == "goal-status.verdict");
+            Assert.Equal("error", finding.Severity);
+            Assert.Contains(missing, finding.Message, StringComparison.Ordinal);
+            Assert.Contains($"vericairn goal evaluate {goal} --by <evaluator> --verdict <n>:impossible:<reason>", finding.Message, StringComparison.Ordinal);
+            Assert.Equal("active", Status(service, goal));
+        }
+
+        // The evaluator judges a condition impossible; the sponsor confirms it, and the goal ends.
+        Ok(service.GoalEvaluate(goal, new GoalEvaluateRequest(reviewer, "The work order was retired.", [new GoalVerdict(1, "impossible", "W-1 will not be accepted."), new GoalVerdict(2, "met", "The guide covers the widget.", [result])])));
+        Ok(service.NewRecord(confirm));
+        Assert.Equal("impossible", Status(service, goal));
+        Assert.DoesNotContain(service.Validate().Findings, f => f.Code == "goal-status.verdict");
+        Assert.Equal(0, service.Check().Errors);
+    }
+
     /// <summary>A goal the builder proposes for the operator, activated; the work order that names it; the builder's result; and a reviewer.</summary>
     private static (string Goal, string Reviewer, string Result) Work(TestEstate estate, EstateService service)
     {

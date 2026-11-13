@@ -234,6 +234,14 @@ public sealed partial class EstateService
             return (null, new Problem("rejected", author.Message, [new FindingDto("error", author.Code, author.Location, author.Message)]));
         }
 
+        // From 0.9.3 (FIX-116), a goal is recorded impossible only on its evaluator's verdict of impossible.
+        if (record.Envelope.Type == "goal-status" && EstateModel.BodyString(record.Envelope, "status") == "impossible"
+            && model.ById.TryGetValue(record.Envelope.Subject?.Id ?? string.Empty, out RecordEnvelope? goal) && goal.Type == "goal"
+            && GoalRules.ImpossibleVerdictMissing(model, goal) is { } missing)
+        {
+            return (null, new Problem("rejected", missing, [new FindingDto("error", GoalRules.ImpossibleVerdictCode, record.RelativePath + "#body.status", missing)]));
+        }
+
         draft = draft with { At = record.Envelope.AtTime };
         foreach ((string id, PreparedRecord _) in preparedRecords.Where(p => p.Value.ExpiresAt <= now).ToArray())
         {
