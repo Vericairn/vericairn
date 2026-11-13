@@ -52,6 +52,9 @@ internal sealed partial class EstateTrust
     private Dictionary<string, List<(string Checkpoint, string Hash)>>? listings;
     private readonly Dictionary<(string Revision, string Previous), bool> revisionRefusals = [];
     private Dictionary<string, RecordSigning.ImportedKey>? closedKeys = new(StringComparer.Ordinal);
+    private readonly RecoveredKeys recoveredKeys = new();
+    private readonly Dictionary<(string Hash, string Previous, string Signature), byte[][]?> revisionSignatureKeys = [];
+    private long closedKeyVerifications;
 
     /// <summary>The closings that act, in checkpoint order.</summary>
     internal IReadOnlyList<Closing> Closings => closings;
@@ -306,8 +309,16 @@ internal sealed partial class EstateTrust
     /// <summary>
     /// Whether a closing that acts refuses a device revision: its device is closed, or it is signed with a closed key and is not the
     /// rotation replacing it, and the closing does not witness it. Read without proofs, since proofs read the device's line. Once the
-    /// closings that act are known nothing it reads changes, so each answer is kept, and whether a signature verifies with a closed key is
-    /// kept with every other verdict on a key (<see cref="VerifiesWithClosedKey"/>).
+    /// closings that act are known nothing it reads changes, so each answer is kept.
+    /// <para>
+    /// Whether a signature was made with a closed key is whether the closed key is among the keys the signature verifies under, which are
+    /// recovered once per signature and confirmed by the platform's verification (<see cref="RevisionSignatureKeys"/>), not found by
+    /// verifying the signature under each closed key in turn (FIX-121): with a closing before each of many rotations of one device, that
+    /// was quadratic in its rotations. Where the recovered keys are not certain to be all of them, and for a closed key whose point the
+    /// arithmetic does not take, the signature is verified under the closed key as before (<see cref="VerifiesWithClosedKey"/>), so every
+    /// answer is the one verifying under each closed key gives (<see cref="RevisionRefusedByVerifying"/>). What remains for each pair of a
+    /// revision and a closing of its device is comparing identities, a witness lookup and at most eight 64-byte comparisons.
+    /// </para>
     /// </summary>
     private bool RevisionRefused(RecordEnvelope revision, RecordEnvelope previous)
     {
@@ -327,6 +338,7 @@ internal sealed partial class EstateTrust
         {
             string identity = IdentityOf(previous);
             byte[]? digest = null;
+            byte[][]?[]? keys = null;
             foreach (Closing closing in closings)
             {
                 if (closing.Identity != identity || Witnesses(closing, revision)) continue;
@@ -334,7 +346,8 @@ internal sealed partial class EstateTrust
                 if (closing.Kind == "key" && revision.Id != closing.Rotation)
                 {
                     digest ??= RecordSigning.Digest(revision.ComputedHash);
-                    if (revision.Signatures.Any(s => VerifiesWithClosedKey(closing.Key!, revision.ComputedHash, digest, s.Signature))) return true;
+                    keys ??= RevisionSignatureKeys(revision, previous, digest);
+                    if (SignedWithClosedKey(closing.Key!, revision, digest, keys)) return true;
                 }
             }
 
@@ -343,14 +356,117 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a signature over a content hash verifies with a closed key, as <see cref="RecordSigning.Verify"/> answers it: the answer is
-    /// kept with every other verdict on a key, and while the estate is judged each closed key is imported once.
+    /// The key-closing check as it was before FIX-121, kept as the oracle the tests compare <see cref="RevisionRefused"/> with: whether a
+    /// closing that acts refuses a device revision, each signature verified under every closed key it is checked against with
+    /// <see cref="RecordSigning.Verify"/>. Nothing is kept.
+    /// </summary>
+    internal bool RevisionRefusedByVerifying(RecordEnvelope revision, RecordEnvelope previous)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        ArgumentNullException.ThrowIfNull(previous);
+        if (!closingsKnown || closings.Count == 0) return false;
+        lock (gate)
+        {
+            string identity = IdentityOf(previous);
+            byte[]? digest = null;
+            foreach (Closing closing in closings)
+            {
+                if (closing.Identity != identity || Witnesses(closing, revision)) continue;
+                if (closing.Kind == "device") return true;
+                if (closing.Kind == "key" && revision.Id != closing.Rotation)
+                {
+                    digest ??= RecordSigning.Digest(revision.ComputedHash);
+                    if (revision.Signatures.Any(s => RecordSigning.Verify(closing.Key!, digest, s.Signature))) return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// For each signature of a device revision, every key it verifies under, recovered once and confirmed by the platform; null for a
+    /// signature whose recovered keys are not certain to be all of them (<see cref="RecoveredKeys.Confirmed"/>). The keys known to verify
+    /// a signature are those of the device's previous key and the revision's own that the platform verifies it with: a revision its
+    /// device signed carries no other.
+    /// </summary>
+    private byte[][]?[] RevisionSignatureKeys(RecordEnvelope revision, RecordEnvelope previous, byte[] digest)
+    {
+        lock (gate)
+        {
+            string hash = revision.ComputedHash;
+            List<string> keys = [.. new[] { EstateModel.BodyString(previous, "publicKey"), EstateModel.BodyString(revision, "publicKey") }.OfType<string>().Distinct(StringComparer.Ordinal)];
+            var result = new byte[][]?[revision.Signatures.Count];
+            for (int i = 0; i < result.Length; i++)
+            {
+                string signature = revision.Signatures[i].Signature;
+                if (!revisionSignatureKeys.TryGetValue((hash, previous.Id, signature), out byte[][]? recovered))
+                {
+                    List<string> signing = [.. keys.Where(k => VerifiesWith(k, hash, digest, signature))];
+                    revisionSignatureKeys[(hash, previous.Id, signature)] = recovered = recoveredKeys.Confirmed(digest, signature, signing);
+                }
+
+                result[i] = recovered;
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Whether one of a revision's signatures was made with a closed key: the closed key's point is among the keys a signature verifies
+    /// under, or, where those keys are not certain or the closed key's point is not one the arithmetic takes, the signature verifies under
+    /// the closed key as before.
+    /// </summary>
+    private bool SignedWithClosedKey(string key, RecordEnvelope revision, byte[] digest, byte[][]?[] keys)
+    {
+        lock (gate)
+        {
+            byte[]? point = recoveredKeys.Point(key);
+            for (int i = 0; i < keys.Length; i++)
+            {
+                bool verifies = point is null || keys[i] is not { } recovered
+                    ? VerifiesWithClosedKey(key, revision.ComputedHash, digest, revision.Signatures[i].Signature)
+                    : RecoveredKeys.Among(recovered, point);
+                if (verifies) return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>How many signatures the key-closing check recovered keys from: once each, however many closings read it.</summary>
+    internal long KeyRecoveries => recoveredKeys.Recoveries;
+
+    /// <summary>How many recovered keys the platform did not confirm: each is dropped, and its signature verified as before.</summary>
+    internal long DroppedKeys => recoveredKeys.Dropped;
+
+    /// <summary>How many signatures the key-closing check verified under each closed key as before, their recovered keys not certain.</summary>
+    internal long RecoveryFallbacks => recoveredKeys.Fallbacks;
+
+    /// <summary>How many times the key-closing check verified a signature under a closed key, rather than reading recovered keys.</summary>
+    internal long ClosedKeyVerifications
+    {
+        get
+        {
+            lock (gate)
+            {
+                return closedKeyVerifications;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a signature over a content hash verifies with a closed key, as <see cref="RecordSigning.Verify"/> answers it: what the
+    /// key-closing check reads where recovered keys cannot answer. The answer is kept with every other verdict on a key, and while the
+    /// estate is judged each closed key is imported once.
     /// </summary>
     private bool VerifiesWithClosedKey(string key, string hash, byte[] digest, string signature)
     {
         lock (gate)
         {
             if (keyVerdicts.TryGetValue((key, hash, signature), out bool known)) return known;
+            closedKeyVerifications++;
             bool value;
             if (closedKeys is null) value = RecordSigning.Verify(key, digest, signature);
             else

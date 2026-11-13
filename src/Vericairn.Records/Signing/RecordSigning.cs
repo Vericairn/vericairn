@@ -106,6 +106,44 @@ public static class RecordSigning
     }
 
     /// <summary>
+    /// The point of an encoded public key as 64 bytes X‖Y, read through the same import <see cref="Verify"/> verifies with, so a key it
+    /// refuses has none; null when the text is not a usable P-256 key.
+    /// </summary>
+    internal static byte[]? PublicPoint(string encodedPublicKey)
+    {
+        if (!IsPublicKey(encodedPublicKey)) return null;
+        try
+        {
+            using ECDsa key = ECDsa.Create();
+            key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(encodedPublicKey), out _);
+            ECPoint q = key.ExportParameters(false).Q;
+            return q.X is { Length: 32 } x && q.Y is { Length: 32 } y ? [.. x, .. y] : null;
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a 64-byte signature over a digest verifies with the P-256 key at a point X‖Y, as the platform verifies it; false when the
+    /// platform refuses the point or the signature.
+    /// </summary>
+    internal static bool VerifyPoint(ReadOnlySpan<byte> point, ReadOnlySpan<byte> digest, ReadOnlySpan<byte> signature)
+    {
+        if (point.Length != 64 || signature.Length != SignatureBytes) return false;
+        try
+        {
+            using ECDsa key = ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = point[..32].ToArray(), Y = point[32..].ToArray() } });
+            return key.VerifyHash(digest, signature, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// A public key imported once, which verifies signatures as <see cref="RecordSigning.Verify"/> does, since that is how it verifies: nothing
     /// when the text is not a usable P-256 key, when the signature is not 64 bytes, or when the platform rejects the key or the signature.
     /// </summary>
