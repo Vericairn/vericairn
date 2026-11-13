@@ -207,6 +207,9 @@ public class DocsTests
             foreach (string field in new[] { "template-defaults", "templateUpgrade", "sourceDigest", "From format 3 an optional section contains id and document" }) Assert.Contains(field, records, StringComparison.Ordinal);
             Assert.Contains("optional reserved (one to eight distinct NuGet placeholder versions", records, StringComparison.Ordinal);
             Assert.Contains("with either release and releaseHash or reserved", records, StringComparison.Ordinal);
+            // Every timestamp field shows the form its value takes.
+            Assert.Contains("| asOf | timestamp (YYYY-MM-DDTHH:MM:SSZ) | true |", records, StringComparison.Ordinal);
+            Assert.DoesNotContain("| timestamp |", records, StringComparison.Ordinal);
             string packageCommands = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "cli-reference.md")));
             foreach (string action in new[] { "observe", "unlist", "deprecate" })
             {

@@ -14,6 +14,13 @@ namespace Vericairn.Records.Types;
 /// <param name="SinceFormat">The record format that introduced the field; records of older formats never carry it.</param>
 public sealed record FieldDescription(string Name, string Kind, bool Required, string Description, long SinceFormat = RecordFormats.First);
 
+/// <summary>Field kinds shown with the form a value takes.</summary>
+internal static class FieldKinds
+{
+    /// <summary>A whole-second UTC time; records describe and the record reference show its form with the kind.</summary>
+    internal const string Timestamp = "timestamp (" + RecordParser.TimestampForm + ")";
+}
+
 /// <summary>A record type: its name, documentation, and body rules.</summary>
 public interface IRecordType
 {

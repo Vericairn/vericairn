@@ -9,7 +9,7 @@ namespace Vericairn.Cli;
 internal sealed class DocsPinCommand : Command
 {
     public DocsPinCommand(CommandContext context)
-        : base("pin", "Record a document's next revision. Converted documents regenerate their revision history and hash authored content; existing whole-file pins keep their mode. --convert-revisions converts the opening history; --render-template also permits a refresh with unchanged authored bytes.")
+        : base("pin", "Record a document's next revision. Converted documents regenerate their revision history and hash authored content; existing whole-file pins keep their mode. --convert-revisions converts the opening history. --render-template needs an estate template instance or a converted revision history, and refreshes it, also with unchanged authored bytes; a plain whole-file document has neither, and its summary is corrected with records new document-revision, as the living-documents guide shows.")
     {
         var path = new Argument<string>("path") { Description = "Normalized repository-relative file path under design/ or docs/; --render-template also admits a root README.md instance." };
         var by = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };

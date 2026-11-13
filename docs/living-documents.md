@@ -40,6 +40,58 @@ check prevents clearance. Whole generated documents under the strict generation
 contract prove currency through fresh generation; authored clearance does not
 replace that check.
 
+## What each outcome declares
+
+A review's outcome says what the reviewer did, not whether the document changed.
+`current` is the reviewer's judgement of the current exact bytes, whoever revised
+them: a reviewer who reads another principal's revision and finds that it holds
+records `current`. `revised` declares that the reviewer revised the content itself,
+so it counts as self review, whoever pinned the bytes. `needs-change` finds the
+document stale and leaves it due.
+
+So a document declared `clearedBy: independent` is cleared by a separate reviewer's
+`current`. In this example a builder revises the guide and pins its bytes, and a
+separate reviewer reads those exact bytes and clears them:
+
+```sh
+vericairn docs pin docs/guide.md --by <builder id> --summary "Describe the revised workflow."
+vericairn docs review docs/guide.md --by <reviewer id> --outcome current --summary "Checked the builder's revision."
+```
+
+The review records `independence: independent-agent` for an agent reviewer, or
+`operator` for the operator. The builder's own review is self review whichever
+outcome it records. From 0.9.3 (FIX-113), when a separate reviewer records `revised`
+on such a document, the `document.cleared-by` refusal names the `revised` outcome as
+its cause and points to `current`. The independence rule is unchanged: nothing
+relabels a self review or clears a document for it.
+
+## When a declared check fails
+
+A failed declared check refuses a clearing review with `document.check-failed`,
+and nothing is written; `needs-change` is still recorded with the failed check, and
+the document stays due. From 0.9.3 (FIX-122), the refusal names what failed. Its
+message gives each failed check with what it found, and the refusal carries one
+`document.check-detail` child finding per problem, as information beside the
+refusal's error, in the text output and in the `findings` of `--json`.
+
+For `links-resolve`, each link that does not resolve is a child finding located at
+the document's repository-relative path with the link's line and column, such as
+`docs/guide.md:3:17`. It names the link as the document writes it and why it fails:
+the link leads outside the repository, or it names a path in the repository that
+holds nothing. Columns count characters from 1. The check's summary, which a review
+records, names the first links that fit in it and counts the rest; the refusal's
+child findings name every one. Neither names an absolute path or quotes the
+document beyond its links.
+
+```text
+ERROR document.check-failed records/document-review/...: A failed check refuses the clearance (links-resolve: Links in docs/guide.md that do not resolve within the repository (1): ../../other-repo/example.md at line 3, column 17, which leads outside the repository.); record needs-change, or fix the document and review it again.
+INFO document.check-detail docs/guide.md:3:17: links-resolve: ../../other-repo/example.md does not resolve, which leads outside the repository.
+```
+
+A failed check other than `links-resolve` has one child finding at the document's
+path with its summary. The refusal, `document.check-failed` and the clearance
+rules are unchanged.
+
 ## Which bytes are compared
 
 For a revision with `hashMode: authored-revisions-v1`, `hash` and `bytes` describe
@@ -109,6 +161,54 @@ mode. For authored-content pins this means empty revision markers and the comple
 authored body; generated history can be rendered from the records. The Git adapter
 can retrieve those same hashed bytes from local history, while old whole-file pins
 still retrieve their exact complete files.
+
+## Correcting a revision's summary
+
+A revision's summary is part of its signed record, so a mistake in it is corrected
+by a successor record, never by editing the record. The document's bytes stay as
+they are. `docs pin` refuses unchanged bytes for a whole-file document, and its
+`--render-template` refreshes only an estate template instance or a converted
+revision history; from 0.9.3 both refusals name this route.
+
+For a whole-file document, write the successor yourself:
+
+1. Read the current pin. `docs pin` with the unchanged bytes is refused and names
+   it (`current pin <pin id>`); `records show` prints it.
+2. Check the file against it: its SHA-256 (`shasum -a 256 docs/guide.md`, or
+   `Get-FileHash docs/guide.md` in PowerShell, written as `sha256:` and the
+   lower-case digest), its byte count (`wc -c < docs/guide.md`) and its path all
+   match the pin.
+3. Write the successor's body with the pin's own `path`, `title`, `hash`, `bytes`
+   and `mediaType`, the next `revision` and the corrected `summary`, and record it
+   with `--supersedes` naming the current pin.
+
+```sh
+vericairn docs pin docs/guide.md --by <author id> --summary "Corrected summary."
+vericairn --json records show <current pin id>
+vericairn records new document-revision --by <author id> --body successor.json --supersedes <current pin id>
+```
+
+```json
+{"path": "docs/guide.md", "title": "Guide", "hash": "sha256:<the pin's hash>", "bytes": 1234,
+ "mediaType": "text/markdown", "revision": 3, "summary": "Corrected summary."}
+```
+
+The original record keeps its bytes and signatures; the successor supersedes it.
+A successor of any pin but the current one forks the document and is refused with
+`document.multiple`. From 0.9.3, a successor whose `hash` or `bytes` differ from
+the file it names is refused with `document.pin-content`. Either refusal writes
+nothing. For a converted history or a template instance, `docs pin <path> --by
+<author id> --summary "Corrected summary." --render-template` records the
+correction with the authored bytes unchanged and regenerates the history line.
+
+A correction does not rewrite what was found in the record it corrects. From 0.9.3
+(FIX-120), `estate check` reports a finding on a superseded record, such as
+`writing.spacing` in its summary, as historical: the finding keeps its code,
+severity and location, and its message names the record that supersedes it.
+Every occurrence stays reported, and history is scanned in full. A finding on the
+current record is reported as before, so a new mistake in the correction is never
+hidden by the historical one. A writing exception is for an intentional token, not
+for an accidental spelling since corrected.
 
 ## Template sections (0.8.4)
 

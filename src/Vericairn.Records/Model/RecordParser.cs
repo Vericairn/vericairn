@@ -30,6 +30,9 @@ public static partial class RecordParser
     /// <summary>Timestamps: RFC 3339, UTC, second precision.</summary>
     public static Regex TimestampPattern => TimestampRegex();
 
+    // The required form of every record timestamp, as a caller writes it.
+    internal const string TimestampForm = "YYYY-MM-DDTHH:MM:SSZ";
+
     /// <summary>True when the text is a valid record timestamp.</summary>
     public static bool IsTimestamp(string? text) =>
         text is not null && TimestampPattern.IsMatch(text) && DateTimeOffset.TryParseExact(text, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out _);

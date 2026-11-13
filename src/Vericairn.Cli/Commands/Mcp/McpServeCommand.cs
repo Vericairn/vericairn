@@ -9,8 +9,10 @@ using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 
-internal sealed class McpServeCommand : Command
+internal sealed class McpServeCommand : Command, ITextOutputCommand
 {
+    public string WhyNotJson => "its standard output carries the MCP protocol's messages, one JSON-RPC message per line.";
+
     public McpServeCommand(CommandContext context)
         : base("serve", "Serve the estate's tools over standard input and output until the input ends; a client of the daemon or the embedded runtime, never a second owner. With --connection, serve a remote estate's network MCP over a paired connection instead.")
     {

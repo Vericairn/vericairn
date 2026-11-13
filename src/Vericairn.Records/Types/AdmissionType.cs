@@ -27,7 +27,7 @@ public sealed class AdmissionType : IRecordType
         new("principal", "ulid", true, "The device's principal, repeated for clarity; must match the device record."),
         new("status", "admitted|revoked", true, "admitted, or revoked by a superseding record."),
         new("note", "string", true, "Why."),
-        new("revokedAt", "timestamp", false, "When the admission ended; required when revoked; records signed by the device at or after this time are invalid."),
+        new("revokedAt", FieldKinds.Timestamp, false, "When the admission ended; required when revoked; records signed by the device at or after this time are invalid."),
     ];
 
     /// <inheritdoc />

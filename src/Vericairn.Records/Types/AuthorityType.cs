@@ -26,7 +26,7 @@ public sealed class AuthorityType : IRecordType
         new("reserved", "string[]", true, "Actions explicitly never granted (publication, spending, credentials, ...)."),
         new("conditions", "string[]", true, "Conditions under which the grant applies."),
         new("basis", "ulid", true, "The decision record that authorizes this grant."),
-        new("expires", "timestamp", false, "When the grant stops being in force; a record authored from then on cannot rely on it.", 2),
+        new("expires", FieldKinds.Timestamp, false, "When the grant stops being in force; a record authored from then on cannot rely on it.", 2),
         new("bounds", "object[]", false, "Required for policy scopes: one typed bound per scope, with actions, subject selection and scope-specific limits. Policy grants require expiry and an operator signature.", 3),
     ];
 

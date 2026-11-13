@@ -100,12 +100,8 @@ public static class Recovery
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
         var text = new StringBuilder();
-        string? leftEstate = left.CurrentEstate is null ? null : left.Chain(left.CurrentEstate)[0];
-        string? rightEstate = right.CurrentEstate is null ? null : right.Chain(right.CurrentEstate)[0];
+        (string? leftEstate, string? rightEstate, List<string> onlyLeft, List<string> onlyRight, List<string> differing) = Differences(left, right);
         text.Append(leftEstate == rightEstate ? "Same estate " : "DIFFERENT ESTATES ").Append(leftEstate ?? "?").Append(leftEstate == rightEstate ? string.Empty : " and " + (rightEstate ?? "?")).Append('\n');
-        List<string> onlyLeft = left.ById.Keys.Except(right.ById.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        List<string> onlyRight = right.ById.Keys.Except(left.ById.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-        List<string> differing = left.ById.Keys.Intersect(right.ById.Keys, StringComparer.Ordinal).Where(id => left.ById[id].ComputedHash != right.ById[id].ComputedHash).Order(StringComparer.Ordinal).ToList();
         text.Append("Only in ").Append(leftName).Append(": ").Append(onlyLeft.Count.ToString(CultureInfo.InvariantCulture)).Append('\n');
         foreach (string id in onlyLeft)
         {
@@ -126,6 +122,19 @@ public static class Recovery
 
         text.Append("A merge adds the records each side lacks; divergent revisions then appear as reconcile tasks.\n");
         return text.ToString();
+    }
+
+    /// <summary>The two copies' estate identities and the record ids only in each and in both with different content, each in id order.</summary>
+    internal static (string? LeftEstate, string? RightEstate, List<string> OnlyLeft, List<string> OnlyRight, List<string> Differing) Differences(EstateModel left, EstateModel right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        string? leftEstate = left.CurrentEstate is null ? null : left.Chain(left.CurrentEstate)[0];
+        string? rightEstate = right.CurrentEstate is null ? null : right.Chain(right.CurrentEstate)[0];
+        List<string> onlyLeft = left.ById.Keys.Except(right.ById.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        List<string> onlyRight = right.ById.Keys.Except(left.ById.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        List<string> differing = left.ById.Keys.Intersect(right.ById.Keys, StringComparer.Ordinal).Where(id => left.ById[id].ComputedHash != right.ById[id].ComputedHash).Order(StringComparer.Ordinal).ToList();
+        return (leftEstate, rightEstate, onlyLeft, onlyRight, differing);
     }
 
     private static FindingList Merge(FindingList first, FindingList second)

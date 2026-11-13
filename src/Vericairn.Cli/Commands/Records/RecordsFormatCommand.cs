@@ -12,6 +12,6 @@ internal sealed class RecordsFormatCommand : Command
     {
         var filesArgument = new Argument<string[]>("files") { Description = "Record files to rewrite in canonical pretty form.", Arity = ArgumentArity.OneOrMore };
         Arguments.Add(filesArgument);
-        SetAction(result => RecordFiles.Format(context, result.GetValue(filesArgument)!));
+        SetAction(result => RecordFiles.Format(context, result.GetValue(filesArgument)!, result.GetValue(context.JsonOption)));
     }
 }

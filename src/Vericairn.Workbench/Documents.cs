@@ -1161,7 +1161,10 @@ public sealed class LivingDocumentsWorkspace : Document
     /// <summary>What a review can find.</summary>
     public IReadOnlyList<string> Outcomes { get; } = ["current", "revised", "needs-change"];
 
-    /// <summary>current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due).</summary>
+    /// <summary>
+    /// current (the reviewer judges that the current exact bytes hold, whoever revised them), revised (the reviewer declares that it
+    /// revised the content itself, which counts as self review) or needs-change (it is stale and stays due).
+    /// </summary>
     public string Outcome { get => outcome; set => Set(ref outcome, value); }
 
     /// <summary>What was checked.</summary>

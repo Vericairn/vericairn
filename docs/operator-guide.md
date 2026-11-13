@@ -99,6 +99,8 @@ vericairn estate bootstrap
 
 The command reports `written` for a new or replaced copy and `unchanged` for identical bytes, and
 restores executable permission on the POSIX script. It checks both destinations before writing.
+It is also the repair for a copy that `estate restore` from a release before 0.9.3 wrote, which
+leaves `bootstrap` without its executable permission ([section 10](#10-export-restore-recovery-and-divergence)).
 A differing copy refuses the operation; preserve any customizations, then use
 `vericairn estate bootstrap --force` to replace it. A link or directory must be moved aside first,
 even with `--force`. Refreshing the scripts keeps the estate's records and manifest pin in place.
@@ -908,6 +910,21 @@ failed destination and preserve it as needed before choosing another empty direc
 does not establish who produced an export or grant authority. Record signatures are checked separately,
 and no private keys travel with the export.
 
+From 0.9.3 (FIX-112), an export records each member's mode as Git does, `100755` for an executable file
+and `100644` for any other, in its inventory entry and in its archive entry's attributes, so the
+restored `bootstrap` runs as `./bootstrap` with no permission repair. Records and objects are never
+executable. On Linux and macOS a file is executable when its owner may execute it; Windows keeps no
+such permission, so an export made there records the POSIX `bootstrap` script as executable and every
+other file as not. On Linux and macOS a restore creates an executable member with execute permission,
+filtered by the umask like every file it creates, and an ordinary member as before; on Windows it
+applies no mode. The verified inventory alone decides the mode, never the archive entry's attributes.
+A mode other than those two, such as a link's, a directory's or one with setuid, refuses the export
+with `export.entry-mode` before anything is written, so a restore still creates only regular files
+within the destination. An export written by an earlier release records no mode and restores as it
+always did. A copy restored by an earlier release has lost `bootstrap`'s executable permission: run
+`vericairn --estate <restored copy> estate bootstrap` there, which reports `unchanged` for identical
+bytes and restores the permission ([section 2](#2-create-an-estate)).
+
 FIX-16 judges single records against the proposed estate, including content checks, before publication,
 as grouped records already are. A validation failure publishes nothing; repository records are staged
 outside the published tree and renamed only after judgment. The gate belongs to one `EstateService`
@@ -1237,7 +1254,7 @@ vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examp
 
 `docs pin` reads the file's exact bytes under `docs/` or `design/`, computes its SHA-256 and byte count, and records a `document-revision`. A first pin is revision 1; each later pin supersedes the current pin and increments its revision. `--title` overrides the title; otherwise it carries forward, or defaults to the file name without its extension on the first pin. Media type follows the file extension. The command prints the revision, record id and record hash; `--json` prints the record receipt. It leaves the document and its hand-written revision line untouched.
 
-Unchanged bytes, a stale `--expected` record id, a whole generated document or generated register member, and a fork of current pins are refused with nothing recorded. A path outside the document directories or an unavailable or aliased file is also refused. Use `--expected` when acting on a pin read earlier. Two branches pinning the same predecessor leave a fork after their records merge; `estate check` and `docs pin` name both pins and the predecessor. Reconcile by recording which successor is kept and which are withdrawn, settle the text, then pin the combined bytes against the kept id. Nothing is deleted and no branch is chosen automatically. The [CLI reference](cli.md#vericairn-docs-pin) describes options, receipts and the matching `POST /v1/documents/pin`, `DocumentPin` and `DocumentPinAsync` operations.
+Unchanged bytes, a stale `--expected` record id, a whole generated document or generated register member, and a fork of current pins are refused with nothing recorded. To correct only a revision's summary, record a successor that pins the same bytes, as the [living-documents guide](living-documents.md#correcting-a-revisions-summary) shows; from 0.9.3 the refusals name that route, and `estate check` reports a finding on the superseded record as historical, naming its successor. A path outside the document directories or an unavailable or aliased file is also refused. Use `--expected` when acting on a pin read earlier. Two branches pinning the same predecessor leave a fork after their records merge; `estate check` and `docs pin` name both pins and the predecessor. Reconcile by recording which successor is kept and which are withdrawn, settle the text, then pin the combined bytes against the kept id. Nothing is deleted and no branch is chosen automatically. The [CLI reference](cli.md#vericairn-docs-pin) describes options, receipts and the matching `POST /v1/documents/pin`, `DocumentPin` and `DocumentPinAsync` operations.
 
 A living document is one whose claims follow facts that change: a README that names what is released, a guide that describes a command, a table generated from records. Declare it with the triggers that make it due:
 
@@ -1265,7 +1282,7 @@ vericairn docs living
 vericairn docs review docs/guide.md --by <principal id> --outcome current --summary "Read against the widget as built."
 ```
 
-`docs living` lists each declared document as current, due with every reason, or unavailable. A review's outcome is `current` (it holds), `revised` (it was changed for the trigger) or `needs-change` (it is stale and stays due). The runtime, not the reviewer, states the content's hash, the covered paths' identity, the triggers the review answers and the reviewer's independence, and runs the declared checks: `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed check refuses the clearance. For a file of the estate's own repository, a new `document-revision` record pinning it also counts as a clearance when its author meets the declaration's `clearedBy` and the declared checks pass; a pin never clears a document declared `independent`, and `covers` is cleared only by a review.
+`docs living` lists each declared document as current, due with every reason, or unavailable. A review's outcome is `current` (the reviewer judges that the current exact bytes hold, whoever revised them), `revised` (the reviewer declares that it revised the content itself, which counts as self review) or `needs-change` (it is stale and stays due). After a builder pins a revision of a document declared `independent`, a separate reviewer clears those exact bytes with `vericairn docs review <path> --by <reviewer id> --outcome current --summary "..."`; the review records `independent-agent` or `operator`. From 0.9.3 (FIX-113), a separate reviewer's `revised` on such a document is refused with `document.cleared-by`, which names that outcome as the cause and points to `current`; the [living-documents guide](living-documents.md#what-each-outcome-declares) gives the example. The runtime, not the reviewer, states the content's hash, the covered paths' identity, the triggers the review answers and the reviewer's independence, and runs the declared checks: `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed check refuses the clearance. From 0.9.3 (FIX-122), the refusal names what each failed check found, and its `document.check-detail` child findings name, for `links-resolve`, every link that does not resolve at the document's path with its line and column and the reason ([living documents](living-documents.md#when-a-declared-check-fails)). For a file of the estate's own repository, a new `document-revision` record pinning it also counts as a clearance when its author meets the declaration's `clearedBy` and the declared checks pass; a pin never clears a document declared `independent`, and `covers` is cleared only by a review.
 
 A generated region is the content between `<!-- vericairn:generated <id> -->` and `<!-- vericairn:end <id> -->`, each on its own line, declared in `regions` with its generator. `estate check` regenerates every region of the estate's own files whose generator is installed and refuses a hand edit or lost markers (`document.generated-edited`); `vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's generator `vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first. `vericairn.records/progress` embeds the progress report without repository checks, so regenerating a document does not recursively read itself.
 

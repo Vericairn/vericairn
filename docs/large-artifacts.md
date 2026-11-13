@@ -323,8 +323,8 @@ Your readback finds those cases, and you record them as failures.
 
 ## Back up what the export doesn't carry
 
-`estate export` writes a zip with an inventory of each member's path, byte count and SHA-256. It
-includes:
+`estate export` writes a zip with an inventory of each member's path, byte count and SHA-256, and from
+0.9.3 its mode, executable or not. It includes:
 
 - every record file and every native object;
 - the `estate/` directory with its manifest, `design/`, `docs/`, `README.md`, `LICENSE`, the bootstrap

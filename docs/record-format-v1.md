@@ -148,6 +148,11 @@ is retained. Restore is not an all-or-nothing filesystem transaction. An I/O fai
 restore does not report success in that case. Inventory hashes establish byte integrity, not the exporter's identity
 or authority; record signatures are still checked separately.
 
+From 0.9.3, each inventory entry also carries `mode`, as Git records it: `100755` for an executable file and `100644` for
+any other; the archive entry's attributes carry the same mode for other tools. Restore reads the mode from the verified
+inventory alone, applies it on Linux and macOS, and refuses any other value (`export.entry-mode`), so it never creates a
+link, a directory or a special file. An entry without `mode`, as every release before 0.9.3 wrote it, restores as before.
+
 ## Software: resources, observations, verifications and operations
 
 A repository the estate uses is a `resource` of kind `repository`, identified by its `rootCommit`, which adoption always

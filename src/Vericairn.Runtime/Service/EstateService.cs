@@ -416,7 +416,49 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return SignedPolicyWrite(draft, model);
             }
         }
+
+        // From 0.9.3, a document revision written as a record, such as a summary-only correction, pins the bytes its file holds.
+        if (request.Type == "document-revision" && DocumentRevisionContent(request.Body) is FindingList mismatch)
+        {
+            return WriteOutcome.Fail(new Problem("rejected", "Not written: the estate would be invalid with this record (1 error).", ToFindings(mismatch, "rejected").Findings));
+        }
+
         return Write(draft);
+    }
+
+    /// <summary>
+    /// A new document revision whose file is present in the estate with another hash or size than the body claims, or null. A file that
+    /// is absent, or a body the record's own rules refuse, is left to those rules.
+    /// </summary>
+    private FindingList? DocumentRevisionContent(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object || Text(body, "path") is not string path
+            || Text(body, "hash") is not string claimed || !body.TryGetProperty("bytes", out JsonElement size) || !size.TryGetInt64(out long claimedBytes))
+            return null;
+        byte[] content;
+        try
+        {
+            string file = GeneratedDocumentVerification.SafeFile(session.Root, path);
+            if (!File.Exists(file)) return null;
+            content = File.ReadAllBytes(file);
+            if (Text(body, "hashMode") == RevisionLines.HashMode) content = RevisionLines.AuthoredContent(content);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            content = [];
+        }
+
+        string actual = ContentHash.Sha256(content);
+        if (actual == claimed && content.LongLength == claimedBytes) return null;
+        var findings = new FindingList();
+        findings.Error("document.pin-content", path, $"{path} holds {content.LongLength} bytes with hash {actual}, not the {claimedBytes} bytes and hash {claimed} this revision claims. A revision pins the exact bytes the file holds; read them again before writing it.");
+        return findings;
+
+        static string? Text(JsonElement body, string name) => body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
 
     /// <inheritdoc />
@@ -1158,7 +1200,18 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse("A template instance is reviewed section by section; name the sections and fidelity being reviewed.");
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("document-review", request.By, document.RootElement, declared.Reference), model);
+            WriteOutcome outcome = WriteLocked(new RecordDraft("document-review", request.By, document.RootElement, declared.Reference), model);
+            // A refusal for a failed check carries what each failed check found as child findings of that one error: for links-resolve, every link
+            // that does not resolve, at the document's repository-relative path with its line and column (FIX-122).
+            if (outcome.Problem is { } refusal && refusal.Findings.Any(f => f.Code == "document.check-failed"))
+            {
+                FindingDto[] details = [.. checks.Where(c => c.Result == "failed").SelectMany(c => c.Details.Count > 0
+                    ? c.Details.Select(d => new FindingDto("info", "document.check-detail", d.Location, d.Message))
+                    : [new FindingDto("info", "document.check-detail", path, c.Name + ": " + c.Summary)])];
+                outcome = outcome with { Problem = refusal with { Findings = [.. refusal.Findings, .. details] } };
+            }
+
+            return outcome;
         }
     }
 
