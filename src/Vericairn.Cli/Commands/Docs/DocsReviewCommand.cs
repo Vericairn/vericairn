@@ -8,12 +8,12 @@ namespace Vericairn.Cli;
 internal sealed class DocsReviewCommand : Command
 {
     public DocsReviewCommand(CommandContext context)
-        : base("review", "Record a review of a living document: the runtime reads its content, records the covered paths' identity and the triggers it answers, and runs its declared checks; a failed check refuses the clearance.")
+        : base("review", "Record a review of a living document: the runtime reads its content, records the covered paths' identity and the triggers it answers, and runs its declared checks; a failed check refuses the clearance. A reviewer who did not revise the content records current, whoever revised it: after a builder pins a revision, a separate reviewer clears those exact bytes with --outcome current.")
     {
         var operations = new LivingDocumentOperations(context);
         var pathArgument = new Argument<string>("path") { Description = "The document's repository-relative path." };
         var byOption = new Option<string>("--by") { Description = "The reviewing principal (ULID).", Required = true };
-        var outcomeOption = new Option<string>("--outcome") { Description = "current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due).", Required = true };
+        var outcomeOption = new Option<string>("--outcome") { Description = "current (the reviewer judges that the current exact bytes hold, whoever revised them), revised (the reviewer declares that it revised the content itself, which counts as self review) or needs-change (it is stale and stays due).", Required = true };
         var summaryOption = new Option<string>("--summary") { Description = "What was checked.", Required = true };
         var findingOption = new Option<string[]>("--finding") { Description = "A finding, severity:summary with severity error, warning or info; repeatable.", AllowMultipleArgumentsPerToken = false };
         var commitOption = new Option<string?>("--commit") { Description = "For a document of another repository, the commit reviewed." };

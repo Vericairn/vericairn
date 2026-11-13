@@ -15,7 +15,10 @@ namespace Vericairn.Records.Types;
 /// </summary>
 public sealed class DocumentReviewType : IRecordType
 {
-    /// <summary>current: the content holds; revised: it was changed for the trigger; needs-change: it is stale and stays due.</summary>
+    /// <summary>
+    /// current: the reviewer judges that the current exact bytes hold, whoever revised them; revised: the reviewer declares that it revised
+    /// the content for the trigger, which counts as self review; needs-change: it is stale and stays due.
+    /// </summary>
     public static readonly ImmutableArray<string> Outcomes = ["current", "revised", "needs-change"];
 
     /// <summary>How independent the reviewer is of the document's content, as for a review.</summary>
@@ -185,9 +188,11 @@ public sealed class DocumentReviewType : IRecordType
             : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         JsonElement[] sections = context.Record.Body.TryGetProperty("sections", out JsonElement selected) && selected.ValueKind == JsonValueKind.Array
             ? selected.EnumerateArray().ToArray() : [];
-        bool revised = outcome == "revised" || (sections.Length == 0 ? reviser?.By == context.Record.By
-            : sections.Any(s => TJson.Text(s, "outcome") == "revised" || TemplateDocuments.Writer(context.Model, declaration,
-                TJson.Text(s, "id") ?? "", TJson.Text(s, "hash"), context.Record.At) == context.Record.By));
+        // The revised outcome declares that this reviewer revised the content; the records show who actually did.
+        bool declared = outcome == "revised" || sections.Any(s => TJson.Text(s, "outcome") == "revised");
+        bool authored = sections.Length == 0 ? reviser?.By == context.Record.By
+            : sections.Any(s => TemplateDocuments.Writer(context.Model, declaration, TJson.Text(s, "id") ?? "", TJson.Text(s, "hash"), context.Record.At) == context.Record.By);
+        bool revised = declared || authored;
         bool self = revised || (elsewhere && independence == "self");
         string kind = EstateModel.BodyString(reviewer, "kind") ?? string.Empty;
         if (independence is not null)
@@ -217,6 +222,9 @@ public sealed class DocumentReviewType : IRecordType
 
         switch (EstateModel.BodyString(declaration, "clearedBy") ?? "any")
         {
+            case "independent" when self && declared && !authored:
+                context.Error("document.cleared-by", "This document is cleared by a principal other than the one that wrote or revised its content, and the outcome revised declares that this reviewer revised it, which counts as self review. A reviewer who did not revise the content records current, which judges the current exact bytes, whoever revised them.");
+                break;
             case "independent" when self:
                 context.Error("document.cleared-by", "This document is cleared by a principal other than the one that wrote or revised its content.");
                 break;

@@ -40,6 +40,31 @@ check prevents clearance. Whole generated documents under the strict generation
 contract prove currency through fresh generation; authored clearance does not
 replace that check.
 
+## What each outcome declares
+
+A review's outcome says what the reviewer did, not whether the document changed.
+`current` is the reviewer's judgement of the current exact bytes, whoever revised
+them: a reviewer who reads another principal's revision and finds that it holds
+records `current`. `revised` declares that the reviewer revised the content itself,
+so it counts as self review, whoever pinned the bytes. `needs-change` finds the
+document stale and leaves it due.
+
+So a document declared `clearedBy: independent` is cleared by a separate reviewer's
+`current`. In this example a builder revises the guide and pins its bytes, and a
+separate reviewer reads those exact bytes and clears them:
+
+```sh
+vericairn docs pin docs/guide.md --by <builder id> --summary "Describe the revised workflow."
+vericairn docs review docs/guide.md --by <reviewer id> --outcome current --summary "Checked the builder's revision."
+```
+
+The review records `independence: independent-agent` for an agent reviewer, or
+`operator` for the operator. The builder's own review is self review whichever
+outcome it records. From 0.9.3 (FIX-113), when a separate reviewer records `revised`
+on such a document, the `document.cleared-by` refusal names the `revised` outcome as
+its cause and points to `current`. The independence rule is unchanged: nothing
+relabels a self review or clears a document for it.
+
 ## Which bytes are compared
 
 For a revision with `hashMode: authored-revisions-v1`, `hash` and `bytes` describe
