@@ -143,6 +143,12 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         Assert.Contains("exits with code 124", guide, StringComparison.Ordinal);
         Assert.Contains("An authenticated prompt is no completion receipt.", guide, StringComparison.Ordinal);
         Assert.Contains("vericairn estate first-authority", guide, StringComparison.Ordinal);
+        // Two first devices: the command only where neither clone's adoption was written; otherwise the refusal's guidance, and the
+        // device whose self-admission is removed is admitted from the first.
+        string flat = guide.Replace('\n', ' ');
+        Assert.Contains("When neither was written", flat, StringComparison.Ordinal);
+        Assert.Contains("`estate first-authority` refuses, since witnessed history speaks to the first authority", flat, StringComparison.Ordinal);
+        Assert.Contains("the device whose self-admission you removed is then admitted from your first device", flat, StringComparison.Ordinal);
         // Nothing in the recipe lengthens a wait, weakens custody, turns presence off or retries by itself.
         foreach (string avoided in new[] { "--presence false", "--custody file", "pkill", "kill -", "rm -", "sudo" })
             Assert.DoesNotContain(avoided, guide, StringComparison.Ordinal);

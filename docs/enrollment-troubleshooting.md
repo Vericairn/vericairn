@@ -176,10 +176,28 @@ The desktop reads `admitted`, and its admission is stored: the step completed, a
 `devices admit` again would not be refused today; it writes a second admission of the same device, which is why the estate is
 read before anything runs again.
 
-## Two first devices: `manifest.first-authority`
+## Two first devices
 
-If the enrollment of a new estate was repeated on another clone and the clones were merged, the estate can hold two
-self-admissions of your devices. When the manifest names neither, `vericairn estate check` reports `manifest.first-authority`,
-with no device's admission counting. From 0.9.3 you name your first device's self-admission with
-`vericairn estate first-authority`, after reading its evidence ([the command](cli.md#vericairn-estate-first-authority-093)).
-Every other self-admission still reads `signature.self-admission`: remove its record file yourself.
+If the enrollment of a new estate was repeated on another clone and the clones were merged, the estate holds two
+self-admissions of your devices, one from each clone. What to do depends on whether each clone's adoption checkpoint was
+written.
+
+When neither was written, for example because each adoption prompt expired as in the first worked example, the manifest
+decides. Each clone's runtime named its own first device's self-admission in its manifest; when the merged manifest names yours,
+the estate reads it and nothing needs naming. When it names neither, `vericairn estate check` reports `manifest.first-authority`,
+with no device's admission counting: name your first device's self-admission with `vericairn estate first-authority`, after
+reading its evidence ([the command](cli.md#vericairn-estate-first-authority-093)).
+
+When both enrollments completed, each clone's first device also signed its own adoption checkpoint, so each self-admission is
+witnessed first by history read with it as the first authority. With the manifest naming one, the copy reads
+`history.root-ambiguous` and no record counts; with it naming neither, `estate first-authority` refuses, since witnessed history
+speaks to the first authority. Follow the refusal's guidance instead: compare the copy with a head known elsewhere
+(`vericairn estate check --expect <checkpoint>`) and remove the records that do not belong, the other clone's self-admission and
+the history checkpoints its device signed.
+
+Either way, every other self-admission still reads `signature.self-admission` until you remove its record file yourself, and the
+device whose self-admission you removed is then admitted from your first device, as any later device is:
+
+```sh
+vericairn devices admit <desktop-id> --by <operator-id> --note "The operator's desktop."
+```
