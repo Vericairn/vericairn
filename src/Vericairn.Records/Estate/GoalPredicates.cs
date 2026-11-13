@@ -15,7 +15,8 @@ namespace Vericairn.Records.Estate;
 /// The record-predicate language of a goal's completion conditions and its evaluator (the estate's design/goals.md § 5): a predicate
 /// counts the current records of one type that match it and holds when the count is within its bounds. A record matches when it is
 /// about the predicate's subject (any revision of it), belongs to its product (living documents), has every body field it names
-/// equal to the string it gives (a field may be a dotted path into nested objects, such as placement.carrier), and is in the state it names, the state status derives. Without bounds a predicate asks that at
+/// equal to the string it gives (a field may be a dotted path into nested objects, such as placement.carrier), and is in the state it names, the state status derives. A
+/// predicate over the work orders placed in a carrier never counts the carrier itself. Without bounds a predicate asks that at
 /// least one record match. Every verdict is met, not-met or unknown, the last when the records cannot decide it here, and names the
 /// records it read at their exact hashes.
 /// </summary>
@@ -110,6 +111,14 @@ public static class GoalPredicates
             .Where(r => fields.All(f => FieldString(r, f.Name) == f.Value))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
+
+        // A carrier is never among its own placed work: a work order may place itself in its own release plan, and a predicate over the
+        // work orders placed in a carrier leaves the carrier out, by its original identity.
+        if (type == "work-order" && fields.FirstOrDefault(f => f.Name == PlacementCarrier).Value is string carrier)
+        {
+            string identity = LivingDocuments.ProductIdentity(model, carrier);
+            candidates.RemoveAll(r => model.Chain(r)[0] == identity);
+        }
 
         // A rule's admission judges the record of an act itself; a derived state rests on other records, the act's or not, so a
         // predicate that names one never holds under a rule (a reserved step's done predicates name no state: FlowContract).
@@ -214,6 +223,9 @@ public static class GoalPredicates
 
     /// <summary>The deepest dotted field path a predicate names.</summary>
     public const int MaximumPathDepth = 8;
+
+    /// <summary>The field by which a predicate counts the work orders placed in a release carrier, which never counts the carrier itself.</summary>
+    private const string PlacementCarrier = "placement.carrier";
 
     /// <summary>A completion condition in words: what a record predicate counts and its bounds, or an evidence statement and its check.</summary>
     public static string Describe(JsonElement condition)
@@ -344,6 +356,12 @@ public static class GoalPredicates
                     if (Newest(chain.SelectMany(id => model.About(id, "acceptance"))) is RecordEnvelope acceptance)
                     {
                         basis.Add(acceptance);
+                    }
+
+                    // An acceptance of its result, as operator close records it, is read where it decides the state.
+                    if (EstateStatus.StatusRecord(model, record) is { Type: "acceptance" } closing && !basis.Contains(closing))
+                    {
+                        basis.Add(closing);
                     }
 
                     string derived = workOrders.TryGetValue(record.Id, out string? found) ? found : "planned";

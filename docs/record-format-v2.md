@@ -420,7 +420,13 @@ predicate names holds:
   `answers`, and otherwise `open`, `notified` or `withdrawn` as its asker recorded; a work order is `planned`,
   `active`, `paused`, `submitted`, `retired`, `accepted` or `accepted (earlier revision)`; a living document is `due`
   while a trigger is newer than its latest clearance, and `current` otherwise. No other type has a derived state; its
-  own fields are compared with `fields`.
+  own fields are compared with `fields`. From 0.9.3 (FIX-128) an ordinary work order is also `accepted` when an
+  acceptance names its current result, as `operator close` records it, and `accepted (earlier revision)` when one names
+  an earlier result ([operator actions](operator-actions.md#close-finished-steps-in-one-action)).
+
+From 0.9.3 (FIX-128), a predicate over work orders whose `fields` name `placement.carrier` never counts the carrier itself:
+a carrier may place itself in its own release plan, and it is not among its own placed work. The carrier is left out by its
+original identity, whichever of its revisions places it.
 
 For example, the condition "release 1.0.0 of product P is published" is `{"type": "release", "subject": "<P>", "fields": {"version": "1.0.0",
 "status": "published"}}`; "work order K is accepted" is `{"type": "work-order", "fields": {"key": "K"}, "state":

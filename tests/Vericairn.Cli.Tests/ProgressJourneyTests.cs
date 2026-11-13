@@ -68,7 +68,8 @@ public class ProgressJourneyTests
             string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
             string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
 
-            // W-1 is accepted before 0.1.0 is published; W-2 before 0.2.0, and W-3's result is not accepted.
+            // W-1 is accepted before 0.1.0 is published; W-2 before 0.2.0, and W-3's result is not accepted. W-1 and W-2 are closed as
+            // operator close closes work, by an acceptance of each one's current result, and read as accepted (FIX-128).
             Worked(root, scratch, op, builder, "W-1", "2026-09-01T00:00:00Z", accepted: true);
             Publish(root, scratch, op, product, "0.1.0", "2026-09-01T01:00:00Z");
             Worked(root, scratch, op, builder, "W-2", "2026-09-01T02:00:00Z", accepted: true);
@@ -88,13 +89,14 @@ public class ProgressJourneyTests
             CliHarness.Outcome text = CliHarness.Ok("--estate", root, "progress");
             Assert.Contains("Progress of Example (example), rendered from its records [estate ", text.Out, StringComparison.Ordinal);
             Assert.Contains("  Check: 0 errors, 0 warnings [every record and the repository, as vericairn estate check runs them]\n", text.Out, StringComparison.Ordinal);
-            Assert.Contains("Work orders by state: 8 current\n  planned: 6\n", text.Out, StringComparison.Ordinal);
+            Assert.Contains("Work orders by state: 8 current\n  planned: 4\n", text.Out, StringComparison.Ordinal);
+            Assert.Contains("\n  accepted: 3\n", text.Out, StringComparison.Ordinal);
             Assert.Contains("Published releases and what each contained: 2 published of 2 releases recorded\n", text.Out, StringComparison.Ordinal);
             Assert.Contains("      accepted: W-2 Order W-2 [result ", text.Out, StringComparison.Ordinal);
             Assert.Contains("      recorded, not yet accepted: W-3 Order W-3 [result ", text.Out, StringComparison.Ordinal);
             Assert.Contains("  REL-030  planned  Order REL-030 [work-order ", text.Out, StringComparison.Ordinal);
             Assert.Contains("    2 work orders, 1 accepted\n", text.Out, StringComparison.Ordinal);
-            Assert.Contains("The next eligible work: 5 of 6 planned work orders\n", text.Out, StringComparison.Ordinal);
+            Assert.Contains("The next eligible work: 3 of 4 planned work orders\n", text.Out, StringComparison.Ordinal);
             Assert.Contains($"      after W-5: planned, holds it [work-order {w5.Id}]\n", text.Out, StringComparison.Ordinal);
             Assert.Contains($"    open: Ship the widget in blue? [ask {ask}]\n      recommendation: Yes, blue reads best.\n", text.Out, StringComparison.Ordinal);
             Assert.Contains($"    milestone work orders submitted: 1\n      M-1  Order M-1 [work-order {milestone.Id}, work-status ", text.Out, StringComparison.Ordinal);

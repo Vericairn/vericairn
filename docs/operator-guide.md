@@ -458,6 +458,12 @@ of them it signs ([presence prompts](#presence-prompts-announced-and-counted-093
 the steps you inspected for a release. See [Operator actions](operator-actions.md#close-finished-steps-in-one-action)
 for saved listings with `--from`, API/SDK use and interrupted-storage recovery.
 
+From 0.9.3 (FIX-128), an ordinary work order whose current result is accepted this way reads as `accepted` in status, goal
+predicates, flows, required attention and Workbench, so ordinary work closed with `operator close` since 0.8.4 now reads as
+accepted where it read `planned` before. An acceptance of an earlier result, or one recorded before the work order changed other
+than in its placement, reads `accepted (earlier revision)`. A milestone still needs its own acceptance
+([details](operator-actions.md#close-finished-steps-in-one-action)).
+
 ## 7. Repositories and checks as evidence
 
 The estate records the repositories it uses as resources, by observation, without changing them:
@@ -1844,7 +1850,7 @@ vericairn goal propose --by <sponsor> --title "Release 1.2.0" --objective "Relea
 
 | Step | Owner | Done from the records | Traps |
 | --- | --- | --- | --- |
-| `placed-work` | release manager | Every work order placed in the carrier accepted, none planned, active, paused, submitted or revised since acceptance | |
+| `placed-work` | release manager | Every work order placed in the carrier accepted, none planned, active, paused, submitted or revised since acceptance; from 0.9.3 the carrier itself is never among its own placed work | |
 | `docs-before-freeze` | release manager | `docs pass --before --record` passed both checks for this version | `prior-version-tokens`, `preparation-wording` |
 | `docs-set` | release manager, work | Its result hands on the set's manifest and notes by hash | `guides-revised`, `notes-window`, `security-section` |
 | `release-commit` | release manager, work | Its result hands on the frozen index at the merge commit | |

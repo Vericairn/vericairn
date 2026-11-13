@@ -218,9 +218,11 @@ internal sealed class AttentionDerivation(
             record = SubjectRecord(record);
         }
 
-        // Only acceptance of the current work-order revision closes its work. An earlier pin remains historical.
+        // Only acceptance of the current work-order revision closes its work, or of its current result as operator close records it,
+        // which status reads as accepted (FIX-128). An earlier pin remains historical.
         record = Latest(record);
-        return Accepted(record);
+        string id = record.Id;
+        return Accepted(record) || Orders().Any(o => Str(o, "id") == id && Str(o, "status") == "accepted");
     }
 
     private IReadOnlyList<GoalRow> Goals() => goals ??= readGoals();

@@ -507,7 +507,11 @@ every template.
   version and any candidate withdrawn since, separated by spaces, as
   `docs pass --before` records them. A predicate's `fields` may name a nested
   field by a dotted path, such as `placement.carrier`, `target.version` or
-  `facts.version`.
+  `facts.version`. From 0.9.3 a predicate over the work orders placed in a
+  carrier, by `placement.carrier`, never counts the carrier itself, which may
+  place itself in its own release plan, and an ordinary work order whose
+  current result an acceptance names, as `operator close` records it, is
+  `accepted`.
 - A trap (`name`, `summary`) declares `holds`, record predicates the position
   reads, or from 0.9.2 `check`, the named check or objection the step's action
   runs on its machine before it acts and refuses on, such as

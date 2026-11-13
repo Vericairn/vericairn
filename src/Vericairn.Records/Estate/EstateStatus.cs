@@ -29,10 +29,7 @@ public static class EstateStatus
         var items = new List<WorkItem>();
         foreach (RecordEnvelope order in model.Current("work-order"))
         {
-            RecordEnvelope? basis = StatusRecord(model, order);
-            string status = basis is null ? "planned"
-                : basis.Type == "acceptance" ? WorkOrderRevisions.IsCurrentSubject(model, basis.Subject, order) ? "accepted" : "accepted (earlier revision)"
-                : EstateModel.BodyString(basis, "status") ?? "planned";
+            (string status, _) = Reading(model, order);
             items.Add(new WorkItem(EstateModel.BodyString(order, "key") ?? "?", EstateModel.BodyString(order, "kind") ?? "?", EstateModel.BodyString(order, "title") ?? "?", status, order.Id));
         }
 
@@ -40,17 +37,68 @@ public static class EstateStatus
     }
 
     /// <summary>
-    /// The record a work order's derived status rests on: the latest acceptance of any of its revisions, else its latest work-status,
-    /// else none, and the work order is planned.
+    /// The record a work order's derived status rests on: the acceptance that makes it accepted, else the acceptance that leaves it
+    /// accepted at an earlier revision, else its latest work-status, else none, and the work order is planned (<see cref="WorkItems"/>).
     /// </summary>
     public static RecordEnvelope? StatusRecord(EstateModel model, RecordEnvelope order)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
-        IReadOnlyList<string> chain = model.Chain(order);
-        RecordEnvelope? acceptance = chain.SelectMany(id => model.About(id, "acceptance")).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
-        return acceptance ?? chain.SelectMany(id => model.About(id, "work-status")).OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).LastOrDefault();
+        return Reading(model, order).Basis;
     }
+
+    /// <summary>
+    /// A work order's derived status and the record it rests on. It is accepted when the latest acceptance of its revisions names its
+    /// current revision, or one that differs from it only in placement, or, for ordinary work, when an acceptance names its current
+    /// result at its exact hash (as operator close records it) and was recorded while such a revision stood. It is accepted (earlier
+    /// revision) when an acceptance names an earlier revision or, for ordinary work, an earlier result or an earlier revision of a result,
+    /// or was recorded before the work order changed. Otherwise its latest work-status gives the status, and without one it is planned.
+    /// A work order's current result is the one operator close reads: the newest current result of an attempt on an assignment of any
+    /// of its revisions. A milestone is accepted only by an acceptance of the milestone itself, the operator's own judgment of it.
+    /// </summary>
+    private static (string Status, RecordEnvelope? Basis) Reading(EstateModel model, RecordEnvelope order)
+    {
+        IReadOnlyList<string> chain = model.Chain(order);
+        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")));
+        if (direct is not null && WorkOrderRevisions.IsCurrentSubject(model, direct.Subject, order))
+        {
+            return ("accepted", direct);
+        }
+
+        // A milestone's acceptance is the operator's own judgment of it, apart from any acceptance of a result toward it.
+        List<RecordEnvelope> results = EstateModel.BodyString(order, "kind") == "ordinary" ? Results(model, chain) : [];
+        RecordEnvelope? current = Newest(results.Where(model.IsCurrent));
+        RecordEnvelope? closing = current is null ? null
+            : Newest(model.About(current.Id, "acceptance").Where(a => a.Subject?.Hash == current.ComputedHash && StandingAt(model, chain, a) is { } standing
+                && WorkOrderRevisions.IsCurrentSubject(model, standing.Reference, order)));
+        if (closing is not null)
+        {
+            return ("accepted", closing);
+        }
+
+        RecordEnvelope? earlier = direct ?? Newest(results.SelectMany(r => model.About(r.Id, "acceptance")));
+        if (earlier is not null)
+        {
+            return ("accepted (earlier revision)", earlier);
+        }
+
+        RecordEnvelope? status = Newest(chain.SelectMany(id => model.About(id, "work-status")));
+        return (status is null ? "planned" : EstateModel.BodyString(status, "status") ?? "planned", status);
+    }
+
+    /// <summary>Every result of an attempt on an assignment of one of a work order's revisions, current or not, each once.</summary>
+    private static List<RecordEnvelope> Results(EstateModel model, IReadOnlyList<string> chain) =>
+        [.. chain.SelectMany(id => model.About(id, "assignment"))
+            .SelectMany(assignment => model.About(assignment.Id, "attempt"))
+            .SelectMany(attempt => model.About(attempt.Id, "result"))
+            .DistinctBy(result => result.Id)];
+
+    /// <summary>The revision of a work order that stood when a record was recorded: its newest revision recorded no later.</summary>
+    private static RecordEnvelope? StandingAt(EstateModel model, IReadOnlyList<string> chain, RecordEnvelope record) =>
+        chain.Select(id => model.ById[id]).LastOrDefault(r => string.CompareOrdinal(r.At, record.At) <= 0);
+
+    private static RecordEnvelope? Newest(IEnumerable<RecordEnvelope> records) =>
+        records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
 
     /// <summary>A work order proposed for a goal whose plan says sponsor-approves, waiting for who decides for the goal to approve it.</summary>
     /// <param name="Goal">The goal's current revision.</param>

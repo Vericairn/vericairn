@@ -33,7 +33,9 @@ A result reaches its assignment and work order through its pinned attempt and
 assignment subjects. Assignment revisions remain distinct scopes. A work order
 is followed through explicit revisions; acceptance of an earlier revision does
 not accept the current scope. An accepted work order closes attention on its
-results without authoring acceptances of those result records. Checks other
+results without authoring acceptances of those result records. From 0.9.3
+(FIX-128), an ordinary work order whose current result an acceptance names, as
+`operator close` records it, is an accepted work order here too. Checks other
 than `pass` or `passed` remain failed or unknown, including skipped and unperformed
 checks. A later result can replace the old result's attention while introducing
 attention of its own.

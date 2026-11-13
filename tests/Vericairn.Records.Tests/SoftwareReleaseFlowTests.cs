@@ -164,6 +164,51 @@ public class SoftwareReleaseFlowTests
         run.AssertValid();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlacedWorkPassesForACarrierPlacedInItselfWhosePlacedWorkOperatorCloseClosed(bool firstParty)
+    {
+        // The carrier places itself in its own release plan, as the estate's carriers do; it is never among its own placed work.
+        using var run = new ReleaseFlowFixture(firstParty);
+        JsonObject carrier = PolicyFixture.Body(run.Carrier);
+        carrier["placement"] = new JsonObject { ["kind"] = "release", ["carrier"] = run.Carrier.Id, ["product"] = run.Product.Id, ["version"] = ReleaseFlowFixture.Version };
+        run.Add("work-order", carrier, supersedes: run.Carrier.Id);
+        run.AssertValid();
+        Assert.Equal("next", run.State("placed-work"));
+        Assert.Equal("planned", EstateStatus.WorkItems(run.Estate.Load()).Single(w => w.Key == "REL-1").Status);
+
+        // operator close accepts each placed work order's current result, as 0.9.2 records it; the step passes once both are closed.
+        OperatorCloseReadingTests.Close(run.Records, run.First);
+        Assert.Equal("next", run.State("placed-work"));
+        OperatorCloseReadingTests.Close(run.Records, run.Second);
+        run.AssertValid();
+        Assert.Equal(["REL-1 planned", "WORK-1 accepted", "WORK-2 accepted"], EstateStatus.WorkItems(run.Estate.Load()).Select(w => w.Key + " " + w.Status).ToArray());
+        Assert.Equal("done", run.State("placed-work"));
+        Assert.Equal("next", run.State("docs-before-freeze"));
+    }
+
+    [Fact]
+    public void ACarrierPlacedInItselfIsNeverAmongItsOwnPlacedWork()
+    {
+        using var run = new ReleaseFlowFixture();
+        JsonObject carrier = PolicyFixture.Body(run.Carrier);
+        carrier["placement"] = new JsonObject { ["kind"] = "release", ["carrier"] = run.Carrier.Id, ["product"] = run.Product.Id, ["version"] = ReleaseFlowFixture.Version };
+        RecordEnvelope placed = run.Add("work-order", carrier, supersedes: run.Carrier.Id);
+        run.Accept(run.First);
+        run.Accept(run.Second);
+        run.AssertValid();
+        Assert.Equal("done", run.State("placed-work"));
+
+        // Every predicate over the work placed in the carrier leaves the carrier out, whatever state it names.
+        EstateModel model = run.Estate.Load();
+        Assert.Equal(placed.Id, model.Latest(run.Carrier).Id);
+        JsonElement all = JsonSerializer.SerializeToElement(new { type = "work-order", fields = new Dictionary<string, string> { ["placement.carrier"] = run.Carrier.Id } });
+        Assert.Equal([run.First.Id, run.Second.Id], GoalPredicates.Matching(model, all).Select(r => r.Id).ToArray());
+        JsonElement planned = JsonSerializer.SerializeToElement(new { type = "work-order", fields = new Dictionary<string, string> { ["placement.carrier"] = run.Carrier.Id }, state = "planned", max = 0 });
+        Assert.Equal("met", GoalPredicates.EvaluatePredicate(model, planned).Value);
+    }
+
     [Fact]
     public void APriorVersionTokenStopsDocsBeforeFreezeWithItsLocationUntilAPassingCheckSupersedesIt()
     {

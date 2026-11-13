@@ -379,6 +379,23 @@ public class CommunicationAttentionTests
     }
 
     [Fact]
+    public void AWorkOrderStatusReadsAcceptedOnceOperatorCloseAcceptsItsCurrentResultClosesItsEarlierWork()
+    {
+        // A result of another assignment of the work order is its current result. The earlier result's failed check stays open while
+        // status reads the work order accepted only at an earlier revision.
+        var f = new Fixture();
+        RecordResponse result = f.Result("old");
+        RecordResponse other = f.Add("assignment", "other-assignment", "{}", f.Api.Record("old-order"));
+        f.Add("result", "other-result", ResultBody("passed"), f.Add("attempt", "other-attempt", "{}", other));
+        f.OrderStates.Add(new { id = "old-order", status = "accepted (earlier revision)" });
+        Assert.Equal(result.Id, Assert.Single(f.Attention()).Record);
+
+        // operator close accepts the current result, and status reads the work order accepted (FIX-128): its earlier work is closed.
+        f.OrderStates[0] = new { id = "old-order", status = "accepted" };
+        Assert.Empty(f.Attention());
+    }
+
+    [Fact]
     public void ALaterResultIsSufficientWhenTheAcceptanceSourceIsUnavailable()
     {
         var f = new Fixture();
