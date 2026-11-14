@@ -4,42 +4,26 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.9.2 — current published release
+## 0.9.3 — current published release
 
-0.9.2 follows 0.9.1. A goal can run a declared flow: each step's position, hand-offs and reviews come from the
-records, each step is routed to its role one step per command, and a run stops where a person holds the role, a
-reserved step showing its exact command only when it is next. The software pack declares the release and estate
-upgrade flows, and the build tooling assembles, freezes and indexes a release's documentation set. An estate
-signs its history: checkpoints witness every record it holds, so a removed, altered or backdated record no longer
-passes unnoticed, and closings bound what a revoked device, a replaced key or a narrowed grant still accounts for.
-Clients follow one event journal from where they left off instead of polling, and an agent is told when what it
-reads changes. An admitted agent on another machine works an estate over MCP's Streamable HTTP transport, each
-call judged as its API operation for that device, and keyword search selects the decisions and documents an
-agent's brief needs, with every selected source pinned and nothing it may not read revealed. An upgrade replaces
-an older background runtime, security reports hold a release until they are triaged, an acceptance rests only on
-reviews that passed, and a stopped operator action can be finished. Every distributable is built on .NET SDK
-10.0.404 and embeds .NET and ASP.NET Core runtime 10.0.15, and 0.9.2 hardens how admissions and an estate's root
-of trust are read, which records give roles and scopes, policy authority after an operator role is removed,
-per-user state on Linux, held-term and blocked-term matching and request authentication, as the release notes'
-Security section describes. A flow's exchange steps are shown stopped, not executed, and Community moves a run
-one step per command. Everything 0.9.1 brought remains, with Remote still a developer build you make from source.
-Its [release notes](docs/releases/0.9.2/release-notes.md) and [documentation set](docs/releases/0.9.2/README.md)
-describe what shipped and its limits.
-
-## 0.9.3 — planned
-
-0.9.3 corrects what the estates running 0.9.2 reported and readies the release flow for the next release.
-Export and restore keep each file's executable mode, a timestamp in the wrong form is refused with the form
-required, `doctor --json` returns one documented result, a failed document check names what failed, and a goal
-is recorded impossible only after its evaluator's verdict. Every operator action announces and counts its
-presence prompts before each one, release steps make no throwaway signature with a presence key, and an estate
-with many key rotations or closings is checked in near-linear time. A change merges through a repository's
-required merge queue with its outcome recorded, an operator action's push and merge trail reaches the estate,
-and a work order whose current result is accepted reads as accepted, so a release can run on its declared
-flow. A command names an estate's first authority where its manifest needs one, a guide tells an expired,
-refused or timed-out presence prompt apart during enrollment and reconciles it safely, and an estate's root can
-hold its owner's agent instruction files. Design work prepares the releases after it: measured agent work,
-smaller milestones after M3, an opt-in estate advisor and one presence check per command.
+0.9.3 follows 0.9.2 and corrects what the estates running 0.9.2 reported. Export and restore keep each file's
+executable mode, a timestamp in the wrong form is refused with the form required, `doctor --json` returns one
+documented result, a failed document check names what failed, a goal is recorded impossible only after its
+evaluator's verdict, and work a planner proposes for a goal waits for its sponsor. Every operator action
+announces and counts its presence prompts before each one, release steps sign no throwaway signature with a
+presence key, and an estate with many key rotations or closings is checked in near-linear time. A change merges
+through a repository's required merge queue with its outcome recorded, an operator action's push and merge trail
+reaches the estate, and a work order whose current result is accepted reads as accepted, which readies the release
+flow for the next release. A command names an estate's first authority where its manifest needs one, a guide
+tells an expired, refused or timed-out presence prompt apart during enrollment and reconciles it safely, an
+estate's root can hold its owner's agent instruction files, and the large-artifact guide lists the three
+inventories of a cold recovery. 0.9.3 also corrects how keys in forms Vericairn does not make are read, which
+could stop the estate check and status, as the release notes' Security section describes; every distributable is
+still built on .NET SDK 10.0.404 and embeds the 10.0.15 runtimes. Accepted designs prepare the releases after it:
+measured agent work, the later milestones realigned into smaller, outcome-based ones, an opt-in estate advisor and
+one presence check per command. Everything 0.9.2 brought remains, with Remote still a developer build you make
+from source. Its [release notes](docs/releases/0.9.3/release-notes.md) and
+[documentation set](docs/releases/0.9.3/README.md) describe what shipped and its limits.
 
 ## 0.9.4 — planned
 
@@ -75,12 +59,29 @@ server for your estates, with every hosted estate keeping a replica you hold.
 
 ## 0.10.x — planned
 
-The first creator domains arrive in this order: websites and web applications; books, book series and
-world building; courses and video, single and in series; and crowdfunding. Each first version takes the
-work from drafting through templates and review to a publishable package with its metadata, such as an
-EPUB and print-ready PDF or a deployable site. You publish on the platform, and Vericairn records the
-publication; direct platform integrations follow. These domains ship within the Community distributable
-and move to separate packages at the packages milestone below.
+The 0.10.x series begins by completing continuous operation: an operation's work keeps moving through its people
+and agents at the times its steps declare, from an always-on server. A reserved act waits for a person unless a
+bounded, recorded grant lets a named agent carry it, in the estate's way of working: people only, people and
+agents, or agents only. Some acts are never delegated, such as changing who may act or making a legal commitment,
+and always wait for a person. The creator domains follow, one release at a time: websites and web applications
+with the software foundries and work kept outside git; music production and publishing; creator merchandise and
+comics; then books, book series and world building. Each takes the work from drafting through templates and
+review to a publishable package with its metadata; you publish on the platform, and Vericairn records the
+publication. These domains ship within the Community distributable and move to separate packages at the next
+milestone.
+
+## Later milestone: packages, the registry, Knowledge and websites — planned
+
+Extensions install, update and remove as packages, with a registry carrying their trust, and the creator domains
+move from the Community distributable into packages. Knowledge holds an estate's articles, terminology and guides,
+and Vericairn's websites, including this roadmap, the catalog and the documentation, are generated from the same
+records.
+
+## Later milestone: teams and organizations — planned
+
+An organization runs Vericairn for its members on a shared server it operates: many estates, each in its own
+account and process, with administration, quotas, monitoring, archiving and upgrades without downtime. Teams work
+in the practices they choose, such as Kanban, Scrum or Stage-Gate, on the same records. All of it is Community.
 
 ## Editions — planned direction
 
@@ -96,22 +97,17 @@ software you can run yourself at the edition that sells it. You will never be lo
 4. Paid rights are verified offline, without contacting Vericairn, and outlive its servers.
 5. Ending a subscription ends only Vericairn's operation of a service, never self-hosting of covered releases or any Community right.
 
-## Later milestones: hosted storage — planned
+## Later milestone: paid editions — planned
 
-Today an estate's records live in a git repository beside your work, or in a store on one machine. Four
-hosted options are planned, each built and qualified on its own before it is offered: a runtime on one of
-your own machines, reached over your network; a runtime hosted with your Vericairn account; a shared
-runtime an organization operates for its members; and managed hosting from a provider you choose.
-
-## Later milestone: coordination, packages and websites — planned
-
-Coordination and scheduling across work, extension packages and foundations for a package registry.
-Readers for Knowledge and the catalog, and websites generated from the same records, including this
-roadmap.
+Once offers are decided, Standard brings coordination of one person's work across machines and Pro the same
+across a team, with sign-in through an organization's directory, and support by agents comes with both. Hosting
+of an estate's runtime, by Vericairn or a provider you choose, is offered to every edition. Each is software you
+can run yourself at the edition that sells it, under the five rules of the Editions section, and no Community
+feature moves behind payment.
 
 ## Later milestone: specialist workflows — planned
 
-Unity projects and games follow, with the further foundries, adapters and providers of the creator
-domains beyond their first versions. Vericairn's catalog plans more
-than 3,000 entries across creative and technical work and 27 industries, listed in the
-[README](README.md#planned); each further domain is placed on this roadmap when its milestone is chosen.
+Courses and video, crowdfunding, Unity projects and games follow, with the further foundries, adapters and
+providers of the creator domains beyond their first versions. Vericairn's catalog plans more than 3,000 entries
+across creative and technical work and 27 industries, listed in the [README](README.md#planned); each further
+domain is placed on this roadmap when it is chosen.
