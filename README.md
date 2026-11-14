@@ -6,8 +6,8 @@ and history kept as records you own: by default in a git repository beside your 
 machine, with hosted options planned. People and agents do the work, and nothing is released until you
 accept it. Software is its first domain, and the one that ships today.
 
-**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.2, from
-November 12, 2026.
+**Status:** pre-1.0, Community edition (Apache-2.0). The current published release is 0.9.3, from
+November 14, 2026.
 [Latest release](https://github.com/Vericairn/vericairn/releases/latest) ·
 [NuGet](https://www.nuget.org/packages/dotnet-vc) · [Install](docs/install.md) ·
 [Limitations](docs/limitations-and-platforms.md) ·
@@ -112,8 +112,9 @@ disclosures and security notices.
 - A published community build guide for every planned catalog entry and a way to request the implementations you
   need most. 0.9.0 prepares the guides and the proposed catalog repository locally; publishing them and opening
   requests remain the operator's separate decisions ([community build guides](docs/community-build-guides.md)).
-- The first creator domains in a 0.10.x series: websites and web applications, then books, book series and
-  world building, courses and video, and crowdfunding.
+- The first creator domains in a 0.10.x series, after continuous operation: websites and web applications, music
+  production and publishing, creator merchandise and comics, then books, book series and world building; courses,
+  video and crowdfunding follow at a later milestone.
 - Paid editions on the same software, with Community staying free: Standard for one person and Pro for teams
   and organizations, with no offers or prices yet. Every paid service is planned as software you can run
   yourself at the edition that sells it, no access to your estate will require a Vericairn account, and you
@@ -152,7 +153,7 @@ release and pins the one it runs on.
 
 ## What is here
 
-The following capabilities are in 0.9.2.
+The following capabilities are in 0.9.3.
 
 - `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in

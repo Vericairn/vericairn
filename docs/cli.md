@@ -917,7 +917,8 @@ id>` writes it: refused unless `--by` is the root operator the first charter nam
 it. It writes only `firstAuthority`, through a file beside the manifest moved into place, and prints `changed:` with each error that
 remains about the root of trust and each error the estate reports on the admission named. Each remaining
 `signature.self-admission` is another self-admission still in the copy: remove its record file yourself and commit it with
-`estate/manifest.json`; the command removes nothing.
+`estate/manifest.json`; the command removes nothing. A forged self-admission, whose signature does not verify, reads
+`signature.invalid` and is not listed among them; `vericairn estate check` reports it, and you remove it the same way.
 
 It names only an admission by the root operator of one of the root operator's own devices whose signature by that device
 verifies. A self-admission whose signature does not verify, which anyone able to add a file can write, a device of an agent or

@@ -91,7 +91,9 @@ any other record); where the first authority already works, because the manifest
 that reads unsettled; where history checkpoints witness a candidate first while it is read as the first authority; for a missing or
 wrong `by`, a missing or stale `expectPlan`; and in a read-only copy. A revoked first device stays nameable. Nothing is removed:
 after a write, `remaining` lists the errors about the root of trust (`manifest.first-authority`, `history.root-ambiguous`,
-`history.manifest-root` and each other self-admission's `signature.self-admission`) and every error on the admission named.
+`history.manifest-root` and `signature.self-admission`, which each other self-admission whose signature verifies reads) and every
+error on the admission named. Another self-admission whose signature does not verify, a forged one, reads `signature.invalid`
+instead, so it is not in `remaining`; `vericairn estate check` reports it, and the operator removes it as any other.
 
 `Vericairn.Records` adds `EstateManifest.WithFirstAuthority(manifestBytes, admission)`, the manifest's bytes in canonical pretty
 form with `firstAuthority` set, whatever it named before; `NamingFirstAuthority` is unchanged. How the root of trust is judged is

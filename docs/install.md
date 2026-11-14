@@ -4,7 +4,7 @@ The 0.9.3 workflow builds self-contained distributables per platform: no separat
 
 The archives install `vericairn`. Introduced in published 0.7.1, the NuGet tool installs `dotnet-vc`, canonically invoked as `dotnet vc`; the two command lines take the same estate arguments. Workbench is installed by direct download only (section 3). The SDK is a separate NuGet package (section 9). Remote, the phone companion, has no distributable: it is a developer build made from source, as [Remote](remote.md#building-from-source) describes.
 
-Use the 0.9.3 archives after the operator accepts and publishes the release. NuGet installation goes live when that publication triggers the Trusted Publishing workflow and it succeeds; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
+0.9.3 was published on November 14, 2026; use its archives from the release page. Its Trusted Publishing workflow published all eight NuGet packages at 0.9.3; package availability follows that workflow, not installation of a local build. The `0.0.1-reserved` packages reserve names and are not the product. Withdrawn candidates 0.5.0, 0.5.1, 0.6.0, 0.7.0 and 0.8.1 are not installation targets.
 
 0.9.3 is the release after 0.9.2. It corrects what the estates running 0.9.2 reported and readies the release
 flow for the next release. Export and restore keep each file's executable mode (FIX-112), a timestamp in the
@@ -588,10 +588,10 @@ Its embedded `.mcp/server.json` describes `io.github.Vericairn/vericairn` for th
 [official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
 package publication; from 0.9.2 the registry listing follows the release's publication through
 the `mcp-registry` workflow ([MCP Registry publication](operator-actions.md#mcp-registry-publication)), which listed
-0.9.2 when it was published. For each later release these are publication targets, not evidence that its listing is
-live.
+0.9.2 and 0.9.3 when each was published. For each later release these are publication targets, not evidence that its
+listing is live.
 
-After 0.9.3 is published, a client with the .NET 10 SDK can start the server without
+With 0.9.3 published, a client with the .NET 10 SDK can start the server without
 installing a global tool:
 
 ```sh
