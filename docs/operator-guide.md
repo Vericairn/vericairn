@@ -1177,7 +1177,7 @@ Your `AGENTS.md` at the root, for example:
 # Working in this estate
 
 These are the owner's instructions for agents working in this estate. Read them first, then read
-[the generated orientation](docs/vericairn-orientation/AGENTS.md), which says how the estate works
+the generated orientation in `docs/vericairn-orientation/AGENTS.md`, which says how the estate works
 and how to reach it. Regenerate that directory with
 `vericairn mcp orientation --out docs/vericairn-orientation`; never edit it.
 
