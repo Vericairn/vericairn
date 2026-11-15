@@ -378,6 +378,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> GoalAcceptAsync(string goal, GoalAcceptRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(GoalAccept), async token => (await PostAsync<GoalAcceptRequest, WriteOutcome>(GoalPath(goal, "accept"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalAccept)), cancellationToken);
 
+    /// <summary>The cancellable GoalClose operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> GoalCloseAsync(string goal, GoalCloseRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(GoalClose), async token => (await PostAsync<GoalCloseRequest, WriteOutcome>(GoalPath(goal, "close"), request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(GoalClose)), cancellationToken);
+
     /// <summary>The cancellable Providers operation, with a deadline covering the complete response.</summary>
     public Task<IReadOnlyList<ProviderRow>> ProvidersAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<IReadOnlyList<ProviderRow>>(nameof(Providers), async token => (await GetAsync<List<ProviderRow>>("/v1/providers", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Providers)), cancellationToken);

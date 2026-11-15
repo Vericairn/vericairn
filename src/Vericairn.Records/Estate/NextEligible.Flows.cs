@@ -187,7 +187,7 @@ public static partial class NextEligible
     /// </summary>
     private static Route RequestRoute(EstateModel model, RecordEnvelope goal, string status, FlowPosition.StepInstance instance, FlowStops.RunStop? stop)
     {
-        IReadOnlyList<string> fence = status == "active" ? [] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+        IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
         var source = new Routing.Source(null, "the operator, who holds every reserved act in this build");
         string act = instance.Step.Reserved!;
         string? principal = stop?.Principal ?? FlowStops.RequestTo(model, goal, instance.Step);
@@ -237,7 +237,7 @@ public static partial class NextEligible
         string? sponsor = Routing.Asked(model, goal, null, machine.Now);
         IReadOnlyList<string> trigger = model.Chain(attention.Trigger);
         List<RecordEnvelope> asks = Routing.AsksOf(model, goal).Where(a => model.Latest(a).Subject is RecordReference subject && trigger.Contains(subject.Id)).ToList();
-        IReadOnlyList<string> fence = status == "active" ? [] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+        IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
         var source = new Routing.Source(null, "who decides for the goal, its sponsor");
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
         if (waiting is not null)

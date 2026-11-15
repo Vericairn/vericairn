@@ -313,6 +313,10 @@ public partial interface IEstateApi
     Task<WriteOutcome> GoalAcceptAsync(string goal, GoalAcceptRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(GoalAccept), () => GoalAccept(goal, request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="GoalClose"/>; a stopped observation does not undo an effect.</summary>
+    Task<WriteOutcome> GoalCloseAsync(string goal, GoalCloseRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(GoalClose), () => GoalClose(goal, request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Providers"/>; a stopped observation does not undo an effect.</summary>
     Task<IReadOnlyList<ProviderRow>> ProvidersAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Providers), () => Providers(), false, this as IClientOperationLifetime, cancellationToken);

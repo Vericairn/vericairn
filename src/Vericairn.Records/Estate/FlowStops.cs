@@ -121,7 +121,7 @@ public static class FlowStops
         bool carried = false;
         foreach (RecordEnvelope request in Requests(model, position.Goal, step).Where(r => !OperatorRequests.Closures(model, r).Any()))
         {
-            (string state, string reason) = status == "achieved" || GoalRules.Ended.IndexOf(status) >= 0 ? ("withdrawn", $"its goal is {status}")
+            (string state, string reason) = status is "achieved" or "closed" || GoalRules.Ended.IndexOf(status) >= 0 ? ("withdrawn", $"its goal is {status}")
                 : position.Flow is null ? ("withdrawn", $"the run's {position.Unavailable}")
                 : instance is null ? ("withdrawn", $"step {step} is not part of the run")
                 : instance.State == "done" ? ("settled", $"step {step} is done: {instance.Reasons[0]}")
@@ -411,16 +411,19 @@ public static class FlowStops
         return records.Count == 0 ? DateTimeOffset.UnixEpoch : records.Max(r => r.AtTime);
     }
 
-    /// <summary>The runs status shows: every current goal that is a run and is active, paused, budget-limited or blocked, oldest first, with its position.</summary>
+    /// <summary>
+    /// The runs status shows: every current goal that is a run and is active, paused, budget-limited or blocked, and from 0.9.4 one whose
+    /// run was closed and whose goal is not yet accepted or ended, oldest first, with its position.
+    /// </summary>
     public static IReadOnlyList<FlowPosition.Position> Runs(EstateModel model, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return Active(model).Select(g => FlowPosition.Derive(model, g, at)).ToList();
+        return Active(model, closed: true).Select(g => FlowPosition.Derive(model, g, at)).ToList();
     }
 
-    /// <summary>Every current goal that is a run and is active, paused, budget-limited or blocked, the oldest run first by its first revision.</summary>
-    private static List<RecordEnvelope> Active(EstateModel model) =>
-        model.Current("goal").Where(FlowRuns.IsRun).Where(g => GoalRules.Status(model, g) is "active" or "paused" or "budget-limited" or "blocked")
+    /// <summary>Every current goal that is a run and is active, paused, budget-limited or blocked, with those whose run was closed when asked, the oldest run first by its first revision.</summary>
+    private static List<RecordEnvelope> Active(EstateModel model, bool closed = false) =>
+        model.Current("goal").Where(FlowRuns.IsRun).Where(g => GoalRules.Status(model, g) is var status && (status is "active" or "paused" or "budget-limited" or "blocked" || (closed && status == "closed")))
             .OrderBy(g => model.ById[model.Chain(g)[0]].At, StringComparer.Ordinal).ThenBy(g => model.Chain(g)[0], StringComparer.Ordinal).ToList();
 
     /// <summary>
@@ -493,7 +496,7 @@ public static class FlowStops
         {
             List<FlowPosition.StepInstance> running = run.Running.ToList();
             TemplatePin? pin = run.Flow?.Pin ?? FlowRuns.Pin(run.Goal);
-            return (JsonNode)new JsonObject
+            var shown = new JsonObject
             {
                 ["goal"] = new JsonObject { ["id"] = run.Goal.Id, ["hash"] = run.Goal.ComputedHash, ["title"] = EstateModel.BodyString(run.Goal, "title"), ["status"] = GoalRules.Status(model, run.Goal) },
                 ["asOf"] = RecordParser.FormatTimestamp(run.At),
@@ -506,6 +509,12 @@ public static class FlowStops
                 ["next"] = new JsonArray(run.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray()),
                 ["stops"] = RenderJson(model, run.Stops, commands: false),
             };
+            if (FlowPosition.ClosingJson(model, run) is JsonObject closed)
+            {
+                shown["closed"] = closed;
+            }
+
+            return (JsonNode)shown;
         }).ToArray());
     }
 
@@ -532,8 +541,8 @@ public static class FlowStops
             }
 
             text.Append("flow ").Append(run.Flow.Pin.Id).Append(' ').Append(run.Flow.Pin.Version).Append(", ").Append(running.Count(s => s.State == "done").ToString(CultureInfo.InvariantCulture))
-                .Append(" of ").Append(running.Count.ToString(CultureInfo.InvariantCulture)).Append(running.Count == 1 ? " step" : " steps").Append(" done; next: ")
-                .Append(next.Count == 0 ? "none" : string.Join(", ", next)).Append('\n');
+                .Append(" of ").Append(running.Count.ToString(CultureInfo.InvariantCulture)).Append(running.Count == 1 ? " step" : " steps").Append(" done")
+                .Append(run.Closing is null ? "; next: " + (next.Count == 0 ? "none" : string.Join(", ", next)) : FlowPosition.Closed(run) + "; unsettled: " + FlowPosition.UnsettledText(run)).Append('\n');
             AppendText(text, model, run.Stops, "    ");
         }
 

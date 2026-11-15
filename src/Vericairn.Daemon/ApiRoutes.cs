@@ -146,6 +146,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals/{{id}}/stop", (string id, GoalActionRequest request) => Outcome(service.GoalStop(id, request)));
         app.MapPost($"{v}/goals/{{id}}/evaluate", (string id, GoalEvaluateRequest request) => Outcome(service.GoalEvaluate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/accept", (string id, GoalAcceptRequest request) => Outcome(service.GoalAccept(id, request)));
+        app.MapPost($"{v}/goals/{{id}}/close", (string id, GoalCloseRequest request) => Outcome(service.GoalClose(id, request)));
         app.MapGet($"{v}/providers", () => Results.Json(service.Providers(), ProtocolJson.Options));
         app.MapGet($"{v}/launchers", () => Results.Json(service.Launchers(), ProtocolJson.Options));
         app.MapPost($"{v}/harness-qualifications", (HarnessQualifyRequest request) => Outcome(service.QualifyHarness(request)));

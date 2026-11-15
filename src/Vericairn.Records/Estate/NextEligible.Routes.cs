@@ -169,7 +169,7 @@ public static partial class NextEligible
         RecordEnvelope? latestAsk = asks.Count == 0 ? null : asks[^1];
         RecordEnvelope? waiting = asks.LastOrDefault(a => Asks.IsWaiting(Asks.State(model, a).State));
         RecordEnvelope? holder = assignments.Count == 0 ? null : assignments[^1];
-        IReadOnlyList<string> fence = status == "active" ? [] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+        IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
 
         // A run of the step in flight holds it, whichever of its assignments the run carries.
         if (runs.FirstOrDefault(r => r.Assignment is not null && assignments.Any(a => model.Chain(a).Contains(r.Assignment))) is AgentRuns.Run running)

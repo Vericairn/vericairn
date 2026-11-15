@@ -20,7 +20,8 @@ namespace Vericairn.Records.Estate;
 /// derives the same position. A step is done when its done predicates hold and each declared output exists at an exact hash, reviewed
 /// where declared; stale when an input it used changed after use; blocked, with the failing predicate, while what it waits on is not
 /// done or its preconditions fail; in review while its output awaits review; stopped while a person holds its role, it is a reserved
-/// act, or required attention arises; next otherwise; and off when the run's configuration leaves it out. Retries go by outcome
+/// act, or required attention arises; next otherwise; and off when the run's configuration leaves it out. From 0.9.4 (FIX-143) a step
+/// of a run its goal's sponsor closed that is neither done nor off is unsettled, with the closer's reason, and never done. Retries go by outcome
 /// (§ 7): an uncertain effect stops the step until it is reconciled by reading; a failed run backs off within the step's attempts;
 /// findings start another attempt within them; a failed step takes its failure route; and a spent retry budget stops it for the
 /// sponsor, only what depends on it waiting. Every attempt stays recorded and shown. Reading grants nothing.
@@ -28,7 +29,7 @@ namespace Vericairn.Records.Estate;
 public static partial class FlowPosition
 {
     /// <summary>The states of a step of a run, in the state language's flow-step vocabulary.</summary>
-    public static readonly ImmutableArray<string> States = ["done", "next", "blocked", "stale", "in-review", "stopped", "off"];
+    public static readonly ImmutableArray<string> States = ["done", "next", "blocked", "stale", "in-review", "stopped", "off", "unsettled"];
 
     /// <summary>
     /// The states of an item a step produces or collects (design/flow.md § 5): satisfied; missing; unproven (its provenance does not
@@ -207,6 +208,15 @@ public static partial class FlowPosition
         /// <summary>True when every step of the run is done or off: the run is complete, and the goal's evaluation and acceptance remain.</summary>
         public bool Complete => Flow is not null && Steps.Count > 0 && Steps.All(s => s.State is "done" or "off");
 
+        /// <summary>
+        /// The goal-status that closed the run (from 0.9.4, FIX-143): who decides for its goal, a person, closed it with a reason for each
+        /// step it had not settled, and every step neither done nor off is unsettled; null while the run is not closed.
+        /// </summary>
+        public RecordEnvelope? Closing { get; init; }
+
+        /// <summary>The step instances a closed run leaves unsettled; empty for a run that is not closed.</summary>
+        public IEnumerable<StepInstance> Unsettled => Steps.Where(s => s.State == "unsettled");
+
         /// <summary>The instances that are part of the run.</summary>
         public IEnumerable<StepInstance> Running => Steps.Where(s => s.State != "off");
 
@@ -290,7 +300,11 @@ public static partial class FlowPosition
             deriving.All();
         }
 
-        var position = new Position(current, flow, null, configuration, work, deriving.Instances) { RunAttention = deriving.RunAttention(), At = at };
+        // From 0.9.4 (FIX-143): a closed run's steps that are neither done nor off are unsettled, with the closer's reason, and the run
+        // raises no attention and has no stop; nothing that comes after the closing makes an unsettled step done but its own records.
+        RecordEnvelope? closing = GoalRules.Closing(model, current);
+        IReadOnlyList<StepInstance> steps = closing is null ? deriving.Instances : Unsettle(deriving.Instances, closing);
+        var position = new Position(current, flow, null, configuration, work, steps) { RunAttention = closing is null ? deriving.RunAttention() : [], At = at, Closing = closing };
         position = position with { Stops = FlowStops.Of(model, position, at) };
         if (!deliver)
         {
@@ -299,6 +313,67 @@ public static partial class FlowPosition
 
         (IReadOnlyList<FlowStops.RunStop> stops, IReadOnlyDictionary<string, int> reaching) = FlowStops.Deliver(model, position, at);
         return position with { Stops = stops, Reaching = reaching };
+    }
+
+    /// <summary>
+    /// A closed run's steps: each that is neither done nor off becomes unsettled, its first reason the closing's own reason for it, its
+    /// stop, command, attention and reviews gone, since nothing of a closed run waits on anyone; its other reasons stay as derived.
+    /// </summary>
+    private static List<StepInstance> Unsettle(IReadOnlyList<StepInstance> instances, RecordEnvelope closing)
+    {
+        IReadOnlyList<RunClosings.Unsettled> named = RunClosings.Of(closing);
+        return instances.Select(instance =>
+        {
+            if (instance.State is "done" or "off")
+            {
+                return instance;
+            }
+
+            string reason = named.FirstOrDefault(n => n.Key == instance.Step.Key && n.Instance == instance.Instance) is RunClosings.Unsettled own
+                ? $"unsettled: its run was closed by goal-status {closing.Id} at {Time(closing.AtTime)} before this step was done: {own.Reason}"
+                : $"unsettled: its run was closed by goal-status {closing.Id} at {Time(closing.AtTime)}, which names no reason for this step, done or off when the run was closed";
+            return instance with { State = "unsettled", Reasons = [reason, .. instance.Reasons], Stop = null, Command = null, Attention = null, Reviews = [], Rerun = false };
+        }).ToList();
+    }
+
+    /// <summary>The closing of a closed run as JSON: its record, who closed it and when, its note, and each step it names with its reason and its state now.</summary>
+    public static JsonObject? ClosingJson(EstateModel model, Position position)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(position);
+        if (position.Closing is not RecordEnvelope closing)
+        {
+            return null;
+        }
+
+        return new JsonObject
+        {
+            ["record"] = new JsonObject { ["type"] = closing.Type, ["id"] = closing.Id, ["hash"] = closing.ComputedHash },
+            ["by"] = closing.By,
+            ["byName"] = Routing.NameOf(model, closing.By),
+            ["at"] = closing.At,
+            ["note"] = EstateModel.BodyString(closing, "note"),
+            ["unsettled"] = new JsonArray(RunClosings.Of(closing).Select(u => (JsonNode)new JsonObject
+            {
+                ["key"] = u.Key,
+                ["instance"] = u.Instance,
+                ["reason"] = u.Reason,
+                ["state"] = position.Find(u.Ref)?.State,
+            }).ToArray()),
+        };
+    }
+
+    /// <summary>The steps a closed run leaves unsettled, each with the closing's reason for it, on one line; empty for a run that is not closed.</summary>
+    public static string UnsettledText(Position position)
+    {
+        ArgumentNullException.ThrowIfNull(position);
+        if (position.Closing is not RecordEnvelope closing)
+        {
+            return string.Empty;
+        }
+
+        IReadOnlyList<RunClosings.Unsettled> named = RunClosings.Of(closing);
+        return string.Join("; ", position.Unsettled.Select(s => $"{s.Name} ({named.FirstOrDefault(n => n.Key == s.Step.Key && n.Instance == s.Instance)?.Reason ?? "no reason named"})"));
     }
 
     /// <summary>A return of the run to an earlier step by a failure route: the step, its instance (null for every one), when, and why.</summary>
@@ -1903,6 +1978,18 @@ public static partial class FlowPosition
 
     private static string Time(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
+    /// <summary>A closed run's words after its count of steps done: who closed it, when, and how many steps it left unsettled; null for a run that is not closed.</summary>
+    internal static string? Closed(Position position)
+    {
+        if (position.Closing is not RecordEnvelope closing)
+        {
+            return null;
+        }
+
+        int unsettled = position.Unsettled.Count();
+        return $"; the run was closed by goal-status {closing.Id} at {Time(closing.AtTime)}, {unsettled.ToString(CultureInfo.InvariantCulture)} unsettled step{(unsettled == 1 ? string.Empty : "s")}, never done";
+    }
+
     /// <summary>A value a command takes unquoted: letters, digits and . _ : / @ + = , -, not starting with a dash, so a bound value is never an option or a shell word.</summary>
     [GeneratedRegex(@"^[A-Za-z0-9._:/@+=,][A-Za-z0-9._:/@+=,\-]{0,499}\z")]
     private static partial Regex CommandValue();
@@ -1926,7 +2013,12 @@ public static partial class FlowPosition
         List<StepInstance> running = position.Running.ToList();
         text.Append("Flow: ").Append(position.Flow.Pin.Id).Append(' ').Append(position.Flow.Pin.Version).Append(" (").Append(position.Flow.Pin.Hash).Append("), ")
             .Append(running.Count(s => s.State == "done").ToString(CultureInfo.InvariantCulture)).Append(" of ").Append(running.Count.ToString(CultureInfo.InvariantCulture))
-            .Append(running.Count == 1 ? " step" : " steps").Append(" done").Append(position.Complete ? "; the run is complete, and the goal's evaluation and acceptance remain" : string.Empty).Append('\n');
+            .Append(running.Count == 1 ? " step" : " steps").Append(" done").Append(Closed(position) ?? (position.Complete ? "; the run is complete, and the goal's evaluation and acceptance remain" : string.Empty)).Append('\n');
+        if (position.Closing is RecordEnvelope closing)
+        {
+            text.Append("  Closed by ").Append(Routing.NameOf(model, closing.By)).Append(" [principal ").Append(closing.By).Append("] at ").Append(closing.At).Append(": ")
+                .Append(EstateModel.BodyString(closing, "note")).Append('\n');
+        }
         if (position.Configuration!.Until is string until)
         {
             text.Append("  Ends at: ").Append(until).Append('\n');
@@ -2012,6 +2104,11 @@ public static partial class FlowPosition
             ["record"] = v.Record is null ? null : new JsonObject { ["type"] = v.Record.Type, ["id"] = v.Record.Id, ["hash"] = v.Record.ComputedHash },
         }).ToArray());
         json["complete"] = position.Complete;
+        if (ClosingJson(model, position) is JsonObject closed)
+        {
+            json["closed"] = closed;
+        }
+
         json["attention"] = new JsonArray(position.RunAttention.Select(a => (JsonNode)AttentionJson(a)).ToArray());
         json["next"] = new JsonArray(position.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray());
         json["stops"] = FlowStops.RenderJson(model, position.Stops, commands);

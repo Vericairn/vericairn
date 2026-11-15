@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.CommandLine;
 using System.Text.Json;
 using Json = System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -381,9 +382,67 @@ internal sealed class GoalOperations(CommandContext context)
         return context.WithApi(root, api => context.ReportOutcome(api.GoalEvaluate(goal, new GoalEvaluateRequest(by, summary, list)), json));
     }
 
-    /// <summary>Accepts a goal at its current revision, relying on its current evaluation.</summary>
-    public int GoalAccept(string root, string goal, string by, string statement, bool json) =>
-        context.WithApi(root, api => context.ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
+    /// <summary>Accepts a goal at its current revision, relying on its current evaluation; with reasons, it closes the goal's run as well.</summary>
+    public int GoalAccept(string root, string goal, string by, string statement, string? reason, string[] stepReasons, bool json)
+    {
+        if (!TryStepReasons(stepReasons, out List<GoalStepReason> steps, out string? problem))
+        {
+            return context.Fail(problem!);
+        }
+
+        return context.WithApi(root, api => context.ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)
+        {
+            Reason = reason, StepReasons = steps.Count == 0 ? null : steps,
+        }), json));
+    }
+
+    /// <summary>Closes a goal's run with a reason for each unsettled step: one for all, or one for each.</summary>
+    public int GoalClose(string root, string goal, string by, string? reason, string[] stepReasons, bool json)
+    {
+        if (!TryStepReasons(stepReasons, out List<GoalStepReason> steps, out string? problem))
+        {
+            return context.Fail(problem!);
+        }
+
+        if (reason is null && steps.Count == 0)
+        {
+            return context.Fail("A run is closed with a reason: --reason for every unsettled step, or --step-reason <step>=<reason> for each.");
+        }
+
+        return context.WithApi(root, api => context.ReportOutcome(api.GoalClose(goal, new GoalCloseRequest(by, reason, steps.Count == 0 ? null : steps)), json));
+    }
+
+    /// <summary>The --reason option of goal close and goal accept.</summary>
+    internal static Option<string?> ReasonOption() => new("--reason")
+    {
+        Description = "From 0.9.4: closes the goal's run, with this reason for every step it has not settled that --step-reason gives none.",
+    };
+
+    /// <summary>The repeatable --step-reason option of goal close and goal accept.</summary>
+    internal static Option<string[]> StepReasonOption() => new("--step-reason")
+    {
+        Description = "From 0.9.4: the reason for one unsettled step, as <step>=<reason>, the step as its key or key[instance]; repeatable.",
+    };
+
+    /// <summary>The step reasons as given: each step=reason, the step a key or key[instance].</summary>
+    private static bool TryStepReasons(string[] given, out List<GoalStepReason> steps, out string? problem)
+    {
+        steps = [];
+        problem = null;
+        foreach (string entry in given)
+        {
+            int equals = entry.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0 || equals == entry.Length - 1)
+            {
+                problem = $"--step-reason is <step>=<reason>, such as announce-x=The X post is not made for this release: '{entry}'.";
+                return false;
+            }
+
+            steps.Add(new GoalStepReason(entry[..equals].Trim(), entry[(equals + 1)..].Trim()));
+        }
+
+        return true;
+    }
 
     /// <summary>The one goal neither achieved nor ended; with none or several, prints the goals and returns null.</summary>
     private string? OpenGoal(IEstateApi api, bool json)

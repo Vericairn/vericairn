@@ -211,6 +211,43 @@ public static class GoalRules
     }
 
     /// <summary>
+    /// True when the principal may close a goal's run with its unsettled steps (from 0.9.4, FIX-143; design/flow.md § 8): who decides for
+    /// the goal, its sponsor when a person and an operator when an agent or a service sponsors it, and only a person, so that no agent
+    /// ever closes a run, its own sponsored goal's included.
+    /// </summary>
+    public static bool MayClose(EstateModel model, RecordEnvelope goal, string? by, RecordEnvelope? record = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        return IsPerson(model, by) && AccepterOf(model, goal).Decides(model, by, record);
+    }
+
+    /// <summary>Why a principal may not close a goal's run (<see cref="MayClose"/>), in words; empty when it may.</summary>
+    public static IReadOnlyList<(string Code, string Message)> CloseRefusals(EstateModel model, RecordEnvelope goal, string? by, RecordEnvelope? record = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        if (MayClose(model, goal, by, record))
+        {
+            return [];
+        }
+
+        Accepter decider = AccepterOf(model, goal);
+        return !IsPerson(model, by)
+            ? [("goal-status.closer", "A run is closed by who decides for its goal, a person, as accepting and stopping are; an agent never closes a run.")]
+            : decider.Principal is not null
+                ? [("goal-status.closer", $"A run is closed only by its goal's sponsor, {Name(model, decider.Principal)} ({decider.Principal}).")]
+                : [("goal-status.closer", "A run whose goal an agent sponsors is closed only by an operator.")];
+    }
+
+    /// <summary>
+    /// The closing of a goal revision's run (from 0.9.4, FIX-143): its goal-status of closed that counts, before a record when one is
+    /// given; null when its run was not closed.
+    /// </summary>
+    public static RecordEnvelope? Closing(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null) =>
+        Statuses(model, goal, before).LastOrDefault(s => EstateModel.BodyString(s, "status") == "closed");
+
+    /// <summary>
     /// The work orders a goal is made of, each at its latest revision: those its plan gives, and those of which a revision names any
     /// revision of the goal among its inputs, which is how a planner proposes work for it. When the goal's plan says sponsor-approves,
     /// a work order that names it joins only once who decides for the goal approves it, and until then it is among the goal's
@@ -341,8 +378,9 @@ public static class GoalRules
 
     /// <summary>
     /// The goal-status records of the exact goal revision that count, oldest first; those before a record when one is given. A status
-    /// counts when its author may record it: an activation or a resumption no rule refuses, an end recorded by the sponsor, and any
-    /// other status. So an activation an agent wrote around the runtime activates nothing.
+    /// counts when its author may record it: an activation or a resumption no rule refuses, an end recorded by the sponsor, a closing
+    /// recorded by who decides for the goal, a person, and any other status. So an activation an agent wrote around the runtime
+    /// activates nothing, and an agent's closing closes nothing.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Statuses(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
@@ -352,6 +390,7 @@ public static class GoalRules
         {
             "active" => ActivationRefusals(model, goal, s.By, s.AtTime, s).Count == 0,
             "impossible" or "abandoned" => MayEnd(model, goal, s.By, s),
+            "closed" => MayClose(model, goal, s.By, s),
             _ => true,
         }));
     }
