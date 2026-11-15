@@ -328,6 +328,7 @@ public static partial class FlowPosition
         private readonly AgentRuns.Ledger ledger;
         private readonly List<AgentRuns.Run> runs;
         private IReadOnlyList<LivingDocuments.State>? documents;
+        private IReadOnlyDictionary<string, RecordEnvelope>? required;
 
         public Deriving(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowRuns.Configuration configuration, RecordEnvelope? work, DateTimeOffset at, IReadOnlyList<Return> branchReturns)
         {
@@ -492,7 +493,8 @@ public static partial class FlowPosition
 
             IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             DateTimeOffset? asked = step.Reserved is null ? null : AskedSince(step, item);
-            if (asked is DateTimeOffset askedAt && FlowStops.ClosesByRequest(step) && CommandOf(step, bindings, EarlyInputs(step, item)).Command is string now
+            string? asking = asked is not null && FlowStops.ClosesByRequest(step) ? CommandOf(step, bindings, EarlyInputs(step, item)).Command : null;
+            if (asked is DateTimeOffset askedAt && asking is string now
                 && FlowStops.ClosedRequest(model, goal, new FlowRuns.StepRef(step.Key, item), now, askedAt, at, done: true, closesOnly: true) is RecordEnvelope closed)
             {
                 // {request}: the request the operator closed as done for this ask, with the step's current command, after it was asked.
@@ -521,6 +523,12 @@ public static partial class FlowPosition
             Closing completion = Completion(step, item, assignments, reviews, result, done);
             (bool complete, List<Output> outputs, List<ItemState> items, RecordEnvelope? review, RecordEnvelope? findings, string? pending) =
                 (completion.Complete, completion.Outputs, completion.Items, completion.Review, completion.Findings, completion.Pending);
+
+            // From 0.9.4 (FIX-142): a step done at no time the records give, every done predicate a count of at most none, counts only once
+            // every step it waits on is done. Before then its predicates hold only because nothing is there yet to count, as the documents
+            // a publication makes due are not due before it, so the documentation pass after publication never reads done before it.
+            bool vacuous = complete && FlowContract.Untimed(step.Kind, step.Outputs.Count, step.Done) && Dependencies(step, item).Any(w => w.State is not ("done" or "off"));
+            complete &= !vacuous;
             bool doneMet = done.All(d => d.Verdict.Value == "met");
             DateTimeOffset? doneAt = complete ? new[] { step.Reserved is null ? result : null, review }.Concat(outputs.Select(o => o.Carrier)).Concat(done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)))
                 .OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max() : null;
@@ -538,6 +546,14 @@ public static partial class FlowPosition
                 return Shaped(new StepInstance(step, item, "done", [Completed(step, result, review, done)], Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
             }
 
+            // From 0.9.4 (FIX-142): an optional reserved step whose request for this ask the operator dismissed settles as skipped, with no
+            // revision of the goal; a required step, or one an estate policy requires, never does, and stays asked as its stop says.
+            if (asked is DateTimeOffset askedFrom && asking is not null && !step.Required && !PolicyRequires(step)
+                && FlowStops.Dismissal(model, goal, reference, asking, askedFrom, at) is RecordEnvelope dismissal)
+            {
+                return Off(step, item, Skipped(dismissal));
+            }
+
             // Retries by outcome (design/flow.md § 7): an uncertain effect is reconciled by reading before any retry, so it stops the step
             // before anything would rerun it, stale, reopened or waiting.
             if (Uncertain(step, result, carried, done) is Attention uncertain)
@@ -553,6 +569,11 @@ public static partial class FlowPosition
             foreach (StepInstance wait in waits.Where(w => w.State != "done"))
             {
                 blocked.Add(wait.State == "off" ? $"it takes an input from {wait.Name}, which is off" : $"it waits on {wait.Name}, which is {wait.State}");
+            }
+
+            if (vacuous)
+            {
+                blocked.Add("its done predicates hold only because nothing is there yet to count, so they count once every step it waits on is done");
             }
 
             blocked.AddRange(Failing(step.Requires, bindings).Select(f => "a precondition fails: " + f));
@@ -1063,6 +1084,21 @@ public static partial class FlowPosition
             return state is { Closes: true }
                 ? $"its role brief, {state.Describe()}: a revision of it, or a review that clears it, comes before the {step.Role} role is briefed from it"
                 : null;
+        }
+
+        /// <summary>True when an estate policy in force requires the step of the run's flow or a base it extends, so that nothing skips it.</summary>
+        private bool PolicyRequires(FlowStep step)
+        {
+            required ??= FlowRuns.PolicyRequired(model, flow, FlowRuns.Product(model, goal, flow));
+            return required.ContainsKey(step.Key);
+        }
+
+        /// <summary>Why a step whose request the operator dismissed is skipped, in words: the request, when, and the operator's own reason on one line.</summary>
+        private string Skipped(RecordEnvelope dismissal)
+        {
+            string request = dismissal.Subject is { } pinned && model.ById.TryGetValue(pinned.Id, out RecordEnvelope? revision) ? model.Chain(revision)[0] : dismissal.Subject?.Id ?? "?";
+            string reason = EstateModel.BodyString(dismissal, "reason") is string said ? SafeText(said, 300) : "no reason given";
+            return $"skipped: the operator dismissed its request {request} at {Time(dismissal.AtTime)} ({reason}), and an optional step whose request the operator dismisses settles as skipped, without a revision of the goal";
         }
 
         /// <summary>The records a step's done predicates count: for a reserved act only those of a principal who holds it; every record otherwise.</summary>
@@ -1626,13 +1662,14 @@ public static partial class FlowPosition
         /// <summary>
         /// The time of the oldest goal revision since which the run's flow pin, subject and options are unchanged: a revision that only
         /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
+        /// From 0.9.4 (FIX-142) a revision that only turns optional steps or optional items off asks nothing again either: what it leaves
+        /// in the run keeps its command, so the operator's closes already recorded keep answering the same asks.
         /// </summary>
         private DateTimeOffset ShapedAt()
         {
-            string shape = Shape(goal);
             RecordEnvelope since = goal;
             IReadOnlyList<string> chain = model.Chain(goal);
-            for (int i = chain.Count - 2; i >= 0 && model.ById.TryGetValue(chain[i], out RecordEnvelope? earlier) && earlier.Type == goal.Type && Shape(earlier) == shape; i--)
+            for (int i = chain.Count - 2; i >= 0 && model.ById.TryGetValue(chain[i], out RecordEnvelope? earlier) && earlier.Type == goal.Type && SameAsks(earlier); i--)
             {
                 since = earlier;
             }
@@ -1640,15 +1677,32 @@ public static partial class FlowPosition
             return since.AtTime;
         }
 
-        private static readonly string[] ShapeMembers = ["pin", "subject", "options"];
-
-        /// <summary>A goal revision's flow pin, subject and options, each as canonical JSON.</summary>
-        private static string Shape(RecordEnvelope revision)
+        /// <summary>
+        /// True when an earlier goal revision gives the run the asks the current one does: the same flow pin and subject, and options that
+        /// are the same in effect but for optional steps or items the current revision turns off.
+        /// </summary>
+        private bool SameAsks(RecordEnvelope earlier)
         {
-            JsonElement plan = FlowRuns.Plan(revision);
-            return string.Join('\n', ShapeMembers.Select(name =>
-                TJson.Object(plan, name) is { ValueKind: JsonValueKind.Object } value ? CanonicalJson.Serialize(value) : "-"));
+            JsonElement now = FlowRuns.Plan(goal);
+            JsonElement then = FlowRuns.Plan(earlier);
+            if (Member(now, "pin") != Member(then, "pin") || Member(now, "subject") != Member(then, "subject"))
+            {
+                return false;
+            }
+
+            if (Member(now, "options") == Member(then, "options"))
+            {
+                return true;
+            }
+
+            FlowRuns.Configuration before = FlowRuns.Configure(model, earlier, flow);
+            return configuration.Values.Values.All(setting => before.Value(setting.Option) == setting.Value
+                || (setting.Value == "off" && (setting.Option.StartsWith(FlowContract.StepOption, StringComparison.Ordinal) || setting.Option.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))));
         }
+
+        /// <summary>A member of a goal revision's plan.flow, its pin, subject or options, as canonical JSON; "-" when it has none.</summary>
+        private static string Member(JsonElement plan, string name) =>
+            TJson.Object(plan, name) is { ValueKind: JsonValueKind.Object } value ? CanonicalJson.Serialize(value) : "-";
 
         /// <summary>A step's inputs as they are handed on now, by the records that carry them and their exact hashes, for its command before the step is derived.</summary>
         private List<Input> EarlyInputs(FlowStep step, string? item) => step.Inputs.Select(input =>

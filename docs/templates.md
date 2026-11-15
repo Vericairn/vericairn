@@ -495,12 +495,22 @@ every template.
   later than the time the run is read. Anything else leaves `{request}` unbound.
   A revision that changes the pin, subject or options, such as a corrective
   version, asks the step again; one that changes only the budget, objective or
-  other fields does not. Because a close counts only after every step the
-  reserved step waits on was done at a time the records give, a flow, an
+  other fields does not, and from 0.9.4 (FIX-142) neither does one whose options
+  only turn optional steps or optional items off. From 0.9.4 the addressed
+  operator's own close of that request with outcome `dismissed` settles an
+  optional reserved step as skipped, `off` with the dismissal as its reason,
+  without a revision of the goal; a required step, or one an estate policy
+  requires, is never skipped and stays asked. Because a close counts only
+  after every step the reserved step waits on was done at a time the records
+  give, a flow, an
   extension included, is refused (`flow.reserved-unclosable`) when such a step
   waits, directly or through steps that may be off, on an operation done only by
   predicates that each say `max: 0`, such as no living document due, with no
   item: that step is done at no time the records give, so no close could count.
+  From 0.9.4 (FIX-142) such a step also counts only once every step it waits on
+  is done: before then its predicates hold only because nothing is there yet to
+  count, so the release flow's `docs-after`, and an extension's step placed
+  after it, never read done before the publication is observed.
   A flow whose
   subject names a `product` record and a `version` text may bind `{previous}`
   in a field: the two newest published releases of the product before the

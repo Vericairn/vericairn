@@ -184,9 +184,47 @@ public static class FlowStops
             return null;
         }
 
+        return Answers(model, goal, step, command, since, until, closesOnly).LastOrDefault(a => !done || a.Close.Type == "observation" || EstateModel.BodyString(a.Close, "outcome") == "done").Request;
+    }
+
+    /// <summary>
+    /// The operator's own dismissal of a reserved step instance's request for the step's current ask (from 0.9.4, FIX-142): the newest
+    /// operator-request-close with outcome dismissed that the request's addressed operator made, as <see cref="ClosedRequest"/> counts a
+    /// close, of a request carrying the command the records give the step now, between when the step was asked and the time the position
+    /// is derived at; null when there is none. An agent's close citing the operator's words, an observation, an earlier close and a close
+    /// of another command never count. Whether a dismissal settles the step is the step's: only an optional step no estate policy requires
+    /// is skipped by one.
+    /// </summary>
+    public static RecordEnvelope? Dismissal(EstateModel model, RecordEnvelope goal, FlowRuns.StepRef step, string? command, DateTimeOffset since, DateTimeOffset until)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(step);
+        return Answers(model, goal, step, command, since, until, closesOnly: true).Where(a => EstateModel.BodyString(a.Close, "outcome") == "dismissed")
+            .Select(a => a.Close).OrderBy(c => c.At, StringComparer.Ordinal).ThenBy(c => c.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    /// <summary>
+    /// Every close that answers a reserved step instance's current ask, with its request, oldest request first: the requests that carry
+    /// the step's command, recorded by a principal who takes the run's steps and put to a person who holds the act, each with a close its
+    /// addressed operator signed between <paramref name="since"/> and <paramref name="until"/> that pins a revision naming the same run,
+    /// step and command; with <paramref name="closesOnly"/>, only operator-request-closes.
+    /// </summary>
+    private static IEnumerable<(RecordEnvelope Request, RecordEnvelope Close)> Answers(EstateModel model, RecordEnvelope goal, FlowRuns.StepRef step, string? command, DateTimeOffset since, DateTimeOffset until, bool closesOnly)
+    {
+        if (command is null)
+        {
+            yield break;
+        }
+
         string root = model.Chain(goal)[0];
-        return Requests(model, goal, step).LastOrDefault(r => CommandOf(r) == command && Unproven(model, goal, r) is null
-            && OperatorRequests.Closures(model, r).Any(c => Counts(c)));
+        foreach (RecordEnvelope request in Requests(model, goal, step).Where(r => CommandOf(r) == command && Unproven(model, goal, r) is null))
+        {
+            foreach (RecordEnvelope close in OperatorRequests.Closures(model, request).Where(Counts))
+            {
+                yield return (request, close);
+            }
+        }
 
         bool Counts(RecordEnvelope close)
         {
@@ -202,12 +240,7 @@ public static class FlowStops
                 return false;
             }
 
-            if (closesOnly && close.Type != "operator-request-close")
-            {
-                return false;
-            }
-
-            return !done || close.Type == "observation" || EstateModel.BodyString(close, "outcome") == "done";
+            return !closesOnly || close.Type == "operator-request-close";
         }
     }
 
