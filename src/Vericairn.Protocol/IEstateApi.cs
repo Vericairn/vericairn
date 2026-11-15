@@ -256,6 +256,9 @@ public partial interface IEstateApi
     /// <summary>Accepts a goal's current revision once its current evaluation finds every condition met and every record predicate holds: its sponsor when a person, or the delegate of an ordinary goal; an operator only when an agent sponsors it; never its evaluator or a step's author.</summary>
     WriteOutcome GoalAccept(string goal, GoalAcceptRequest request);
 
+    /// <summary>From 0.9.4: closes a goal's run that will not complete, recording each step it has not settled with its reason, none of them done: by who decides for the goal, a person; never an agent. Neither accepts nor stops the goal.</summary>
+    WriteOutcome GoalClose(string goal, GoalCloseRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support closing a goal's run.", []));
+
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
     IReadOnlyList<ProviderRow> Providers();
 

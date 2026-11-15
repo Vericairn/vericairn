@@ -1465,6 +1465,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 }
             }
 
+            // From 0.9.4 (FIX-143) a reason closes the run with the acceptance: each unsettled step recorded with its reason, judged with it.
+            RunClosings.Plan? closing = request.Reason is null && request.StepReasons is not { Count: > 0 } ? null
+                : RunClosings.Prepare(model, current, request.By, request.Reason, StepReasons(request.StepReasons), DateTimeOffset.UtcNow);
+            refusals.AddRange(closing?.Refusals ?? []);
             if (refusals.Count > 0)
             {
                 return Refuse("Not accepted: " + string.Join(" ", refusals));
@@ -1472,13 +1476,76 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             var body = new JsonObject { ["statement"] = request.Statement, ["basis"] = new JsonArray(evaluation!.Id), ["self"] = current.By == request.By };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("acceptance", request.By, document.RootElement, current.Reference), model);
+            var accepting = new RecordDraft("acceptance", request.By, document.RootElement, current.Reference);
+            if (closing is null)
+            {
+                return WriteLocked(accepting, model);
+            }
+
+            // The closing and the acceptance are judged together and stored as one batch, both announced before the first presence prompt.
+            var closingDraft = new RecordDraft("goal-status", request.By, JsonSerializer.SerializeToElement(closing.Body()), current.Reference);
+            using IDisposable counted = presence.Action("goal accept " + current.Id, SignsWithPresence(model, request.By) ? [DescribeRecord(closingDraft, model), DescribeRecord(accepting, model)] : null);
+            (AuthoredRecord? closed, string? refusal) = AuthorLocked(closingDraft, model);
+            if (closed is null)
+            {
+                return Refuse(refusal!);
+            }
+
+            (AuthoredRecord? accepted, refusal) = AuthorLocked(accepting, model);
+            if (accepted is null)
+            {
+                return Refuse(refusal!);
+            }
+
+            (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked([closed, accepted], "Close a goal's run with its unsettled steps and accept the goal.", null);
+            RecordWritten? acceptance = written.FirstOrDefault(w => w.Id == accepted.Envelope.Id);
+            return problem is null ? WriteOutcome.Success(acceptance!) : new WriteOutcome(written.Count == 0 ? null : written[^1], problem);
         }
     }
 
+    /// <inheritdoc />
+    public WriteOutcome GoalClose(string goal, GoalCloseRequest request)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(goal);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The closing principal must be a ULID.");
+        }
+
+        if (request.Reason is null && request.StepReasons is not { Count: > 0 })
+        {
+            return Refuse("A run is closed with a reason: one for every unsettled step, or one for each of them.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? current = GoalView.Find(model, goal);
+            if (current is null)
+            {
+                return NotFound($"No goal has id {goal}.");
+            }
+
+            // Who decides for the goal, a person, closes its run: every refusal at once, before anything is written (FIX-143).
+            RunClosings.Plan closing = RunClosings.Prepare(model, current, request.By, request.Reason, StepReasons(request.StepReasons), DateTimeOffset.UtcNow);
+            if (closing.Refusals.Count > 0)
+            {
+                return Refuse("Not closed: " + string.Join(" ", closing.Refusals));
+            }
+
+            return WriteLocked(new RecordDraft("goal-status", request.By, JsonSerializer.SerializeToElement(closing.Body()), current.Reference), model);
+        }
+    }
+
+    /// <summary>The reasons a request gives single steps, as step and reason.</summary>
+    private static List<(string Step, string Reason)> StepReasons(IReadOnlyList<GoalStepReason>? reasons) =>
+        [.. (reasons ?? []).Select(r => (r.Step ?? string.Empty, r.Reason ?? string.Empty))];
+
     /// <summary>
     /// Records a goal's next status: activate a proposed goal; pause an active one; resume a paused, budget-limited or blocked one;
-    /// stop one that has not ended. Activation and resumption are its sponsor's, a person within the authority to spend, or an
+    /// stop one that has not ended, a goal whose run was closed among them, which is otherwise neither activated, paused nor resumed.
+    /// Activation and resumption are its sponsor's, a person within the authority to spend, or an
     /// operator's for a goal an agent sponsors; pausing and stopping are the sponsor's or that operator's. Every refusal comes before
     /// anything is written.
     /// </summary>
@@ -1505,6 +1572,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string? refusal = action switch
             {
                 _ when ended => status == "achieved" ? $"Goal {current.Id} was achieved; a new objective is a new goal." : $"Goal {current.Id} ended as {status}; a new objective is a new goal.",
+                not "stop" when status == "closed" => $"Goal {current.Id}'s run was closed; it is accepted or stopped, or a revision of it is proposed, and the run is never resumed.",
                 "activate" when status != "proposed" => status == "active" ? $"Goal {current.Id} is already active." : $"Goal {current.Id} is {status}; resume it instead.",
                 "resume" when status is not ("paused" or "budget-limited" or "blocked") => status == "proposed" ? $"Goal {current.Id} was never activated; activate it." : $"Goal {current.Id} is already active.",
                 "pause" when status != "active" => $"Goal {current.Id} is {status}, not active.",

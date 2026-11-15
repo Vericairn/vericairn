@@ -445,6 +445,27 @@ template content; see [Templates](templates.md#flows-092). `records describe
 operator-request` includes this contract, within the generic record reader
 `vericairn.records/readers/8`.
 
+### Closing a run (0.9.4)
+
+FIX-143 adds one status and one optional field to `goal-status` within format 3,
+and no record type. A goal without a closing reads as before.
+
+| Record | Additive contract |
+| --- | --- |
+| `goal-status` | Status `closed` closes a run of a flow that will never complete. Its `unsettled`, required with `closed` and refused with any other status, names each step instance of the run that was neither done nor off when it was closed, once, as `{key, instance?, reason}`, `reason` being the closer's, at most 2,000 characters. |
+
+Validation refuses `closed` for a goal that is not a run, or in an earlier
+format; a closing recorded by anyone but who decides for the goal, a person (its
+sponsor when a person, an operator when an agent or a service sponsors it), so an
+agent's closing is refused and counts for nothing; a step the run's flow does not
+declare, an instance a step that runs once does not take or one the run does not
+name, a step named twice and a blank reason; a closing as the goal's first status;
+and any status after it but `impossible` or `abandoned`. Which steps were unsettled
+is the runtime's to check when it writes the closing; reading derives the rest: a
+closed run's steps that are neither done nor off read `unsettled` with their
+reasons, never `done`, and the goal may still be accepted. `goal close` and
+`goal accept --reason` write it ([operator guide](operator-guide.md#closing-a-run-094)).
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

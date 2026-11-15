@@ -208,7 +208,11 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(151, synchronous.Length);
+        Assert.Equal(152, synchronous.Length);
+        // From 0.9.4 (FIX-143) closing a goal's run, with its default and its cancellable counterpart.
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.GoalClose));
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.GoalClose))!.IsAbstract);
+        Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.GoalCloseAsync))!.IsAbstract);
         // From 0.9.3 (CODE-72) naming the estate's first authority, with its default and its cancellable counterpart.
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.FirstAuthority));
         Assert.False(typeof(IEstateApi).GetMethod(nameof(IEstateApi.FirstAuthority))!.IsAbstract);

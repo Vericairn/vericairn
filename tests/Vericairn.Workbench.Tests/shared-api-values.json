@@ -94,7 +94,8 @@
     "stale",
     "in-review",
     "stopped",
-    "off"
+    "off",
+    "unsettled"
   ],
   "Vericairn.Records.Estate.FlowStops.Deliveries": [
     "due",
@@ -362,7 +363,8 @@
     "budget-limited",
     "blocked",
     "impossible",
-    "abandoned"
+    "abandoned",
+    "closed"
   ],
   "Vericairn.Records.Types.GoalType.Approvals": [
     "sponsor-approves",

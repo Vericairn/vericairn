@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 28, November 15, 2026. Add `goal close`, and `--reason` and `--step-reason` on `goal accept`, which close a run of a flow that will never complete with a reason for each unsettled step, in the development build.
+
 Revision 27, November 13, 2026. Describe 0.9.3's command additions as released commands rather than development builds.
 
 Revision 26, November 13, 2026. Add `estate first-authority`, which lists the self-admissions that could be the estate's first authority with their evidence and names one of the root operator's devices in the manifest, in the development build.
@@ -436,6 +438,15 @@ one person at a time: a fourth routes as
 `queued`, and `goal step` dispatches nothing for it. `operator list` delivers a run's request only while it carries the command
 the records give now, and lists each open request a run no longer waits on, `withdrawn` or `settled`, under `withdrawn` in its
 JSON. See [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
+
+From FIX-143 (0.9.4), `goal close <goal> --by <id> --reason <text>` closes a run of a flow that will never complete: each step
+it has not settled, neither done nor off, is recorded with a reason in a signed goal-status of `closed`, and none of them counts
+as done. `--reason` gives every unsettled step that `--step-reason <step>=<reason>`, repeatable, gives none its reason, the step
+named by its key or `key[instance]`; a close needs one or the other. Only who decides for the goal, a person, closes its run, and
+an agent is refused; every refusal comes at once, before anything is written. `goal accept` takes the same two options and then
+closes the run with the acceptance, as one batch. `goal show`, `goal next` and `status` read a closed run with each of those
+steps `unsettled` and its reason; the goal reads `closed` until it is accepted or stopped, and is never resumed. See
+[closing a run](operator-guide.md#closing-a-run-094).
 
 ## `vericairn estate cache rebuild` (0.9.2)
 

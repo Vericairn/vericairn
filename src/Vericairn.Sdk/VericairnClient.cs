@@ -434,6 +434,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public WriteOutcome GoalAccept(string goal, GoalAcceptRequest request) => Post<GoalAcceptRequest, WriteOutcome>(GoalPath(goal, "accept"), request)!;
 
     /// <inheritdoc />
+    public WriteOutcome GoalClose(string goal, GoalCloseRequest request) => Post<GoalCloseRequest, WriteOutcome>(GoalPath(goal, "close"), request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
 
     /// <inheritdoc />

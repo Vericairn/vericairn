@@ -23,5 +23,6 @@ internal sealed class GoalCommand : Command
         Subcommands.Add(new GoalStepCommand(context));
         Subcommands.Add(new GoalEvaluateCommand(context));
         Subcommands.Add(new GoalAcceptCommand(context));
+        Subcommands.Add(new GoalCloseCommand(context));
     }
 }

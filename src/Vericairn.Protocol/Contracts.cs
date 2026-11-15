@@ -469,7 +469,29 @@ public sealed record GoalVerdict(int Condition, string Verdict, string Reason, I
 /// <summary>Accept a goal at its current revision, relying on its current evaluation.</summary>
 /// <param name="By">The accepting principal: the sponsor when the sponsor is a person, or the principal it delegated an ordinary goal's acceptance to; an operator when an agent sponsors it.</param>
 /// <param name="Statement">What is accepted and on what basis.</param>
-public sealed record GoalAcceptRequest(string By, string Statement);
+public sealed record GoalAcceptRequest(string By, string Statement)
+{
+    /// <summary>From 0.9.4: with a reason, the acceptance also closes the goal's run, as <see cref="GoalCloseRequest"/> does, with this reason for each unsettled step <see cref="StepReasons"/> gives none.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>From 0.9.4: the reasons for single unsettled steps, which close the goal's run with the acceptance.</summary>
+    public IReadOnlyList<GoalStepReason>? StepReasons { get; init; }
+}
+
+/// <summary>
+/// Close a goal's run that will not complete (from 0.9.4): each step it has not settled, neither done nor off, is recorded with its
+/// reason in a goal-status of closed, and none of them counts as done. Closing is who decides for the goal's, a person: its sponsor, or
+/// an operator for a goal an agent sponsors; it is neither acceptance nor stopping, and the goal may still be accepted.
+/// </summary>
+/// <param name="By">The closing principal: a person who decides for the goal.</param>
+/// <param name="Reason">The reason for every unsettled step <paramref name="StepReasons"/> gives none.</param>
+/// <param name="StepReasons">The reasons for single unsettled steps.</param>
+public sealed record GoalCloseRequest(string By, string? Reason = null, IReadOnlyList<GoalStepReason>? StepReasons = null);
+
+/// <summary>A reason for one unsettled step of a run.</summary>
+/// <param name="Step">The step instance: its key, or key[instance] for a step that runs over a list.</param>
+/// <param name="Reason">Why it is left unsettled.</param>
+public sealed record GoalStepReason(string Step, string Reason);
 
 /// <summary>Revoke a device's admission.</summary>
 /// <param name="Device">Device id.</param>

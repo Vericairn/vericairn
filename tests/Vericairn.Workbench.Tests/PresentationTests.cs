@@ -34,7 +34,7 @@ public class PresentationTests
         Assert.Equal(Vericairn.Records.Estate.GoalPredicates.States["ask"], asks);
         Assert.Equal(AskType.States.Append("answered"), asks);
         Assert.True(StateLanguage.NeedsPerson("ask", "notified"));
-        Assert.Equal(["proposed", .. GoalStatusType.Statuses.Where(s => s is "active" or "paused" or "budget-limited" or "blocked"), "impossible", "abandoned", "achieved"], StateLanguage.Vocabularies.Single(v => v.Subject == "goal").States.Select(s => s.Value));
+        Assert.Equal(["proposed", .. GoalStatusType.Statuses.Where(s => s is "active" or "paused" or "budget-limited" or "blocked"), "closed", "impossible", "abandoned", "achieved"], StateLanguage.Vocabularies.Single(v => v.Subject == "goal").States.Select(s => s.Value));
         Assert.Equal(GoalStatusType.Statuses.Append("proposed").Append("achieved").Order(StringComparer.Ordinal), StateLanguage.Vocabularies.Single(v => v.Subject == "goal").States.Select(s => s.Value).Order(StringComparer.Ordinal));
         Assert.Equal(Vericairn.Records.Estate.GoalPredicates.Verdicts, StateLanguage.Vocabularies.Single(v => v.Subject == "condition").States.Select(s => s.Value));
         Assert.Equal(Vericairn.Records.Estate.GoalRules.EvaluationVerdicts, StateLanguage.Vocabularies.Single(v => v.Subject == "evaluation").States.Select(s => s.Value));

@@ -1424,7 +1424,7 @@ vericairn goal accept <goal> --by <sponsor> --statement "I accept this goal from
 
 For record predicates the runtime supplies the evaluation's verdict and records read. For evidence conditions the evaluator supplies `--verdict n:met:reason` (or `not-yet` or `impossible`) and `--read n:<record id>`; numbering starts at one, and a met evidence condition must name a record. The evaluator cannot have authored any step. Acceptance needs the current evaluation of the exact goal revision, every condition met, and every record predicate still holding. The accepter is neither the evaluator nor a step's author: the sponsor when a person, an operator when an agent sponsors it, or the sponsor's named delegate holding `accept-work` for an ordinary goal without reserved actions. A delegate never accepts a goal involving a release or milestone.
 
-`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. A goal ends as impossible only on its evaluator's verdict: the evaluator records an evaluation that judges a condition `impossible` with `goal evaluate`, and then who decides for the goal confirms it with a `goal-status` of `impossible` (`vericairn records new goal-status --by <sponsor> --subject goal:<id>:<hash> --body impossible.json`). From 0.9.3 a status of `impossible` without that verdict in the goal's current evaluation is refused (`goal-status.verdict`), and the refusal names the `goal evaluate` command that records it. An `impossible` status already in the estate keeps its reading; `estate check` reports one without a verdict as information. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. For a run of a flow, `goal next` and `goal step` hold the run for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
+`goal pause`, `resume` and `stop` record lifecycle changes. The sponsor may pause or stop; an operator may also do so for a goal an agent sponsors. A stop ends the goal as abandoned. From 0.9.4 `goal close` closes a run of a flow that will never complete, with a reason for each step it left unsettled, without ending the goal ([closing a run](#closing-a-run-094)). A goal ends as impossible only on its evaluator's verdict: the evaluator records an evaluation that judges a condition `impossible` with `goal evaluate`, and then who decides for the goal confirms it with a `goal-status` of `impossible` (`vericairn records new goal-status --by <sponsor> --subject goal:<id>:<hash> --body impossible.json`). From 0.9.3 a status of `impossible` without that verdict in the goal's current evaluation is refused (`goal-status.verdict`), and the refusal names the `goal evaluate` command that records it. An `impossible` status already in the estate keeps its reading; `estate check` reports one without a verdict as information. Pausing or abandoning a goal prevents new runs but does not stop runs already in flight: use `worker stop` for each run that must stop, as section 18 shows. In this build `goal propose --deadline`, recorded as `limits.deadline`, is validated and recorded but not yet enforced, and so is `limits.consecutiveFailures` for a goal that runs no flow. Monitor them and act explicitly. For a run of a flow, `goal next` and `goal step` hold the run for its sponsor when it reaches `limits.consecutiveFailures` ([hand-offs](#hand-offs-reviews-and-failure-routes-092)). Worker thresholds and the silence limit do operate; `limitations-and-platforms.md` describes their implementation limits.
 
 ## 18. Routing, asks and the worker
 
@@ -1678,7 +1678,11 @@ it reruns under its recovery once what it waits on is done; `blocked` while an e
 naming every failing precondition, trap and due time; `in-review` while an item awaits its review, or a result awaits one
 before another attempt; `stopped` while a person holds its role or its assignment, it is a reserved act, or a watch passed
 its limit; `next` when an agent carries it; and `off` when the run's configuration, its `until` step or an unentered branch
-leaves it out. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
+leaves it out, or, from 0.9.4, when the operator dismissed the request of an optional reserved step, which reads `off` as
+skipped ([stops](#stops-and-their-surfaces-092)); and, from 0.9.4, `unsettled` in a run its sponsor closed
+([closing a run](#closing-a-run-094)). From 0.9.4 (FIX-142) a step done by its done predicates alone, each a count of
+at most none, such as no living document due, counts only once every step it waits on is done: before then its predicates hold
+only because nothing is there yet to count, so it reads `blocked` and says so. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
 `template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
 source. The same records give the same position on every machine at the same time (due times and watches read the clock);
 a machine that cannot resolve the flow shows the goal, says so, and takes none of its steps.
@@ -1818,7 +1822,11 @@ other records decide. Closing the request does not complete the step, and neithe
 agent's close citing the operator's words; the step's reasons name each record that does not count. Once the operator's act
 is recorded, the request is `settled` and no longer delivered. A request the addressed operator closed with their own signed
 close, while its command still holds, is not made again (route `closed`), and the step waits for the act's record. Any other
-close, an agent's among them, leaves the step's request due again. A request recorded by a principal who does not take the
+close, an agent's among them, leaves the step's request due again. From 0.9.4 (FIX-142) the operator's own dismissal
+(`operator dismiss <request> --by <operator> --reason <text>`) of an optional reserved step's request, carrying the command the
+records give now, settles the step as skipped: it reads `off`, its reason naming the request, when it was dismissed and the
+operator's reason, and the run goes on without it, with no revision of the goal. A required step, or an optional one an estate
+policy requires, is never skipped: its dismissed request stays `closed` and the step waits for the act's record. A request recorded by a principal who does not take the
 run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
 command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
 status and attention show the checked command first and label that prose as not checked.
@@ -1850,6 +1858,37 @@ the flows' order, the earliest position in its flow first and, at the same posit
 fourth as `queued`, and `goal step` dispatches nothing for it until one of the three settles: the person answers or carries it,
 or its request is settled or withdrawn. Remote shows the stops as canonical status gives them. It answers asks as before, and
 it carries no reserved act out; neither Workbench nor Remote offers an action on a stop.
+
+### Closing a run (0.9.4)
+
+A run that will never complete, such as a release whose listing will not be confirmed or whose publication the next version
+replaced, is closed rather than left incomplete (FIX-143). Who decides for its goal closes it: its sponsor when a person, or an
+operator for a goal an agent or a service sponsors, and only a person. An agent's close is refused, and a closing an agent writes
+around the runtime counts for nothing (`goal-status.closer`).
+
+```sh
+vericairn goal close <goal> --by <sponsor> --reason "Nothing else remains of this release." \
+  --step-reason "mcp-registry=The registry listing is retired for this product."
+vericairn goal accept <goal> --by <sponsor> --statement <text> --reason <text>
+```
+
+`--reason` gives every unsettled step a reason, and `--step-reason <step>=<reason>`, repeatable, gives one step its own, the
+step named by its key or `key[instance]`. Every step that is neither done nor off needs one. A step reason that names a step
+that is done, off or not in the run is refused, with every other refusal at once, before anything is written. The close records
+a signed goal-status of `closed` whose `unsettled` names each of those steps with its reason
+([record format 3](record-format-v3.md#closing-a-run-094)). `goal accept` takes the same options and then records the closing
+and the acceptance together, as one batch, refused when either would be; its presence prompts announce both.
+
+A closed run reads closed in `goal show`, the goal reads of the API and the SDK, the MCP `goal_get` and `goal_progress` tools,
+and status. Its position names the goal-status that closed it and how many steps it left unsettled, and each of them reads
+`unsettled`, first with the closer's reason and then with what it waited on. An unsettled step never counts as done, and the run
+is not `complete`. A required reserved step, such as `publish`, reads not done with its reason, and its command is no longer
+shown. A closed run has no stop and raises no attention, `goal step` dispatches nothing of it, and its open requests are
+withdrawn. Status lists a closed run, with its unsettled steps and their reasons, until its goal is accepted or stopped.
+
+Closing is neither acceptance nor stopping. The goal's status is `closed`: it may still be accepted on its evaluation, or
+stopped, which abandons it, but it is never activated, paused or resumed again, and it is not closed twice; a revision of the
+goal starts a new run. The run of an achieved goal that was left incomplete can be closed too, to record why.
 
 ### The software release and upgrade flows (0.9.2)
 
@@ -1886,7 +1925,7 @@ vericairn goal propose --by <sponsor> --title "Release 1.2.0" --objective "Relea
 | `publish` | publisher, reserved `publish` | The operator's observation of the publication: the published revision | `accepted`, `stable-channel`, `not-withdrawn` |
 | `observe` | release manager | The release is published; package destinations observed with `packages observe` | |
 | `upgrade-estate` | release manager, optional, off by default | The estate's observation of the published version, from a run of the upgrade flow | |
-| `docs-after` | release manager | No living document of the product due, after `docs pass <version>` | |
+| `docs-after` | release manager | No living document of the product due, after `docs pass <version>`; from 0.9.4 counted only once the steps before it are done, so never before the publication is observed | |
 | `close` | decider | The carrier's acceptance | `placed-work-accepted`, `nothing-due` |
 
 The traps carry the lessons of 0.8.1 to 0.8.4. A guide still naming the release before last, as 0.8.4's notes-window
@@ -1947,7 +1986,8 @@ once the operator closes its request with the observed link, and the profile rep
 counts only for the step's current ask: a request a principal who takes the run's steps put to the operator, with the command the
 records give the step now, closed after the step was asked and after the goal revision that last changed the run's flow pin,
 subject or options, so a corrective version's listing and announcement are asked again, while a revision that only grants more
-budget asks nothing again. Its
+budget asks nothing again, nor, from 0.9.4, one that only turns optional steps or items off. The profile repository's documents
+count, as `docs-after` does, only once the documentation pass after publication is done. Its
 destinations are that estate's own, so it is never part of the software pack.
 
 ## 19. Pairing, local-network connections and revocation

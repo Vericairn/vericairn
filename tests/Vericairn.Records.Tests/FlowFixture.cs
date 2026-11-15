@@ -52,7 +52,7 @@ public sealed class FlowFixture : IDisposable
 
     public RecordEnvelope Goal { get; private set; } = null!;
 
-    /// <summary>A run with a step's assignment pinning its input, for the format-3 round trip of every new field.</summary>
+    /// <summary>A run with a step's assignment pinning its input, then closed, for the format-3 round trip of every new field.</summary>
     public static FlowFixture RecordedFixture()
     {
         var run = new FlowFixture();
@@ -75,6 +75,11 @@ public sealed class FlowFixture : IDisposable
             ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
             ["flowStep"] = new JsonObject { ["goal"] = run.Goal.Id, ["key"] = "accept" },
         }, subject: run.Work.Reference);
+
+        // From 0.9.4 the sponsor closes the run with a reason for each step it has not settled, a clip's instance among them.
+        RunClosings.Plan closing = RunClosings.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "The song is shelved.", [("shorts[intro]", "The intro has no clip.")], run.Estate.Clock);
+        Assert.Empty(closing.Refusals);
+        run.Add("goal-status", closing.Body(), subject: run.Goal.Reference);
         return run;
     }
 

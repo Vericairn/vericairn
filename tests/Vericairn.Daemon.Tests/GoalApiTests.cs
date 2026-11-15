@@ -78,6 +78,13 @@ public class GoalApiTests
         Assert.Equal("achieved", Assert.Single(api.Goals()).Status);
         Assert.Contains("Achieved: acceptance", api.Goal(goal)!.Text, StringComparison.Ordinal);
         Assert.Equal("refused", api.GoalStop(goal, new GoalActionRequest(op)).Problem!.Code);
+
+        // From 0.9.4 a run is closed through the API as goal close does: a goal that runs no flow, an agent and a missing goal are refused.
+        WriteOutcome notARun = api.GoalClose(goal, new GoalCloseRequest(op, "Nothing remains."));
+        Assert.Equal("refused", notARun.Problem!.Code);
+        Assert.Contains($"Goal {goal} is not a run of a flow", notARun.Problem.Message, StringComparison.Ordinal);
+        Assert.Contains("an agent never closes a run", api.GoalClose(goal, new GoalCloseRequest(builder, "Mine.")).Problem!.Message, StringComparison.Ordinal);
+        Assert.Equal("not-found", (await api.GoalCloseAsync("01M4TRNE1GYEK4P8MXQAB3C8Q4", new GoalCloseRequest(op, "Gone."), TestContext.Current.CancellationToken)).Problem!.Code);
         Assert.Equal(0, api.Check().Errors);
     }
 

@@ -193,6 +193,53 @@ public class FlowCliJourneyTests
         return CliHarness.Ok("--estate", root, "--json", "work", "result", attempt, "--by", by, "--body", CliHarness.WriteJson(scratch, output + "-result.json", body.ToJsonString())).Json;
     }
 
+    [Fact]
+    public void ARunThatWillNotCompleteIsClosedWithItsReasonsBySponsorAndNeverByAnAgent()
+    {
+        string root = CliHarness.TempDirectory("flow-close");
+        string scratch = CliHarness.TempDirectory("flow-close-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Runs.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string agent = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "agent.json", """{"kind":"agent","name":"Writer","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            File.WriteAllText(Path.Combine(root, "docs", "templates", "example-song-1.0.0.json"), FlowFixture.Song().ToJsonString());
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json",
+                $$$"""{"roles":[{"role":"writer","principals":["{{{op}}}"]},{"role":"reviewer","principals":["{{{op}}}"]},{"role":"listener","principals":["{{{op}}}"]},{"role":"decider","principals":["{{{op}}}"]}]}"""));
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+                """{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and release it.","scope":["path:song/"],"exitQuestion":"Is the song released?","inputs":[],"deliverables":["the song"]}""")).Id;
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Release the song", "--objective", "Produce and release the song.",
+                "--done", """{"type":"work-order","fields":{"key":"SONG-1"}}""", "--work-order", order, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2",
+                "--flow", "example/song@1.0.0", "--subject", "recording=" + order, "--subject", "tracks=intro").Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+
+            // A close needs a reason, each step reason is <step>=<reason>, and an agent's close is refused before anything is written.
+            Refused(root, "A run is closed with a reason", ["goal", "close", goal, "--by", op]);
+            Refused(root, "--step-reason is <step>=<reason>", ["goal", "close", goal, "--by", op, "--step-reason", "publish"]);
+            Refused(root, "an agent never closes a run", ["goal", "close", goal, "--by", agent, "--reason", "The writer would close it."]);
+
+            // The sponsor closes it with one reason for the publication and one for the rest; nothing reads done by the closing.
+            CliHarness.Ok("--estate", root, "--json", "goal", "close", goal, "--by", op, "--reason", "The song is shelved.", "--step-reason", "publish=No release this year.");
+            string shown = CliHarness.Ok("--estate", root, "goal", "show", goal).Out;
+            Assert.Contains("Status: closed", shown, StringComparison.Ordinal);
+            Assert.Contains("unsettled steps, never done", shown, StringComparison.Ordinal);
+            Assert.Contains("publish  unsettled", shown, StringComparison.Ordinal);
+            Assert.Contains("before this step was done: No release this year.", shown, StringComparison.Ordinal);
+            JsonElement flow = CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("flow");
+            Assert.All(flow.GetProperty("steps").EnumerateArray(), s => Assert.Equal("unsettled", s.GetProperty("state").GetString()));
+            Assert.Contains("unsettled: draft (The song is shelved.)", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+
+            // Closing is not stopping: the run is never resumed, and stopping it still abandons the goal.
+            Refused(root, "run was closed", ["goal", "resume", goal, "--by", op]);
+            CliHarness.Ok("--estate", root, "--json", "goal", "stop", goal, "--by", op);
+            Assert.Contains("Status: abandoned", CliHarness.Ok("--estate", root, "goal", "show", goal).Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static void Refused(string root, string because, string[] args)
     {
         CliHarness.Outcome outcome = CliHarness.Run(["--estate", root, .. args]);

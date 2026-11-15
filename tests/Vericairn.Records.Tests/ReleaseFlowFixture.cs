@@ -22,7 +22,7 @@ public sealed class ReleaseFlowFixture : IDisposable
 
     public const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
-    public ReleaseFlowFixture(bool firstParty = false, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? policy = null)
+    public ReleaseFlowFixture(bool firstParty = false, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? policy = null, Action<JsonObject>? extension = null)
     {
         Records = new PolicyFixture();
         RecordEnvelope basis = Add("decision", Records.DecisionBody());
@@ -46,7 +46,7 @@ public sealed class ReleaseFlowFixture : IDisposable
             Records.Policy(policy(this));
         }
 
-        Flow = firstParty ? InstallFirstParty(Estate) : SoftwareFlows.ReleaseFlow;
+        Flow = firstParty ? InstallFirstParty(Estate, extension) : SoftwareFlows.ReleaseFlow;
         Goal = Add("goal", GoalBody(Version, options));
         Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: Goal.Reference);
     }
@@ -101,10 +101,10 @@ public sealed class ReleaseFlowFixture : IDisposable
         };
     }
 
-    /// <summary>The sponsor revises the run for a corrective version, as after a withdrawal.</summary>
-    public RecordEnvelope Revise(string version)
+    /// <summary>The sponsor revises the run for a corrective version, as after a withdrawal, or with its own options.</summary>
+    public RecordEnvelope Revise(string version, JsonObject? options = null)
     {
-        Goal = Add("goal", GoalBody(version), supersedes: Goal.Id);
+        Goal = Add("goal", GoalBody(version, options), supersedes: Goal.Id);
         return Goal;
     }
 
@@ -258,6 +258,19 @@ public sealed class ReleaseFlowFixture : IDisposable
         ["outcome"] = "done", ["link"] = "https://example.invalid/observed",
     }, subject: request.Reference);
 
+    /// <summary>The operator's own dismissal of a request, with the operator's reason.</summary>
+    public RecordEnvelope Dismiss(RecordEnvelope request, string reason = "Not this time.") => Add("operator-request-close", new JsonObject
+    {
+        ["outcome"] = "dismissed", ["reason"] = reason,
+    }, subject: request.Reference);
+
+    /// <summary>An agent's dismissal of a request citing the operator's words: kept, and never the operator's act.</summary>
+    public RecordEnvelope DismissByAgent(RecordEnvelope request) => Add("operator-request-close", new JsonObject
+    {
+        ["outcome"] = "dismissed", ["reason"] = "The operator said to skip it.",
+        ["operatorWords"] = new JsonObject { ["by"] = Estate.OperatorId, ["statement"] = "Skip it.", ["source"] = "Operator conversation, message 3", ["at"] = RecordParser.FormatTimestamp(Estate.Clock) },
+    }, builder: true, subject: request.Reference);
+
     /// <summary>An agent's close of a request citing the operator's words: kept, and never the operator's act.</summary>
     public RecordEnvelope DoneByAgent(RecordEnvelope request) => Add("operator-request-close", new JsonObject
     {
@@ -293,13 +306,24 @@ public sealed class ReleaseFlowFixture : IDisposable
     /// <summary>The first-party extension's file, which Vericairn's estate keeps under docs/templates, read from the product's fixtures.</summary>
     public static string FirstPartyPath => Path.Combine(RecordCompanionTests.FindRepository(), "tests", "fixtures", "flows", "vericairn-first-party-release-1.0.0.json");
 
-    /// <summary>Copies the first-party extension byte for byte into an estate's docs/templates, as Vericairn's estate keeps it.</summary>
-    public static TemplateDefinition InstallFirstParty(TestEstate estate)
+    /// <summary>
+    /// Copies the first-party extension byte for byte into an estate's docs/templates, as Vericairn's estate keeps it; or, given a
+    /// revision, the extension as that revision changes it, kept under its own version's file name.
+    /// </summary>
+    public static TemplateDefinition InstallFirstParty(TestEstate estate, Action<JsonObject>? revise = null)
     {
         string text = File.ReadAllText(FirstPartyPath);
-        estate.WriteFile("docs/templates/vericairn-first-party-release-1.0.0.json", text);
+        if (revise is not null)
+        {
+            JsonObject content = JsonNode.Parse(text)!.AsObject();
+            revise(content);
+            text = content.ToJsonString();
+        }
+
         using System.Text.Json.JsonDocument json = System.Text.Json.JsonDocument.Parse(text);
-        return TemplateDefinition.Read(json.RootElement);
+        TemplateDefinition definition = TemplateDefinition.Read(json.RootElement);
+        estate.WriteFile($"docs/templates/vericairn-first-party-release-{definition.Version}.json", text);
+        return definition;
     }
 
     public void Dispose() => Records.Dispose();
