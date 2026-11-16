@@ -202,7 +202,7 @@ public sealed class PresenceSessionCommandTests
         Assert.DoesNotContain(rows, row => row.StartsWith("Presence check", StringComparison.Ordinal));
         // The padding is one space: the runtime's words follow on as one text.
         Assert.StartsWith("runtime: Signed 1 of 1. Presence check for operator record:", output.ToString(), StringComparison.Ordinal);
-        Assert.Equal("Signed 1 of 1. " + Genuine, CliHarness.Unfold(output.ToString().TrimEnd('\n'))["runtime: ".Length..]);
+        Assert.Equal("Signed 1 of 1. " + Genuine, CliHarness.Unfold(output.ToString().TrimEnd('\r', '\n'))["runtime: ".Length..]);
     }
 
     [Fact]
