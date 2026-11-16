@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 31, November 16, 2026. `estate first-authority`: from 0.9.4 the estate reads a hand-named self-admission whose signature does not verify as no first authority, as the command's evidence already read it (FIX-134), in the development build.
+
 Revision 30, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
 
 Revision 29, November 16, 2026. `doctor` reports whether presence sessions may open on this machine and why not, and `doctor --json` adds the `presence` probe, in the development build.
@@ -986,7 +988,10 @@ remains about the root of trust and each error the estate reports on the admissi
 
 It names only an admission by the root operator of one of the root operator's own devices whose signature by that device
 verifies. A self-admission whose signature does not verify, which anyone able to add a file can write, a device of an agent or
-another person, a recovery device, a device with no such admission and any other record are refused, each with why. The root
+another person, a recovery device, a device with no such admission and any other record are refused, each with why. From 0.9.4
+(FIX-134) the estate reads such a self-admission the same way when the manifest names it by hand: no first authority, with
+`manifest.first-authority` naming it among the listing's findings and nothing signed under it counting, so the command can name
+the one that verifies. The root
 operator is read from the manifest's charter, so the command lists and names nothing while `estate/manifest.json` does not parse
 without findings, such as a key it does not know, a key twice or a form that is not canonical; restore it first. A
 revoked device stays nameable, and the listing shows it revoked: the first device admitting itself is the root, revoked or not.

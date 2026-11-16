@@ -33,7 +33,9 @@ that the manifest names (`firstAuthority`), or the only one when it names none, 
 (`estate.multiple`, `signature.self-admission`) and never takes its place, whatever its id or date, and one that comes with
 history checkpoints of its own at most leaves the copy unsettled ([below](#history-checkpoints-092)); several self-admissions
 with none named are reported (`manifest.first-authority`, listing each with its device) and none is the first authority until
-the manifest names one. A reader without a manifest takes the first charter by id. Policy and writing changes and duty
+the manifest names one. From 0.9.4 (FIX-134) a self-admission whose signature does not verify under its device's key at its
+stated time is never the first authority, named or the only one: the estate reads `manifest.first-authority` naming it, and
+nothing signed under it counts, until the manifest names one that verifies. A reader without a manifest takes the first charter by id. Policy and writing changes and duty
 results/reviews have additional signature and exact-approval requirements.
 
 After the target's accepted publication is recorded, an upgrade from 0.7.3

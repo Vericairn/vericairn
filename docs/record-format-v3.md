@@ -705,7 +705,12 @@ naming none while there are several, is `manifest.first-authority`, whose messag
 there is then no first authority, so no signed admission counts until the manifest names the right one. Witnessed history only
 confirms it, as for the first charter: the one the manifest names, witnessed alone, stands; another witnessed, judged with it as
 the first authority, is `history.root-ambiguous`, with no record counting. Every other such self-admission is
-`signature.self-admission`.
+`signature.self-admission`. From 0.9.4 (FIX-134), a self-admission is the first authority only when, read as the first authority,
+its content has the hash its envelope declares and its signature verifies as every signature does: under its device's key at its
+stated time, by a device of its author. One the manifest names that does not, or the only one when it names none, is
+`manifest.first-authority` naming it, there is no first authority and nothing signed under it counts until the manifest names
+one that verifies; it is never witnessed first under any reading either. Before 0.9.4 such an admission was read as the first
+authority, flagged only by its own `signature.invalid`.
 
 ## Closings and authority at a record's time (0.9.2)
 
