@@ -159,8 +159,10 @@ public sealed class DispatchAuthorityTests
         model = e.F.Load();
         Assert.Empty(Errors(model, nextDay));
         Assert.Contains("no dispatch grant in force", Refused(model, expired).Message, StringComparison.Ordinal);
-        // Before its grant the service principal is no dispatcher, and holds no authority to assign at all.
-        Refused(model, early, "assignment.author");
+        // A dispatcher with no history before its grant is one at every date: an assignment it dates before the grant is outside any
+        // dispatch grant in force then, and counts for nothing.
+        Assert.Contains("no dispatch grant in force", Refused(model, early).Message, StringComparison.Ordinal);
+        Assert.False(model.Counts(model.ById[early.Id]));
         Assert.False(Routing.MayTakeStep(model, model.ById[e.Goal.Id], e.Dispatcher.Id, Start.AddDays(30)));
     }
 
@@ -267,25 +269,159 @@ public sealed class DispatchAuthorityTests
     }
 
     [Fact]
-    public void AServicePrincipalsEarlierAssignmentKeepsCountingAfterALaterDispatchGrant()
+    public void AServicePrincipalsEarlierAssignmentKeepsCountingAndItsLaterDispatchGrantIsRefused()
     {
-        // The service principal assigns a step under local-engineering, which then expires; a later, valid dispatch grant withdraws
-        // nothing it wrote before, since authority is read from the grants as they stood at each record's time.
+        // The service principal assigns a step under local-engineering, which then expires. A dispatch grant afterwards finds that
+        // history and is refused, so it withdraws nothing the principal wrote before it; from its date on it confines the principal,
+        // giving no authority to assign.
         using var e = new Estate();
         var engineering = new JsonObject
         {
             ["grantee"] = e.Dispatcher.Id, ["scope"] = new JsonArray(Scopes.LocalEngineering), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(),
             ["basis"] = e.Basis.Id, ["expires"] = RecordParser.FormatTimestamp(e.F.Estate.Clock.AddHours(1)),
         };
-        e.Grant(engineering);
+        RecordEnvelope engineeringGrant = e.Grant(engineering);
         RecordEnvelope assigned = e.Assign(e.Build, e.F.Estate.BuilderId);
         EstateModel model = e.F.Load();
         Assert.Empty(Errors(model, assigned));
 
         e.F.Estate.SetClock(e.F.Estate.Clock.AddHours(2));
         RecordEnvelope dispatch = e.Grant();
+        RecordEnvelope after = e.Assign(e.Review, e.Spare.Id);
         model = e.F.Load();
-        Assert.Empty(Errors(model, dispatch));
+        Finding refused = Refused(model, dispatch, "authority.dispatch");
+        Assert.Contains("has a history before this grant", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(engineeringGrant.Id, refused.Message, StringComparison.Ordinal);
+        Assert.Empty(Errors(model, assigned));
+        Assert.True(model.Counts(model.ById[assigned.Id]));
+        Assert.Contains("no dispatch grant in force", Refused(model, after).Message, StringComparison.Ordinal);
+        Assert.False(model.Counts(after));
+        Assert.False(Routing.MayTakeStep(model, model.ById[e.Goal.Id], e.Dispatcher.Id, e.F.Estate.Clock));
+    }
+
+    [Fact]
+    public void AStepTheOperatorAssignedBeforeTheGrantRefusesTheGrantAndOnlyEarlierWorkCounts()
+    {
+        // The Reviewer's probe (a): the operator assigns the service principal a step, then grants it dispatch. The grant finds that
+        // history and is refused. The principal's attempt and result dated before the grant count, as work on a step the operator gave it;
+        // its attempt dated after the grant counts for nothing, since the refused grant still confines it from its date on.
+        using var e = new Estate();
+        RecordEnvelope assigned = e.Assign(e.Build, e.Dispatcher.Id, e.F.OperatorSigner, e.F.Estate.OperatorId);
+        DateTimeOffset before = e.F.Estate.Clock;
+        e.F.Estate.SetClock(before.AddHours(1));
+        RecordEnvelope dispatch = e.Grant();
+        RecordEnvelope later = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, assigned.Reference, signer: e.Signer);
+        e.F.Estate.SetClock(before.AddMinutes(1));
+        RecordEnvelope attempt = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, assigned.Reference, signer: e.Signer);
+        RecordEnvelope result = e.F.Estate.Add("result", e.Dispatcher.Id, Result, attempt.Reference, signer: e.Signer);
+        EstateModel model = e.F.Load();
+        Assert.Contains("has a history before this grant", Refused(model, dispatch, "authority.dispatch").Message, StringComparison.Ordinal);
+        Assert.True(model.Counts(model.ById[attempt.Id]));
+        Assert.True(model.Counts(model.ById[result.Id]));
+        Assert.DoesNotContain(model.Findings, f => f.Code == "dispatch.work" && f.Location.StartsWith(attempt.ExpectedPath, StringComparison.Ordinal));
+        Refused(model, later, "dispatch.work");
+        Assert.False(model.Counts(later));
+    }
+
+    [Fact]
+    public void AnAssignmentDatedIntoAnEarlierGrantsTermIsNoDispatchersWorkSinceTheGrantIsRefused()
+    {
+        // The Reviewer's probe (b): the service principal held local-engineering, which expired, and was then granted dispatch. The grant
+        // is refused for that history, so the principal never became a dispatcher: an assignment it dates back into its local-engineering
+        // term is judged by that grant, as any principal's record dated into an expired grant's term is; one it dates after the refused
+        // grant counts for nothing.
+        using var e = new Estate();
+        DateTimeOffset start = e.F.Estate.Clock;
+        var engineering = new JsonObject
+        {
+            ["grantee"] = e.Dispatcher.Id, ["scope"] = new JsonArray(Scopes.LocalEngineering), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(),
+            ["basis"] = e.Basis.Id, ["expires"] = RecordParser.FormatTimestamp(start.AddHours(1)),
+        };
+        e.Grant(engineering);
+        e.F.Estate.SetClock(start.AddHours(2));
+        RecordEnvelope dispatch = e.Grant();
+        RecordEnvelope after = e.Assign(e.Build, e.F.Estate.BuilderId);
+        e.F.Estate.SetClock(start.AddMinutes(10));
+        RecordEnvelope backdated = e.Assign(e.Build, e.Spare.Id);
+        EstateModel model = e.F.Load();
+        Assert.Contains("has a history before this grant", Refused(model, dispatch, "authority.dispatch").Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(model.Findings, f => f.Code is "assignment.dispatch" or "assignment.author" && f.Location.StartsWith(backdated.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains("no dispatch grant in force", Refused(model, after).Message, StringComparison.Ordinal);
+        Assert.False(model.Counts(after));
+    }
+
+    [Fact]
+    public void ADispatchersRecordsDatedBeforeItsGrantAreConfinedAndVoidNothing()
+    {
+        // A dispatcher with no history before its grant writes, after the grant, an assignment and work dated before it. Its own records
+        // never count as history, so the grant stays valid, and it is a dispatcher for every record at any date: the backdated assignment
+        // is outside any dispatch grant in force at its date, and the backdated attempt and result are a dispatcher's work.
+        using var e = new Estate();
+        DateTimeOffset start = e.F.Estate.Clock;
+        e.F.Estate.SetClock(start.AddHours(1));
+        RecordEnvelope grant = e.Grant(e.GrantBody(bounds: new JsonArray(Estate.Bound([e.Goal.Id], cap: 20))));
+        e.F.Estate.SetClock(start.AddMinutes(10));
+        RecordEnvelope backdated = e.Assign(e.Build, e.F.Estate.BuilderId);
+        RecordEnvelope itself = e.Assign(e.Review, e.Dispatcher.Id);
+        RecordEnvelope attempt = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, itself.Reference, signer: e.Signer);
+        RecordEnvelope result = e.F.Estate.Add("result", e.Dispatcher.Id, Result, attempt.Reference, signer: e.Signer);
+        e.F.Estate.SetClock(start.AddHours(2));
+        RecordEnvelope legitimate = e.Assign(e.Build, e.Spare.Id);
+        EstateModel model = e.F.Load();
+        Assert.Empty(Errors(model, grant));
+        Assert.Contains("no dispatch grant in force", Refused(model, backdated).Message, StringComparison.Ordinal);
+        Refused(model, attempt, "dispatch.work");
+        Refused(model, result, "dispatch.work");
+        foreach (RecordEnvelope record in new[] { backdated, itself, attempt, result }) Assert.False(model.Counts(model.ById[record.Id]), record.Type);
+        Assert.Empty(Errors(model, legitimate));
+        Assert.True(model.Counts(model.ById[legitimate.Id]));
+    }
+
+    [Fact]
+    public void AGrantVoidedByAnotherPrincipalsBackdatedRecordStillConfinesTheDispatcher()
+    {
+        // After a valid grant, the operator writes an assignment to the dispatcher dated before it. The grant is now refused for that
+        // history, and still confines the dispatcher from its date on: its later attempt counts for nothing, and it assigns nothing.
+        using var e = new Estate();
+        DateTimeOffset start = e.F.Estate.Clock;
+        e.F.Estate.SetClock(start.AddHours(1));
+        RecordEnvelope grant = e.Grant();
+        RecordEnvelope assigned = e.Assign(e.Build, e.Spare.Id);
+        Assert.Empty(Errors(e.F.Load(), assigned));
+        e.F.Estate.SetClock(start.AddMinutes(10));
+        RecordEnvelope backdated = e.Assign(e.Review, e.Dispatcher.Id, e.F.OperatorSigner, e.F.Estate.OperatorId);
+        e.F.Estate.SetClock(start.AddHours(3));
+        RecordEnvelope attempt = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, backdated.Reference, signer: e.Signer);
+        RecordEnvelope later = e.Assign(e.Build, e.F.Estate.BuilderId);
+        EstateModel model = e.F.Load();
+        Assert.Contains("has a history before this grant", Refused(model, grant, "authority.dispatch").Message, StringComparison.Ordinal);
+        Refused(model, attempt, "dispatch.work");
+        Assert.False(model.Counts(attempt));
+        Assert.Contains("no dispatch grant in force", Refused(model, later).Message, StringComparison.Ordinal);
+        Assert.False(model.Counts(later));
+    }
+
+    [Fact]
+    public void AFormerDispatcherIsGrantedNothingElseAfterExpiryAndMayBeGrantedDispatchAgain()
+    {
+        // The dispatch grant expires; an administer or a local-engineering grant afterwards is refused, and a renewed dispatch grant is
+        // valid, its assignments counting.
+        using var e = new Estate();
+        RecordEnvelope first = e.Grant(e.GrantBody(term: TimeSpan.FromDays(2)));
+        e.F.Estate.SetClock(e.F.Estate.Clock.AddDays(3));
+        RecordEnvelope administer = e.F.Grant(e.Dispatcher.Id, e.Basis, [Scopes.Administer]);
+        RecordEnvelope engineering = e.F.Grant(e.Dispatcher.Id, e.Basis, [Scopes.LocalEngineering]);
+        EstateModel model = e.F.Load();
+        Assert.Contains(first.Id, Refused(model, administer, "authority.dispatch").Message, StringComparison.Ordinal);
+        Assert.Contains("during or after its term", Refused(model, engineering, "authority.dispatch").Message, StringComparison.Ordinal);
+
+        using var g = new Estate();
+        g.Grant(g.GrantBody(term: TimeSpan.FromDays(2)));
+        g.F.Estate.SetClock(g.F.Estate.Clock.AddDays(3));
+        RecordEnvelope renewed = g.Grant();
+        RecordEnvelope assigned = g.Assign(g.Build, g.F.Estate.BuilderId);
+        model = g.F.Load();
+        Assert.Empty(Errors(model, renewed));
         Assert.Empty(Errors(model, assigned));
         Assert.True(model.Counts(model.ById[assigned.Id]));
     }

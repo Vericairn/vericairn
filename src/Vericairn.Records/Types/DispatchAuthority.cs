@@ -15,11 +15,20 @@ namespace Vericairn.Records.Types;
 /// assignments it records a day. The grant expires within 30 days of being made. A dispatcher's assignment is in its authority only
 /// for a step of a goal the grant named when it was recorded, within the cap, outside a reserved role, to a principal the roster names
 /// for the step's role and never a person, and, for a step another assignment still holds, only where the bound allows reassignment
-/// after a lapse: never the holder it replaces, a step a person holds or a role the roster gives a person. A principal is a dispatcher
-/// for a record only from a valid dispatch grant dated at or before it (<see cref="DispatcherAt"/>). A dispatcher never assigns a step
-/// to itself and never works one: its attempts, progress claims and results count for nothing, and so does an assignment it records
+/// after a lapse: never the holder it replaces, a step a person holds or a role the roster gives a person. A dispatcher never assigns a
+/// step to itself and never works one: its attempts, progress claims and results count for nothing, and so does an assignment it records
 /// outside its grant. The roster, whether a principal is a person, the step's role and the dispatcher's own record are read as they
 /// stood at the assignment's time. No other record type takes this scope.
+/// <para>
+/// A dispatch grant is made only to a principal with no history before it (<see cref="Judge"/>): no earlier grant of any scope and no
+/// assignment to it by another principal, dated before the grant, unless an earlier dispatch grant to it is valid, as a renewal. The
+/// principal's own records never count as such history, so a dispatcher cannot void its grant by dating a record of its own before it.
+/// Whether a principal is a dispatcher for a record, and so confined, is read so that backdating fails closed (<see cref="DispatcherAt"/>):
+/// once it holds a valid dispatch grant it is a dispatcher for every record it writes, at any date, so a record it dates before its grant
+/// is confined like one after it; and a dispatch grant refused only for that history, which an earlier history or a record another
+/// principal wrote after the grant and dated before it can cause, still confines the principal's records from the grant's date on, while
+/// giving no authority to assign. Every grant of another scope to a principal that held a valid dispatch grant at or before it is refused.
+/// </para>
 /// </summary>
 internal static class DispatchAuthority
 {
@@ -49,8 +58,13 @@ internal static class DispatchAuthority
         if (!PolicyRecords.Contains(scopes, Scopes.Dispatch))
         {
             if (bounds.Count > 0) body.Error("authority.bounds", "bounds", "Bounds belong to an explicitly granted scope: this grant does not give dispatch.");
-            if (grantee is not null && OtherGrant(context.Model, grantee, context.Record, dispatch: true) is { } held)
-                body.Error("authority.dispatch", "scope", $"Principal {grantee} is a dispatcher under grant {held.Id}, and a dispatcher holds no other authority: it is granted dispatch alone.");
+            // A principal that held a valid dispatch grant at or before this one stays a dispatcher, holding no other authority, after its
+            // grant expires; one whose dispatch grant is in force is refused the same way.
+            RecordEnvelope? held = grantee is null ? null
+                : Judge(context.Model).Valid.FirstOrDefault(g => EstateModel.BodyString(g, "grantee") == grantee && string.CompareOrdinal(g.At, context.Record.At) <= 0)
+                ?? OtherGrant(context.Model, grantee, context.Record, dispatch: true);
+            if (held is not null)
+                body.Error("authority.dispatch", "scope", $"Principal {grantee} is a dispatcher under grant {held.Id}, during or after its term, and a dispatcher holds no other authority: it is granted dispatch alone.");
             return;
         }
 
@@ -97,7 +111,14 @@ internal static class DispatchAuthority
 
         if (grantee is not null && OtherGrant(context.Model, grantee, context.Record, dispatch: false) is { } other)
             body.Error("authority.dispatch", "grantee", $"Principal {grantee} holds grant {other.Id} of another scope, and a dispatcher holds no other authority.");
+        if (!shapeOnly && grantee is not null && Judge(context.Model) is var judged && judged.Shape.Contains(context.Record) && !judged.Valid.Contains(context.Record) &&
+            judged.History.TryGetValue(context.Record.Id, out RecordEnvelope? earlier))
+            body.Error("authority.dispatch", "grantee", $"Principal {grantee} has a history before this grant ({earlier.Type} {earlier.Id}, dated {earlier.At}), and a dispatch grant is made only to a principal with none: no earlier grant of any scope and no assignment to it, unless it renews a valid dispatch grant. This grant gives no authority to assign, and still confines what the principal writes from its date on.");
     }
+
+    /// <summary>Set while a dispatch grant is judged for its shape alone, the history rule aside (<see cref="Judge"/>).</summary>
+    [ThreadStatic]
+    private static bool shapeOnly;
 
     /// <summary>Whether a principal record's only role is service.</summary>
     private static bool OnlyService(RecordEnvelope principal) => AuthorityReplay.Roles(principal) is [Roles.Service];
@@ -121,8 +142,8 @@ internal static class DispatchAuthority
 
     /// <summary>
     /// The dispatch grant in force for a principal at a record's time: the revision of a grant line, among those their authors may write,
-    /// that stood then, naming the principal the grantee of dispatch, unexpired when the record was authored and not closed by a closing
-    /// that does not witness the record. Null when there is none.
+    /// that stood then, naming the principal the grantee of dispatch, valid (<see cref="Judge"/>), unexpired when the record was authored
+    /// and not closed by a closing that does not witness the record. Null when there is none.
     /// </summary>
     internal static RecordEnvelope? GrantAt(EstateModel model, string principal, RecordEnvelope record)
     {
@@ -132,7 +153,8 @@ internal static class DispatchAuthority
         {
             if (model.Authority.At(line, record.At) is not { } grant || EstateModel.BodyString(grant, "grantee") != principal) continue;
             if (PolicyRecords.Contains(PolicyRecords.Property(grant.Body, "scope"), Scopes.Dispatch) && !EstateModel.Expired(grant, record.AtTime) &&
-                EstateModel.BodyString(grant, "expires") is not null && !model.Trust.GrantClosedFor(grant, record, anchorsCount: true))
+                EstateModel.BodyString(grant, "expires") is not null && !model.Trust.GrantClosedFor(grant, record, anchorsCount: true) &&
+                Judge(model).Valid.Any(g => g.Id == grant.Id))
                 return grant;
         }
 
@@ -156,7 +178,7 @@ internal static class DispatchAuthority
             if (model.Authority.At(line, at) is not { } grant || EstateModel.BodyString(grant, "grantee") != principal || EstateModel.Expired(grant, atTime)) continue;
             List<string> given = [.. PolicyRecords.Items(PolicyRecords.Property(grant.Body, "scope")).Where(s => s.ValueKind == JsonValueKind.String).Select(s => s.GetString()!)];
             if (given.Any(s => s != Scopes.Dispatch)) return false;
-            covered |= EstateModel.BodyString(grant, "expires") is not null && PolicyRecords.Items(PolicyRecords.Property(grant.Body, "bounds"))
+            covered |= EstateModel.BodyString(grant, "expires") is not null && Judge(model).Valid.Any(g => g.Id == grant.Id) && PolicyRecords.Items(PolicyRecords.Property(grant.Body, "bounds"))
                 .Any(b => PolicyRecords.Text(b, "scope") == Scopes.Dispatch && PolicyRecords.Contains(PolicyRecords.Property(b, "goals"), identity));
         }
 
@@ -210,7 +232,7 @@ internal static class DispatchAuthority
     {
         ArgumentNullException.ThrowIfNull(model);
         var withheld = new HashSet<string>(StringComparer.Ordinal);
-        if (ValidGrants(model).Count == 0) return withheld;
+        if (Judge(model).Shape.Count == 0) return withheld;
         foreach (RecordEnvelope record in model.CountingRecords.Where(r => r.Format >= 3 && r.Type is "attempt" or "result" or "work-progress" or "assignment" && DispatcherAt(model, r.By, r)))
         {
             if (record.Type is "attempt" or "result" or "work-progress") withheld.Add(record.Id);
@@ -230,41 +252,83 @@ internal static class DispatchAuthority
     }
 
     /// <summary>
-    /// Whether a principal is a dispatcher for a record: a valid dispatch grant to it, one that counts, that its author may write and that
-    /// its own validation finds no error in, is dated at or before the record. Authority is read from the grants as they stood at the
-    /// record's time, so a later dispatch grant withdraws nothing the principal wrote before it, and an invalid one withdraws nothing at
-    /// all; once granted, the principal stays a dispatcher, holding no other authority, after the grant expires.
+    /// Whether a principal is a dispatcher for a record, and so confined: it never works a step and assigns only within a dispatch grant
+    /// in force. It is one when it holds a valid dispatch grant at any date, since such a grant means it had no history before it, so a
+    /// record of its own dated before the grant can only have been dated back; or when a dispatch grant to it, valid but for that history,
+    /// is dated at or before the record. Its earlier work keeps counting where it had a history before its first such grant, and a
+    /// dispatch grant of another shape confines nothing.
     /// </summary>
     internal static bool DispatcherAt(EstateModel model, string? principal, RecordEnvelope record)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(record);
-        return principal is not null && ValidGrants(model).Any(g => EstateModel.BodyString(g, "grantee") == principal && string.CompareOrdinal(g.At, record.At) <= 0);
+        if (principal is null) return false;
+        Judgment judged = Judge(model);
+        return judged.Valid.Any(g => EstateModel.BodyString(g, "grantee") == principal) ||
+            judged.Shape.Any(g => EstateModel.BodyString(g, "grantee") == principal && string.CompareOrdinal(g.At, record.At) <= 0);
     }
 
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EstateModel, Tuple<IReadOnlyList<RecordEnvelope>, List<RecordEnvelope>>> validGrants = new();
+    /// <summary>The dispatch grants of a model as judged once: those valid in shape, those also valid for history, and each refused one's earliest history.</summary>
+    private sealed record Judgment(IReadOnlyList<RecordEnvelope> Shape, IReadOnlyList<RecordEnvelope> Valid, IReadOnlyDictionary<string, RecordEnvelope> History);
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EstateModel, Tuple<IReadOnlyList<RecordEnvelope>, Judgment>> judgments = new();
 
     /// <summary>
-    /// The valid dispatch grants of a model: authority records that count, that their authors may write, that give dispatch, and in which
-    /// their own validation finds no error. Judged once for each set of counting records.
+    /// Judges a model's dispatch grants once for each set of counting records. A grant is valid in shape when it counts, its author may
+    /// write it and its own validation, the history rule aside, finds no error. It is valid when it is also valid for history: in time
+    /// order, ids breaking ties, an earlier dispatch grant to the same principal is valid, as a renewal, or no record that counts by its
+    /// signatures, written by another principal, is dated before it and names the principal: a grant of any scope, or an assignment to it.
+    /// The principal's own records are never such history, so nothing a dispatcher writes, at any date, voids its grant.
     /// </summary>
-    private static List<RecordEnvelope> ValidGrants(EstateModel model)
+    private static Judgment Judge(EstateModel model)
     {
-        lock (validGrants)
+        lock (judgments)
         {
-            if (validGrants.TryGetValue(model, out Tuple<IReadOnlyList<RecordEnvelope>, List<RecordEnvelope>>? known) && ReferenceEquals(known.Item1, model.CountingRecords)) return known.Item2;
+            if (judgments.TryGetValue(model, out Tuple<IReadOnlyList<RecordEnvelope>, Judgment>? known) && ReferenceEquals(known.Item1, model.CountingRecords)) return known.Item2;
+            List<RecordEnvelope> shape = [];
             List<RecordEnvelope> valid = [];
-            foreach (RecordEnvelope grant in model.OfType("authority").Where(g => PolicyRecords.Contains(PolicyRecords.Property(g.Body, "scope"), Scopes.Dispatch) &&
-                model.Authority.Accepted.Contains(g.Id)))
+            var history = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+            List<RecordEnvelope> grants = [.. model.OfType("authority").Where(g => PolicyRecords.Contains(PolicyRecords.Property(g.Body, "scope"), Scopes.Dispatch) &&
+                model.Authority.Accepted.Contains(g.Id)).OrderBy(g => g.At, StringComparer.Ordinal).ThenBy(g => g.Id, StringComparer.Ordinal)];
+            foreach (RecordEnvelope grant in grants)
             {
                 var findings = new FindingList();
-                new AuthorityType().Validate(new ValidationContext(model, grant, findings));
-                if (!findings.HasErrors) valid.Add(grant);
+                bool outer = shapeOnly;
+                shapeOnly = true;
+                try
+                {
+                    new AuthorityType().Validate(new ValidationContext(model, grant, findings));
+                }
+                finally
+                {
+                    shapeOnly = outer;
+                }
+
+                if (findings.HasErrors) continue;
+                shape.Add(grant);
+                string? principal = EstateModel.BodyString(grant, "grantee");
+                if (valid.Any(g => EstateModel.BodyString(g, "grantee") == principal)) valid.Add(grant);
+                else if (principal is not null && HistoryBefore(model, principal, grant) is { } earlier) history[grant.Id] = earlier;
+                else valid.Add(grant);
             }
 
-            validGrants.AddOrUpdate(model, Tuple.Create(model.CountingRecords, valid));
-            return valid;
+            var judged = new Judgment(shape, valid, history);
+            judgments.AddOrUpdate(model, Tuple.Create(model.CountingRecords, judged));
+            return judged;
         }
+    }
+
+    /// <summary>
+    /// The earliest record that counts by its signatures, written by another principal and dated before a grant, that names the grant's
+    /// principal: an authority record granting it any scope, or an assignment to it; null when there is none.
+    /// </summary>
+    private static RecordEnvelope? HistoryBefore(EstateModel model, string principal, RecordEnvelope grant)
+    {
+        string line = model.Chain(grant)[0];
+        return model.Records.Where(r => r.By != principal && r.Id != grant.Id && GoalRules.Before(r, grant) && model.Trust.Counts(r) &&
+                (r.Type == "authority" && EstateModel.BodyString(r, "grantee") == principal && model.Chain(r)[0] != line ||
+                 r.Type == "assignment" && EstateModel.BodyString(r, "contributor") == principal))
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
     }
 
     /// <summary>

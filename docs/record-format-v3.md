@@ -100,16 +100,23 @@ only role is `service` and that holds no other grant. Its `authority` record giv
 `conditions`, expires no more than 30 days after it is made, and carries one bound, `{scope: "dispatch", goals, maxAssignmentsPerDay,
 reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
 `maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
-reassign a step another assignment still holds, with no result on it, as after a lapse. Another grant to a dispatcher, or a
-dispatch grant to a principal holding another, is `authority.dispatch`. A dispatcher's assignment is `assignment.dispatch`, and
-counts for nothing, unless, at its time, the grant is in force, its work order is a step of a goal the bound names, its role is no
-reserved action, the day's cap is not passed, and it goes to a principal the goal's roster names for the step's role, as `goal step`
-routes it, never the dispatcher itself or a person; a reassignment also takes over no step a person holds, needs `reassign`, and goes
-neither to the holder it replaces nor in a role the roster gives a person. Nothing else gives a dispatcher authority to assign. A
-principal is a dispatcher for a record only from a valid dispatch grant dated at or before it, so a later or an invalid dispatch grant
-withdraws nothing the principal wrote, as authorization reads every grant at the action's authoring time. The roster, whether a principal is a person, the step's role (from the
-work order's revision the assignment pins) and the dispatcher's own record are read as they stood at the assignment's time. A
-dispatcher never works a step: an attempt, progress claim or result it writes is `dispatch.work` and counts for nothing. No field or
+reassign a step another assignment still holds, with no result on it, as after a lapse. A dispatch grant is made only to a principal
+with no history before it: no grant of any scope and no assignment to it by another principal, dated before the grant, unless an
+earlier dispatch grant to it is valid, as a renewal; the principal's own records never count as such history. A grant of another
+scope to a principal holding a dispatch grant, or that held a valid one at or before it, during its term or after it expired, a
+dispatch grant to a principal holding another, and a dispatch grant with an earlier history are `authority.dispatch`. A dispatcher's
+assignment is `assignment.dispatch`, and counts for nothing, unless, at its time, a valid dispatch grant is in force, its work order
+is a step of a goal the bound names, its role is no reserved action, the day's cap is not passed, and it goes to a principal the
+goal's roster names for the step's role, as `goal step` routes it, never the dispatcher itself or a person; a reassignment also takes
+over no step a person holds, needs `reassign`, and goes neither to the holder it replaces nor in a role the roster gives a person.
+Nothing else gives a dispatcher authority to assign. The roster, whether a principal is a person, the step's role (from the work
+order's revision the assignment pins) and the dispatcher's own record are read as they stood at the assignment's time. A dispatcher
+never works a step: an attempt, progress claim or result it writes is `dispatch.work` and counts for nothing. Backdating fails
+closed: a principal holding a valid dispatch grant is a dispatcher for every record it writes, at any date, so an assignment or work
+it dates before its grant counts for nothing too; and a dispatch grant refused only for an earlier history, whether that history was
+written before the grant or dated before it afterwards by another principal, gives no authority to assign yet confines what the
+principal writes from the grant's date on. What a principal with such a history wrote dated before the grant keeps its reading, and
+a record it dates back into an earlier grant's term is read as any principal's record dated into an expired grant's term. No field or
 type is added; an older reader reports the bound as errors and a dispatcher's assignment as `assignment.author`.
 
 Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot
