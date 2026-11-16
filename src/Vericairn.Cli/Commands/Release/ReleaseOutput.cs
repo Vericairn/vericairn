@@ -12,7 +12,8 @@ internal static class ReleaseOutput
     /// <summary>Prints a release operation's outcome exactly as the runtime reported it: a problem fails, a rejected record lists its findings, and the exit code says whether the request advanced.</summary>
     public static int Write(CommandContext context, ReleaseResponse response, bool json)
     {
-        if (response.Problem is not null) context.Error.WriteLine("error: " + response.Message);
+        // From 0.9.4 (CODE-80) the runtime's problem, and each finding it names, are shown as its own words, marked and escaped.
+        if (response.Problem is not null) CommandContext.WriteRuntime(context.Error, response.Message);
         if (json)
         {
             context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
@@ -37,7 +38,7 @@ internal static class ReleaseOutput
             if (response.Problem is null) context.Output.WriteLine(response.Message);
             if (response.Problem is { } problem)
                 foreach (FindingDto finding in problem.Findings)
-                    context.Output.WriteLine($"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
+                    CommandContext.WriteRuntime(context.Output, $"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
             if (response.Policies is { } policies) context.Output.Write(policies.Text);
         }
 

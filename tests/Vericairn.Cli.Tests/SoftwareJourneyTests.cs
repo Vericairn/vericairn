@@ -286,13 +286,13 @@ public class SoftwareJourneyTests
             string bare = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "bare.json", Product)).Id;
             CliHarness.Outcome unselected = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, unselected.Code);
-            Assert.Contains("No release provider is selected", unselected.Err, StringComparison.Ordinal);
+            Assert.Contains("No release provider is selected", CliHarness.Unfold(unselected.Err), StringComparison.Ordinal);
             CliHarness.Outcome unknown = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "gitlab-releases", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, unknown.Code);
-            Assert.Contains("'gitlab-releases' has no implementation", unknown.Err, StringComparison.Ordinal);
+            Assert.Contains("'gitlab-releases' has no implementation", CliHarness.Unfold(unknown.Err), StringComparison.Ordinal);
             CliHarness.Outcome incomplete = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "release", "submit", "--provider", "github-releases", "--product", bare, "--version", "1.0.0", "--by", builder);
             Assert.Equal(2, incomplete.Code);
-            Assert.Contains("needs the settings repository", incomplete.Err, StringComparison.Ordinal);
+            Assert.Contains("needs the settings repository", CliHarness.Unfold(incomplete.Err), StringComparison.Ordinal);
             Assert.False(Directory.Exists(Path.Combine(root, "records", "operation")));
             Assert.Empty(provider.Dispatches);
 

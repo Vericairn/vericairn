@@ -103,6 +103,19 @@ Linux secret service (`linux-secret-service`), or a file in the per-user state d
 format 2 a device keeps its identity across renames and key rotations
 ([record-format-v2.md](record-format-v2.md#a-device-keeps-its-identity)).
 
+From 0.9.4 the charter's policies may also state `presence`, `per-signature` or `per-action`, in an estate at record format 3. It
+says how many presence checks a person's device asks for: `per-signature`, one check for every signature with a key that needs its
+owner's presence, as before 0.9.4; `per-action`, or no `presence` at all, lets an operator action ask one check for a list of its
+signatures it announces first, a presence session, where the release build's helper and the Mac's macOS version allow it
+([operator's guide](operator-guide.md#3-principals-devices-and-admission)). Every runtime honors it for every person's device in the
+estate, and the stricter of it and the device owner's setting on the key's machine wins: either saying `per-signature` makes every
+signature ask its own check, and an owner cannot loosen the estate's setting. Any other value is refused, and a runtime reading one
+anyway counts it as `per-signature`.
+Under required signatures only a charter revision the root operator signs changes it; under optional signatures an unsigned charter
+revision can change it either way, as it can every charter policy. The field is additive within format 3, but a reader before 0.9.4
+refuses a charter whose policies hold a member it does not know, so write it only after every writer of the estate has upgraded. The
+setting is honored by software, not enforced by the hardware.
+
 ## Where records are kept: profiles, the live store, objects
 
 The manifest's `profile` is `repository-synced` (the default: record files in the git repository are canonical and

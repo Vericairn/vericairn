@@ -61,13 +61,35 @@ public sealed class PresenceSessionTests
         }
 
         IReadOnlyList<PresenceNotice> notices = Since(f, start);
-        Assert.Equal(["announced", "prompt", "prompt", "prompt", "prompt", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal(["announced", "session", "signed", "signed", "signed", "ended", "finished"], notices.Select(n => n.Kind));
         Assert.StartsWith("operator close asks for your presence once, for one presence session of 3 signatures in at most 300 s, covering only this list:", notices[0].Text, StringComparison.Ordinal);
         Assert.Contains($"1. acceptance STEP-1: accepts result {first.Result.Id} at its exact hash (exact ", notices[0].Text, StringComparison.Ordinal);
         Assert.Contains("changes: adds an acceptance about STEP-1 on the basis of 1 review", notices[0].Text, StringComparison.Ordinal);
         Assert.Contains("Presence check for operator close: the system dialog shows fingerprint ", notices[1].Text, StringComparison.Ordinal);
         Assert.StartsWith("Signature 1 of 3, under the session's check: acceptance STEP-1:", notices[2].Text, StringComparison.Ordinal);
         Assert.Equal("Signed 3 of 3 with one presence check.", notices[^1].Text);
+        // CODE-80: the announcement carries the exact terms the helper was handed and the runtime's descriptions; the check's notice the nonce
+        // alone, never the terms again; each signature the session, its seconds left and its short hash; the end its reason.
+        PresenceSessionNotice announced = notices[0].Session!;
+        Assert.Equal(System.Text.Encoding.UTF8.GetString(helper.Terms[0]), announced.Terms);
+        Assert.Equal(terms.Session, announced.Id);
+        Assert.Equal(300, announced.LimitSeconds);
+        Assert.Equal([0, 1, 2], announced.Descriptions!.Select(d => d.Entry));
+        Assert.Equal(("acceptance", "STEP-1", "adds an acceptance about STEP-1 on the basis of 1 review"), (announced.Descriptions![0].Type, announced.Descriptions[0].Key, announced.Descriptions[0].Changes));
+        Assert.Null(announced.Nonce);
+        PresenceSessionNotice check = notices[1].Session!;
+        Assert.Equal((terms.Session, (string?)null), (check.Id, check.Terms));
+        Assert.Equal(16, System.Buffers.Text.Base64Url.DecodeFromChars(check.Nonce).Length);
+        Assert.Contains(PresenceSessionRules.Fingerprint(System.Buffers.Text.Base64Url.DecodeFromChars(check.Nonce), helper.Terms[0]), notices[1].Text, StringComparison.Ordinal);
+        for (int i = 0; i < 3; i++)
+        {
+            PresenceNotice signed = notices[2 + i];
+            Assert.Equal((i + 1, terms.Session), (signed.Index, signed.Session!.Id));
+            Assert.Equal(terms.Entries[i].Hash![7..19], signed.ShortHash);
+            Assert.NotNull(signed.Session.SecondsLeft);
+        }
+
+        Assert.Equal((terms.Session, "closed"), (notices[5].Session!.Id, notices[5].Session!.Reason));
     }
 
     [Fact]
@@ -529,7 +551,7 @@ public sealed class PresenceSessionTests
 
         Assert.Equal(2, bench.Helpers.Count);
         Assert.All(bench.Helpers, h => Assert.True(h.Closed));
-        PresenceNotice renewal = Assert.Single(bench.Notices(), n => n.Kind == "revised");
+        PresenceNotice renewal = Assert.Single(bench.Notices(), n => n.Kind == "renewed");
         Assert.StartsWith("release submit renews its presence session because the session reached its limit, and asks once more", renewal.Text, StringComparison.Ordinal);
         Assert.Equal("Signed 2 of 2 with 2 presence checks.", bench.Notices()[^1].Text);
     }
@@ -553,7 +575,7 @@ public sealed class PresenceSessionTests
 
         Assert.Equal(checks, bench.Helpers.Count);
         Assert.Equal(1, bench.Helpers[0].Statuses);
-        if (checks == 2) Assert.Contains("so the session is renewed before the effect is dispatched", Assert.Single(bench.Notices(), n => n.Kind == "revised").Text, StringComparison.Ordinal);
+        if (checks == 2) Assert.Contains("so the session is renewed before the effect is dispatched", Assert.Single(bench.Notices(), n => n.Kind == "renewed").Text, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -573,7 +595,7 @@ public sealed class PresenceSessionTests
 
         Assert.Equal(2, bench.Helpers.Count);
         Assert.False(bench.Action.Failed);
-        Assert.Contains("renews its presence session because " + reason, Assert.Single(bench.Notices(), n => n.Kind == "revised").Text, StringComparison.Ordinal);
+        Assert.Contains("renews its presence session because " + reason, Assert.Single(bench.Notices(), n => n.Kind == "renewed").Text, StringComparison.Ordinal);
         Assert.Equal("Signed 2 of 2 with 2 presence checks.", bench.Notices()[^1].Text);
     }
 

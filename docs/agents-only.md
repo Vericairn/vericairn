@@ -41,6 +41,18 @@ When a presence prompt expires, is refused or times out while you enroll a devic
 [enrollment troubleshooting](enrollment-troubleshooting.md) and inspect before running anything again.
 Keep signing keys outside the repository and never give an agent a person's key.
 
+From 0.9.4 a person's Mac device may ask one presence check for an operator action's announced list, a presence
+session, instead of one check for every signature: only with a release build's signed helper on a macOS version that
+release lists as qualified, and until a release qualifies one, every signature keeps its own check. Records a person
+judges are listed by exact hash, at most 16 to a check, and acts on the root of trust and on policy keep their own check.
+An estate that wants one check per signature sets the charter's `policies.presence` to `per-signature`, and a device's
+owner can ask the same on the machine holding the key with `vericairn devices presence`; the stricter wins. Nothing binds
+a presence key to Vericairn's helper: a program running as you can use your key after one approval of a dialog it wrote,
+so refuse a dialog you did not expect ([presence sessions](operator-guide.md#presence-prompts-announced-and-counted-093)). Agents and services
+sign without presence, as before. The operator's remaining acts in this mode (the charter, grants, admissions and the
+renewals at human checkpoints) are outside the list a session may cover, so each asks its own check; a delegated reserved
+act, which is planned, would be an agent's signature without presence.
+
 ```bash
 set -euo pipefail
 field() {

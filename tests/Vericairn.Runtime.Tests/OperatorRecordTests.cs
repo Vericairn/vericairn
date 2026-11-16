@@ -451,6 +451,8 @@ public sealed class OperatorRecordTests
         Assert.Equal(Enumerable.Range(1, 25), prompts.Select(p => p.Index!.Value));
         Assert.True(prompts[12].Sequence < added.Sequence && added.Sequence < prompts[13].Sequence);
         Assert.All(prompts, p => Assert.Equal(p.Index <= 13 ? 22 : 25, p.Count));
+        // CODE-80: each prompt of a record names the record's short hash, which the helper's own label shows.
+        Assert.All(prompts, p => Assert.Matches("^[0-9a-f]{12}$", p.ShortHash));
         Assert.DoesNotContain(notices, n => n.Kind == "revised");
         Assert.Equal("Signed 25 of 25.", notices[^1].Text);
         // The count is exactly what the action signed with the operator's device, each with its reason in custody's prompt.
@@ -491,7 +493,7 @@ public sealed class OperatorRecordTests
         Assert.Equal("operator/" + result.Record!.Id, terms.Entries.First(e => e.Action == "change-push").Fixed["branch"]);
         IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
         Assert.Equal("Signed 22 of 22 with one presence check.", notices[^1].Text);
-        Assert.DoesNotContain(notices, n => n.Kind == "revised");
+        Assert.DoesNotContain(notices, n => n.Kind is "revised" or "renewed");
     }
 
     [Theory]
@@ -557,7 +559,9 @@ public sealed class OperatorRecordTests
         Assert.Empty(custody.Reasons);
         Assert.Equal(25, helpers.Sum(h => h.SignedHashes.Count));
         IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
-        PresenceNotice renewal = Assert.Single(notices, n => n.Kind == "revised" && n.Text.Contains("renews its presence session", StringComparison.Ordinal));
+        PresenceNotice renewal = Assert.Single(notices, n => n.Kind == "renewed" && n.Text.Contains("renews its presence session", StringComparison.Ordinal));
+        Assert.Equal("the action needs a signature its list does not cover", renewal.Session!.Reason);
+        Assert.Equal(System.Text.Encoding.UTF8.GetString(helpers[1].Terms[0]), renewal.Session.Terms);
         Assert.Contains("because the action needs a signature its list does not cover", renewal.Text, StringComparison.Ordinal);
         Assert.Equal("Signed 25 of 25 with 2 presence checks.", notices[^1].Text);
         // The renewal lists the action's recorded operations as references, which the rest supersede and observe.
@@ -905,7 +909,7 @@ public sealed class OperatorRecordTests
         Assert.Equal(6, announced.Count);
         Assert.Equal(6, custody.Reasons.Count - signed);
         Assert.Equal(6, notices.Count(n => n.Kind == "prompt"));
-        Assert.DoesNotContain(notices, n => n.Kind is "added" or "revised");
+        Assert.DoesNotContain(notices, n => n.Kind is "added" or "revised" or "renewed");
         Assert.Equal("Signed 6 of 6.", notices[^1].Text);
         Assert.Equal(2, f.Remote.Memory.Effects);
     }

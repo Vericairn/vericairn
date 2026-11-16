@@ -257,7 +257,12 @@ even in an estate that permits unsigned records. The installed custody interface
 at a time, so a device that requires presence checks it once per acceptance. From 0.9.3 every
 selected acceptance is announced before the first prompt, and each prompt says which signature of
 how many it is and what it signs, as the [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
-describes; a declined prompt stops the selection, and the last line says how many were signed. All selected records
+describes; a declined prompt stops the selection, and the last line says how many were signed. From 0.9.4 the command
+authors every acceptance it will sign before the first, so where presence sessions are on, up to 16 of them are listed by
+exact hash and signed under one presence check, a list for each 16, each announced just before its own check; while an agent
+run this machine's worker started is unsettled under your user, each acceptance asks its own check, and a declined or
+unanswered check signs nothing and stops the selection, never falling back to one check per signature
+([presence sessions](operator-guide.md#presence-prompts-announced-and-counted-093)). All selected records
 are signed and validated before the batch starts storing them; an evidence or authority refusal
 writes no acceptance. An interrupted storage operation retains its receipts and journal for
 reconciliation, using the existing batch recovery mechanism. Inspect those receipts before retrying.
@@ -292,7 +297,11 @@ uses the existing record authoring and device signing path, including the device
 where required. Every operation it records is signed by the same device, so a device that needs
 presence asks for each: from 0.9.3 the command announces them before the first prompt, 22 for a new
 action, and an observation it repeats while checks run before that observation asks, as the
-[operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) lists. It requires a signature even when the estate otherwise permits unsigned records.
+[operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) lists. From 0.9.4, where presence sessions are
+on, one check covers the record by exact hash and its branch's push, opening, observations and merge by kind; the action renews,
+with one more check and the remaining list announced first, when its waits for checks outlast the session or an observation repeats
+beyond what the list allows, so one check for the whole action is the best case and a real run usually asks two or three (inferred from its default
+120-second wait for each check phase, not measured) ([presence sessions](operator-guide.md#presence-prompts-announced-and-counted-093)). It requires a signature even when the estate otherwise permits unsigned records.
 It cannot borrow another principal's authority or device, and it never receives or retains a key.
 
 The estate must use repository-synced storage at record format 3. Its repository must be registered

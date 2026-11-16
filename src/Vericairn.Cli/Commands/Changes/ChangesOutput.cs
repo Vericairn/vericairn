@@ -15,7 +15,9 @@ internal static class ChangesOutput
         {
             foreach (RecordWritten? record in new[] { response.Operation, response.Observation, response.Ask })
                 if (record is not null) context.Output.WriteLine($"{record.Path}  {record.Id}  {record.Hash}");
-            context.Output.WriteLine(response.Message);
+            // From 0.9.4 (CODE-80) a problem the runtime reports is shown as its own words, marked and escaped.
+            if (response.Ok) context.Output.WriteLine(response.Message);
+            else CommandContext.WriteRuntime(context.Output, response.Message);
         }
         return response.Ok ? CommandContext.Clean : CommandContext.HasErrors;
     }

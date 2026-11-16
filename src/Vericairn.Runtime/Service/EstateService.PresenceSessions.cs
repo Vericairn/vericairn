@@ -23,7 +23,18 @@ public sealed partial class EstateService
 {
     private PresenceSessionService? presenceSessionService;
 
-    private PresenceSessionService PresenceSessions => LazyInitializer.EnsureInitialized(ref presenceSessionService, () => new PresenceSessionService(presence) { OutsideChanged = MarkEventsDirty });
+    private PresenceSessionService PresenceSessions => LazyInitializer.EnsureInitialized(ref presenceSessionService, () => new PresenceSessionService(presence)
+    {
+        OutsideChanged = MarkEventsDirty,
+        // From 0.9.4 (CODE-80): the session ledger beside this clone's live store, in this user's machine state.
+        Ledger = new PresenceSessionLedger(PresenceSessionLedger.DirectoryOf(session.Root, session.Manifest.Estate, session.Manifest.Profile, session.Home)),
+    });
+
+    /// <summary>From 0.9.4 (CODE-80): this runtime's presence session ledger.</summary>
+    internal PresenceSessionLedger? PresenceLedger => PresenceSessions.Ledger;
+
+    /// <summary>From 0.9.4 (CODE-80): the presence notices, for a test that confirms a client follows them before it acts.</summary>
+    internal PresenceNotices PresenceNotices => presence.Notices;
 
     /// <summary>From 0.9.4 (ID-16): the profile of a runtime the command line hosts in its own process, one of the two a presence session opens on.</summary>
     public const string EmbeddedProfile = "embedded";

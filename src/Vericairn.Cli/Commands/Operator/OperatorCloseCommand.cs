@@ -46,7 +46,7 @@ internal sealed class OperatorCloseCommand : Command
                         if (candidates.Problem is not null) context.Error.WriteLine(candidates.Problem.Message);
                         return candidates.Ok ? CommandContext.Clean : CommandContext.HasErrors;
                     }
-                    if (!candidates.Ok) return Refused(candidates.Problem!);
+                    if (!candidates.Ok) return Refused(candidates.Problem!, true);
                     if (candidates.Items is null || candidates.Items.Any(i => i is null || i.WorkOrder is null || i.Result is null || i.Reviews is null || i.Reviews.Any(r => r is null))
                         || candidates.Items.Select(i => i.Key).Distinct(StringComparer.Ordinal).Count() != candidates.Items.Count)
                         return context.Fail("Supply an intact operator close --json listing.");
@@ -56,7 +56,7 @@ internal sealed class OperatorCloseCommand : Command
                     if (parse.GetValue(from) is not null)
                     {
                         OperatorCloseCandidatesResponse current = api.OperatorCloseCandidates();
-                        if (!current.Ok) return Refused(current.Problem!);
+                        if (!current.Ok) return Refused(current.Problem!, true);
                         // A saved file supplies pins, not trusted prose. Verify the displayed descriptions as well.
                         foreach (OperatorCloseItem item in chosen)
                         {
@@ -67,7 +67,8 @@ internal sealed class OperatorCloseCommand : Command
                     }
                     // Keep machine output one JSON response; the evidence is still shown before signing on standard error.
                     TextWriter display = parse.GetValue(context.JsonOption) ? context.Error : context.Output;
-                    // A device that needs its owner's presence asks once per acceptance; the runtime announces and counts those prompts.
+                    // A device that needs its owner's presence asks once per acceptance, or from 0.9.4 once per list of up to 16 under a presence
+                    // session; the runtime announces and counts those checks, and the presence display shows them.
                     Show(display, chosen);
                     display.Flush();
                     OperatorCloseResponse response = api.OperatorClose(new(actor!, [.. chosen.Select(i => i.ToSelection())], every));
@@ -75,14 +76,16 @@ internal sealed class OperatorCloseCommand : Command
                     else
                     {
                         foreach (RecordWritten receipt in response.Written) context.Output.WriteLine($"Accepted: {receipt.Id} at {receipt.Hash}");
-                        if (response.Problem is not null) context.Error.WriteLine(response.Problem.Message);
+                        // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
+                        if (response.Problem is not null) CommandContext.WriteRuntime(context.Error, response.Problem.Message);
                     }
                     return response.Ok ? CommandContext.Clean : CommandContext.HasErrors;
                 }
 
-                int Refused(Problem problem)
+                int Refused(Problem problem, bool fromRuntime = false)
                 {
                     if (parse.GetValue(context.JsonOption)) WriteJson(new OperatorCloseResponse([], problem));
+                    else if (fromRuntime) CommandContext.WriteRuntime(context.Error, problem.Message);
                     else context.Error.WriteLine(problem.Message);
                     return CommandContext.HasErrors;
                 }

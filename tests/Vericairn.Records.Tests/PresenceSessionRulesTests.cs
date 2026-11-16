@@ -220,6 +220,39 @@ public sealed class PresenceSessionRulesTests
         }
     }
 
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("[]")]
+    [InlineData("{\"format\":\"vericairn.presence-settings/0\",\"devices\":{}}")]
+    [InlineData("{\"format\":\"vericairn.presence-settings/1\",\"devices\":[]}")]
+    public void ASettingIsNeverWrittenOverAFileThatDoesNotReadSoNoOtherDeviceIsLoosened(string damaged)
+    {
+        // CODE-80, the reviewer's probe: device B per-signature, the file damaged, then device A set per-action with a limit.
+        string home = Path.Combine(Path.GetTempPath(), "vericairn-presence-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            const string a = "01J9Z3K4M5N6P7Q8R9S0T1V2W4", b = "01J9Z3K4M5N6P7Q8R9S0T1V2W9";
+            PresenceSettings.Write(b, perSignature: true, home: home);
+            File.WriteAllText(PresenceSettings.PathOf(home), damaged);
+            Assert.True(PresenceSettings.Read(b, home).PerSignature);
+
+            UnreadableSettingsException refused = Assert.Throws<UnreadableSettingsException>(() => PresenceSettings.Write(a, perSignature: false, limitSeconds: 120, home));
+
+            Assert.Equal(damaged, File.ReadAllText(PresenceSettings.PathOf(home)));
+            Assert.Equal(PresenceSettings.PathOf(home), refused.Path);
+            Assert.Contains(PresenceSettings.PathOf(home), refused.Message, StringComparison.Ordinal);
+            Assert.Contains("remove it to return every device on this machine to the default", refused.Message, StringComparison.Ordinal);
+            PresenceSetting stillB = PresenceSettings.Read(b, home), stillA = PresenceSettings.Read(a, home);
+            Assert.True(stillB.PerSignature);
+            Assert.NotNull(stillB.Problem);
+            Assert.True(stillA.PerSignature);
+        }
+        finally
+        {
+            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+        }
+    }
+
     [Fact]
     public void TheOwnersSettingIsOwnerOnlyAndAnUnreadableOneAsksOneCheckPerSignature()
     {
