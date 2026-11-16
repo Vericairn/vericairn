@@ -224,13 +224,14 @@ public class McpTests
             Assert.True(before.GetProperty("ready").GetBoolean());
             string hash = before.GetProperty("goal").GetProperty("hash").GetString()!;
 
-            // The goal tools are reads, and the writes a worker sees are the five of its contract, none of which records a goal's status, evaluation or acceptance.
+            // The goal tools are reads but, from 0.9.4 (PROC-19), goal_decide, the decision of a run's step its assignee records; the writes a
+            // worker sees are the five of its contract and goal_decide, none of which records a goal's status, evaluation or acceptance.
             var registry = new ToolRegistry(api, builder);
             foreach (string name in new[] { "document_sections", "section_brief" })
                 Assert.False(registry.Visible().Single(t => t.Name == name).Writes);
-            Assert.Equal(["goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
-            Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)), t => Assert.False(t.Writes));
-            Assert.Equal(["document_review", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["goal_decide", "goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal) && t.Name != "goal_decide"), t => Assert.False(t.Writes));
+            Assert.Equal(["document_review", "goal_decide", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
 
             // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about
             // the goal, and none answers the ask: no decision is recorded, and the ask still waits.
