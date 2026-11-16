@@ -71,7 +71,7 @@ internal static class PresenceSessionProtocol
         ["change-open"] = (["provider", "repository", "product", "productHash", "branch"], ["head"]),
         ["change-merge"] = (["provider", "repository", "product", "productHash"], ["pullRequest", "head"]),
         ["change-observe"] = ([], ["provider", "repository", "product", "productHash", "head"]),
-        ["dispatch-release-workflow"] = (["provider", "destination", "version", "product", "commit"], []),
+        ["dispatch-release-workflow"] = (["provider", "destination", "version", "product", "commit", "workflow"], []),
         ["release"] = (["product", "version", "destination", "commit"], []),
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
@@ -86,13 +86,16 @@ internal static class PresenceSessionProtocol
         _ => true,
     };
 
-    /// <summary>Whether a value is held to the character set of its fixed name (§ 6).</summary>
+    /// <summary>
+    /// Whether a value is held to the character set of its fixed name (§ 6); from decision 01M7J7J6MRZPDMYDRGK0MDEZR7 a release build's
+    /// workflow to the branch's, letters, digits and <c>._/-</c>, at most 100 characters.
+    /// </summary>
     internal static bool ValidFixed(string name, string? value) => name switch
     {
         "provider" => PresenceText.IsSlug(value),
         "repository" or "product" => PresenceText.IsUlid(value),
         "productHash" => PresenceText.IsHash(value),
-        "branch" or "destination" => PresenceText.IsBranch(value),
+        "branch" or "destination" or "workflow" => PresenceText.IsBranch(value),
         "pullRequest" => PresenceText.IsPullRequest(value),
         "head" or "commit" => PresenceText.IsCommit(value),
         "version" => PresenceText.IsVersion(value),
@@ -797,6 +800,8 @@ internal sealed class PresenceSessionRules
             {
                 ("dispatch-release-workflow", "destination") => StatesOnly(record, ["destination", "repository"], expected),
                 ("dispatch-release-workflow", "commit") => StatesOnly(record, ["commit", "ref"], expected),
+                // The workflow the dispatch names, its workflow setting, byte for byte; a record naming another, or none, is outside.
+                ("dispatch-release-workflow", "workflow") => record.Target("workflow") == expected,
                 (null, "product") => true,
                 (null, "destination") => record.Field("repository") == expected,
                 (null, _) => record.Field(name) == expected,

@@ -777,16 +777,17 @@ let fixedNames: [String: (required: [String], optional: [String])] = [
     "change-open": (["provider", "repository", "product", "productHash", "branch"], ["head"]),
     "change-merge": (["provider", "repository", "product", "productHash"], ["pullRequest", "head"]),
     "change-observe": ([], ["provider", "repository", "product", "productHash", "head"]),
-    "dispatch-release-workflow": (["provider", "destination", "version", "product", "commit"], []),
+    "dispatch-release-workflow": (["provider", "destination", "version", "product", "commit", "workflow"], []),
     "release": (["product", "version", "destination", "commit"], []),
 ]
 
+/// Whether a value is held to the character set of its fixed name; a release build's workflow to the branch's (decision 01M7J7J6MRZPDMYDRGK0MDEZR7).
 func validFixed(_ name: String, _ value: [UInt8]?) -> Bool {
     switch name {
     case "provider": return isSlug(value)
     case "repository", "product": return isUlid(value)
     case "productHash": return isHash(value)
-    case "branch", "destination": return isBranch(value)
+    case "branch", "destination", "workflow": return isBranch(value)
     case "pullRequest": return isPullRequest(value)
     case "head", "commit": return isCommit(value)
     case "version": return isVersion(value)
@@ -1598,6 +1599,9 @@ final class PresenceSession {
                 if !statesOnly(record, ["destination", "repository"], expected) { return false }
             case ("dispatch-release-workflow"?, "commit"):
                 if !statesOnly(record, ["commit", "ref"], expected) { return false }
+            case ("dispatch-release-workflow"?, "workflow"):
+                // The workflow the dispatch names, its workflow setting, byte for byte; a record naming another, or none, is outside.
+                if record.target("workflow")?.bytes != expected { return false }
             case (nil, "product"):
                 continue
             case (nil, "destination"):

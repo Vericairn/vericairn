@@ -659,7 +659,7 @@ public class GoalStepTests
         return (sam, goal);
     }
 
-    private static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
+    internal static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
         run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, run.Report(report)) }));
 
     private static void Order(RunEstate run, string key, string extra) =>

@@ -283,11 +283,11 @@ public class FlowStopRoutingTests
         public override DateTimeOffset GetUtcNow() => at;
     }
 
-    private static void Options(JsonObject body) =>
+    internal static void Options(JsonObject body) =>
         body["plan"]!["flow"]!["options"] = new JsonObject { ["step.review-lyrics"] = "off", ["step.shorts"] = "off" };
 
     /// <summary>The song taken to its listening review: the builder drafts and masters by assignments the operator makes, and goal step gives listening to the operator.</summary>
-    private static (RecordWritten Lyrics, RecordWritten Mastering, RecordWritten Master) ToAcceptance(RunEstate run, string goal, bool listen = true)
+    internal static (RecordWritten Lyrics, RecordWritten Mastering, RecordWritten Master) ToAcceptance(RunEstate run, string goal, bool listen = true)
     {
         string builder = run.Estate.BuilderId;
         RecordWritten drafting = Assign(run, goal, "draft", builder);

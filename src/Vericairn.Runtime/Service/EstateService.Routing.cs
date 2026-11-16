@@ -75,8 +75,11 @@ public sealed partial class EstateService
             return StepProblem(goal, "refused", "The recording principal and the repository are named by ULIDs; nothing was recorded.");
         }
 
-        // The records a step signs together are announced before the first prompt once its route is known (FIX-124).
-        using IDisposable counted = presence.Action("goal step " + goal);
+        // The records a step signs together are announced before the first prompt once its route is known (FIX-124). From 0.9.4 (ID-16)
+        // its route authors them completely in advance, so a person's assignment and ask share one presence check, listed by exact hash
+        // in the step's presence session; the list is read at the step's first signature, once the route has filled it.
+        List<RecordDraft> stepDrafts = [];
+        using IDisposable counted = SessionAction("goal step " + goal, null, GoalStepSession(goal, stepDrafts));
         AuthoredRecord? routed = null;
         RunStartRequest run;
         string key;
@@ -156,7 +159,7 @@ public sealed partial class EstateService
 
             if (route.State != "agent")
             {
-                return Ask(model, current, taken, request);
+                return Ask(model, current, taken, request, stepDrafts);
             }
 
             // An agent's step: refused before anything is recorded when the run could not start here.
@@ -184,9 +187,12 @@ public sealed partial class EstateService
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference);
+                var assigning = Fixed(new RecordDraft("assignment", request.By, Element(Routed(model, current, taken, where, "run")), taken.Order.Reference), SessionNow());
                 ExpectPresence(request.By, [DescribeRecord(assigning, model), OperationSignature(global::Vericairn.Records.Types.OperationType.AgentRun, "not-started", "agent run of " + key)], "the step is routed to an agent");
-                (routed, string? unsigned) = AuthorLocked(assigning, model);
+                // Authored in advance and listed, the assignment is still a single signature: the run's intent is authored by the worker
+                // after its preflight, so it is in no list, and each keeps its own check (design/presence-sessions.md § 5).
+                stepDrafts.Add(assigning);
+                (routed, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
                 if (routed is null)
                 {
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -285,8 +291,11 @@ public sealed partial class EstateService
         return new TakeoverResponse($"{personName} takes the step over by assignment {written.Id}, which carries the agent's brief and names its assignment {request.Assignment}. {stopped}", true, written, stops);
     }
 
-    /// <summary>Records what a step routed to a person, or to no one, asks: the person's assignment and ask, or the sponsor's ask.</summary>
-    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
+    /// <summary>
+    /// Records what a step routed to a person, or to no one, asks: the person's assignment and ask, authored completely in advance into
+    /// <paramref name="stepDrafts"/> so one presence check covers both (ID-16), or the sponsor's ask, a single write.
+    /// </summary>
+    private GoalStepResponse Ask(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request, List<RecordDraft> stepDrafts)
     {
         if (step.Attention is not null)
         {
@@ -302,22 +311,16 @@ public sealed partial class EstateService
             return StepProblem(goal.Id, "refused", $"{key} has no principal available and the estate names no one to ask: it has no charter operator. Nothing was recorded.", key, route);
         }
 
-        AuthoredRecord? assignment = null;
+        RecordDraft? assigning = null;
         string question, recommendation, consequence;
         string[] options = [];
         if (route.State is "person" or "reserved")
         {
             // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
-            // together, or neither is.
-            var assigning = new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference);
+            // together, or neither is. Both are authored completely before the first signature, the ask naming the assignment's id.
+            assigning = Fixed(new RecordDraft("assignment", request.By, Element(Routed(model, goal, step, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference), SessionNow());
             ExpectPresence(request.By, [DescribeRecord(assigning, model), new("ask", SubjectKey(model, step.Order.Reference), "records a question that waits on its principal")], "the step is routed to a person");
-            (assignment, string? unsigned) = AuthorLocked(assigning, model);
-            if (assignment is null)
-            {
-                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
-            }
-
-            string id = assignment.Envelope.Id;
+            string id = assigning.Id!;
             // From 0.9.4 (PROC-19) a decision step its role decides is asked as a decision among its paths, recorded with goal decide.
             string? paths = step.Review is null && step.Step?.Step is { Decides: true, Transition: { } transition }
                 ? string.Join("; ", transition.Paths.Select(p => $"{p.Name}, to {p.Leads}"))
@@ -373,15 +376,15 @@ public sealed partial class EstateService
             ask["options"] = new JsonArray(options.Select(o => (JsonNode)o).ToArray());
         }
 
-        if (assignment is not null)
+        if (assigning is not null)
         {
-            ask["assignment"] = assignment.Envelope.Id;
+            ask["assignment"] = assigning.Id;
         }
 
         var draft = new RecordDraft("ask", request.By, Element(ask), new RecordReference("work-order", step.Order.Id, null));
         RecordWritten? assigned = null;
         RecordWritten asked;
-        if (assignment is null)
+        if (assigning is null)
         {
             WriteOutcome written = WriteLocked(draft, model);
             if (!written.Ok)
@@ -393,7 +396,16 @@ public sealed partial class EstateService
         }
         else
         {
-            (AuthoredRecord? authored, string? unsigned) = AuthorLocked(draft, model);
+            // The step's list, read at its first signature: the assignment and the ask, by exact hash, in the order they are signed.
+            draft = Fixed(draft, SessionNow());
+            stepDrafts.AddRange([assigning, draft]);
+            (AuthoredRecord? assignment, string? unsigned) = AuthorLocked(SessionDraft(assigning), model);
+            if (assignment is null)
+            {
+                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+            }
+
+            (AuthoredRecord? authored, unsigned) = AuthorLocked(SessionDraft(draft), model);
             if (authored is null)
             {
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -434,6 +446,7 @@ public sealed partial class EstateService
     private GoalStepResponse RuleStep(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
     {
         FlowPosition.StepInstance instance = step.Step!;
+        // A single write, and an observation is outside § 10's allow-list: it is in no presence session's list and keeps its own check (ID-16).
         var draft = new RecordDraft("observation", request.By, Element(FlowDecisions.RuleBody(instance)), new RecordReference(goal.Type, goal.Id, goal.ComputedHash));
         WriteOutcome written = WriteLocked(draft, model);
         if (!written.Ok)

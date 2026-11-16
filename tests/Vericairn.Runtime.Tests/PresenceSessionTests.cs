@@ -270,22 +270,28 @@ public sealed class PresenceSessionTests
     [Fact]
     public void TheGoalStepsListIsComposedFromTheDraftsItsRouteAuthorsWithTheirIdsAndTimes()
     {
-        // The goal step's composition waits here for its action behind routing: nothing is listed until its route fills the drafts.
+        // The goal step's composition waits for its route: nothing is listed until the route fills the drafts.
         var drafts = new List<Records.Authoring.RecordDraft>();
-        PresenceSessionAction session = EstateService.GoalStepSession("01J9Z3K4M5N6P7Q8R9S0T1V2W9", () => drafts);
-        var context = new PresenceComposeContext(new Records.Authoring.RecordDraft("assignment", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { })),
-            new HashSet<string>(StringComparer.Ordinal));
-        Assert.Null(session.Compose(context));
+        PresenceSessionAction session = EstateService.GoalStepSession("01J9Z3K4M5N6P7Q8R9S0T1V2W9", drafts);
         DateTimeOffset at = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-        drafts.Add(new Records.Authoring.RecordDraft("assignment", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { }), At: at, Id: "01J9Z3K4M5N6P7Q8R9S0T1V2WA"));
-        drafts.Add(new Records.Authoring.RecordDraft("ask", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { }), At: at, Id: "01J9Z3K4M5N6P7Q8R9S0T1V2WB"));
-        PresenceSessionPlan plan = session.Compose(context)!;
-        Assert.Equal("goal step", plan.Action);
+        var assignment = new Records.Authoring.RecordDraft("assignment", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { }), At: at, Id: "01J9Z3K4M5N6P7Q8R9S0T1V2WA");
+        var ask = new Records.Authoring.RecordDraft("ask", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { }), At: at, Id: "01J9Z3K4M5N6P7Q8R9S0T1V2WB");
+        PresenceComposeContext Signing(Records.Authoring.RecordDraft draft) => new(draft, new HashSet<string>(StringComparer.Ordinal));
+        Assert.Null(session.Compose(Signing(assignment)));
+        drafts.AddRange([assignment, ask]);
+        PresenceSessionPlan plan = session.Compose(Signing(assignment))!;
+        Assert.Equal(("goal step", "goal step:01J9Z3K4M5N6P7Q8R9S0T1V2W9"), (plan.Action, plan.Identity));
         Assert.Equal(["assignment", "ask"], plan.Exact.Select(d => d.Type));
         Assert.Empty(plan.Kinds);
+        // A later composition, such as a renewal's, lists the drafts from the one being signed on: those signed before it are not listed again.
+        Assert.Equal(["ask"], session.Compose(Signing(ask))!.Exact.Select(d => d.Type));
+        // A record the route did not author in advance, such as an agent run's intent, composes no list and keeps its own check.
+        var intent = new Records.Authoring.RecordDraft("operation", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { action = "agent-run", status = "not-started" }), At: at, Id: "01J9Z3K4M5N6P7Q8R9S0T1V2WC");
+        Assert.Null(session.Compose(Signing(intent)));
+        Assert.Null(session.Compose(Signing(intent with { Id = null })));
         // A draft without its id or time is not authored completely, so no list is composed from it.
         drafts.Add(new Records.Authoring.RecordDraft("ask", "01J9Z3K4M5N6P7Q8R9S0T1V2W3", JsonSerializer.SerializeToElement(new { })));
-        Assert.Null(session.Compose(context));
+        Assert.Null(session.Compose(Signing(assignment)));
     }
 
     [Theory]
@@ -399,7 +405,7 @@ public sealed class PresenceSessionTests
             Fixed = new Dictionary<string, string>(StringComparer.Ordinal) { ["provider"] = "memory-pull-requests", ["repository"] = repository, ["product"] = product, ["productHash"] = hash, ["branch"] = "work/a" },
         };
         var observe = new PresenceListEntry { Type = "operation", Action = "change-observe", Count = 3, Statuses = PresenceSessionProtocol.OperationStatuses, Observation = "push-head", Observes = 0 };
-        PresenceListEntry build = EstateService.ReleaseBuildEntry("github-releases-gh", "Example/widget", "1.1.0", product, commit, new Dictionary<string, string>(StringComparer.Ordinal), 3)!.Entry;
+        PresenceListEntry build = EstateService.ReleaseBuildEntry("github-releases-gh", "Example/widget", "1.1.0", product, commit, new Dictionary<string, string>(StringComparer.Ordinal) { ["workflow"] = "release.yml" }, 3)!.Entry;
         List<PresenceListEntry> planned = [push, observe, build];
         HashSet<string> actionRecords = new(["01J9Z3K4M5N6P7Q8R9S0T1V2WB"], StringComparer.Ordinal);
         var draft = new Records.Authoring.RecordDraft("operation", estate.OperatorId, JsonSerializer.SerializeToElement(new { }));
@@ -432,16 +438,23 @@ public sealed class PresenceSessionTests
         Assert.Null(EstateService.OwnEntry(Observation("01J9Z3K4M5N6P7Q8R9S0T1V2WC", "push-head"), draft, model, false, Now, planned, actionRecords));
         Assert.Null(EstateService.OwnEntry(Observation("01J9Z3K4M5N6P7Q8R9S0T1V2WB", "target-run"), draft, model, false, Now, planned, actionRecords));
 
-        // A release build is re-issued only as the one the action planned, through ReleaseBuildEntry: a record naming another ref gets none.
-        PresenceRecord Build(string reference) => Record(estate.OperatorId, "dispatch-release-workflow", "dispatched", new JsonObject
+        // A release build is re-issued only as the one the action planned, through ReleaseBuildEntry: a record naming another ref, or
+        // another workflow than the planned one, or none, gets none (decision 01M7J7J6MRZPDMYDRGK0MDEZR7).
+        PresenceRecord Build(string reference, string? workflow = "release.yml")
         {
-            ["repository"] = "Example/widget", ["version"] = "1.1.0", ["product"] = product, ["ref"] = reference,
-        }, "github-releases-gh");
+            var target = new JsonObject { ["repository"] = "Example/widget", ["version"] = "1.1.0", ["product"] = product, ["ref"] = reference };
+            if (workflow is not null) target["workflow"] = workflow;
+            return Record(estate.OperatorId, "dispatch-release-workflow", "dispatched", target, "github-releases-gh");
+        }
+
         PresenceListEntry rebuilt = EstateService.OwnEntry(Build(commit), draft, model, false, Now, planned, actionRecords)!.Value.Entry;
         Assert.Equal(build.Fixed, rebuilt.Fixed);
+        Assert.Equal("release.yml", rebuilt.Fixed["workflow"]);
         Assert.Equal(2, rebuilt.Count);
         Assert.Null(EstateService.OwnEntry(Build("main"), draft, model, false, Now, planned, actionRecords));
         Assert.Null(EstateService.OwnEntry(Build(commit), draft, model, false, Now, [push], actionRecords));
+        Assert.Null(EstateService.OwnEntry(Build(commit, "other.yml"), draft, model, false, Now, planned, actionRecords));
+        Assert.Null(EstateService.OwnEntry(Build(commit, null), draft, model, false, Now, planned, actionRecords));
     }
 
     private static readonly long Now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();

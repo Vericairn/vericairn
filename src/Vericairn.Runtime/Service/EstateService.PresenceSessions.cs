@@ -320,9 +320,9 @@ public sealed partial class EstateService
     /// allow-list admits the record, its time is inside the helper's window and the list may hold one more; otherwise a kind entry only
     /// where it re-issues one the action planned: the same kind with every value that entry fixes (provider, repository, product, product
     /// hash, branch or pull request, and the head the action's changes state; or the release build's provider, destination, version,
-    /// product and commit, through <see cref="ReleaseBuildEntry"/>), or an observation of one of the action's own operations, of an
-    /// observation the action planned. Its count is what remains of that record's step, the record included. A record of another branch,
-    /// head, pull request, destination or version gets none and keeps its own check.
+    /// product, commit and workflow, through <see cref="ReleaseBuildEntry"/>), or an observation of one of the action's own operations, of
+    /// an observation the action planned. Its count is what remains of that record's step, the record included. A record of another branch,
+    /// head, pull request, destination, version or workflow gets none and keeps its own check.
     /// </summary>
     internal static (PresenceListEntry Entry, string Changes, IReadOnlyList<string> References)? OwnEntry(PresenceRecord record, RecordDraft draft, EstateModel model,
         bool noExact, long now, List<PresenceListEntry> planned, HashSet<string> actionRecords)
@@ -371,7 +371,9 @@ public sealed partial class EstateService
             // The release build the action planned, its count what remains of this step: composed by ReleaseBuildEntry alone.
             PresenceListEntry? build = planned.FirstOrDefault(p => p.Action == action);
             if (build is null) return null;
-            var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+            // The workflow is the planned entry's, and the record must name it: a record naming another workflow, or none, gets none.
+            if (build.Fixed.GetValueOrDefault("workflow") is not string workflow || record.Target("workflow") != workflow) return null;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["workflow"] = workflow };
             if (record.Target("ref") is string stated) settings["ref"] = stated;
             if (record.Target("commit") is string named) settings["commit"] = named;
             return ReleaseBuildEntry(build.Fixed["provider"], build.Fixed["destination"], build.Fixed["version"], build.Fixed["product"], build.Fixed.GetValueOrDefault("commit"), settings, remaining) is { } rebuilt
