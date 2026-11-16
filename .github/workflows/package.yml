@@ -314,6 +314,9 @@ jobs:
             echo
             echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
             echo "Release evidence: vericairn-$VERSION-companions.zip holds the build's readable reports (checksums, components, workflow actions, documentation contents and the frozen index) with the exact inputs they were generated from. Every file SHA256SUMS names is attached to this release."
+            echo
+            # MCP-07: the build's MCP tool definitions, each with its hints and SHA-256, and the set's SHA-256 initialize carries.
+            dotnet artifacts/bin/Vericairn.DocsTool/release/vericairn-docs.dll mcp-tools
           } > dist/NOTES.md
       - name: Verify every package against SHA256SUMS
         # The same check nuget.yml runs before it pushes the published files.

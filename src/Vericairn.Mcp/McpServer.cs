@@ -17,6 +17,12 @@ namespace Vericairn.Mcp;
 /// </summary>
 public sealed class McpServer
 {
+    /// <summary>
+    /// From 0.9.4 (MCP-07): the key under which initialize's <c>_meta</c> carries the build's tool definitions, as an object with their
+    /// <c>count</c> and <c>hash</c> (<see cref="ToolRegistry.DefinitionsHash"/>).
+    /// </summary>
+    public const string ToolDefinitionsMeta = "vericairn/toolDefinitions";
+
     /// <summary>Protocol revisions this server speaks; the first is the one it proposes.</summary>
     public static readonly ImmutableArray<string> SupportedProtocolVersions = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -305,6 +311,12 @@ public sealed class McpServer
                     },
                     ["serverInfo"] = new JsonObject { ["name"] = "vericairn", ["version"] = version },
                     ["instructions"] = Instructions,
+                    // From 0.9.4 (MCP-07): the build's tool definitions by count and hash, as its release notes state them, so a client
+                    // can tell whether the tool set changed since it last connected.
+                    ["_meta"] = new JsonObject
+                    {
+                        [ToolDefinitionsMeta] = new JsonObject { ["count"] = ToolRegistry.Definitions().Count, ["hash"] = ToolRegistry.DefinitionsHash },
+                    },
                 });
             case "ping":
                 return Result(id, new JsonObject());

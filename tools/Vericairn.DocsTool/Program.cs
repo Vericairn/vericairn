@@ -103,4 +103,8 @@ prepare.SetAction(parseResult => ReferenceSet.Prepare(parseResult.GetValue(prepa
     parseResult.GetValue(prepareParagraph), parseResult.GetValue(guidesOption), parseResult.GetValue(keepOption)));
 root.Subcommands.Add(prepare);
 
+var mcpTools = new Command("mcp-tools", "Print this build's MCP tool definitions for the release notes: each tool's behavior hints and definition SHA-256, and the set's SHA-256 that initialize carries; with --json, the definitions themselves.");
+mcpTools.SetAction(parseResult => McpTools.Print(parseResult.GetValue(jsonOption)));
+root.Subcommands.Add(mcpTools);
+
 return root.Parse(args).Invoke();
