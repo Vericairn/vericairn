@@ -2969,15 +2969,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // without its act closes all the same and keeps the task while it counts, acts and no act follows it: the act written again
             // follows it alone, with a new id, so the task ends once an act follows the closing (OPS-07). A key's closing is followed as
             // well by its device's revocation or a closing of its device, since no rotation of the closed key can be written after them.
-            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal: it witnesses only what
-            // was there, and the revision written again is preceded by a checkpoint of its own.
+            // Nor does a checkpoint stored without the principal revision it was written before, a role's removal in an estate that wrote
+            // a plain checkpoint before it: it witnesses only what was there, and the revision written again is preceded by a checkpoint of
+            // its own. A role closing stored so (ID-14) is a closing like the others above.
             bool checkpointOnly = missing.All(r => r.Type == "history-checkpoint");
             bool adoptionMissing = checkpointOnly && stored.Any(r => r.Type == "admission") && !global::Vericairn.Records.History.SignedHistory.Adopted(model);
             bool anchorsMissing = checkpointOnly && stored.Any(r => r.Type == "estate") && model.Findings.Any(f => f.Code == "history.unanchored");
-            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority");
+            bool closingAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type is "admission" or "device" or "authority" or "principal");
             global::Vericairn.Records.Estate.Closing? unfollowed = closingAlone
                 ? model.Trust.Closings.FirstOrDefault(c => stored.Any(s => s.Id == c.Record.Id) && model.Counts(c.Record) && !model.Trust.Followed(c)) : null;
-            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal");
+            // A role closing stored without its removal (ID-14) closes all the same, and keeps the task as any other closing does.
+            bool removalAlone = stored.Count > 0 && stored.All(r => r.Type == "history-checkpoint") && missing.All(r => r.Type == "principal") && unfollowed is null;
             bool moot = stored.Count == 0 || missing.Count == 0 || checkpointOnly && !adoptionMissing && !anchorsMissing || closingAlone && unfollowed is null || removalAlone || (routing &&
                 (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
                  || (order is not null && (Routing.Assignments(model, order, flowStep).Count > 0 || (flowStep is null && status != "planned")))));

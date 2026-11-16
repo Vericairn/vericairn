@@ -27,6 +27,12 @@ public static class SignatureChecks
 
             if (record.Signatures.Count == 0)
             {
+                // An unsigned record by a person whose role a closing closed, dated into the time it stood, counts for nothing (ID-14).
+                if (trust.UnsignedRoleRefuser(record) is { } roleClosing)
+                {
+                    findings.Add(EstateTrust.AfterRoleClosing(record, roleClosing));
+                }
+
                 if (record.Type == "admission")
                 {
                     if (!trust.AdmissionCounts(record, EstateTrust.Mode.Anchors))

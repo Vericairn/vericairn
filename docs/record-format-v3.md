@@ -574,7 +574,7 @@ writes one. The design is the estate's signed history design, decision
 | `inventory` | Hashes of the objects listing the records this checkpoint first witnesses, each once. |
 | `records`, `recordSetHash` | The count and record set hash of everything it witnesses: its inventory and those of the checkpoints it follows, less the removals they acknowledge. The set hash is an estate observation's: SHA-256 of the canonical JSON array of `{hash, id}` sorted by id. |
 | `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
-| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). |
+| `closes` | Optional `{kind, id}`, `kind` `device`, `key`, `grant` or, from 0.9.4, `role`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). An older reader refuses a `role` closing's `kind` (`body.enum`), so readers upgrade before an estate writes one. |
 | `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures, and signed records a closing refused, because this checkpoint lists them. |
 | `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
 
@@ -731,6 +731,22 @@ acts and no act follows yet:
 | `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
 | `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision naming another grantee, dropping a scope, reserving another action, adding a condition, adding or shortening an expiry, or changing a policy scope's bounds | An operator, who may revise the grant |
+| `role` (0.9.4) | The principal revision of a person whose role is removed; the closing closes it and every revision of its line dated at or before it | A revision of that person's record dropping a role or describing another kind of principal; never for the root operator, nor for an agent's or a service's record | The root operator or another operator, the role still standing, never the person |
+
+**Role closings (0.9.4).** From 0.9.4 (ID-14), a `role` closing closes a person: from it on,
+a record the person wrote, signed or unsigned, that the closing or a checkpoint it follows does
+not witness and no anchor lists counts for nothing (`history.after-closing`) when it is dated at
+or before the removal the closing precedes, whatever device signed it, so a former operator
+cannot write records dated into the time the role stood. That removal is the earliest revision
+of the person's line after the revisions closed that drops a role from the one named, written
+by the closing's author and signed by a device that signed the closing; until one follows, the
+closing refuses every record of the person it does not witness, and the check warns
+`history.closing-unfollowed`. A record dated after the removal reads the person's roles as the
+removal left them. What the person gave as operator before the closing, the principal and
+authority revisions it witnesses, keeps counting for anchoring, acknowledging a removal, rooting
+an adoption and the closings judged after it, as written, where the person held the role when
+writing it. A removal in an adopted estate that no role closing names is the warning
+`history.closing-missing`, and the runtime refuses to write one without its closing.
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
@@ -914,10 +930,12 @@ for nothing, whoever signed it. It attaches to the nearest record below it in it
 counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
 revision on top of one that does not count is compared with, and follows, the line there, so
 its line has one current record in every read. The strongest acts, which consider only the
-revisions above, compare a revision with the nearest one below it that they consider. A role has no closing; role closings are planned. A former operator's records dated into
-the time the role stood read as it stood, apart from policy authority, which reads them only
-where signed history places them before the removal; close and revoke a person's devices when
-removing their role.
+revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's role in an
+estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
+refuses the person's records dated into the time the role stood that it does not witness. In an estate that has not adopted, and
+for a removal no role closing names, a former operator's records dated into the time the role stood read as it stood, apart from
+policy authority, which reads them only where signed history places them before the removal; close and revoke a person's devices
+when removing their role there.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The

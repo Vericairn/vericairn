@@ -340,8 +340,12 @@ runtime writes a checkpoint before it writes a revision that takes a role away; 
 not, it refuses such a revision when any record would fail with it. In every
 read, a grant or principal revision counts for nothing when it is dated before the nearest
 record below it in its line that counts; a record below that does not count is skipped, and a
-revision on top of one follows the line there. A role has no closing; role closings are planned. Close and revoke a person's devices when removing their operator
-role or `administer` grant. Status and policy evaluation take their recorded time from the
+revision on top of one follows the line there. From 0.9.4 (ID-14), in an estate that has adopted checkpoints, removing a role from
+a person's principal record writes a role closing (`closes.kind` `role`) for that person in the same batch, signed by the root
+operator or another standing operator, and a removal without it is refused; from it on, what the person writes dated into the
+time the role stood counts only when the closing witnesses it (`history.after-closing` otherwise), and what they gave as
+operator before it keeps counting for the strongest acts. In an estate that has not adopted, close and revoke a person's
+devices when removing their operator role or `administer` grant. Status and policy evaluation take their recorded time from the
 records that count.
 
 A signed record dated more than five minutes after a checkpoint that witnesses it is the
@@ -383,7 +387,7 @@ adopted history checkpoints.
   the unwitnessed tail may state a time before the newest checkpoint, and is read at that time
   unless a closing refuses it. A revocation, rotation or narrowing stated more than five minutes
   before the newest record its closing would witness, or before the head checkpoint, is refused.
-  A role has no closing; role closings are planned.
+  From 0.9.4 a role removal in an adopted estate follows the person's role closing (ID-14).
 
 ## Published Vericairn dependency observations (0.8.3)
 

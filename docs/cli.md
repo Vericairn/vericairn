@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 32, November 16, 2026. `records new principal` writes a person's role closing before a revision removing a role in an estate that has adopted, and `estate checkpoint --adopt --check` lists records by a person whose role was removed since (ID-14), in the development build.
+
 Revision 31, November 16, 2026. `estate first-authority`: from 0.9.4 the estate reads a hand-named self-admission whose signature does not verify as no first authority, as the command's evidence already read it (FIX-134), in the development build.
 
 Revision 30, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
@@ -724,7 +726,9 @@ checkpoint, with trigger `adoption`, witnesses every record present and anchors 
 adoption changes no reading and admits nothing new. Only the root operator or a person holding `administer` signs it; any
 other principal, an agent above all, is refused before anything is signed. `--adopt --check` lists what it would witness and
 anchor: the count, each unsigned record it anchors with its type, date, path, the commit that added it and that commit's date,
-the unsigned records that count for nothing today and stay so, records signed by a device revoked now, records that read
+the unsigned records that count for nothing today and stay so, records signed by a device revoked now, from 0.9.4 records by a
+person whose role was removed since, each with a `NOTE` naming the roles removed (no role closing bounds such a removal written
+before adoption; the list is advisory and the plan hash does not cover it), records that read
 otherwise when roles and grants are read at each record's own time, each with a `NOTE` saying what differs (adoption keeps for
 every record it witnesses the reading it has then; the list is advisory, the plan hash does not cover it, and adoption computes
 it again, so it can differ from the check's), record files deleted in the repository's history, which no checkpoint can
@@ -749,8 +753,10 @@ records/history-checkpoint/<YYYY-MM>/<id>.json  <id>  sha256:<hash>  (history ch
 With `--json`, the record's output adds a `checkpoint` object with `trigger` and `written`. A checkpoint that cannot be
 written never blocks the act: the record is written alone and standard error says why. A release submission is the
 exception: its gate refuses with `history.checkpoint` and says why. So is an act a closing precedes: `devices revoke`, with or
-without `--recovery`, `devices rotate`, and `records new authority --supersedes` with a revision that names another grantee,
-drops a scope, reserves another action, adds a condition, adds or shortens an expiry or changes `bounds`. Each is stored after
+without `--recovery`, `devices rotate`, `records new authority --supersedes` with a revision that names another grantee,
+drops a scope, reserves another action, adds a condition, adds or shortens an expiry or changes `bounds`, and from 0.9.4
+`records new principal --supersedes` with a revision that drops a role from a person or describes another kind of principal,
+whose closing, `closes.kind` `role`, is signed by the root operator or another standing operator (ID-14). Each is stored after
 its closing, a checkpoint with trigger `closing` signed by the key that performs the act and printed after the act, and is
 refused with nothing written when the closing cannot be written or would close nothing, when the act is signed elsewhere or
 goes through `operator record`, or when `--at` states a time more than five minutes before the newest record its closing would

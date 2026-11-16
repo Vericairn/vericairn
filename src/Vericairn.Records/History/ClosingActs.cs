@@ -8,13 +8,14 @@ using Vericairn.Records.Model;
 namespace Vericairn.Records.History;
 
 /// <summary>
-/// The acts a closing precedes (design/signed-history.md § 8; OPS-07): revoking a device, rotating a device's key, and revising a grant
-/// in a way that narrows it. In an estate that has adopted history checkpoints each is stored after its closing, in the same batch.
+/// The acts a closing precedes (design/signed-history.md § 8; OPS-07): revoking a device, rotating a device's key, revising a grant
+/// in a way that narrows it and, from 0.9.4 (ID-14), removing a role from a person's principal record. In an estate that has adopted
+/// history checkpoints each is stored after its closing, in the same batch.
 /// </summary>
 internal static class ClosingActs
 {
-    /// <summary>The record types such an act can be: a revision of an admission, a device or an authority record.</summary>
-    internal static readonly IReadOnlyList<string> Types = ["admission", "device", "authority"];
+    /// <summary>The record types such an act can be: a revision of an admission, a device, an authority or a principal record.</summary>
+    internal static readonly IReadOnlyList<string> Types = ["admission", "device", "authority", "principal"];
 
     /// <summary>
     /// The closing a retried act is written after, alone (OPS-07): a closing that counts and acts, names exactly what the act closes,
@@ -36,7 +37,10 @@ internal static class ClosingActs
     /// narrows. A grant revision replaces the nearest record below it in its line that counts (<see cref="EstateTrust.AttachedTo"/>):
     /// the one it supersedes when that counts, otherwise the one that record attaches to, and with none below it that counts it narrows
     /// nothing. A device revision needs no such reading, since it counts only on top of one that counts: a rotation that counts replaces
-    /// a key its device held. Null for any other record.
+    /// a key its device held. From 0.9.4 (ID-14), <c>role</c> and the principal revision a principal revision replaces, read as a grant
+    /// revision's is, when that revision describes a person and the new one removes a role from it (<see cref="RemovesRole"/>): a person's
+    /// principal record, as design/signed-history.md § 8 says, other than the root operator's, whom no revision takes the root operator's
+    /// place from. Null for any other record.
     /// </summary>
     internal static (string Kind, string Id)? For(EstateModel model, RecordEnvelope record)
     {
@@ -68,6 +72,11 @@ internal static class ClosingActs
                 trust ??= model.Trust;
                 RecordEnvelope? replaced = trust.Counts(previous) ? previous : trust.AttachedTo(previous);
                 return replaced is not null && Narrows(replaced.Body, body) ? ("grant", replaced.Id) : null;
+            case "principal":
+                trust ??= model.Trust;
+                RecordEnvelope? held = trust.Counts(previous) ? previous : trust.AttachedTo(previous);
+                return held is not null && EstateModel.BodyString(held, "kind") == "human" && trust.PrincipalIdentity(held) != trust.RootOperator && RemovesRole(held.Body, body)
+                    ? ("role", held.Id) : null;
             default:
                 return null;
         }
@@ -91,6 +100,17 @@ internal static class ClosingActs
         bool hadBounds = previous.TryGetProperty("bounds", out JsonElement before);
         bool hasBounds = next.TryGetProperty("bounds", out JsonElement after);
         return hadBounds != hasBounds || hadBounds && !JsonElement.DeepEquals(before, after);
+    }
+
+    /// <summary>
+    /// Whether a principal revision removes a role from the revision it replaces, read conservatively (ID-14): it drops a role the replaced
+    /// revision states, or describes another kind of principal. Only a revision that keeps every role and the kind writes no closing.
+    /// </summary>
+    internal static bool RemovesRole(JsonElement previous, JsonElement next)
+    {
+        if (previous.ValueKind != JsonValueKind.Object || next.ValueKind != JsonValueKind.Object) return true;
+        if (Text(previous, "kind") != Text(next, "kind")) return true;
+        return !Strings(previous, "roles").IsSubsetOf(Strings(next, "roles"));
     }
 
     private static string? Text(JsonElement body, string name) =>

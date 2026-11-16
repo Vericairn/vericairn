@@ -412,8 +412,9 @@ internal sealed partial class EstateTrust
             if (r.Type == "device" && r.Supersedes is not null && model.ById.TryGetValue(r.Supersedes, out RecordEnvelope? previous) && previous.Type == "device")
                 return DeviceRevisionCounts(r, previous) && !RevisionRefused(r, previous) && Counts(previous);
             bool counts = r.Signatures.Count > 0 ? Authentic(r) : Unsigned(r).Counts;
-            // A record relying on a grant revision that a closing closed counts only when that closing witnesses it.
-            return counts && GrantRefuser(r) is null;
+            // A record relying on a grant revision that a closing closed counts only when that closing witnesses it, and so does an
+            // unsigned record by a person a role closing closed, dated into the time the role stood (ID-14).
+            return counts && GrantRefuser(r) is null && UnsignedRoleRefuser(r) is null;
         }
     }
 
@@ -857,7 +858,13 @@ internal sealed partial class EstateTrust
         {
             if (admissionRefusals.TryGetValue(closing.Record.Id, out int[]? known)) return known;
             int[] refused = [];
-            if (closing.Kind != "grant" && closing.Identity is { } identity && AdmissionsAsked() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
+            if (closing.Kind == "role")
+            {
+                // A role closing refuses the signed records its person wrote, whichever device signed them (ID-14).
+                AdmissionIndex asked = AdmissionsAsked();
+                refused = [.. Enumerable.Range(0, asked.Records.Count).Where(record => asked.Records[record].Signatures.Count > 0 && Refuses(closing, asked.Records[record]))];
+            }
+            else if (closing.Kind != "grant" && closing.Identity is { } identity && AdmissionsAsked() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
                 refused = [.. signed.Where(record => Refuses(closing, index.Records[record]))];
             admissionRefusals[closing.Record.Id] = refused;
             return refused;
@@ -1701,6 +1708,8 @@ internal sealed partial class EstateTrust
             }
 
             for (int i = 0; i < count; i++) author[i] = persons.TryGetValue(revisions[i].By, out int a) ? a : -1;
+            bool[] keptRevision = new bool[count];
+            for (int i = 0; i < count; i++) keptRevision[i] = Kept(revisions[i], bound);
 
             // Given by then, in time order: a revision gives the role only when its author was given it by an earlier one.
             var classes = new StrictClass[count];
@@ -1728,8 +1737,9 @@ internal sealed partial class EstateTrust
                 for (int i = 0; i < count; i++)
                 {
                     if (classes[i] == StrictClass.Unread) continue;
-                    // The author is read as their line stands before this revision in time order.
-                    classes[i] = revisions[i].By == root || author[i] >= 0 && standing[author[i]] && Gives(author[i]) ? StrictClass.Written : StrictClass.Removal;
+                    // The author is read as their line stands before this revision in time order. One who no longer stands is read as
+                    // written where a role closing of theirs among the closings witnesses the revision (ID-14).
+                    classes[i] = revisions[i].By == root || author[i] >= 0 && (standing[author[i]] || keptRevision[i]) && Gives(author[i]) ? StrictClass.Written : StrictClass.Removal;
                     if (below[i] >= 0)
                     {
                         followed[below[i]] = true;
@@ -1847,7 +1857,7 @@ internal sealed partial class EstateTrust
             if (!Considered(grant, bound, view) || StrictlyRefused(grant, bound, view)) return StrictClass.Unread;
             if (grant.By == RootOperator && RootOperator is not null) return StrictClass.Written;
             StrictReading reading = ReadStrictly(bound);
-            if (reading.Standing.Contains(grant.By) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
+            if ((reading.Standing.Contains(grant.By) || Kept(grant, bound)) && StrictHead(grant.By, grant.At, bound) is { Operator: true }) return StrictClass.Written;
             return reading.GivenAt.TryGetValue(grant.By, out string? given) && string.CompareOrdinal(given, grant.At) <= 0 ? StrictClass.Removal : StrictClass.Unread;
         }
     }
@@ -1891,6 +1901,20 @@ internal sealed partial class EstateTrust
                 $"This {record.Type} revision {gives}, but that no longer counts for anchoring and closings: its author's operator role is removed or disputed. A standing operator should write it again.");
         }
     }
+
+    /// <summary>What marks a role closing among the closings a view reads, beside the ids of the revisions whose verdicts differ.</summary>
+    private const string RoleMarker = "role-closing ";
+
+    /// <summary>
+    /// Whether the strongest acts keep a principal or grant revision as its author wrote it although the author no longer stands (ID-14;
+    /// design/signed-history.md § 8): a role closing among the closings given closed the author's role and witnesses the revision. So
+    /// what a person gave as operator before their role was closed, the appointments and grants the closing witnesses, keeps counting
+    /// for anchoring, acknowledging removals, rooting an adoption and the closings judged after the role closing, provided the person held
+    /// the role when they wrote it, as those acts read the person's line; what they write afterwards, dated into the time the role stood,
+    /// the closing refuses.
+    /// </summary>
+    private bool Kept(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
+        bound.Any(c => c.Kind == "role" && c.Identity == revision.By && Witnesses(c, revision));
 
     /// <summary>
     /// Whether the strongest acts consider a principal or grant revision against the closings given: authentic by its signatures, or the
@@ -2004,12 +2028,15 @@ internal sealed partial class EstateTrust
             }
 
             StrictView view = None();
-            if (refusers is not null)
+            // A role closing also keeps, for these acts, what its person gave as operator before it (ID-14; <see cref="Kept"/>), which no
+            // verdict shows: each one among the closings is part of what the view reads, so views share only with the same role closings.
+            List<string> kept = [.. bound.Where(c => c.Kind == "role").Select(c => RoleMarker + c.Record.Id)];
+            if (refusers is not null || kept.Count > 0)
             {
                 StrictIndex index = Index();
-                var changed = new HashSet<string>(StringComparer.Ordinal);
+                var changed = new HashSet<string>(kept, StringComparer.Ordinal);
                 var judged = new HashSet<RecordEnvelope>(ReferenceEqualityComparer.Instance);
-                foreach (int record in refusers.Keys)
+                foreach (int record in refusers?.Keys ?? Enumerable.Empty<int>())
                 {
                     foreach (RecordEnvelope revision in index.Readers[record])
                     {
@@ -2039,7 +2066,13 @@ internal sealed partial class EstateTrust
         {
             if (strictRefusals.TryGetValue(closing.Record.Id, out int[]? known)) return known;
             int[] refused = [];
-            if (closing.Kind != "grant" && closing.Identity is { } identity && Index() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
+            if (closing.Kind == "role")
+            {
+                // A role closing refuses the signed records its person wrote, whichever device signed them (ID-14).
+                StrictIndex read = Index();
+                refused = [.. Enumerable.Range(0, read.Records.Count).Where(record => read.Records[record].Signatures.Count > 0 && Refuses(closing, read.Records[record]))];
+            }
+            else if (closing.Kind != "grant" && closing.Identity is { } identity && Index() is var index && index.SignedBy.TryGetValue(identity, out List<int>? signed))
                 refused = [.. signed.Where(record => Refuses(closing, index.Records[record]))];
             strictRefusals[closing.Record.Id] = refused;
             return refused;
@@ -2268,7 +2301,7 @@ internal sealed partial class EstateTrust
         head is not null && EstateModel.BodyString(head, "kind") == "human" && head.Body.TryGetProperty("roles", out JsonElement roles) &&
         roles.ValueKind == JsonValueKind.Array && roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == Roles.Operator);
 
-    private string PrincipalIdentity(RecordEnvelope principal)
+    internal string PrincipalIdentity(RecordEnvelope principal)
     {
         RecordEnvelope current = principal;
         var seen = new HashSet<string>(StringComparer.Ordinal) { current.Id };
