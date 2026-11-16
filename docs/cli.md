@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 32, November 16, 2026. Mark every line taken from the runtime with `runtime:`, its control characters shown escaped, name the action and references as a session's terms state them, and refuse `devices presence` over a settings file that does not read, in the development build.
+
 Revision 31, November 16, 2026. Add `devices presence`, which keeps a device owner's presence setting on the machine holding the key, and `devices sessions`, which lists the presence session ledger, and show a presence session's list, the fingerprint computed from its terms and each signature on standard error, in the development build.
 
 Revision 30, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
@@ -952,36 +954,45 @@ signatures it adds, with why, before they are asked for; and when it ends, how m
 command's answer, so `--json` output stays one JSON document. A command that signs nothing with presence prints none of this,
 and neither does a daemon of an older release. The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093)
 lists how many prompts the release and acceptance steps ask for. From 0.9.4 each prompt's line ends with the signed record's short
-hash, the first twelve hexadecimal digits of its content hash, which the release build's helper also shows in its dialog's label.
+hash, the first twelve hexadecimal digits of its content hash, which the release build's helper also shows in its dialog's label, and
+every one of these lines begins with `runtime:`: its words are the runtime's, and the mark keeps them from passing for a line the
+command line derived itself. Control characters and escape sequences in them are shown escaped, never passed to the terminal.
 
 ## Presence sessions on standard error (0.9.4)
 
 From 0.9.4 (CODE-80) an operator action that asks one presence check for a list of its signatures, a presence session, is shown on
 standard error from the list's terms, the exact text the runtime hands the `vericairn-enclave` helper. The command line checks the
-terms as the helper does, counts them and summarizes each entry itself, and labels the runtime's own description of each entry as the
-runtime's, since only the terms are what the helper enforces:
+terms as the helper does, names the action as they do, counts them and summarizes each entry itself, with the recorded records a kind
+entry may supersede or observe. Every word of the runtime's (its description of each entry and what it changes, its own name for the
+action where that differs from the terms', a renewal's reason, each signature's line and how many were signed) is on a line that begins
+with `runtime:`, with control characters, escape sequences and line breaks inside a field shown escaped, since only the terms are what
+the helper enforces; a line without the mark is one the command line derived itself:
 
 ```text
 operator close asks for your presence once, for one presence session of 2 signatures in at most 300 s, covering only this list, read here from its terms:
   1. acceptance by exact hash 5174cd67ab7d
-     the runtime's description: acceptance STEP-1: accepts result <result-id> at its exact hash
-     what it changes, in the runtime's words: adds an acceptance about STEP-1 on the basis of 1 review
+runtime:   describes entry 1: acceptance STEP-1: accepts result <result-id> at its exact hash
+runtime:   says entry 1 changes: adds an acceptance about STEP-1 on the basis of 1 review
   2. acceptance by exact hash a0adefb51eff
-     the runtime's description: acceptance STEP-2: accepts result <result-id> at its exact hash
-     what it changes, in the runtime's words: adds an acceptance about STEP-2 on the basis of 1 review
+runtime:   describes entry 2: acceptance STEP-2: accepts result <result-id> at its exact hash
+runtime:   says entry 2 changes: adds an acceptance about STEP-2 on the basis of 1 review
   In all, counted here from the terms: 2 signatures: 2 acceptance records by exact hash.
 Anything outside this list asks again.
 Presence check for operator close: the system dialog should show fingerprint T937-DZ2K-TZN0, computed here from the list above and the check's nonce. Approve it once, only if the fingerprints match and the list is what you asked for; it covers 2 signatures in at most 300 s.
-Signature 1 of 2, under the session's check: acceptance STEP-1: accepts result <result-id> at its exact hash (5174cd67ab7d); entry 1 of its list, by exact hash
-Signature 2 of 2, under the session's check: acceptance STEP-2: accepts result <result-id> at its exact hash (a0adefb51eff); entry 2 of its list, by exact hash
-Signed 2 of 2 with one presence check.
+runtime: Signature 1 of 2, under the session's check: acceptance STEP-1: accepts result <result-id> at its exact hash (5174cd67ab7d)
+  Its short hash is entry 1 of the list above, by exact hash.
+runtime: Signature 2 of 2, under the session's check: acceptance STEP-2: accepts result <result-id> at its exact hash (a0adefb51eff)
+  Its short hash is entry 2 of the list above, by exact hash.
+runtime: Signed 2 of 2 with one presence check.
 ```
 
 The fingerprint is computed by the command line from the helper's nonce and the list's terms, as the helper computes the one it writes
 into the dialog, and only for a list the command line read before the nonce. A list that reached it only with the nonce or after it, or
 that the helper would refuse, gets a warning in place of a fingerprint: decline the dialog unless you asked for exactly that action. A
-renewal is shown the same way, with the runtime's reason, before its own check; a session that ends early, at a screen lock, sleep or
-its limit, says so. Where no daemon serves the estate the command line runs the runtime in its own process, so what it prints is not
+notice the command line cannot check, such as a check without its session or a list without its terms, is shown whole as the runtime's,
+after a warning. A renewal is shown the same way, with the runtime's reason on a `runtime:` line, before its own check; a session that
+ends early, at a screen lock, sleep or its limit, says so on a `runtime:` line. Before it hands terms to the helper the runtime waits up
+to two seconds until every client following the notices has read them, so each can show the fingerprint. Where no daemon serves the estate the command line runs the runtime in its own process, so what it prints is not
 independent of that runtime; the dialog's own text is. Sessions open only with a release build's signed helper on a macOS version the
 release lists as qualified, which `vericairn doctor` reports; elsewhere every signature keeps its own check, shown as above for 0.9.3.
 The [operator's guide](operator-guide.md#presence-prompts-announced-and-counted-093) states the guarantee and lists each step's checks.
@@ -1008,7 +1019,9 @@ vericairn --json devices presence <device>
 
 The setting is kept owner-only in `presence.json` under the Vericairn home, never in a record, an export or a support bundle, and only
 for a device of the estate whose key this machine holds; the command refuses another device, both choices at once, a limit outside 60
-to 300 seconds and a limit with `--per-signature`, writing nothing. It also shows the estate charter's `policies.presence`, since the
+to 300 seconds and a limit with `--per-signature`, writing nothing. While `presence.json` does not read as its format, every device on
+the machine counts as per-signature, and the command refuses to write over it, naming the file: repair it, or remove it to return every
+device to the default, then set each device again. It also shows the estate charter's `policies.presence`, since the
 stricter of the two wins: under a charter that says `per-signature`, every signature asks its own check whatever the owner's setting.
 `--json` writes `device`, `presence`, `limitSeconds`, `charter`, `effective`, `required` (whether the device's signatures need its
 owner's presence at all) and `problem` (why a damaged settings file counts as per-signature). Neither setting is enforced by the
