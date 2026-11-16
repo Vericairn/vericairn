@@ -9,9 +9,15 @@ Tags, short hashes, expressions, local actions and container action references a
 refused. Remote reusable workflows receive the same check. A reusable workflow in
 this directory is checked as part of the repository.
 
-Dependabot proposes GitHub Actions updates monthly in one grouped pull request.
-Each proposed SHA still needs review and an explicit entry in `actions.allow` from
-the builder; a Dependabot update alone cannot pass the workflow policy.
+Dependabot proposes GitHub Actions updates and NuGet package updates monthly, each
+ecosystem in one grouped pull request, and only for versions published at least 7 days
+earlier (`cooldown`), so a compromised version that is withdrawn within days is never
+proposed. GitHub does not apply the cooldown to security updates. Each proposed action
+SHA still needs review and an explicit entry in `actions.allow` from the builder; a
+Dependabot update alone cannot pass the workflow policy. A NuGet update changes
+`Directory.Packages.props`; Dependabot does not regenerate the runtime-specific
+`packages.distributable.lock.json` files, so the package job's locked restore refuses
+the update until the builder regenerates them as the software guide describes.
 
 CI runs `ruby .github/scripts/check-workflow-actions.rb` over every `.yml` and `.yaml`
 workflow, including release-only workflows. It uses Ruby's bundled YAML syntax-tree

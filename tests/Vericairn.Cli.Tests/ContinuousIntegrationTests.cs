@@ -388,10 +388,16 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void DependabotGroupsMonthlyActionUpdatesAndLeavesApprovalToTheWorkflowPolicy()
+    public void DependabotProposesActionAndNuGetUpdatesMonthlyAfterACooldownAndLeavesApprovalToTheWorkflowPolicy()
     {
+        // CI-09: a compromised version is usually found within days, so nothing is proposed until it is 7 days old.
+        // Dependabot does not apply the cooldown to security updates, which stay unblocked.
         string github = Path.Combine(RepositoryRoot(), ".github");
-        Assert.Equal("version: 2\nupdates:\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: monthly\n    groups:\n      github-actions:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n", Read(Path.Combine(github, "dependabot.yml")));
+        Assert.Equal("version: 2\nupdates:\n"
+            + "  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: monthly\n    cooldown:\n      default-days: 7\n"
+            + "    groups:\n      github-actions:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n"
+            + "  - package-ecosystem: nuget\n    directory: /\n    schedule:\n      interval: monthly\n    cooldown:\n      default-days: 7\n"
+            + "    groups:\n      nuget:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n", Read(Path.Combine(github, "dependabot.yml")));
         string policy = Read(Path.Combine(github, "scripts", "check-workflow-actions.rb"));
         Assert.Contains("!OWNER.match?(action)", policy, StringComparison.Ordinal);
         Assert.Contains("!allowed.include?(action)", policy, StringComparison.Ordinal);
