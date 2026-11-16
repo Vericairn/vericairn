@@ -93,17 +93,44 @@ public class FlowDecisionTests
         AssertNoErrors(run);
         RecordEnvelope approved = run.Marked("APPROVED");
         Draft(run);
-        FlowPosition.StepInstance gate = run.Step("gate");
-        Assert.Equal(("done", "rule", "rule"), (gate.State, gate.Decision!.Decider, gate.Decision.Configured));
-        Assert.Equal(["ship"], gate.Decision.Paths);
-        Assert.StartsWith("rule 1 holds as the records stood at", gate.Decision.Reasons, StringComparison.Ordinal);
-        Assert.Contains(gate.Decision.Evidence, e => e.Id == approved.Id && e.Hash == approved.ComputedHash);
-        Assert.False(gate.Step.IsRouted && gate.State == "next");
 
-        // A record made after the step was ready never changes the decision taken.
-        run.Marked("REWORK");
-        Assert.Equal(["ship"], run.Step("gate").Decision!.Paths);
+        // Until it is recorded, the rule's decision shows pending with its path, and nothing after the gate runs.
+        FlowPosition.StepInstance pending = run.Step("gate");
+        Assert.Equal(("next", "pending", "rule", "1"), (pending.State, pending.Decision!.State, pending.Decision.Decider, pending.Decision.Rule));
+        Assert.Equal(["ship"], pending.Decision.Paths);
+        Assert.StartsWith("rule 1 holds as the records stood at", pending.Decision.Reasons, StringComparison.Ordinal);
+        Assert.Contains(pending.Decision.Evidence, e => e.Id == approved.Id && e.Hash == approved.ComputedHash);
+        Assert.Equal("blocked", run.Step("release").State);
+
+        // Recorded as the runtime evaluated it, by who takes the step: the path, the rule that matched and the records it read.
+        RecordEnvelope ruled = RecordRule(run);
+        AssertNoErrors(run);
+        Assert.Contains($"work-order {approved.Id} {approved.ComputedHash}", ruled.Body.GetProperty("facts").GetProperty("read").EnumerateArray().Select(r => r.GetString()));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("done", "taken", "rule", ruled.Id), (gate.State, gate.Decision!.State, gate.Decision.Decider, gate.Decision.Record!.Id));
         Assert.Equal("next", run.Step("release").State);
+    }
+
+    [Fact]
+    public void ARecordedRuleDecisionIsNeverEvaluatedAgain()
+    {
+        // Review finding 5: an unchanged revision of a marker, a marker dated before the round, or a changed state never flips the path.
+        using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: true));
+        RecordEnvelope approved = run.Marked("APPROVED");
+        RecordEnvelope drafted = Draft(run);
+        RecordRule(run);
+        run.Add("work-order", PolicyFixture.Body(approved), supersedes: approved.Id);
+        run.Estate.SetClock(drafted.AtTime.AddMinutes(-5));
+        run.Marked("REWORK");
+        run.Estate.SetClock(drafted.AtTime.AddHours(1));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("done", "ship"), (gate.State, gate.Decision!.Paths[0]));
+        Assert.Equal("next", run.Step("release").State);
+
+        // A second rule decision for the same round is refused by validation and counts for nothing.
+        RecordEnvelope again = run.Add("observation", FlowDecisions.RuleBody(run.Step("gate") with { Decision = gate.Decision with { Paths = ["rework"], Rule = "2", At = gate.Decision.Since } }), subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), again), f => f.Code == "observation.flow-decision");
+        Assert.Equal("ship", run.Step("gate").Decision!.Paths[0]);
     }
 
     [Fact]
@@ -111,10 +138,13 @@ public class FlowDecisionTests
     {
         using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: true));
         Draft(run);
-        FlowPosition.StepInstance gate = run.Step("gate");
-        Assert.Equal(("done", "default"), (gate.State, gate.Decision!.Decider));
-        Assert.Equal(["drop"], gate.Decision.Paths);
-        Assert.StartsWith("no rule holds as the records stood at", gate.Decision.Reasons, StringComparison.Ordinal);
+        FlowPosition.StepInstance pending = run.Step("gate");
+        Assert.Equal(("next", "default", "default"), (pending.State, pending.Decision!.Decider, pending.Decision.Rule));
+        Assert.Equal(["drop"], pending.Decision.Paths);
+        Assert.StartsWith("no rule holds as the records stood at", pending.Decision.Reasons, StringComparison.Ordinal);
+        RecordRule(run);
+        AssertNoErrors(run);
+        Assert.Equal(("done", "default"), (run.Step("gate").State, run.Step("gate").Decision!.Decider));
         Assert.Equal(("off", "off"), (run.Step("release").State, run.Step("publish").State));
     }
 
@@ -125,6 +155,9 @@ public class FlowDecisionTests
         {
             run.Marked("APPROVED");
             Draft(run);
+            Assert.Equal(("next", "rule"), (run.Step("gate").State, run.Step("gate").Decision!.Decider));
+            RecordRule(run);
+            AssertNoErrors(run);
             Assert.Equal(("done", "rule"), (run.Step("gate").State, run.Step("gate").Decision!.Decider));
         }
 
@@ -221,8 +254,8 @@ public class FlowDecisionTests
         // Findings send it back: the agent decides again, and the first decision never takes effect.
         run.Review(first, "findings");
         FlowPosition.StepInstance sentBack = run.Step("gate");
-        Assert.Equal(("next", "pending"), (sentBack.State, sentBack.Decision!.State));
-        Assert.Contains(sentBack.Reasons, r => r.Contains("found what to change in its decision", StringComparison.Ordinal));
+        Assert.Equal(("next", "pending", 0), (sentBack.State, sentBack.Decision!.State, sentBack.Decision.Paths.Count));
+        Assert.Equal("blocked", run.Step("release").State);
 
         RecordEnvelope second = Decide(run, assignment, ["ship"], "Ready, with the fix.");
         Assert.Equal("in-review", run.Step("gate").State);
@@ -255,9 +288,16 @@ public class FlowDecisionTests
         FlowPosition.StepInstance missed = Gate(run, Friday.AddHours(3));
         if (rule == "default")
         {
-            Assert.Equal(("done", "deadline"), (missed.State, missed.Decision!.Decider));
+            // The deadline takes the default path, which goal step records; a decision recorded after the deadline counts for nothing.
+            Assert.Equal(("next", "deadline", "deadline"), (missed.State, missed.Decision!.Decider, missed.Decision.Rule));
             Assert.Equal(["drop"], missed.Decision.Paths);
-            Assert.Equal(deadline, missed.DoneAt);
+            run.Estate.SetClock(Friday.AddHours(3));
+            Decide(run, run.Assign("gate", run.Estate.OperatorId), ["ship"], "Too late.");
+            Assert.Equal("deadline", Gate(run, Friday.AddHours(3).AddMinutes(1)).Decision!.Decider);
+            RecordEnvelope recorded = run.Add("observation", FlowDecisions.RuleBody(Gate(run, Friday.AddHours(3).AddMinutes(1))), subject: run.Goal.Reference);
+            FlowPosition.StepInstance defaulted = Gate(run, Friday.AddHours(3).AddMinutes(2));
+            Assert.Equal(("done", "deadline", recorded.Id), (defaulted.State, defaulted.Decision!.Decider, defaulted.Decision.Record!.Id));
+            Assert.Equal(["drop"], defaulted.Decision.Paths);
             return;
         }
 
@@ -265,11 +305,18 @@ public class FlowDecisionTests
         FlowStops.RunStop stop = Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddHours(3)).Stops, s => s.Step?.Key == "gate");
         Assert.Equal(("attention", run.Estate.OperatorId), (stop.Kind, stop.Principal));
 
-        // Once the sponsor answers, the decider still decides, late.
-        Answer(run, missed.Attention.Trigger, Friday.AddHours(3));
+        // A decision recorded after the deadline waits for the sponsor's answer before it takes effect.
+        RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+        run.Estate.SetClock(Friday.AddHours(3).AddMinutes(1));
+        Decide(run, assignment, ["ship"], "Late, but ready.");
+        FlowPosition.StepInstance waiting = Gate(run, Friday.AddHours(3).AddMinutes(10));
+        Assert.Equal(("stopped", "attention", "attention"), (waiting.State, waiting.Stop, waiting.Decision!.State));
+        Assert.Equal("blocked", Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddHours(3).AddMinutes(10)).Steps, s => s.Step.Key == "release").State);
+
+        // Once the sponsor answers, the decision takes effect.
+        Answer(run, missed.Attention.Trigger, Friday.AddHours(3).AddMinutes(20));
         FlowPosition.StepInstance late = Gate(run, Friday.AddHours(4));
-        Assert.Equal(("stopped", "person", "pending"), (late.State, late.Stop, late.Decision!.State));
-        Assert.Contains(late.Reasons, r => r.StartsWith("it missed its deadline at", StringComparison.Ordinal));
+        Assert.Equal(("done", "taken"), (late.State, late.Decision!.State));
     }
 
     [Fact]
@@ -288,7 +335,8 @@ public class FlowDecisionTests
             Assert.Equal(("blocked", "returning"), (back.State, back.Decision!.State));
             FlowPosition.StepInstance draft = run.Step("draft");
             Assert.Equal(("next", true), (draft.State, draft.Rerun));
-            Assert.StartsWith("reopened: the decision at gate took path rework back to draft", draft.Reasons[0], StringComparison.Ordinal);
+            Assert.StartsWith("reopened: the decision at gate, by Test Builder in result ", draft.Reasons[0], StringComparison.Ordinal);
+            Assert.Contains("took path rework back to draft", draft.Reasons[0], StringComparison.Ordinal);
             Draft(run);
             FlowPosition.StepInstance again = run.Step("gate");
             Assert.Equal(("next", "pending", true), (again.State, again.Decision!.State, again.Rerun));
@@ -369,6 +417,169 @@ public class FlowDecisionTests
         Assert.Equal(("done", "next"), (run.Step("gate").State, run.Step("release").State));
     }
 
+    [Fact]
+    public void TheFirstDecisionThatStandsIsFinalForItsRound()
+    {
+        // Review finding 2: a later decision on the same assignment never replaces one in effect, and validation reports it.
+        using var run = new FlowFixture(Gate(), rolesOf: f => Approvers(f, agent: false));
+        Draft(run);
+        RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+        Decide(run, assignment, ["ship"], "Ship it.");
+        run.Marked("RELEASED");
+        RecordEnvelope again = Decide(run, assignment, ["drop"], "Changed my mind.");
+        Assert.Contains(Errors(run.Estate.Load(), again), f => f.Code == "result.decision" && f.Message.Contains("stands and is final", StringComparison.Ordinal));
+        Assert.Equal(("done", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Paths[0]));
+        Assert.Equal(("done", "stopped"), (run.Step("release").State, run.Step("publish").State));
+    }
+
+    [Fact]
+    public void OnlyTheStepsCurrentAssignmentDecides()
+    {
+        // Review finding 3: a displaced holder's decision counts for nothing, and validation reports it.
+        using var run = new FlowFixture(Gate(), rolesOf: f => Approvers(f, agent: false));
+        Draft(run);
+        RecordEnvelope displaced = run.Assign("gate", run.Estate.OperatorId);
+        run.Assign("gate", run.Estate.OperatorId);
+        RecordEnvelope decided = Decide(run, displaced, ["ship"], "From the old assignment.");
+        Assert.Contains(Errors(run.Estate.Load(), decided), f => f.Code == "result.decision" && f.Message.Contains("no longer holds step gate", StringComparison.Ordinal));
+        Assert.Equal("pending", run.Step("gate").Decision!.State);
+        Assert.Equal("blocked", run.Step("release").State);
+    }
+
+    [Fact]
+    public void APathBackCountsTheDecisionsThatTookItOneARoundNeverFreshAssignments()
+    {
+        // Review finding 6: assignments made for other reasons never count, and a decision sent back and decided again counts once.
+        using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: true)))
+        {
+            run.Marked("REWORK");
+            Draft(run);
+            RecordRule(run);
+            Assert.Equal("returning", run.Step("gate").Decision!.State);
+            run.Assign("draft", run.Estate.BuilderId);
+            run.Assign("draft", run.Estate.BuilderId);
+            Draft(run);
+            FlowPosition.StepInstance second = run.Step("gate");
+            Assert.Equal(("next", "rework"), (second.State, second.Decision!.Paths[0]));
+            RecordRule(run);
+            Assert.Equal(("returning", 1), (run.Step("gate").Decision!.State, run.Step("gate").Decision!.Taken));
+        }
+
+        using (var run = new FlowFixture(Gate(transition => transition["review"] = "independent", configurable: false), rolesOf: f => Approvers(f, agent: true)))
+        {
+            Draft(run);
+            RecordEnvelope assignment = run.Assign("gate", run.Estate.BuilderId);
+            run.Review(Decide(run, assignment, ["rework"], "Rework."), "findings");
+            run.Review(Decide(run, assignment, ["rework"], "Rework, as reviewed."));
+            Assert.Equal("returning", run.Step("gate").Decision!.State);
+            Draft(run);
+            RecordEnvelope next = run.Assign("gate", run.Estate.BuilderId);
+            run.Review(Decide(run, next, ["rework"], "Rework again."));
+            Assert.Equal(("returning", 1), (run.Step("gate").Decision!.State, run.Step("gate").Decision!.Taken));
+        }
+    }
+
+    [Fact]
+    public void AReturnMadeStaysMadeWhenTheDecidingStepIsBlockedLater()
+    {
+        // Review finding 7: once a decision returned the run to draft, a later block of the gate does not undo the return.
+        JsonObject flow = Gate();
+        StepOf(flow, "gate")["requires"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "HOLD" }, ["max"] = 0 });
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        Draft(run);
+        Decide(run, run.Assign("gate", run.Estate.OperatorId), ["rework"], "Rework.");
+        Assert.Equal(("next", true), (run.Step("draft").State, run.Step("draft").Rerun));
+        run.Marked("HOLD");
+        Assert.Equal("blocked", run.Step("gate").State);
+        Assert.Equal(("next", true), (run.Step("draft").State, run.Step("draft").Rerun));
+    }
+
+    [Fact]
+    public void AJoinIsOffWhenEveryPathItJoinsIsOffAndABranchNotTakenIsOffWhateverItsPredicates()
+    {
+        // Review findings 8 and 9: a path into a branch turns the joined paths off, the join with them; a branch not taken stays off.
+        using (var run = new FlowFixture(Fork(withdrawal: true), rolesOf: f => Approvers(f, agent: false)))
+        {
+            AssertNoErrors(run);
+            Draft(run);
+            Decide(run, run.Assign("gate", run.Estate.OperatorId), ["withdraw"], "Withdraw instead.");
+            Assert.Equal(("off", "off", "off"), (run.Step("clips").State, run.Step("notes").State, run.Step("merge").State));
+            Assert.Equal("next", run.Step("retract").State);
+        }
+
+        using (var run = new FlowFixture(Fork(withdrawal: true), rolesOf: f => Approvers(f, agent: false)))
+        {
+            run.Marked("WITHDRAW");
+            Draft(run);
+            Decide(run, run.Assign("gate", run.Estate.OperatorId), ["clips"], "Clips only.");
+            FlowPosition.StepInstance retract = run.Step("retract");
+            Assert.Equal("off", retract.State);
+            Assert.StartsWith("the decision at gate took path clips, not withdraw", retract.Reasons[0], StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void AnEndPathTurnsOffEveryStepNotDoneWhateverItsOrder()
+    {
+        // Review finding 10: a step declared before the gate that is not done is off too, and the run reads complete.
+        JsonObject flow = Gate();
+        JsonObject notes = Operation("notes", "NOTES");
+        flow["steps"]!.AsArray().Insert(1, notes);
+        StepOf(flow, "gate")["after"] = new JsonArray("draft");
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        Draft(run);
+        Assert.Equal("next", run.Step("notes").State);
+        Decide(run, run.Assign("gate", run.Estate.OperatorId), ["drop"], "Shelved.");
+        Assert.Equal(("off", "off", "off"), (run.Step("notes").State, run.Step("release").State, run.Step("publish").State));
+        Assert.True(run.Position().Complete);
+    }
+
+    [Fact]
+    public void ADecisionNeverTurnsOffARequiredReservedStepOrOneAPolicyRequires()
+    {
+        // Review finding 11: goal decide refuses such a path, naming the step; validation reports a recorded one; the step stays on.
+        using (var run = new FlowFixture(Gate(requiredPublish: true), rolesOf: f => Approvers(f, agent: false)))
+        {
+            AssertNoErrors(run);
+            Draft(run);
+            RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+            FlowDecisions.Plan refused = FlowDecisions.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "gate", ["drop"], "Shelved.", [], run.Estate.Clock);
+            Assert.Contains(refused.Refusals, r => r.StartsWith($"{FlowDecisions.ProtectedCode}: path drop would turn off step publish: it is a required reserved step (publish)", StringComparison.Ordinal));
+            RecordEnvelope dropped = Decide(run, assignment, ["drop"], "Shelved anyway.");
+            Assert.Contains(Errors(run.Estate.Load(), dropped), f => f.Code == "result.decision-protected" && f.Message.Contains("step publish", StringComparison.Ordinal));
+            Assert.Equal(("off", "stopped"), (run.Step("release").State, run.Step("publish").State));
+            Assert.False(run.Position().Complete);
+        }
+
+        using (var run = new FlowFixture(Gate(), rolesOf: f => Approvers(f, agent: false)))
+        {
+            JsonObject body = run.Policies.PolicyBody("gate-publish", duty: false);
+            body["rules"] = new JsonArray(new JsonObject { ["key"] = "publish", ["kind"] = FlowRuns.PolicyKind, ["version"] = 1, ["parameters"] = new JsonObject { ["flow"] = "example/gate", ["steps"] = new JsonArray("publish") } });
+            run.Policies.Policy(body);
+            Draft(run);
+            RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+            FlowDecisions.Plan refused = FlowDecisions.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "gate", ["drop"], "Shelved.", [], run.Estate.Clock);
+            Assert.Contains(refused.Refusals, r => r.StartsWith($"{FlowDecisions.ProtectedCode}: path drop would turn off step publish: estate policy gate-publish requires it", StringComparison.Ordinal));
+            RecordEnvelope dropped = Decide(run, assignment, ["drop"], "Shelved anyway.");
+            Assert.Contains(Errors(run.Estate.Load(), dropped), f => f.Code == "result.decision-protected");
+            Assert.Equal("stopped", run.Step("publish").State);
+        }
+    }
+
+    [Fact]
+    public void AStepOfARoleTheFlowMarksAPersonsIsDecidedOnlyByAPerson()
+    {
+        JsonObject flow = Gate(configurable: false);
+        flow["roles"]![1]!["holder"] = "person";
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: true));
+        Draft(run);
+        RecordEnvelope decided = Decide(run, run.Assign("gate", run.Estate.BuilderId), ["ship"], "An agent's choice.");
+        Assert.Contains(Errors(run.Estate.Load(), decided), f => f.Code == "result.decision" && f.Message.Contains("marks the approver role a person's", StringComparison.Ordinal));
+        Assert.NotEqual("done", run.Step("gate").State);
+    }
+
     public static TheoryData<string, string> Refusals => new()
     {
         { "one-path", "flow.transition" },
@@ -386,6 +597,9 @@ public class FlowDecisionTests
         { "step-waiting-outside-the-paths", "flow.transition" },
         { "optional-decision-step", "flow.transition" },
         { "decision-in-a-branch", "flow.transition" },
+        { "rule-transition-on-an-operation", "flow.transition" },
+        { "transition-on-a-reserved-step", "flow.transition" },
+        { "failure-route-to-a-decision-step", "flow.failure" },
         { "unknown-decider", "body.enum" },
         { "unknown-undelegable", "body.enum" },
     };
@@ -416,6 +630,25 @@ public class FlowDecisionTests
             case "decision-in-a-branch": flow["branches"] = new JsonArray(new JsonObject { ["name"] = "aside", ["when"] = new JsonArray(FlowFixture.Marker("ASIDE")), ["steps"] = new JsonArray("gate") }); break;
             case "unknown-decider": transition["decider"] = "coin"; break;
             case "unknown-undelegable": transition["undelegable"] = "lunch"; break;
+            case "rule-transition-on-an-operation":
+                // Review finding 1: a path back from a step that is not a decision step is never left undecided.
+                JsonObject check = Operation("check", "CHECKED", "draft");
+                check["transition"] = new JsonObject
+                {
+                    ["paths"] = new JsonArray(new JsonObject { ["name"] = "rework", ["step"] = "draft", ["limit"] = 2 }, new JsonObject { ["name"] = "on", ["step"] = "gate" }),
+                    ["decider"] = "rule", ["rules"] = new JsonArray(new JsonObject { ["path"] = "on", ["when"] = new JsonArray(FlowFixture.Marker("ON")) }), ["default"] = "rework",
+                };
+                flow["steps"]!.AsArray().Insert(1, check);
+                StepOf(flow, "gate")["after"] = new JsonArray("check");
+                break;
+            case "transition-on-a-reserved-step": StepOf(flow, "gate")["reserved"] = "publish"; StepOf(flow, "gate")["action"] = FlowFixture.PublishCommand; transition["decider"] = "rule"; transition.Remove("configurable"); break;
+            case "failure-route-to-a-decision-step":
+                // Review finding 4: a failure route never returns the run to a decision step.
+                JsonObject polish = FlowFixture.Step("polish", "work", "writer", outputs: new JsonArray(FlowFixture.FileItem("polished")));
+                polish["after"] = new JsonArray("release");
+                polish["failure"] = new JsonObject { ["route"] = "step", ["step"] = "gate" };
+                flow["steps"]!.AsArray().Add(polish);
+                break;
             default: throw new ArgumentOutOfRangeException(nameof(change));
         }
 
@@ -426,9 +659,9 @@ public class FlowDecisionTests
     /// <summary>
     /// A release gate: draft the lyrics; the gate, decided by the approver role, ships (release, then the operator's publication), reworks
     /// (back to draft, at most twice) or drops (ends the run); a venture may choose a rule (approved ships, rework reworks, else drop) or a
-    /// rule then the role.
+    /// rule then the role. Publication is optional unless asked required, so that drop may turn it off.
     /// </summary>
-    private static JsonObject Gate(Action<JsonObject>? change = null, bool configurable = true)
+    private static JsonObject Gate(Action<JsonObject>? change = null, bool configurable = true, bool requiredPublish = false)
     {
         var transition = new JsonObject
         {
@@ -456,20 +689,31 @@ public class FlowDecisionTests
         JsonObject gate = FlowFixture.Step("gate", "decision", "approver");
         gate["transition"] = transition;
         JsonObject release = Operation("release", "RELEASED", "gate");
-        JsonObject publish = FlowFixture.Step("publish", "operation", "decider", reserved: "publish", done: new JsonArray(FlowFixture.Marker("PUBLISHED")), action: FlowFixture.PublishCommand);
+        JsonObject publish = FlowFixture.Step("publish", "operation", "decider", optional: requiredPublish ? null : "on", reserved: "publish", done: new JsonArray(FlowFixture.Marker("PUBLISHED")), action: FlowFixture.PublishCommand);
         return Flow("example/gate", gate, release, publish);
     }
 
-    /// <summary>A fork: draft; the gate takes clips, notes or both at once; merge joins them.</summary>
-    private static JsonObject Fork()
+    /// <summary>A fork: draft; the gate takes clips, notes or both at once; merge joins them; with a withdrawal, a path into its branch.</summary>
+    private static JsonObject Fork(bool withdrawal = false)
     {
         JsonObject gate = FlowFixture.Step("gate", "decision", "approver");
-        gate["transition"] = new JsonObject
+        var paths = new JsonArray(new JsonObject { ["name"] = "clips", ["step"] = "clips" }, new JsonObject { ["name"] = "notes", ["step"] = "notes" });
+        if (withdrawal)
         {
-            ["paths"] = new JsonArray(new JsonObject { ["name"] = "clips", ["step"] = "clips" }, new JsonObject { ["name"] = "notes", ["step"] = "notes" }),
-            ["decider"] = "role", ["several"] = true, ["join"] = "merge",
-        };
-        return Flow("example/fork", gate, Operation("clips", "CLIPS", "gate"), Operation("notes", "NOTES", "gate"), Operation("merge", "MERGED", "clips", "notes"));
+            paths.Add(new JsonObject { ["name"] = "withdraw", ["branch"] = "withdrawal" });
+        }
+
+        gate["transition"] = new JsonObject { ["paths"] = paths, ["decider"] = "role", ["several"] = true, ["join"] = "merge" };
+        JsonObject flow = Flow("example/fork", gate, Operation("clips", "CLIPS", "gate"), Operation("notes", "NOTES", "gate"), Operation("merge", "MERGED", "clips", "notes"));
+        if (withdrawal)
+        {
+            JsonObject retract = FlowFixture.Step("retract", "operation", "writer", optional: "on", done: new JsonArray(FlowFixture.Marker("RETRACTED")));
+            retract["after"] = new JsonArray("draft");
+            flow["steps"]!.AsArray().Add(retract);
+            flow["branches"] = new JsonArray(new JsonObject { ["name"] = "withdrawal", ["when"] = new JsonArray(FlowFixture.Marker("WITHDRAW")), ["steps"] = new JsonArray("retract") });
+        }
+
+        return flow;
     }
 
     private static JsonObject Flow(string id, params JsonObject[] after) => new()
@@ -509,6 +753,10 @@ public class FlowDecisionTests
     /// <summary>The decider's attempt and its completed result recording a decision on an assignment of the gate.</summary>
     private static RecordEnvelope Decide(FlowFixture run, RecordEnvelope assignment, string[] paths, string reasons, params RecordEnvelope[] evidence) =>
         run.Decide(assignment, paths, reasons, evidence);
+
+    /// <summary>The rule's decision of the gate, recorded by the operator as goal step records it, from the position as it reads now.</summary>
+    private static RecordEnvelope RecordRule(FlowFixture run) =>
+        run.Add("observation", FlowDecisions.RuleBody(run.Step("gate")), subject: run.Goal.Reference);
 
     private static FlowPosition.StepInstance Gate(FlowFixture run, DateTimeOffset at) =>
         Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, at).Steps, s => s.Step.Key == "gate");

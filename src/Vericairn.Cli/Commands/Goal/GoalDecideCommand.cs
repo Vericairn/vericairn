@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 internal sealed class GoalDecideCommand : Command
 {
     public GoalDecideCommand(CommandContext context)
-        : base("decide", "Decide a run's decision step, from 0.9.4: the principal holding the step's assignment, the person or the agent its role reached through goal step, records the path or paths its transition takes, with the reasons and the evidence by hash, as the result of that assignment, signed by its own device. A rule's decision is never recorded here: the run derives it from the records. Choosing a path performs nothing reserved and dispatches nothing; goal step then takes the steps the path makes eligible, and a reserved step still waits on the operator. A decision the flow requires of a person, or one never delegated, is refused for an agent.")
+        : base("decide", "Decide a run's decision step, from 0.9.4: the principal holding the step's assignment, the person or the agent its role reached through goal step, records the path or paths its transition takes, with the reasons and the evidence by hash, as the result of that assignment, signed by its own device. A rule's decision is never recorded here: goal step records it. The first decision of a round is final, and only the step's current assignment decides. Choosing a path performs nothing reserved and dispatches nothing; goal step then takes the steps the path makes eligible, and a reserved step still waits on the operator. A decision the flow requires of a person, or one never delegated, is refused for an agent.")
     {
         var operations = new GoalOperations(context);
         var goalArgument = new Argument<string>("goal") { Description = "Goal record id (any revision)." };

@@ -180,7 +180,11 @@ public static partial class FlowContract
             }
 
             branched.UnionWith(branch.StringArray("steps", true, allowEmpty: false, maxItemLength: 100, itemPattern: Patterns.Slug, patternHint: "a step key") ?? []);
-            branch.Text("returnTo", false, 100, Patterns.Slug, "a step key");
+            if (branch.Text("returnTo", false, 100, Patterns.Slug, "a step key") is string returnTo
+                && declared.FirstOrDefault(s => s.Key == returnTo) is { } deciding && TJson.Object(deciding.Body.Element, "transition").ValueKind == JsonValueKind.Object)
+            {
+                branch.Error("flow.failure", "returnTo", DecidingTarget(returnTo));
+            }
             branch.NoOtherKeys();
         }
 
@@ -248,6 +252,10 @@ public static partial class FlowContract
 
         return new FlowTransition.StepShape(key, TJson.Text(step, "kind"), after, also, TJson.Text(step, "each"), FlowTransition.Read(TJson.Object(step, "transition"), key));
     }
+
+    /// <summary>From 0.9.4 (PROC-19), why a failure route or a branch never returns the run to a decision step that decides the run's path.</summary>
+    internal static string DecidingTarget(string target) =>
+        $"'{target}' is a decision step that decides the run's path: a failure route or a branch never returns the run to it, since it decides again only through its own rounds, a path back, a hold or what it waits on done again.";
 
     /// <summary>The refusal of a reserved step that could never close: it waits on a step done at no time the records give.</summary>
     public const string UnclosableCode = "flow.reserved-unclosable";
@@ -649,6 +657,11 @@ public static partial class FlowContract
         else if (earlier.FirstOrDefault(e => e.Key == target) is { Kind: "effect" or "exchange" } outside)
         {
             failure.Error("flow.failure", "step", $"'{target}' is an {outside.Kind} step: a failure route never repeats an outside effect.");
+        }
+        else if (earlier.FirstOrDefault(e => e.Key == target) is { } deciding && TJson.Object(deciding.Body.Element, "transition").ValueKind == JsonValueKind.Object)
+        {
+            // From 0.9.4 (PROC-19) a decision step decides again only through its own rounds: a failure route never reopens it.
+            failure.Error("flow.failure", "step", DecidingTarget(target!));
         }
 
         return route == "branch" ? branch : null;

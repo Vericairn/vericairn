@@ -175,10 +175,11 @@ public static partial class FlowPosition
 
     /// <summary>
     /// A decision transition's decision for a step instance's current round (from 0.9.4, PROC-19; the estate's design/flow.md § 5): the
-    /// step's item of kind decision. A rule's is derived from the records as they stood when the round began, naming the records it read; a
-    /// role's principal, an agent or a person, records its own as a result of its assignment of the step, with its paths, reasons and
-    /// evidence by hash; a deadline takes the default path where the transition says so. Never stored, and distinct from the estate's
-    /// decision records.
+    /// step's item of kind decision, on record or, for a rule's not yet recorded, pending. A rule's is read from the records as they stood
+    /// when the round began, naming the records it read, and recorded by who takes the step as a flow-decision observation; a role's
+    /// principal, an agent or a person, records its own as a result of its current assignment of the step, with its paths, reasons and
+    /// evidence by hash; a missed deadline takes the default path where the transition says so, recorded as a rule's is. The state is
+    /// derived from those records, never stored, and the decision is distinct from the estate's decision records.
     /// </summary>
     /// <param name="State">One of <see cref="DecisionStates"/>.</param>
     /// <param name="Configured">The decider in this run: rule, role or rule-then-role.</param>
@@ -198,8 +199,11 @@ public static partial class FlowPosition
         /// <summary>The review that let an agent's decision take effect, when its transition requires one.</summary>
         public RecordEnvelope? Review { get; init; }
 
-        /// <summary>For a path back, the times the run took it before this decision.</summary>
+        /// <summary>For a path back, the times the run took it before this decision, one a round.</summary>
         public int Taken { get; init; }
+
+        /// <summary>For a rule's decision, the rule that matched, its number from 1, or default, or deadline for a deadline's default; null for a principal's.</summary>
+        public string? Rule { get; init; }
     }
 
     /// <summary>One instance of a step: the step, once or once per name its each field lists, with its derived state.</summary>
@@ -385,10 +389,9 @@ public static partial class FlowPosition
         var deriving = new Deriving(model, current, flow, configuration, work, at, []);
         deriving.All();
 
-        // A failure route through a branch returns the run to the branch's returnTo step once the branch's steps are done, and from 0.9.4
-        // (PROC-19) a decision's path back returns it to an earlier step, which only a derivation can tell: the position is derived once
-        // more with those returns.
-        if (deriving.BranchReturns().Concat(deriving.DecisionReturns()).ToList() is { Count: > 0 } returns)
+        // A failure route through a branch returns the run to the branch's returnTo step once the branch's steps are done, which only a
+        // derivation can tell: the position is derived once more with those returns.
+        if (deriving.BranchReturns() is { Count: > 0 } returns)
         {
             deriving = new Deriving(model, current, flow, configuration, work, at, returns);
             deriving.All();
@@ -397,7 +400,9 @@ public static partial class FlowPosition
         // From 0.9.4 (FIX-143): a closed run's steps that are neither done nor off are unsettled, with the closer's reason, and the run
         // raises no attention and has no stop; nothing that comes after the closing makes an unsettled step done but its own records.
         RecordEnvelope? closing = GoalRules.Closing(model, current);
-        IReadOnlyList<StepInstance> steps = closing is null ? deriving.Instances : Unsettle(deriving.Instances, closing);
+        // From 0.9.4 (PROC-19) a decision that ended the run turns off every step not done, whatever their order.
+        List<StepInstance> derivedSteps = deriving.Ended();
+        IReadOnlyList<StepInstance> steps = closing is null ? derivedSteps : Unsettle(derivedSteps, closing);
         var position = new Position(current, flow, null, configuration, work, steps) { RunAttention = closing is null ? deriving.RunAttention() : [], At = at, Closing = closing };
         position = position with { Stops = FlowStops.Of(model, position, at) };
         if (!deliver)
@@ -502,6 +507,7 @@ public static partial class FlowPosition
         private readonly List<AgentRuns.Run> runs;
         private IReadOnlyList<LivingDocuments.State>? documents;
         private IReadOnlyDictionary<string, RecordEnvelope>? required;
+        private readonly Dictionary<string, List<FlowDecisions.Recorded>> decisions = new(StringComparer.Ordinal);
 
         public Deriving(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowRuns.Configuration configuration, RecordEnvelope? work, DateTimeOffset at, IReadOnlyList<Return> branchReturns)
         {
@@ -540,6 +546,39 @@ public static partial class FlowPosition
                 .Concat(failures.Where(f => f.Value.Route.Branch is not null).SelectMany(f => flow.Branches.First(b => b.Name == f.Value.Route.Branch).Steps
                     .Select(member => ReturnTo(member, f.Key, f.Value.Record.AtTime, f.Value) with { Entry = true })))
                 .Concat(branchReturns).ToList();
+
+            // From 0.9.4 (PROC-19) each decision step's decisions on record that stand, and a return for each that took a path back and took
+            // effect, within its limit or once the sponsor answered: read from the records before any step is derived, so a return made
+            // stays made whatever the deciding step's state reads later. A return its step was done again after reopens nothing.
+            foreach (FlowStep step in flow.Steps.Where(s => s.Kind == "decision" && s.Transition is not null && !configuration.Off.ContainsKey(s.Key)))
+            {
+                FlowTransition transition = step.Transition!;
+                string decider = configuration.Decider(step);
+                List<FlowDecisions.Recorded> principals = decider == "rule" ? [] : FlowDecisions.PrincipalDecisions(model, flow, step, held.GetValueOrDefault(new FlowRuns.StepRef(step.Key, null)) ?? []);
+                List<FlowDecisions.Recorded> rules = FlowDecisions.RuleDecisions(model, goal, step.Key).Where(r => decider != "role" || r.Rule == "deadline").ToList();
+                List<FlowDecisions.Recorded> standing = FlowDecisions.Standing(model, flow, step, principals, rules);
+                decisions[step.Key] = standing;
+                foreach (FlowDecisions.Recorded decision in standing.Where(d => FlowDecisions.TookEffect(model, flow, step, d)))
+                {
+                    if (decision.Paths.Select(transition.Path).OfType<FlowPath>().FirstOrDefault(p => p.Step is string target && target != step.Key && flow.IndexOf(target) < flow.IndexOf(step.Key)) is not FlowPath back)
+                    {
+                        continue;
+                    }
+
+                    int prior = standing.Count(d => d.At < decision.At && d.Paths.Contains(back.Name, StringComparer.Ordinal) && FlowDecisions.TookEffect(model, flow, step, d));
+                    if (back.Limit is int limit && prior >= limit && !Answered(decision.Record))
+                    {
+                        continue;
+                    }
+
+                    string who = decision.Ruled ? "its rule" : Routing.NameOf(model, decision.By);
+                    string why = $"the decision at {step.Key}, by {who} in {decision.Record.Type} {decision.Record.Id}, took path {back.Name} back to {back.Step} at {Time(decision.At)}";
+                    var shown = new StepDecision("returning", decider, decision.Paths, decision.Ruled ? "rule" : GoalRules.IsPerson(model, decision.By) ? "person" : "agent",
+                        decision.Ruled ? null : decision.By, decision.Record, decision.Reasons, decision.Evidence, decision.At) { Taken = prior, Rule = decision.Rule };
+                    returns.Add(new Return(back.Step, null, false, decision.At, step.Key,
+                        new Failure(decision.Record, $"its decision took path {back.Name} back to {back.Step}", new FlowFailure("step", null, back.Step)), Decided: why, Decision: shown));
+                }
+            }
         }
 
         public List<StepInstance> Instances { get; } = [];
@@ -670,17 +709,44 @@ public static partial class FlowPosition
                 return Off(step, item, decided) with { DecidedOff = decided };
             }
 
-            return Running(step, item);
+            // A decision that ended the run turns off a later step that is not done; an earlier one is turned off once all are derived.
+            StepInstance running = Running(step, item);
+            return running.State is not ("done" or "off") && Ending(flow.IndexOf(step.Key)) is string ended && Kept(step) is null
+                ? Off(step, item, ended) with { DecidedOff = ended }
+                : running;
+        }
+
+        /// <summary>Why the run ends before a place in the flow's order: an earlier step's decision in effect took a path that ends it; null otherwise.</summary>
+        private string? Ending(int index)
+        {
+            foreach (FlowStep deciding in flow.Steps.Take(index).Where(s => s.Transition is not null))
+            {
+                if (InstanceOf(deciding.Key, null) is { Decision: { State: "taken" } decision } decided
+                    && decision.Paths.Select(deciding.Transition!.Path).FirstOrDefault(p => p?.Ends == true) is FlowPath ending)
+                {
+                    return $"its run ends at {decided.Name}, whose decision took path {ending.Name}, to {ending.Leads}";
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
-        /// Why a decision leaves a step out of the run (from 0.9.4, PROC-19): an earlier step's decision in effect took a path that ends the
-        /// run or hands it to another flow; or it took other paths than the one that leads here; or every step this one waits on is off by
-        /// a decision, unless it is where paths meet. Null when no decision leaves it out.
+        /// Why a decision leaves a step out of the run (from 0.9.4, PROC-19): an earlier step's decision in effect took other paths than the
+        /// one that leads here, or than the one that enters this step's branch, whatever the branch's predicates say; or every step this
+        /// one waits on is off by a decision, a join among them. A step an estate policy requires and a required reserved step are never
+        /// left out. A path that ends the run turns off every step not done once the run is derived (<see cref="Ended"/>). Null when no
+        /// decision leaves it out.
         /// </summary>
         private string? DecidedOff(FlowStep step)
         {
+            if (Kept(step) is not null)
+            {
+                return null;
+            }
+
             int index = flow.IndexOf(step.Key);
+            FlowBranch? branch = flow.BranchOf(step.Key);
             foreach (FlowStep deciding in flow.Steps.Take(index).Where(s => s.Transition is not null))
             {
                 if (InstanceOf(deciding.Key, null) is not { Decision: { State: "taken" } decision } decided)
@@ -690,29 +756,28 @@ public static partial class FlowPosition
 
                 FlowTransition transition = deciding.Transition!;
                 List<FlowPath> taken = decision.Paths.Select(transition.Path).OfType<FlowPath>().ToList();
-                if (taken.FirstOrDefault(p => p.Ends) is FlowPath ending)
+                if (taken.Any(p => p.Ends))
                 {
-                    return $"its run ends at {decided.Name}, whose decision took path {ending.Name}, to {ending.Leads}";
+                    continue;
                 }
 
-                List<FlowPath> here = transition.Paths.Where(p => p.Step == step.Key).ToList();
-                if (here.Count > 0 && index > flow.IndexOf(deciding.Key) && !taken.Any(p => p.Step == step.Key))
+                List<FlowPath> here = transition.Paths.Where(p => p.Step == step.Key || (branch is not null && p.Branch == branch.Name)).ToList();
+                if (here.Count > 0 && !taken.Any(p => p.Step == step.Key || (branch is not null && p.Branch == branch.Name)))
                 {
                     return $"the decision at {decided.Name} took path{(taken.Count == 1 ? string.Empty : "s")} {string.Join(", ", taken.Select(p => p.Name))}, not {string.Join(" or ", here.Select(p => p.Name))}, which leads here";
                 }
             }
 
-            if (flow.Steps.Any(s => s.Transition?.Join == step.Key))
-            {
-                return null;
-            }
-
             List<StepInstance> waited = step.After.SelectMany(key => derived.Values.Where(d => d.Step.Key == key))
                 .Concat(step.Inputs.Where(i => i.Step is not null).SelectMany(i => derived.Values.Where(d => d.Step.Key == i.Step))).ToList();
             return waited.Count > 0 && waited.All(w => w.DecidedOff is not null)
-                ? $"every step it waits on is off by a decision: {string.Join("; ", waited.Select(w => $"{w.Name}, {w.DecidedOff}").Distinct(StringComparer.Ordinal))}"
+                ? Ending(index) ?? $"every step it waits on is off by a decision: {string.Join("; ", waited.Select(w => $"{w.Name}, {w.DecidedOff}").Distinct(StringComparer.Ordinal))}"
                 : null;
         }
+
+        /// <summary>Why no decision turns a step off (from 0.9.4, PROC-19): an estate policy requires it, or it is a required reserved step; null otherwise.</summary>
+        private string? Kept(FlowStep step) =>
+            PolicyRequires(step) ? "an estate policy requires it" : step.Required && step.Reserved is not null ? $"it is a required reserved step ({step.Reserved})" : null;
 
         /// <summary>True when an earlier step's decision in effect took a path that enters a branch (from 0.9.4, PROC-19).</summary>
         private bool DecisionEnters(string branch) =>
@@ -720,28 +785,21 @@ public static partial class FlowPosition
                 .Any(s => InstanceOf(s.Key, null) is { Decision: { State: "taken" } decision } && decision.Paths.Any(n => s.Transition!.Path(n)?.Branch == branch));
 
         /// <summary>
-        /// The returns of decisions' paths back (from 0.9.4, PROC-19): each to the earlier step a decision in effect took the run back to,
-        /// from when it was decided; those this derivation already knows are not returned again.
+        /// The derived steps, with a decision in effect that ended the run, or handed it to another flow, applied (from 0.9.4, PROC-19): every
+        /// step not done, whatever its place in the flow's order, is off, but a step an estate policy requires or a required reserved step,
+        /// which no decision turns off; the run then reads complete once those are done.
         /// </summary>
-        public List<Return> DecisionReturns()
+        public List<StepInstance> Ended()
         {
-            var found = new List<Return>();
-            foreach (StepInstance instance in Instances.Where(i => i.Decision is { State: "returning", At: not null }))
+            StepInstance? ending = Instances.FirstOrDefault(i => i.Decision is { State: "taken" } d && d.Paths.Any(p => i.Step.Transition?.Path(p)?.Ends == true));
+            if (ending is null)
             {
-                StepDecision decision = instance.Decision!;
-                FlowTransition transition = instance.Step.Transition!;
-                FlowPath? back = decision.Paths.Select(transition.Path).OfType<FlowPath>().FirstOrDefault(p => p.Step is string target && target != instance.Step.Key && flow.IndexOf(target) < flow.IndexOf(instance.Step.Key));
-                if (back is null || returns.Any(r => r.Decided is not null && r.From == instance.Name && r.At == decision.At))
-                {
-                    continue;
-                }
-
-                string why = $"the decision at {instance.Name} took path {back.Name} back to {back.Step} at {Time(decision.At!.Value)}";
-                found.Add(new Return(back.Step, null, false, decision.At.Value, instance.Name,
-                    new Failure(decision.Record ?? goal, $"its decision took path {back.Name} back to {back.Step}", new FlowFailure("step", null, back.Step)), Decided: why, Decision: decision));
+                return Instances;
             }
 
-            return found;
+            FlowPath path = ending.Decision!.Paths.Select(p => ending.Step.Transition!.Path(p)).First(p => p?.Ends == true)!;
+            string why = $"its run ends at {ending.Name}, whose decision took path {path.Name}, to {path.Leads}";
+            return Instances.Select(i => i.State is "done" or "off" || i.Ref == ending.Ref || Kept(i.Step) is not null ? i : Off(i.Step, i.Instance, why) with { DecidedOff = why }).ToList();
         }
 
         /// <summary>A step instance the run's configuration leaves in it, derived from the records.</summary>
@@ -817,8 +875,6 @@ public static partial class FlowPosition
             bool stale = !decides && inputs.Any(i => i.Change is not null) && (complete || holder is not null) && !(step.Kind == "review" && complete);
             Return? reopened = complete && !stale && !decides ? Reopened(step, item, doneAt) : null;
             string? lapsed = null;
-            // From 0.9.4 (PROC-19) a step done with a transition decided by a rule takes the path the rule reads once it is done.
-            StepInstance Settled(StepInstance settled) => step.Transition is null || decides ? settled : WithRule(settled, bindings);
             if (complete && !stale && reopened is null && !decides)
             {
                 // From 0.9.4 (FIX-146) an optional item a goal revision of the run's current shape turned off settles its step as a step
@@ -840,7 +896,7 @@ public static partial class FlowPosition
                 // before 0.9.4 keeps its meaning: it holds the step until then, and arms nothing.
                 if (step.Reserved is null || timing.Start == "due" || due?.At is not DateTimeOffset dueAt)
                 {
-                    return Settled(Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt)));
+                    return Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
                 }
 
                 List<RecordEnvelope> acts = done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)).DistinctBy(r => r.Id).ToList();
@@ -856,7 +912,7 @@ public static partial class FlowPosition
                 if (lapsed is null)
                 {
                     reasons.Add($"its act counts from {Time(dueAt)}, when it was due ({due.Reason})");
-                    return Settled(Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt is DateTimeOffset acted && acted > dueAt ? acted : dueAt)));
+                    return Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt is DateTimeOffset acted && acted > dueAt ? acted : dueAt));
                 }
             }
 
@@ -986,7 +1042,7 @@ public static partial class FlowPosition
             // From 0.9.4 (PROC-19) a ready decision step is decided by its rule or its role, and its decision takes effect.
             if (decides)
             {
-                return Transitioned(step, step.Transition!, waits, due, assignments, reviews, bindings,
+                return Transitioned(step, step.Transition!, waits, due, reviews, bindings,
                     Shaped(new StepInstance(step, item, "next", [], Who(holder), holder, result, review, outputs, items, inputs, done, null)));
             }
 
@@ -1216,17 +1272,18 @@ public static partial class FlowPosition
         }
 
         /// <summary>
-        /// A ready decision step's state from its transition (from 0.9.4, PROC-19; design/flow.md § 5). Its round begins when what it waits on
-        /// is done, or when it is due, and again once a step its decision went back to is done again. A rule decides at once, reading the
-        /// records as they stood when the round began, the first rule that holds winning, else the default; a role's principal decides by
-        /// the result of its assignment, recorded in the round; under rule-then-role the role decides when no rule holds. A deadline that
-        /// passes before a decision takes the default path or raises attention, as the transition says. An agent's decision takes effect
-        /// only once its review passes, where the transition asks one; a path back taken past its limit raises attention. Taken, a path
-        /// forward or into a branch makes the steps it leads to eligible and the step is done; a path back returns the run to its step; a
-        /// hold decides again. Nothing reserved is performed: a reserved step a path leads to still stops for the operator.
+        /// A ready decision step's state from its transition (from 0.9.4, PROC-19; design/flow.md § 5), read from the decisions on record
+        /// and never evaluated again. Its round begins when what it waits on is done, or when it is due, and again once a step its decision
+        /// went back to is done again; a hold opens a new round with the same holder. In each round the first decision that stands is final:
+        /// a principal's on the step's current assignment for the round, or a rule's recorded by who took the step. Until one is recorded, a
+        /// rule's decision, or the default a missed deadline takes, shows as pending with its path, and goal step records it; a role's
+        /// principal decides otherwise, a person's decision recorded after a deadline under its attention rule waiting for the sponsor's
+        /// answer. An agent's decision takes effect only once its review passes, where the transition asks one; a path back taken past its
+        /// limit raises attention. Taken, a path forward or into a branch makes the steps it leads to eligible and the step is done; a path
+        /// back returns the run to its step. Nothing reserved is performed: a reserved step a path leads to still stops for the operator.
         /// </summary>
-        private StepInstance Transitioned(FlowStep step, FlowTransition transition, List<StepInstance> waits, StepDue? due, List<RecordEnvelope> assignments,
-            List<RecordEnvelope> reviews, IReadOnlyDictionary<string, string> bindings, StepInstance basis)
+        private StepInstance Transitioned(FlowStep step, FlowTransition transition, List<StepInstance> waits, StepDue? due, List<RecordEnvelope> reviews,
+            IReadOnlyDictionary<string, string> bindings, StepInstance basis)
         {
             string decider = configuration.Decider(step);
             RecordEnvelope? holder = basis.Assignment;
@@ -1238,154 +1295,200 @@ public static partial class FlowPosition
                 start = dueAt;
             }
 
-            List<FlowDecisions.Recorded> recorded = decider == "rule" ? [] : RecordedDecisions(step, transition, assignments);
+            // The round's start moves past a path back's step done again; a hold moves only where the next decision may begin.
+            DateTimeOffset round = start;
+            DateTimeOffset? deadline = due?.Deadline;
+            bool missed = deadline is DateTimeOffset passedAt && passedAt < at && decider != "rule";
+            RecordEnvelope missedFrom = due?.From ?? trigger;
+            List<FlowDecisions.Recorded> standing = decisions.GetValueOrDefault(step.Key) ?? [];
             var notes = new List<string>();
-            StepDecision? decision = null;
-            if (decider != "role")
-            {
-                decision = RuleDecision(step, transition, decider, bindings, start, decider == "rule");
-                if (decision is not null && BackOf(step, transition, decision.Paths) is { } returned && returned.Step != step.Key
-                    && InstanceOf(returned.Step!, null) is { State: "done", DoneAt: DateTimeOffset again } && again > decision.At)
-                {
-                    notes.Add($"its decision at {Time(decision.At!.Value)} took path {returned.Name} back to {returned.Step}, done again at {Time(again)}, so it decides again from then");
-                    start = again;
-                    decision = RuleDecision(step, transition, decider, bindings, start, decider == "rule");
-                }
-            }
-
-            if (decision is null)
-            {
-                FlowDecisions.Recorded? latest = recorded.LastOrDefault(r => r.Result.AtTime >= start);
-                if (latest is not null && BackOf(step, transition, latest.Paths) is { } back && back.Step != step.Key
-                    && InstanceOf(back.Step!, null) is { State: "done", DoneAt: DateTimeOffset again } && again > latest.Result.AtTime)
-                {
-                    notes.Add($"its decision {latest.Result.Id} took path {back.Name} back to {back.Step}, done again at {Time(again)}, so it decides again from then");
-                    start = again;
-                    latest = null;
-                    if (decider == "rule-then-role")
-                    {
-                        decision = RuleDecision(step, transition, decider, bindings, start, false);
-                    }
-                }
-
-                if (decision is null && latest is not null)
-                {
-                    decision = new StepDecision("taken", decider, latest.Paths, GoalRules.IsPerson(model, latest.By) ? "person" : "agent", latest.By, latest.Result, latest.Reasons, latest.Evidence, latest.Result.AtTime);
-                }
-            }
-
-            decision = decision is null ? null : decision with { Since = start };
-            StepDecision Waiting(string state) => new(state, decider, [], null, null, null, string.Empty, [], null) { Since = start };
-
-            // A deadline under the step's timing that passes before a decision takes the default path, or raises attention.
-            if (due?.Deadline is DateTimeOffset deadline && deadline < at && decision?.Decider is not ("rule" or "default") && (decision is null || decision.At > deadline))
-            {
-                if (transition.Deadline == "default" && transition.Default is string fallback)
-                {
-                    decision = new StepDecision("taken", decider, [fallback], "deadline", null, null, $"its deadline at {Time(deadline)} ({due.Reason}) passed before a decision, and its transition takes its default path then", [], deadline) { Since = start };
-                }
-                else if (decision is null)
-                {
-                    RecordEnvelope missedFrom = due.From ?? trigger;
-                    if (!Answered(missedFrom))
-                    {
-                        string summary = $"step {basis.Name} missed its deadline at {Time(deadline)} without a decision ({due.Reason}): its decider still decides once the sponsor answers, and only what depends on it waits";
-                        return basis with
-                        {
-                            State = "stopped", Reasons = ["required attention: " + summary, Paths(transition)], Stop = "attention",
-                            Attention = new Attention("missed", missedFrom, summary), Decision = Waiting("attention"),
-                        };
-                    }
-
-                    notes.Add($"it missed its deadline at {Time(deadline)}, and the sponsor answered the ask about it: its decider decides, late");
-                }
-            }
-
-            if (decision is null)
-            {
-                return Pending(step, transition, basis, holder, start, notes, Waiting("pending"));
-            }
-
-            // An agent's decision takes effect only once its review passes, where the transition asks one.
+            FlowDecisions.Recorded? current = null;
             RecordEnvelope? passed = null;
-            if (decision.Record is RecordEnvelope carrier && decision.Decider == "agent" && transition.Review is { Independence: not "none" } required)
+            string state = "pending";
+            int prior = 0;
+            bool held = false;
+            foreach (FlowDecisions.Recorded decision in standing)
             {
-                var producers = new HashSet<string>(StringComparer.Ordinal) { decision.By! };
-                passed = Reviewed([(carrier, carrier.ComputedHash)], producers, decision.By!, required, reviews, null, out RecordEnvelope? sentBack, out _);
-                if (passed is null && sentBack is not null)
+                if (decision.At < start)
                 {
-                    notes.Add($"review {sentBack.Id} found what to change in its decision {carrier.Id}, which does not take effect: its decider decides again");
-                    return Pending(step, transition, basis, holder, start, notes, Waiting("pending"));
+                    continue;
                 }
 
-                if (passed is null)
+                if (!decision.Ruled)
                 {
-                    string role = required.Role ?? Roles.Reviewer;
+                    // Only the step's current assignment for this round decides; a displaced or earlier one counts for nothing.
+                    if (holder is null || model.Chain(decision.Assignment!)[0] != model.Chain(holder)[0] || holder.AtTime < round)
+                    {
+                        continue;
+                    }
+
+                    // Under its default rule a deadline takes the default path, and no decision recorded after it counts.
+                    if (missed && transition.Deadline == "default" && decision.At > deadline)
+                    {
+                        continue;
+                    }
+
+                    if (decision.By is string by && !GoalRules.IsPerson(model, by) && transition.Review is { Independence: not "none" } required)
+                    {
+                        var producers = new HashSet<string>(StringComparer.Ordinal) { by };
+                        passed = Reviewed([(decision.Record, decision.Record.ComputedHash)], producers, by, required, reviews, null, out RecordEnvelope? sentBack, out _);
+                        if (passed is null && sentBack is not null)
+                        {
+                            notes.Add($"review {sentBack.Id} found what to change in its decision {decision.Record.Id}, which never takes effect: its decider decides again");
+                            continue;
+                        }
+
+                        if (passed is null)
+                        {
+                            string role = required.Role ?? Roles.Reviewer;
+                            return basis with
+                            {
+                                State = "in-review",
+                                Reasons = [$"its decision {decision.Record.Id}, path {string.Join(", ", decision.Paths)} by {Routing.NameOf(model, by)}, an agent, awaits {Describe(required)} before it takes effect: a review of result {decision.Record.Id} at its exact hash with outcome pass", .. notes],
+                                Reviews = [new PendingReview([], required with { Role = role }, role, decision.Record, producers, Carrying(reviews, decision.Record, []))],
+                                Decision = Shown(decision, "in-review", decider, start, 0, null),
+                            };
+                        }
+                    }
+                }
+
+                FlowPath? back = BackOf(step, transition, decision.Paths);
+                if (back is not null)
+                {
+                    // A path back counts the decisions that took it and took effect, one a round, before this one.
+                    prior = standing.Count(d => d.At < decision.At && d.Paths.Contains(back.Name, StringComparer.Ordinal) && FlowDecisions.TookEffect(model, flow, step, d));
+                    if (back.Limit is int limit && prior >= limit && !Answered(decision.Record))
+                    {
+                        current = decision;
+                        state = "attention";
+                        break;
+                    }
+
+                    if (back.Step == step.Key)
+                    {
+                        notes.Add($"held: path {back.Name} {DeciderWords(model, Shown(decision, "held", decider, start, prior, passed))} at {Time(decision.At)}; its decider decides again");
+                        start = decision.At.AddTicks(1);
+                        held = true;
+                        passed = null;
+                        continue;
+                    }
+
+                    if (InstanceOf(back.Step!, null) is { State: "done", DoneAt: DateTimeOffset again } && again > decision.At)
+                    {
+                        notes.Add($"its decision {decision.Record.Id} took path {back.Name} back to {back.Step}, done again at {Time(again)}, so it decides again from then");
+                        start = round = again;
+                        held = false;
+                        passed = null;
+                        continue;
+                    }
+
+                    current = decision;
+                    state = "returning";
+                    break;
+                }
+
+                current = decision;
+                state = "taken";
+                break;
+            }
+
+            StepDecision Waiting(string waiting) => new(waiting, decider, [], null, null, null, string.Empty, [], null) { Since = start };
+            if (current is null)
+            {
+                // A missed deadline takes the default path, which goal step records, or asks the sponsor before the decider decides late.
+                if (missed && transition.Deadline == "default" && transition.Default is string fallback)
+                {
+                    return Ruled(basis, new StepDecision("pending", decider, [fallback], "deadline", null, null,
+                        $"its deadline at {Time(deadline!.Value)} ({due!.Reason}) passed before a decision, and its transition takes its default path then", [], deadline) { Rule = "deadline", Since = start }, transition, notes);
+                }
+
+                if (missed && !Answered(missedFrom))
+                {
+                    string summary = $"step {basis.Name} missed its deadline at {Time(deadline!.Value)} without a decision ({due!.Reason}): its decider still decides once the sponsor answers, and only what depends on it waits";
                     return basis with
                     {
-                        State = "in-review",
-                        Reasons = [$"its decision {carrier.Id}, path {string.Join(", ", decision.Paths)} by {Routing.NameOf(model, decision.By)}, an agent, awaits {Describe(required)} before it takes effect: a review of result {carrier.Id} at its exact hash with outcome pass", .. notes],
-                        Reviews = [new PendingReview([], required with { Role = role }, role, carrier, producers, Carrying(reviews, carrier, []))],
-                        Decision = decision with { State = "in-review" },
+                        State = "stopped", Reasons = ["required attention: " + summary, Paths(transition), .. notes], Stop = "attention",
+                        Attention = new Attention("missed", missedFrom, summary), Decision = Waiting("attention"),
                     };
                 }
 
-                decision = decision with { Review = passed };
-            }
-
-            // A path back carries the most times the run takes it, past which attention is raised.
-            FlowPath? backPath = BackOf(step, transition, decision.Paths);
-            if (backPath is { Limit: int limit })
-            {
-                int before = recorded.Count(r => r.Result.Id != decision.Record?.Id && r.Paths.Contains(backPath.Name, StringComparer.Ordinal) && r.Result.AtTime <= (decision.At ?? at));
-                if (decision.Record is null && backPath.Step != step.Key)
+                if (missed)
                 {
-                    // A rule's rounds leave no record of their own: the times its step was carried again from a fresh assignment count them.
-                    before = Math.Max(before, Math.Max(0, (held.GetValueOrDefault(new FlowRuns.StepRef(backPath.Step!, null)) ?? []).Count - 1));
+                    notes.Add($"it missed its deadline at {Time(deadline!.Value)}, and the sponsor answered the ask about it: its decider decides, late");
                 }
 
-                decision = decision with { Taken = before };
-                RecordEnvelope looped = decision.Record ?? trigger;
-                if (before >= limit && !Answered(looped))
+                // A rule decides at once, read as the records stood when the round began; until goal step records it, it shows pending.
+                if (decider != "role" && RuleDecision(transition, decider, bindings, start, decider == "rule") is StepDecision ruling)
                 {
-                    string summary = $"step {basis.Name}'s decision takes path {backPath.Name} back to {backPath.Leads} again, past the limit of {limit.ToString(CultureInfo.InvariantCulture)} its transition sets ({before.ToString(CultureInfo.InvariantCulture)} taken): the sponsor is asked, and only what depends on it waits";
-                    return basis with
-                    {
-                        State = "stopped", Reasons = ["required attention: " + summary, .. notes], Stop = "attention",
-                        Attention = new Attention("loop", looped, summary), Decision = decision with { State = "attention" },
-                    };
+                    return Ruled(basis, ruling with { Since = start }, transition, notes);
                 }
+
+                return Pending(step, transition, basis, holder, round, notes, Waiting(held ? "held" : "pending"));
             }
 
-            string said = $"decided: path{(decision.Paths.Count == 1 ? string.Empty : "s")} {string.Join(", ", decision.Paths.Select(p => $"{p} ({transition.Path(p)?.Leads ?? "?"})"))}, {DeciderWords(model, decision)}{(decision.At is DateTimeOffset when ? $" at {Time(when)}" : string.Empty)}{(passed is null ? string.Empty : $", reviewed by {Routing.NameOf(model, passed.By)} in review {passed.Id}")}";
-            if (backPath is not null && backPath.Step == step.Key)
+            StepDecision shown = Shown(current, state, decider, start, prior, passed);
+            if (state == "attention")
             {
-                // A hold decides again: the step stays with its decider, and a later decision counts.
-                notes.Insert(0, $"held: {said}; its decider decides again");
-                return Pending(step, transition, basis, holder, decision.At ?? start, notes, Waiting("held") with { Taken = decision.Taken }, held: true);
-            }
-
-            if (backPath is not null)
-            {
+                FlowPath back = BackOf(step, transition, current.Paths)!;
+                string summary = $"step {basis.Name}'s decision takes path {back.Name} back to {back.Leads} again, past the limit of {back.Limit!.Value.ToString(CultureInfo.InvariantCulture)} its transition sets ({prior.ToString(CultureInfo.InvariantCulture)} taken): the sponsor is asked, and only what depends on it waits";
                 return basis with
                 {
-                    State = "blocked", Reasons = [$"{said}: the run goes back to {backPath.Step}, which runs again from a fresh assignment, and then it decides again", .. notes],
-                    Decision = decision with { State = "returning" },
+                    State = "stopped", Reasons = ["required attention: " + summary, .. notes], Stop = "attention",
+                    Attention = new Attention("loop", current.Record, summary), Decision = shown,
                 };
             }
 
-            DateTimeOffset doneAt = new[] { decision.At, passed?.AtTime }.Max() ?? start;
-            return basis with { State = "done", Reasons = [said, .. notes], DoneAt = doneAt, Due = null, Decision = decision };
+            // A person's or an agent's decision recorded after a deadline under its attention rule waits for the sponsor's answer.
+            if (!current.Ruled && missed && transition.Deadline == "attention" && current.At > deadline && !Answered(missedFrom))
+            {
+                string summary = $"step {basis.Name} missed its deadline at {Time(deadline!.Value)} ({due!.Reason}), and its decision {current.Record.Id}, recorded after it, takes effect once the sponsor answers; only what depends on it waits";
+                return basis with
+                {
+                    State = "stopped", Reasons = ["required attention: " + summary, .. notes], Stop = "attention",
+                    Attention = new Attention("missed", missedFrom, summary), Decision = shown with { State = "attention" },
+                };
+            }
+
+            string said = $"decided: path{(current.Paths.Count == 1 ? string.Empty : "s")} {string.Join(", ", current.Paths.Select(p => $"{p} ({transition.Path(p)?.Leads ?? "?"})"))}, {DeciderWords(model, shown)} at {Time(current.At)}{(passed is null ? string.Empty : $", reviewed by {Routing.NameOf(model, passed.By)} in review {passed.Id}")}";
+            if (state == "returning")
+            {
+                FlowPath back = BackOf(step, transition, current.Paths)!;
+                return basis with
+                {
+                    State = "blocked", Reasons = [$"{said}: the run goes back to {back.Step}, which runs again from a fresh assignment, and then it decides again", .. notes],
+                    Decision = shown,
+                };
+            }
+
+            DateTimeOffset doneAt = new[] { current.At, passed?.AtTime }.Max() ?? current.At;
+            return basis with { State = "done", Reasons = [said, .. notes], DoneAt = doneAt, Due = null, Decision = shown };
         }
+
+        /// <summary>A decision on record as the position shows it, in a state, with the round's start, the times its path back was taken before and the review that let it take effect.</summary>
+        private StepDecision Shown(FlowDecisions.Recorded decision, string state, string decider, DateTimeOffset since, int prior, RecordEnvelope? review) =>
+            new(state, decider, decision.Paths, decision.Ruled ? decision.Rule switch { "deadline" => "deadline", "default" => "default", _ => "rule" } : GoalRules.IsPerson(model, decision.By) ? "person" : "agent",
+                decision.Ruled ? null : decision.By, decision.Record, decision.Reasons, decision.Evidence, decision.At)
+            { Since = since, Taken = prior, Review = review, Rule = decision.Rule };
+
+        /// <summary>
+        /// A rule's decision, or a missed deadline's default, not yet on record (from 0.9.4, PROC-19): the step is next, and goal step records
+        /// the decision as the position shows it, signed by who takes the step; nothing after the step runs before it is recorded.
+        /// </summary>
+        private static StepInstance Ruled(StepInstance basis, StepDecision decision, FlowTransition transition, List<string> notes) => basis with
+        {
+            State = "next", Stop = null, Principal = null,
+            Reasons = [$"{(decision.Decider == "deadline" ? "its deadline takes" : "its rule takes")} path {string.Join(", ", decision.Paths)} ({transition.Path(decision.Paths[0])?.Leads ?? "?"}), as the records stood at {Time(decision.At ?? decision.Since)}: goal step records that decision, signed by who takes the step, and the path is taken once it is recorded", Paths(transition), .. notes],
+            Decision = decision,
+        };
 
         /// <summary>
         /// A decision step waiting on its decider (from 0.9.4, PROC-19): the principal holding its assignment for this round goes on with it,
-        /// an agent deciding and a person asked; otherwise it is routed by its role, a person's where the decision is a person's, and goal
-        /// step assigns it afresh when the round moved past the assignment that held it. A hold keeps its holder.
+        /// an agent deciding and a person asked; otherwise it is routed by its role, a person's where only a person decides, and goal step
+        /// assigns it afresh when the round began after the assignment that held it. A hold keeps its holder.
         /// </summary>
-        private StepInstance Pending(FlowStep step, FlowTransition transition, StepInstance basis, RecordEnvelope? holder, DateTimeOffset start, List<string> notes, StepDecision decision, bool held = false)
+        private StepInstance Pending(FlowStep step, FlowTransition transition, StepInstance basis, RecordEnvelope? holder, DateTimeOffset round, List<string> notes, StepDecision decision)
         {
-            bool fresh = !held && holder is not null && holder.AtTime < start;
+            bool fresh = holder is not null && holder.AtTime < round;
             string? holding = holder is null || fresh ? null : EstateModel.BodyString(holder, "contributor");
             string paths = Paths(transition);
             if (holding is not null)
@@ -1396,7 +1499,7 @@ public static partial class FlowPosition
             }
 
             (string? principal, string role) = ByRole(step);
-            string personal = transition.PersonOnly ? $"; the decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}" : string.Empty;
+            string personal = FlowDecisions.PersonDecides(flow, step) && transition.PersonOnly ? $"; the decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}" : string.Empty;
             if (principal is null || GoalRules.IsPerson(model, principal))
             {
                 return basis with { State = "stopped", Stop = principal is null ? "attention" : "person", Principal = principal, Reasons = [role + personal, paths, .. notes], Decision = decision, Rerun = fresh };
@@ -1415,9 +1518,10 @@ public static partial class FlowPosition
 
         /// <summary>
         /// A rule's decision (from 0.9.4, PROC-19), reading the records as they stood at a time: the first rule whose predicates all hold
-        /// takes its path; when none does, the default path, or null where the role decides then. The records each rule read are named.
+        /// takes its path; when none does, the default path, or null where the role decides then. The records each rule read are named, and
+        /// the rule that matched.
         /// </summary>
-        private StepDecision? RuleDecision(FlowStep step, FlowTransition transition, string decider, IReadOnlyDictionary<string, string> bindings, DateTimeOffset asOf, bool always)
+        private StepDecision? RuleDecision(FlowTransition transition, string decider, IReadOnlyDictionary<string, string> bindings, DateTimeOffset asOf, bool always)
         {
             var read = new List<RecordReference>();
             var unmet = new List<string>();
@@ -1425,45 +1529,22 @@ public static partial class FlowPosition
             {
                 List<GoalPredicates.Verdict> verdicts = transition.Rules[index].When.Select(p => GoalPredicates.EvaluatePredicate(model, FlowRuns.Bind(p, bindings), asOf)).ToList();
                 read.AddRange(verdicts.SelectMany(v => v.Read));
+                string number = (index + 1).ToString(CultureInfo.InvariantCulture);
                 if (verdicts.All(v => v.Value == "met"))
                 {
-                    return new StepDecision("taken", decider, [transition.Rules[index].Path], "rule", null, null,
-                        $"rule {(index + 1).ToString(CultureInfo.InvariantCulture)} holds as the records stood at {Time(asOf)}: {string.Join("; ", verdicts.Select(v => v.Reason))}", Distinct(read), asOf);
+                    return new StepDecision("pending", decider, [transition.Rules[index].Path], "rule", null, null,
+                        $"rule {number} holds as the records stood at {Time(asOf)}: {string.Join("; ", verdicts.Select(v => v.Reason))}", Distinct(read), asOf) { Rule = number };
                 }
 
                 GoalPredicates.Verdict first = verdicts.First(v => v.Value != "met");
-                unmet.Add($"rule {(index + 1).ToString(CultureInfo.InvariantCulture)} is {first.Value}: {first.Reason}");
+                unmet.Add($"rule {number} is {first.Value}: {first.Reason}");
             }
 
             return always
-                ? new StepDecision("taken", decider, [transition.Default!], "default", null, null, $"no rule holds as the records stood at {Time(asOf)}, so it takes its default path ({string.Join("; ", unmet)})", Distinct(read), asOf)
+                ? new StepDecision("pending", decider, [transition.Default!], "default", null, null, $"no rule holds as the records stood at {Time(asOf)}, so it takes its default path ({string.Join("; ", unmet)})", Distinct(read), asOf) { Rule = "default" }
                 : null;
 
             static List<RecordReference> Distinct(List<RecordReference> references) => references.DistinctBy(r => r.Id).ToList();
-        }
-
-        /// <summary>
-        /// The decisions recorded for a decision step, oldest first (from 0.9.4, PROC-19): each a completed result of one of its assignments,
-        /// by the principal that held it, naming paths its transition offers as the flow allows, by a person where the decision is a person's.
-        /// </summary>
-        private List<FlowDecisions.Recorded> RecordedDecisions(FlowStep step, FlowTransition transition, List<RecordEnvelope> assignments) =>
-            assignments.SelectMany(a => WorkView.AttemptsOf(model, a).Select(t => (Holder: EstateModel.BodyString(a, "contributor"), Result: WorkView.ResultOf(model, t))))
-                .Where(x => x.Result is not null && x.Result.By == x.Holder && EstateModel.BodyString(x.Result, "outcome") == "completed")
-                .Select(x => FlowDecisions.Of(x.Result!)).OfType<FlowDecisions.Recorded>()
-                .Where(d => FlowDecisions.PathRefusals(flow, step, d.Paths).Count == 0 && (!transition.PersonOnly || GoalRules.IsPerson(model, d.By)))
-                .OrderBy(d => d.Result.At, StringComparer.Ordinal).ThenBy(d => d.Result.Id, StringComparer.Ordinal).ToList();
-
-        /// <summary>A step done with a transition a rule decides (from 0.9.4, PROC-19): the rule read as the records stood when it was done, and the path it takes.</summary>
-        private StepInstance WithRule(StepInstance settled, IReadOnlyDictionary<string, string> bindings)
-        {
-            FlowTransition transition = settled.Step.Transition!;
-            DateTimeOffset asOf = settled.DoneAt ?? at;
-            StepDecision decision = RuleDecision(settled.Step, transition, configuration.Decider(settled.Step), bindings, asOf, true)! with { Since = asOf };
-            return settled with
-            {
-                Reasons = [.. settled.Reasons, $"decided: path {string.Join(", ", decision.Paths)} ({transition.Path(decision.Paths[0])?.Leads ?? "?"}), {DeciderWords(model, decision)} at {Time(asOf)}"],
-                Decision = decision,
-            };
         }
 
         /// <summary>True when every derived instance of a step a failure route returns to is off in this run, so the route cannot move.</summary>

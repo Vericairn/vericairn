@@ -25,9 +25,10 @@ public static partial class NextEligible
 {
     /// <summary>
     /// The route states the one-step operation acts on for a run: an agent's run, a person's assignment and ask, the sponsor's ask for
-    /// required attention, or the operator request of a reserved act.
+    /// required attention, the operator request of a reserved act, and from 0.9.4 (PROC-19) a rule's decision, or a missed deadline's
+    /// default, recorded as the position derives it.
     /// </summary>
-    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention", "request"];
+    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention", "request", "rule"];
 
     /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step, a review before hand-off, or required attention.</summary>
     /// <param name="Step">The step instance and its derived state.</param>
@@ -94,6 +95,17 @@ public static partial class NextEligible
             if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind is "missed" or "loop"))
             {
                 steps.Add(new FlowStepRoute(instance, AttentionOf(model, current, status, instance.Step.Role, attention, machine)));
+                continue;
+            }
+
+            // From 0.9.4 (PROC-19) a rule's decision, or a missed deadline's default, not yet on record is recorded by the one-step
+            // operation, signed by who takes the step; no contributor carries it.
+            if (position.Work is not null && position.Flow is not null && instance.State == "next" && instance.Decision is { State: "pending", Record: null, Decider: "rule" or "default" or "deadline" } ruling)
+            {
+                IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+                string by = ruling.Decider == "deadline" ? "its deadline's default" : ruling.Rule == "default" ? "its rule's default" : $"its rule {ruling.Rule}";
+                steps.Add(new FlowStepRoute(instance, new Route(instance.Step.Role, null, new Routing.Source(null, "the run's own rule, recorded by who takes the step"), [], "rule", null, null, null, null, null, fence, [],
+                    $"a decision by {by}: path {string.Join(", ", ruling.Paths)}, as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}; goal step records it, signed by who takes the step, and no contributor carries it")));
                 continue;
             }
 

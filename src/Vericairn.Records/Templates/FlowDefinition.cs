@@ -435,6 +435,11 @@ public sealed class FlowDefinition
                     errors.Add($"{where}: branch '{name}' returns to '{returnTo}', which is not a step outside the branch.");
                 }
 
+                if (returnTo is not null && steps.FirstOrDefault(s => s.Key == returnTo)?.Transition is not null)
+                {
+                    errors.Add($"flow.failure: Branch '{name}' returns to {FlowContract.DecidingTarget(returnTo)}");
+                }
+
                 branches.Add(new FlowBranch(name, TJson.Array(branch, "when").ToList(), members, returnTo));
             }
         }
@@ -457,6 +462,12 @@ public sealed class FlowDefinition
             if (failure.Step is not null && at >= 0 && steps[at].Kind is "effect" or "exchange")
             {
                 errors.Add($"Step '{step.Key}' returns the run to '{failure.Step}' when it fails, an {steps[at].Kind} step: a failure route never repeats an outside effect.");
+            }
+
+            // From 0.9.4 (PROC-19) a decision step decides again only through its own rounds.
+            if (failure.Step is not null && at >= 0 && steps[at].Transition is not null)
+            {
+                errors.Add($"flow.failure: Step '{step.Key}' fails back to {FlowContract.DecidingTarget(failure.Step)}");
             }
 
             if (failure.Branch is string entered && branches.All(b => b.Name != entered))

@@ -686,10 +686,11 @@ document never pins one.
 
 ### Decision transitions (0.9.4)
 
-From 0.9.4 (PROC-19) a step may end in a decision transition: two or more named
-paths, each leading to a step, a branch, another flow or the end of the run,
-decided by a rule, by the step's role, whose principal is an agent or a person,
-or by a rule first and the role when no rule holds.
+From 0.9.4 (PROC-19) a `decision` step may end in a decision transition: two or
+more named paths, each leading to a step, a branch, another flow or the end of
+the run, decided by a rule, by the step's role, whose principal is an agent or a
+person, or by a rule first and the role when no rule holds. Another kind of step
+is followed by a decision step that decides from its outputs.
 
 ```json
 { "key": "gate", "title": "Decide the release", "kind": "decision", "role": "approver",
@@ -719,8 +720,10 @@ or by a rule first and the role when no rule holds.
   `limit`, the most times the run takes it: past it, attention is raised and
   the sponsor is asked, and once the ask is answered the path is taken once
   more. Every step that names the deciding step in its `after` is one of its
-  paths' steps or its join. A deciding step is required, runs once and belongs
-  to no branch, so its paths' steps never run unchosen.
+  paths' steps or its join. A deciding step is a `decision` step, required,
+  not reserved, run once and in no branch, so its paths' steps never run
+  unchosen, and no failure route or branch returns the run to it
+  (`flow.failure`): it decides again only by its own course.
 - `gate` in place of `paths` is the phase gate's predefined set, on a
   `decision` step: `{"go": "<later step>", "recycle": "<earlier step>",
   "limit": 3}` gives the paths `go`, `recycle`, `hold`, which keeps the step with
@@ -730,41 +733,62 @@ or by a rule first and the role when no rule holds.
   `join` names the step where they meet, which waits on each of them; a path
   back, the end and another flow are always taken alone.
 - `decider` is `rule`, `role` or `rule-then-role`, and `configurable` the other
-  deciders a venture may choose. A role decides only a `decision` step, and a
-  reserved step's transition is a rule's, read once the operator's act is
-  recorded. `person: true` requires a person, and `undelegable`
+  deciders a venture may choose. `person: true` requires a person, and `undelegable`
   (`administration`, `charter`, `grant`, `legal-commitment`,
   `ownership-transfer` or `destructive`) marks a decision the operating-modes
   design never delegates: either one is decided by a person in the step's role,
   never a rule, an agent's assignment of it or decision is refused, and routing
-  passes over the role's agents.
+  passes over the role's agents. A step of a role the flow marks `person` is
+  decided by a person too.
 - A rule's `rules` are record predicates in the goal completion language, bound
   to the run as the step's own are, and `default` is the path taken when none
   holds. The rule reads the records made at or before the round began, when
   what the step waits on was done or the step was due, the first rule whose
-  predicates all hold winning; a record made later never changes a decision
-  taken. A rule decides at once and its decision is never stored: the position
-  derives it and names the records it read by hash.
+  predicates all hold winning. The position shows that decision pending, with
+  its path, until `goal step` records it, signed by who takes the step: an
+  observation of kind `flow-decision` naming the step, the path, the rule that
+  matched and each record the rule read by id and hash
+  ([record format 3](record-format-v3.md#decisions-of-a-runs-steps-094)). From
+  then the position reads the recorded decision and never evaluates the rule
+  again, so no later record, a revision, a record dated earlier or a changed
+  state, changes it.
 - A role's principal decides from the step's assignment, which goal step routes
   to it as any step's: an agent is routed, a person is assigned and asked. The
   decision is the step's item of kind decision, the result of that assignment,
   whose `decision` field names the paths, the reasons and the evidence by hash,
-  signed by the decider's own device, as `vericairn goal decide` records it
-  ([CLI](cli.md#runs-of-a-flow-092)). It is distinct from the estate's decision records.
+  signed by the decider's own device, as `vericairn goal decide` and the MCP
+  `goal_decide` tool record it ([CLI](cli.md#runs-of-a-flow-092)). Only the
+  step's current assignment decides: a displaced one's decision counts for
+  nothing. It is distinct from the estate's decision records.
+- In each round the first decision that stands is final: a further decision
+  of the round counts for nothing, and validation reports it, so neither the
+  API nor a synced record changes it. A new round begins only by the flow's own
+  course: a path back once its step is done again, a hold, or what the step
+  waits on done again. A decision a review sent back never stood, and its
+  decider decides again in the same round.
 - `review` is the review an agent's decision takes before it takes effect, as an
   item's review is; findings send it back to its decider. A person's decision
   takes effect when recorded.
 - `deadline` is what the step's timing deadline does when it passes before a
-  decision: `default` takes the default path at the deadline, and `attention`,
-  the default, asks the sponsor, after whose answer the decider still decides.
+  decision: `default` takes the default path, which `goal step` records as a
+  rule's decision is recorded, and no decision recorded after the deadline
+  counts; `attention`, the default, asks the sponsor, and a decision recorded
+  after the deadline takes effect only once the sponsor answers.
 
 A taken path makes the steps it leads to eligible and turns the other paths'
-steps off, with every step that waits only on steps a decision turned off; the
-end and another flow turn off every step after the deciding step, and the run
-is then complete. A path back returns the run to its step, which runs again from
-a fresh assignment, and the deciding step decides again once that step is done
-again. Choosing a path performs nothing reserved: a reserved step a path leads
-to still stops for the operator, with its exact command when it is next.
+steps off, the steps of a branch a path not taken enters whatever the branch's
+predicates say, and every step that waits only on steps a decision turned off,
+a join among them once every path it joins is off; the end and another flow
+turn off every step not done, whatever its place in the flow's order, and the
+run is then complete. A path back returns the run to its step, which runs again
+from a fresh assignment, and the deciding step decides again once that step is
+done again; the return stays made whatever the deciding step reads later. A
+path back counts the decisions that took it and took effect, one a round.
+Choosing a path performs nothing reserved: a reserved step a path leads to
+still stops for the operator, with its exact command when it is next. No
+decision turns off a step an estate policy requires or a required reserved
+step: `goal decide` refuses such a path (`flow.decision-protected`), validation
+reports a recorded one (`result.decision-protected`), and the step stays on.
 Community takes the chosen path when `goal step` is called; the carrier that
 takes paths unattended in Standard and Pro is `GOAL-10` (0.9.6). A venture
 chooses the decider, where the flow allows, by the option `decider.<step>` in

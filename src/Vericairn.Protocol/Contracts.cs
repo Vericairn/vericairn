@@ -407,6 +407,10 @@ public sealed record GoalStepResponse(string Goal, string Outcome, string Messag
     /// <summary>For a run's reserved act, the operator request this call wrote, carrying the step's exact command; it grants nothing (0.9.2).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RecordWritten? Request { get; init; }
+
+    /// <summary>From 0.9.4, for a decision step its rule decides, the flow-decision observation this call wrote, recording the rule's decision, or a missed deadline's default, as the run derived it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public RecordWritten? Decision { get; init; }
 }
 
 /// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>

@@ -468,28 +468,40 @@ reasons, never `done`, and the goal may still be accepted. `goal close` and
 
 ### Decisions of a run's steps (0.9.4)
 
-PROC-19 adds one optional field to `result` within format 3, and no record type.
-A result without `decision` behaves as before, and a flow's decision transition
-is template content of kind `flow` ([Templates](templates.md#decision-transitions-094)),
+PROC-19 adds one optional field to `result` and one observation kind within
+format 3, and no record type. A result without `decision` and every other
+observation behave as before, and a flow's decision transition is template
+content of kind `flow` ([Templates](templates.md#decision-transitions-094)),
 not a record.
 
 | Record | Additive contract |
 | --- | --- |
-| `result` | Optional `decision: {paths, reasons, evidence}` records the decision of a run's decision step by the principal holding its assignment: `paths`, the path or paths of the step's transition it takes; `reasons`, never blank; and `evidence`, each `{type, id, hash}` of an exact record, possibly none. It is the step's item of kind decision, distinct from the estate's `decision` records, and it performs nothing reserved. |
+| `result` | Optional `decision: {paths, reasons, evidence}` records the decision of a run's decision step by the principal holding its current assignment: `paths`, the path or paths of the step's transition it takes; `reasons`, never blank; and `evidence`, each `{type, id, hash}` of an exact record, possibly none. It is the step's item of kind decision, distinct from the estate's `decision` records, and it performs nothing reserved. |
+| `observation` | Kind `flow-decision` records a rule's decision of a run's decision step, or the default its missed deadline takes, as the runtime evaluated it: its subject is the goal's exact revision, its author a principal who takes the run's steps, `asOf` the round's start, when the rule read the records, and its `facts` are `step`, `paths` (the one path taken), `rule` (the matching rule's number from 1, `default` or `deadline`) and `read` (each record the rule read as its type, id and hash, separated by spaces). |
 
 Validation refuses a `decision` on a result that is not completed; on a result
 whose attempt is not on an assignment of a decision step of a run's flow, or is
 on a review assignment; for a step whose transition its role does not decide in
-the run's configuration, a rule's decision being derived from the records and
-never recorded; naming a path the transition does not declare, a path twice, or
-several paths where the flow takes one or where one of them goes back, ends the
-run or hands it to another flow; by an agent where the decision is a person's,
-because the flow requires a person or the decision is one the operating-modes
-design never delegates; and evidence that is not an estate record at its
-recorded hash. An assignment of a decision step is refused where a rule decides
-it in the run, and an agent's where the decision is a person's. Which decision
-counts, its review before it takes effect, a deadline's default and a path back
-past its limit are derived when the run is read, never stored. A reader of
+the run's configuration; naming a path the transition does not declare, a path
+twice, or several paths where the flow takes one or where one of them goes back,
+ends the run or hands it to another flow; by an agent where the decision is a
+person's, because the flow requires a person, the decision is one the
+operating-modes design never delegates or the flow marks the step's role a
+person's; on an assignment a later assignment of the step displaced before it;
+after an earlier decision of the same assignment that still stands in its round,
+not sent back by a review and not a hold that took effect; and evidence that is
+not an estate record at its recorded hash. It reports a decision whose paths
+would turn off a step an estate policy requires or a required reserved step
+(`result.decision-protected`); such a step stays on. Validation refuses a
+`flow-decision` observation whose goal is not a run, whose author does not take
+the run's steps, whose step's transition a rule does not decide in the run's
+configuration or that takes no default at a deadline, whose path is not the one
+its rule names, whose read records are not estate records at their hashes, whose
+`asOf` is later than it is recorded, or for a round whose rule decision is
+already recorded. An assignment of a decision step is refused where a rule
+decides it in the run, and an agent's where the decision is a person's. Which
+decision counts, its review before it takes effect and a path back past its
+limit are derived when the run is read, never stored. A reader of
 format 3 that predates the field refuses a result that carries it as an unknown
 key, as any later format-3 field; a reader of it that cannot resolve the run's
 flow shows the result and reads the step undecided. `records describe result`

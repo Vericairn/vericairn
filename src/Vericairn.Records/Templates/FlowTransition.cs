@@ -142,7 +142,7 @@ public sealed record FlowTransition(IReadOnlyList<FlowPath> Paths, string? Defau
     /// What one step's transition must hold within its own content: its paths, each named once and leading to exactly one of a step, a
     /// branch, another flow by its exact pin or the end, a limit only on a path to a step; or the phase gate's go and recycle; a decider and
     /// the deciders a venture may choose; the rules and the default a rule needs, each naming a declared path and never one back to the
-    /// step itself; a role's decision only on a decision step, never on a reserved one or under a rule alone where a person is required;
+    /// step itself; the transition only on a decision step that is not reserved, and never under a rule where a person is required;
     /// several paths only with a join that is one of them or after them; and the review and deadline rule. How its paths relate to the
     /// flow's other steps is checked once every step is read (<see cref="Structure"/>).
     /// </summary>
@@ -239,14 +239,16 @@ public sealed record FlowTransition(IReadOnlyList<FlowPath> Paths, string? Defau
             transition.Error("flow.transition", "decider", "A decision the flow requires of a person, or one the operating-modes design never delegates, is decided by a person in the step's role, never by a rule: its decider is role, and no venture chooses another.");
         }
 
-        if (options.Any(o => o != "rule") && kind is not null && kind != "decision")
+        // A transition ends a decision step only: its decision is the step's own item, so a path back always returns to a step its
+        // decision waits on and the step decides again; a step of another kind is followed by a decision step that reads its outputs.
+        if (kind is not null && kind != "decision")
         {
-            transition.Error("flow.transition", "decider", $"A role decides a decision step's transition; a {kind} step's transition is decided by a rule, read once the step is done.");
+            transition.Error("flow.transition", "transition", $"A decision transition ends a decision step; a {kind} step is followed by a decision step that decides the path from its outputs, so no path, forward or back, leaves a {kind} step undecided.");
         }
 
-        if (options.Any(o => o != "rule") && reserved is not null)
+        if (reserved is not null)
         {
-            transition.Error("flow.transition", "decider", "A reserved step's act is the operator's, and a role's choice never performs it: its transition is decided by a rule, read once the act is recorded.");
+            transition.Error("flow.transition", "reserved", "A reserved step's act is the operator's, and no choice of a path performs it: a decision step after it decides the path.");
         }
 
         if (each is not null)

@@ -156,7 +156,8 @@
     "person",
     "reserved",
     "attention",
-    "request"
+    "request",
+    "rule"
   ],
   "Vericairn.Records.Estate.NextEligible.RouteStates": [
     "agent",
@@ -486,7 +487,8 @@
     "package",
     "vericairn-release",
     "operator-request",
-    "security-triage"
+    "security-triage",
+    "flow-decision"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",

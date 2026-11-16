@@ -15,8 +15,8 @@ namespace Vericairn.Runtime.Service;
 /// A run's decision step decided by the principal its role reached (from 0.9.4, PROC-19; the estate's design/flow.md § 5): a person, or an
 /// agent, holding the step's assignment records the path its transition takes, with the reasons and the evidence by hash, as the result of
 /// that assignment, signed by its own device; a new attempt is recorded with it when the decider has none open. A rule's decision is
-/// never recorded here: the position derives it from the records. Choosing a path performs nothing reserved and dispatches nothing;
-/// goal step takes the steps the path makes eligible.
+/// never recorded here: goal step records it as the position derives it. Choosing a path performs nothing reserved and dispatches
+/// nothing; goal step takes the steps the path makes eligible.
 /// </summary>
 public sealed partial class EstateService
 {

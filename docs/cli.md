@@ -13,7 +13,7 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 29, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its assignment, and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
+Revision 29, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
 
 Revision 28, November 15, 2026. Add `goal close`, and `--reason` and `--step-reason` on `goal accept`, which close a run of a flow that will never complete with a reason for each unsettled step, in the development build.
 
@@ -464,14 +464,18 @@ shows its decision: `goal show` prints the step's `decision:` line, its state (`
 `returning` or `attention`), the decider in this run, and once decided its paths, who decided and when, why, and the evidence or,
 for a rule, the records it read, each by hash; `status` prints each run's `Decision:` lines. With `--json`, `goal show`'s flow
 gains that step's `decision` (`state`, `decider`, `paths`, `decidedBy`, `by`, `byName`, `record`, `reasons`, `evidence`, `at`,
-`since`, `review` and `taken`), and status's `runs` gain `decisions`, each named. A rule decides at once; a step its role decides
-routes as any step does, to an agent or, assigned and asked, to a person, and `goal step` never routes one the flow requires of a
-person to an agent. `goal decide <goal> --by <id> --step <step> --path <name> --reason <text>` records the decision of the
+`since`, `review`, `taken` and `rule`), and status's `runs` gain `decisions`, each named. A rule's decision, or the default a missed
+deadline takes, routes as `rule`: `goal step` records it, signed by the acting principal, as an observation of kind `flow-decision`
+naming the path, the rule that matched and the records it read by hash, answers with the outcome `decided` and the record as
+`decision`, and the next `goal step` takes the path. A step its role decides routes as any step does, to an agent or, assigned and
+asked, to a person, and `goal step` never routes one that only a person decides to an agent. `goal decide <goal> --by <id> --step <step> --path <name> --reason <text>` records the decision of the
 principal holding the step's assignment as the result of that assignment, signed by its own device: `--path` repeats for several
 paths at once where the flow allows, and `--evidence <id or type:id>`, repeatable, pins each record it rests on at its current
 hash. It refuses, at once and before anything is written, a step that is not a decision step its role decides in this run, one not
-waiting on its decider, a principal not holding its assignment, an agent where the decision is a person's, a path the transition
-does not offer or several where it takes one, blank reasons and unknown evidence. Choosing a path dispatches nothing and performs
+waiting on its decider or decided by its rule, a principal not holding its current assignment, an agent where the decision is a
+person's, a path the transition does not offer or several where it takes one, a path that would turn off a step an estate policy
+requires or a required reserved step (`flow.decision-protected`, naming the step), blank reasons and unknown evidence. The first
+decision of a round that stands is final. Choosing a path dispatches nothing and performs
 nothing reserved: `goal step` takes the steps it makes eligible, and a reserved one still waits on the operator. A path back past
 its limit and a missed deadline under the `attention` rule route as `attention`, and `goal step` asks the sponsor once.
 

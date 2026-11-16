@@ -144,6 +144,11 @@ public sealed partial class EstateService
 
             route = taken.Route;
             key = taken.Key;
+            if (route.State == "rule")
+            {
+                return RuleStep(model, current, taken, request);
+            }
+
             if (route.State == "request")
             {
                 return RequestStep(model, current, taken, request);
@@ -417,6 +422,26 @@ public sealed partial class EstateService
             _ => $"No principal is available for {key}: {whom} is asked to assign someone or change the roster (ask {asked.Id}); it is given to no one else.",
         };
         return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked);
+    }
+
+    /// <summary>
+    /// Records a rule's decision, or a missed deadline's default, as the run derives it (from 0.9.4, PROC-19; design/flow.md § 5): a
+    /// flow-decision observation of the goal's exact revision naming the step, the path, the rule that matched and each record it read by id
+    /// and hash, signed by who takes the step. The position reads it from then on and never evaluates the rule again; nothing is dispatched.
+    /// </summary>
+    private GoalStepResponse RuleStep(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
+    {
+        FlowPosition.StepInstance instance = step.Step!;
+        var draft = new RecordDraft("observation", request.By, Element(FlowDecisions.RuleBody(instance)), new RecordReference(goal.Type, goal.Id, goal.ComputedHash));
+        WriteOutcome written = WriteLocked(draft, model);
+        if (!written.Ok)
+        {
+            return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, step.Key, step.Route.State, null, Problem: written.Problem);
+        }
+
+        FlowPosition.StepDecision decision = instance.Decision!;
+        return new GoalStepResponse(goal.Id, "decided", $"{step.Key} is decided by {(decision.Decider == "deadline" ? "its deadline's default" : decision.Rule == "default" ? "its rule's default" : "its rule " + decision.Rule)}: path {string.Join(", ", decision.Paths)}, recorded in observation {written.Written!.Id}; goal step takes the path next. Nothing was dispatched.",
+            true, step.Key, step.Route.State, null) { Decision = written.Written };
     }
 
     /// <summary>
