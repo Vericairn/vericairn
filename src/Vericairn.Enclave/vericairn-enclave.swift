@@ -777,7 +777,7 @@ let fixedNames: [String: (required: [String], optional: [String])] = [
     "change-open": (["provider", "repository", "product", "productHash", "branch"], ["head"]),
     "change-merge": (["provider", "repository", "product", "productHash"], ["pullRequest", "head"]),
     "change-observe": ([], ["provider", "repository", "product", "productHash", "head"]),
-    "dispatch-release-workflow": (["provider", "destination", "version", "product"], ["commit"]),
+    "dispatch-release-workflow": (["provider", "destination", "version", "product", "commit"], []),
     "release": (["product", "version", "destination", "commit"], []),
 ]
 
@@ -1021,7 +1021,7 @@ func readBytes(_ terms: inout Terms, _ items: [JSON]?, received: Double) throws 
         do {
             record = try Record.read(bytes)
         } catch let failure as JSONFailure {
-            throw refuse("terms.bytes", "\(what)'s bytes are not a record: \(failure.detail).")
+            throw refuse("terms.bytes", "\(what)'s bytes are refused: \(failure.detail).")
         }
         guard ids.insert(record.id).inserted else { throw refuse("terms.bytes", "\(what) repeats a record id.") }
         if offset < exact.count {
@@ -1263,6 +1263,7 @@ final class PresenceSession {
     private var signed: [[UInt8]: (entry: Int, record: Record)] = [:]
     private var signedUnder: [Int: [[UInt8]]] = [:]
     private var head: [UInt8]?
+    private var superseded = Set<[UInt8]>()
     private var context: LAContext?
     private var key: SecureEnclave.P256.Signing.PrivateKey?
     private var blob = Data()
@@ -1431,6 +1432,7 @@ final class PresenceSession {
             switch simulated {
             case "declined": checked(false, LAError(.userCancel))
             case "unavailable": checked(false, LAError(.passcodeNotSet))
+            case "passed": checked(true, nil)
             default: break
             }
             return
@@ -1475,6 +1477,9 @@ final class PresenceSession {
                 end("refusal", refusal: refuse("check.unavailable", "The presence check is unavailable on this Mac now."))
             }
         }
+        // The check has passed: the context never shows a dialog again, so a signature its evaluation does not cover is refused
+        // (check.unavailable) instead of opening a system dialog whose text the helper did not write.
+        context.interactionNotAllowed = true
         guard let signing = try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob, authenticationContext: context) else {
             end("refusal", refusal: refuse("check.unavailable", "The key could not be used with the session's check."))
         }
@@ -1518,10 +1523,16 @@ final class PresenceSession {
             do {
                 record = try Record.read(bytes)
             } catch let failure as JSONFailure {
-                throw refuse("record.form", "The record is " + failure.detail + ".")
+                throw refuse("record.form", "The record is refused: " + failure.detail + ".")
             }
             guard record.by == terms.principal else { throw refuse("record.author", "The record is by another principal.") }
+            // Check 3: no record takes the id of one the session holds: signed in it, listed as a reference, or an exact entry's, unless
+            // these are that exact entry's own bytes.
             guard signed[record.id] == nil else { throw refuse("record.author", "A record with this id was already signed in the session.") }
+            guard !terms.references.contains(where: { $0.id == record.id }) else { throw refuse("record.author", "The record takes the id of a reference of the session.") }
+            guard !terms.entries.contains(where: { $0.exact && $0.record?.id == record.id && $0.hash != record.hashBytes }) else {
+                throw refuse("record.author", "The record takes the id of an exact entry of the session.")
+            }
             let index = try match(record, terms)
             guard let key else { throw refuse("check.unavailable", "The session holds no key.") }
             let signature: [UInt8]
@@ -1533,6 +1544,7 @@ final class PresenceSession {
             if terms.entries[index].exact { used[index] = true } else { left[index] -= 1 }
             signed[record.id] = (index, record)
             signedUnder[index, default: []].append(record.id)
+            if let previous = record.supersedes { superseded.insert(previous) }
             if head == nil, record.type == "operation", let action = record.field("action")?.text, changeActions.contains(action),
                let value = record.target("head")?.bytes, isCommit(value) {
                 head = value
@@ -1551,6 +1563,7 @@ final class PresenceSession {
     /// supersedes, subject and target.operation follow § 5's rules (record.reference), dated within the window (record.time).
     private func match(_ record: Record, _ terms: Terms) throws -> Int {
         if let exact = terms.entries.first(where: { $0.exact && !used[$0.index] && $0.hash == record.hashBytes }) { return exact.index }
+        if record.supersedes == record.id { throw refuse("record.reference", "The record supersedes itself.") }
         let candidates = terms.entries.filter { !$0.exact && left[$0.index] > 0 && carries(record, $0) }
         guard !candidates.isEmpty else { throw refuse("record.outside", "The record matches no unused entry of the list.") }
         var first: Refusal?
@@ -1620,6 +1633,7 @@ final class PresenceSession {
                 return false
             }
         }
+        if action == "change-open" || action == "change-merge", let number = record.target("pullRequest"), !isPullRequest(number.bytes) { return false }
         if action == "change-merge", entry.fixed["pullRequest"] == nil {
             guard let from = entry.pullRequestFrom, let number = record.target("pullRequest")?.bytes else { return false }
             let observed = (signedUnder[from] ?? []).compactMap { signed[$0]?.record.target("pullRequest")?.bytes }
@@ -1648,6 +1662,7 @@ final class PresenceSession {
             guard let candidate = terms.reference(record.supersedes)?.record, candidate.type == "release", candidate.field("status")?.text == "candidate" else {
                 return "A publication supersedes the candidate listed in the references."
             }
+            if superseded.contains(candidate.id) { return "Another record of the session already superseded that candidate." }
             let kept: (JSON) -> [(key: [UInt8], value: JSON)] = { body in
                 (body.members ?? []).filter { member in !["status", "publishedAt", "url"].contains { Array($0.utf8) == member.key } }
             }
@@ -1669,6 +1684,15 @@ final class PresenceSession {
             guard identity.count == prefix.count + 26, Array(identity[0..<prefix.count]) == prefix, isUlid(Array(identity[prefix.count...])) else {
                 return "An observation's identity is not its operation's followed by :observe: and a ULID."
             }
+            // The observation is of that operation's change: its provider, repository, product, product hash and head, and its branch
+            // or pull request where both state one, are the operation's, whatever the entry fixes.
+            guard same(record.field("provider"), operation.field("provider")) else { return "An observation's provider is not its operation's." }
+            for name in ["repository", "product", "productHash", "head"] where record.target(name)?.bytes == nil || !same(record.target(name), operation.target(name)) {
+                return "An observation's repository, product, product hash or head is not its operation's."
+            }
+            for name in ["branch", "pullRequest"] where record.target(name) != nil && operation.target(name) != nil && !same(record.target(name), operation.target(name)) {
+                return "An observation's branch or pull request is not its operation's."
+            }
         } else {
             guard let subject = record.subject, subject.type == Array("product".utf8), let product = entry.fixed["product"], subject.id == product else {
                 return "The record's subject does not name the entry's product."
@@ -1678,6 +1702,7 @@ final class PresenceSession {
         }
         if let previous = record.supersedes {
             guard let earlier = recordNamed(previous, terms), earlier.type == "operation" else { return "The record supersedes a record neither signed nor referenced." }
+            if superseded.contains(previous) { return "Another record of the session already superseded the record this one supersedes." }
             guard earlier.field("identity")?.bytes == identity, same(earlier.field("provider"), record.field("provider")), same(earlier.field("action"), record.field("action")) else {
                 return "The record supersedes an operation of another identity, provider or action."
             }
@@ -1700,11 +1725,22 @@ final class PresenceSession {
         return (f["provider"] ?? []) + [0x3A] + (f["repository"] ?? []) + [0x3A] + Array((entry.action ?? "").utf8) + [0x3A] + name + [0x3A] + headValue + [0x3A] + productHash
     }
 
+    /// Whether the screen is locked or the user's session is away from the console, read before each signature beside the lock,
+    /// screen saver and switch notices. It fails closed: no session dictionary, or one that does not say the session is on the
+    /// console, counts as locked. The lock key is present, and true, only while the screen is locked.
     private func screenLocked() -> Bool {
+        var session = CGSessionCopyCurrentDictionary() as? [String: Any]
         #if VERICAIRN_SESSION_TESTS
-        if let screen = testEnvironment["VERICAIRN_TEST_SCREEN"] { return screen == "locked" }
+        // Test hook: the session dictionary as each state of the screen gives it.
+        switch testEnvironment["VERICAIRN_TEST_SCREEN"] {
+        case "unlocked"?: session = [kCGSessionOnConsoleKey: true]
+        case "locked"?: session = [kCGSessionOnConsoleKey: true, "CGSSessionScreenIsLocked": true]
+        case "off-console"?: session = [kCGSessionOnConsoleKey: false]
+        case "absent"?: session = nil
+        default: break
+        }
         #endif
-        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        guard let session, (session[kCGSessionOnConsoleKey] as? Bool) == true else { return true }
         return (session["CGSSessionScreenIsLocked"] as? Bool) == true
     }
 
@@ -1829,7 +1865,7 @@ func signRecord(_ blobPath: String, _ reason: String?) -> Never {
     do {
         record = try Record.read(input)
     } catch let failure as JSONFailure {
-        fail(5, "record.form: the record is \(failure.detail).")
+        fail(5, "record.form: the record is refused: \(failure.detail).")
     } catch {
         fail(5, "record.form: the record could not be read.")
     }

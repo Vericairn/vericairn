@@ -97,6 +97,16 @@
     "pushSupersedingOther": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000163", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "uncertain", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "reconciliation": "Wrongly names another push."}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}, "supersedes": "01M7H300000000000000000162"},
     "openRef": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000164", "at": "2026-11-15T11:42:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-open", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-open at the pinned head, with the declared repository and checks.", "status": "observed-success", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "pullRequest": "42"}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}},
     "observeOfRef": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000165", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-observe", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10:observe:01M7H300000000000000007003", "intent": "change-observe at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "operation": "01M7H300000000000000000164", "observation": "pull-request"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "operation", "id": "01M7H300000000000000000164"}},
+    "pushTakesReferenceId": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000160", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "uncertain", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "reconciliation": "Claims the referenced failure's own id."}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}, "supersedes": "01M7H300000000000000000160"},
+    "pushTakesReferenceIdIntent": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000160", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}},
+    "pushTakesExactId": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000001", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}},
+    "pushSelfSuperseding": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000170", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "dispatched", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}, "supersedes": "01M7H300000000000000000170"},
+    "pushDispatchedAgain": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000171", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-push", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-push:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-push at the pinned head, with the declared repository and checks.", "status": "dispatched", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}, "supersedes": "01M7H300000000000000000100"},
+    "openOddPull": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000172", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-open", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "intent": "change-open at the pinned head, with the declared repository and checks.", "status": "dispatched", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "pullRequest": "4 2"}, "requiredChecks": ["build"], "evidence": [], "dispatchedAt": "2026-11-15T12:00:00Z"}, "subject": {"type": "product", "id": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}, "supersedes": "01M7H300000000000000000110"},
+    "observeOtherRepository": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000180", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-observe", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10:observe:01M7H300000000000000007100", "intent": "change-observe at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2XA", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "operation": "01M7H300000000000000000110", "observation": "pull-request"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "operation", "id": "01M7H300000000000000000110"}},
+    "observeOtherBranch": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000181", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-observe", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10:observe:01M7H300000000000000007101", "intent": "change-observe at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "operation": "01M7H300000000000000000110", "observation": "pull-request", "branch": "work/elsewhere"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "operation", "id": "01M7H300000000000000000110"}},
+    "observeOtherProvider": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000182", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "memory-pull-requests", "action": "change-observe", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10:observe:01M7H300000000000000007102", "intent": "change-observe at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "operation": "01M7H300000000000000000110", "observation": "pull-request"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "operation", "id": "01M7H300000000000000000110"}},
+    "observeOtherProductHash": {"format": "vericairn.record/3", "type": "operation", "id": "01M7H300000000000000000183", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"provider": "github-pull-requests", "action": "change-observe", "identity": "github-pull-requests:01J9Z3K4M5N6P7Q8R9S0T1V2W6:change-open:operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8:0123456789abcdef0123456789abcdef01234567:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10:observe:01M7H300000000000000007103", "intent": "change-observe at the pinned head, with the declared repository and checks.", "status": "not-started", "target": {"product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "repositoryHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "destination": "Vericairn/vericairn", "target": "main", "head": "0123456789abcdef0123456789abcdef01234567", "operation": "01M7H300000000000000000110", "observation": "pull-request"}, "requiredChecks": ["build"], "evidence": []}, "subject": {"type": "operation", "id": "01M7H300000000000000000110"}},
     "checkpoint": {"format": "vericairn.record/3", "type": "history-checkpoint", "id": "01M7H300000000000000000200", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"previous": [], "inventory": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"], "records": 12, "recordSetHash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "trigger": "release"}},
     "checkpointManual": {"format": "vericairn.record/3", "type": "history-checkpoint", "id": "01M7H300000000000000000201", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"previous": [], "inventory": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"], "records": 12, "recordSetHash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "trigger": "manual"}},
     "checkpointAnchored": {"format": "vericairn.record/3", "type": "history-checkpoint", "id": "01M7H300000000000000000202", "at": "2026-11-15T12:00:00Z", "by": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "body": {"anchored": [{"id": "01M7H300000000000000000001", "hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888"}], "previous": [], "inventory": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"], "records": 12, "recordSetHash": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "trigger": "release"}},
@@ -371,6 +381,14 @@
       "name": "a version outside its character set",
       "about": "A version holds letters, digits and .+- only.",
       "terms": {"format": "vericairn.presence-session/1", "action": "release submit", "actionIdentity": "sha256:37e7b650dcf3c43545c4f55ce78db531eb4cf6d4ee37bfd098a0c41447882ac9", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "history-checkpoint", "count": 1, "atMost": false, "trigger": "release"}, {"entry": "kind", "type": "operation", "action": "dispatch-release-workflow", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-releases-gh", "destination": "Vericairn/vericairn", "version": "0.9.4 beta", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "commit": "89abcdef0123456789abcdef0123456789abcdef"}}], "references": []},
+      "bytes": [],
+      "open": {"refused": "terms.invalid", "ended": "refusal"},
+      "steps": []
+    },
+    {
+      "name": "a release build without its commit",
+      "about": "A release build entry fixes the commit its target states.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "release submit", "actionIdentity": "sha256:37e7b650dcf3c43545c4f55ce78db531eb4cf6d4ee37bfd098a0c41447882ac9", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "history-checkpoint", "count": 1, "atMost": false, "trigger": "release"}, {"entry": "kind", "type": "operation", "action": "dispatch-release-workflow", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-releases-gh", "destination": "Vericairn/vericairn", "version": "0.9.4", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7"}}], "references": []},
       "bytes": [],
       "open": {"refused": "terms.invalid", "ended": "refusal"},
       "steps": []
@@ -748,6 +766,47 @@
       ]
     },
     {
+      "name": "record.author: a reference's id, superseding it",
+      "about": "A record may not take a reference's id, even when it supersedes that id.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes push", "actionIdentity": "sha256:ba79d717095bd489b88d7df0e88a674ed47372b8d6afca3a33b32e99fff05332", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-push", "count": 2, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "head": "0123456789abcdef0123456789abcdef01234567"}}], "references": [{"id": "01M7H300000000000000000160", "type": "operation", "hash": "${hash:pushFailedRef}"}]},
+      "bytes": ["pushFailedRef"],
+      "open": "opened",
+      "steps": [
+        {"sign": "pushTakesReferenceId", "refused": "record.author", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.author: a reference's id",
+      "about": "A new intent may not take a reference's id.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes push", "actionIdentity": "sha256:ba79d717095bd489b88d7df0e88a674ed47372b8d6afca3a33b32e99fff05332", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-push", "count": 2, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8", "head": "0123456789abcdef0123456789abcdef01234567"}}], "references": [{"id": "01M7H300000000000000000160", "type": "operation", "hash": "${hash:pushFailedRef}"}]},
+      "bytes": ["pushFailedRef"],
+      "open": "opened",
+      "steps": [
+        {"sign": "pushTakesReferenceIdIntent", "refused": "record.author", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.author: an unsigned exact entry's id",
+      "about": "A kind record may not take the id of an exact entry not yet signed.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "open": "opened",
+      "steps": [
+        {"sign": "pushTakesExactId", "refused": "record.author", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.author: a signed exact entry's id",
+      "about": "A kind record may not take the id of an exact entry already signed.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "open": "opened",
+      "steps": [
+        {"sign": "accept", "entry": 0, "left": 3},
+        {"sign": "pushTakesExactId", "refused": "record.author", "ended": "refusal"}
+      ]
+    },
+    {
       "name": "record.outside: an unlisted acceptance",
       "about": "An acceptance the list does not name.",
       "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
@@ -892,6 +951,83 @@
         {"sign": "openIntent", "entry": 0, "left": 5},
         {"sign": "openDispatched", "entry": 0, "left": 4},
         {"sign": "mergeOtherPull", "refused": "record.outside", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: a record that supersedes itself",
+      "about": "A record does not supersede its own id.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "open": "opened",
+      "steps": [
+        {"sign": "pushSelfSuperseding", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: an intent superseded twice",
+      "about": "Two records of a session do not supersede the same record.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "open": "opened",
+      "steps": [
+        {"sign": "pushIntent", "entry": 1, "left": 3},
+        {"sign": "pushDispatched", "entry": 1, "left": 2},
+        {"sign": "pushDispatchedAgain", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: an observation of another repository",
+      "about": "An observation's repository is the operation's it observes, though its entry fixes no values.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes open", "actionIdentity": "sha256:9946bad8818023b2caa53551e436827314bcb3017fc10ae6757b774682dfcb6c", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-open", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}, {"entry": "kind", "type": "operation", "action": "change-observe", "count": 2, "atMost": true, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {}, "observation": "pull-request", "observes": 0}], "references": []},
+      "bytes": [],
+      "open": "opened",
+      "steps": [
+        {"sign": "openIntent", "entry": 0, "left": 4},
+        {"sign": "observeOtherRepository", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: an observation of another branch",
+      "about": "An observation's branch is the operation's it observes, though its entry fixes no values.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes open", "actionIdentity": "sha256:9946bad8818023b2caa53551e436827314bcb3017fc10ae6757b774682dfcb6c", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-open", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}, {"entry": "kind", "type": "operation", "action": "change-observe", "count": 2, "atMost": true, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {}, "observation": "pull-request", "observes": 0}], "references": []},
+      "bytes": [],
+      "open": "opened",
+      "steps": [
+        {"sign": "openIntent", "entry": 0, "left": 4},
+        {"sign": "observeOtherBranch", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: an observation of another provider",
+      "about": "An observation's provider is the operation's it observes, though its entry fixes no values.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes open", "actionIdentity": "sha256:9946bad8818023b2caa53551e436827314bcb3017fc10ae6757b774682dfcb6c", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-open", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}, {"entry": "kind", "type": "operation", "action": "change-observe", "count": 2, "atMost": true, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {}, "observation": "pull-request", "observes": 0}], "references": []},
+      "bytes": [],
+      "open": "opened",
+      "steps": [
+        {"sign": "openIntent", "entry": 0, "left": 4},
+        {"sign": "observeOtherProvider", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.reference: an observation of another product hash",
+      "about": "An observation's product hash is the operation's it observes, though its entry fixes no values.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes open", "actionIdentity": "sha256:9946bad8818023b2caa53551e436827314bcb3017fc10ae6757b774682dfcb6c", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-open", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}, {"entry": "kind", "type": "operation", "action": "change-observe", "count": 2, "atMost": true, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {}, "observation": "pull-request", "observes": 0}], "references": []},
+      "bytes": [],
+      "open": "opened",
+      "steps": [
+        {"sign": "openIntent", "entry": 0, "left": 4},
+        {"sign": "observeOtherProductHash", "refused": "record.reference", "ended": "refusal"}
+      ]
+    },
+    {
+      "name": "record.outside: an opening's pull request outside its digits",
+      "about": "A pull request an opening states is at most 10 digits.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "changes open", "actionIdentity": "sha256:9946bad8818023b2caa53551e436827314bcb3017fc10ae6757b774682dfcb6c", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "kind", "type": "operation", "action": "change-open", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": [],
+      "open": "opened",
+      "steps": [
+        {"sign": "openIntent", "entry": 0, "left": 2},
+        {"sign": "openOddPull", "refused": "record.outside", "ended": "refusal"}
       ]
     },
     {
@@ -1064,6 +1200,28 @@
       "open": "opened",
       "steps": [
         {"signal": "sleep", "ended": "sleep"}
+      ]
+    },
+    {
+      "name": "the user session off the console",
+      "about": "A session away from the console counts as locked.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "screen": "off-console",
+      "open": "opened",
+      "steps": [
+        {"sign": "accept", "ended": "lock"}
+      ]
+    },
+    {
+      "name": "no session dictionary",
+      "about": "When the user session's state cannot be read, the screen counts as locked.",
+      "terms": {"format": "vericairn.presence-session/1", "action": "operator record", "actionIdentity": "sha256:bb3ccbc2d812b5fe18697ea2b86190a236f2ad83f5d1f362e82970b9a1e62035", "principal": "01J9Z3K4M5N6P7Q8R9S0T1V2W3", "device": "01J9Z3K4M5N6P7Q8R9S0T1V2W4", "publicKey": "${publicKey}", "session": "01J9Z3K4M5N6P7Q8R9S0T1V2W5", "limitSeconds": 300, "entries": [{"entry": "exact", "type": "acceptance", "hash": "${hash:accept}"}, {"entry": "kind", "type": "operation", "action": "change-push", "count": 3, "atMost": false, "statuses": ["canceled", "dispatched", "known-failure", "not-started", "observed-success", "uncertain"], "fixed": {"provider": "github-pull-requests", "repository": "01J9Z3K4M5N6P7Q8R9S0T1V2W6", "product": "01J9Z3K4M5N6P7Q8R9S0T1V2W7", "productHash": "sha256:4a0ad014f4c0131b74fc73f279421297704859445dd7aca1e530eb4642225d10", "branch": "operator/01J9Z3K4M5N6P7Q8R9S0T1V2W8"}}], "references": []},
+      "bytes": ["accept"],
+      "screen": "absent",
+      "open": "opened",
+      "steps": [
+        {"sign": "accept", "ended": "lock"}
       ]
     },
     {

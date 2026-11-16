@@ -114,17 +114,20 @@ internal sealed record ProcessResult(int Code, byte[] Output, string Error)
     }
 }
 
-/// <summary>A key without presence in the Secure Enclave, made with the helper's test build, and removed with its directory.</summary>
+/// <summary>
+/// A key in the Secure Enclave, made with the helper's test build, and removed with its directory: without presence, so no test asks
+/// anyone for Touch ID or a password, unless a test asks for one that needs presence to show that nothing it does raises a dialog.
+/// </summary>
 internal sealed class EnclaveSessionKey : IDisposable
 {
     private readonly string directory;
 
-    internal EnclaveSessionKey(string helper)
+    internal EnclaveSessionKey(string helper, bool presence = false)
     {
         directory = Path.Combine(EnclaveSessionBuild.WorkDirectory, "key-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         Blob = Path.Combine(directory, "device.se");
-        ProcessResult created = ProcessResult.Run(helper, ["create", Blob], environment: null, input: null);
+        ProcessResult created = ProcessResult.Run(helper, presence ? ["create", Blob, "--presence"] : ["create", Blob], environment: null, input: null);
         Assert.True(created.Code == 0, "The test key could not be made: " + created.Error);
         PublicKey = Base64Url.EncodeToString(Convert.FromBase64String(created.Text));
     }

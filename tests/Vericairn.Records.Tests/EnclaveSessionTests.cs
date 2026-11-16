@@ -201,6 +201,42 @@ public class EnclaveSessionTests(EnclaveSessionFixture fixture) : IClassFixture<
     }
 
     [Fact]
+    public void OnceItsCheckHasPassedTheSessionNeverShowsADialog()
+    {
+        // A key that needs presence, and a check the test hook reports as passed without evaluating the context: a session whose
+        // context does not cover its key. Its first signature is refused at once, with no dialog, because the helper makes the
+        // context non-interactive once its check has passed. The helper's probe of the key raises none either: prompting arrives.
+        string helper = fixture.Helper;
+        using var presence = new EnclaveSessionKey(helper, presence: true);
+        Dictionary<string, string> environment = TestEnvironment();
+        environment["VERICAIRN_TEST_CHECK"] = "passed";
+        using EnclaveSession session = EnclaveSession.Start(helper, presence.Blob, environment);
+        SessionVectors vectors = SessionVectors.Load();
+        JsonElement vector = vectors.Session("operator record, the best case");
+        var bytes = new JsonArray();
+        foreach (JsonElement name in vector.GetProperty("bytes").EnumerateArray()) bytes.Add(Base64Url.EncodeToString(vectors.RecordBytes(name.GetString()!, presence.PublicKey)));
+        session.Send(new JsonObject { ["type"] = "open", ["terms"] = Base64Url.EncodeToString(vectors.TermsBytes(vector, presence.PublicKey)), ["bytes"] = bytes });
+        session.Expect("prompting");
+        session.Expect("opened");
+        session.Send(new JsonObject { ["type"] = "sign", ["record"] = Base64Url.EncodeToString(vectors.RecordBytes("accept", presence.PublicKey)) });
+        session.ExpectRefusal("check.unavailable", "refusal");
+    }
+
+    [Fact]
+    public void AReleaseBuildCarriesNoTestHook()
+    {
+        // The same list tools/presence-session-qualification.py's build command reads in the release candidate's helper.
+        string[] markers = ["VERICAIRN_TEST", "VERICAIRN_SESSION_TESTS", "test-advance", "test-signal", "testEnvironment", "testMessage"];
+        byte[] tests = File.ReadAllBytes(fixture.Helper);
+        Assert.Contains(markers, marker => tests.AsSpan().IndexOf(Encoding.ASCII.GetBytes(marker)) >= 0);
+        string release = EnclaveSessionBuild.Compile("release", ["-O"]) ?? throw new InvalidOperationException("The release build did not compile.");
+        byte[] content = File.ReadAllBytes(release);
+        foreach (string marker in markers) Assert.True(content.AsSpan().IndexOf(Encoding.ASCII.GetBytes(marker)) < 0, "The release build carries " + marker + ".");
+        Assert.Equal(2, ProcessResult.Run(release, ["canonical"], environment: null, input: "{}"u8.ToArray()).Code);
+        Assert.Equal(2, ProcessResult.Run(release, ["fingerprint", release, "AAAAAAAAAAAAAAAAAAAAAA"], environment: null, input: null).Code);
+    }
+
+    [Fact]
     public void SignRecordReadsTheRecordAndOpensItsDialogWithTheHelpersLabel()
     {
         string helper = fixture.Helper;

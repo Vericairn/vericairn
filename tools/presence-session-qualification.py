@@ -38,6 +38,9 @@ HEAD = hashlib.sha1(b"presence session qualification").hexdigest()
 PROVIDER = "github-pull-requests"
 STATUSES = sorted(["not-started", "dispatched", "observed-success", "known-failure", "canceled", "uncertain"])
 BRANCH = "qualification/presence-session"
+# What a build compiled with the helper's test hooks carries and a release build must not: the hooks' environment names, their
+# messages and their names in the code. EnclaveSessionTests holds a release build to the same list.
+TEST_HOOK_MARKERS = [b"VERICAIRN_TEST", b"VERICAIRN_SESSION_TESTS", b"test-advance", b"test-signal", b"testEnvironment", b"testMessage"]
 
 
 def ulid():
@@ -169,6 +172,21 @@ def sign_chain(session, opened, count, every, branch=BRANCH):
     return count
 
 
+def command_build(arguments):
+    with open(arguments.helper, "rb") as helper:
+        content = helper.read()
+    found = [marker.decode() for marker in TEST_HOOK_MARKERS if marker in content]
+    answered = []
+    for command in (["canonical"], ["fingerprint", arguments.helper, "AAAAAAAAAAAAAAAAAAAAAA"]):
+        done = subprocess.run([arguments.helper] + command, input=b"{}", capture_output=True, env={}, check=False)
+        if done.returncode != 2:
+            answered.append(command[0])
+    if found or answered:
+        print("this helper carries test hooks:", ", ".join(found + [f"answers {name}" for name in answered]))
+        sys.exit(1)
+    print("no test hook: none of the hooks' names is in the helper, and it refuses the test commands as usage errors")
+
+
 def command_key(arguments):
     directory = tempfile.mkdtemp(prefix="vericairn-qualification-")
     os.chmod(directory, 0o700)
@@ -269,6 +287,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--helper", required=True, help="the release candidate's signed vericairn-enclave")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("build", help="check that the helper carries no test hook")
     commands.add_parser("key", help="make a throwaway presence key and print its blob")
     for name, text in [("open", "open a session over push records and sign them, spread over the given seconds"),
                        ("hold", "open a session and sign one record every few seconds until it ends"),
@@ -283,7 +302,7 @@ def main():
         if name == "hold":
             command.add_argument("--every", type=float, default=5, help="seconds between signatures")
     arguments = parser.parse_args()
-    {"key": command_key, "open": command_open, "hold": command_hold, "parent": command_parent, "maximum": command_maximum}[arguments.command](arguments)
+    {"build": command_build, "key": command_key, "open": command_open, "hold": command_hold, "parent": command_parent, "maximum": command_maximum}[arguments.command](arguments)
 
 
 if __name__ == "__main__":

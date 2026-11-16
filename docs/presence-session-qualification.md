@@ -32,13 +32,17 @@ use of the helper.
    authority, the release's `TeamIdentifier`, the helper's identifier and `flags=0x10000(runtime)`;
    `codesign -d --entitlements - vericairn-enclave` must show no `com.apple.security.get-task-allow`. A
    helper that does not meet this refuses every session with `helper.unsigned`.
-3. **The Mac.** Record the macOS version and build (`sw_vers`), the hardware model (`sysctl hw.model`)
+3. **No test hooks.** From the product repository at the candidate's commit, run
+   `python3 tools/presence-session-qualification.py --helper ./vericairn-enclave build`. It passes only when
+   none of the test hooks' names is in the helper and the helper refuses their commands as usage errors; a
+   helper built with its test hooks fails it and is no release helper.
+4. **The Mac.** Record the macOS version and build (`sw_vers`), the hardware model (`sysctl hw.model`)
    and whether it has Touch ID.
-4. **A throwaway presence key.** From the product repository at the candidate's commit, run
+5. **A throwaway presence key.** From the product repository at the candidate's commit, run
    `python3 tools/presence-session-qualification.py --helper ./vericairn-enclave key`. It makes a key that
    asks for presence in a new owner-only directory and prints its blob. Never use a device's key: the
    driver signs synthetic records that belong to no estate.
-5. **The driver.** Every command below is
+6. **The driver.** Every command below is
    `python3 tools/presence-session-qualification.py --helper ./vericairn-enclave <command> --blob <blob>`.
    It stands in for the runtime on the helper's protocol, starts the helper with an empty environment,
    prints every message the helper answers with the seconds since it started, and prints the dialog's
@@ -59,8 +63,10 @@ it once more and leave the dialog unanswered: after 300 seconds the helper refus
 and nothing is signed.
 
 **2. The context satisfies the key.** During point 1, no second dialog opens for any signature, and no
-dialog opens before the one that begins "open Vericairn session". If each signature asks again, this
-point fails: the build must not list this macOS version, so every signature keeps its own check.
+dialog opens before the one that begins "open Vericairn session". Once the check has passed, the helper's
+context never shows a dialog again: a signature its evaluation does not cover is refused with
+`check.unavailable` and the session ends. If that refusal follows an answered dialog, this point fails:
+the build must not list this macOS version, so every signature keeps its own check.
 
 **3. The dialog's text is whole.** Run `maximum`. The dialog shows the whole text the driver printed as
 expected: 200 characters, ending with an ellipsis, the fingerprint included. Record the process name the
@@ -98,7 +104,10 @@ that `sleep` came first.
 the event: lock with Control-Command-Q; lock with a hot corner set to Lock Screen; start a screen saver
 that asks for the password immediately; switch to another user (fast user switching); close the lid on a
 portable Mac; sleep the display (`pmset displaysleepnow`); sleep the Mac (`pmset sleepnow`). The helper
-answers `ended` with `lock` or `sleep` within a second of the event. Record each reason. Separately,
+answers `ended` with `lock` or `sleep` within a second of the event. Record each reason. Before each
+signature the helper also reads the user session's own state and counts the screen as locked when that
+state is missing or does not say the session is on the console; the signatures of point 1 show that this
+macOS version reports it. Separately,
 record whether the enclave itself refuses at the lock screen: make a key without presence
 (`./vericairn-enclave create <directory>/plain.se`), run `sleep 15; ./vericairn-enclave sign
 <directory>/plain.se <64 zeros>`, lock the screen within 15 seconds and record whether it signed.

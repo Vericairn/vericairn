@@ -572,10 +572,11 @@ public class ContinuousIntegrationTests
         Assert.Contains("swiftc -O -o artifacts/enclave/vericairn-enclave", enclave, StringComparison.Ordinal);
         Assert.Contains("VERICAIRN_ENCLAVE_HELPER=", enclave, StringComparison.Ordinal);
         Assert.DoesNotContain("matrix.share", enclave, StringComparison.Ordinal);
+        // From 0.9.4 (ID-15) both workflows require the enclave, so the enclave and presence session tests fail rather than skip.
+        Assert.Contains("VERICAIRN_EXPECT_ENCLAVE=1", enclave, StringComparison.Ordinal);
         if (file == "release.yml")
         {
             Assert.Contains("          artifacts/enclave/vericairn-enclave available\n", enclave, StringComparison.Ordinal);
-            Assert.Contains("VERICAIRN_EXPECT_ENCLAVE=1", enclave, StringComparison.Ordinal);
         }
 
         string service = Block(steps, "- name: Install a secret service", 6);
