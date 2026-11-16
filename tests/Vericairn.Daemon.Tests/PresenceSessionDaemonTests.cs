@@ -46,14 +46,47 @@ public sealed class PresenceSessionDaemonTests
         Assert.False(host.Service.HostsEmbedded);
         using var client = new VericairnClient(host.Endpoint);
         OperatorCloseCandidatesResponse listed = client.OperatorCloseCandidates();
+        // CODE-80: a client follows the notices over the local socket, as the command line does, and reads them as it does.
+        using var follower = new VericairnClient(host.Endpoint);
+        long start = (await follower.PresencePromptsAsync(new(), TestContext.Current.CancellationToken)).Cursor;
+        var reader = new PresenceNoticeReader();
+        var lines = new List<PresenceLine>();
+        Task following = Task.Run(async () =>
+        {
+            long cursor = start;
+            while (!lines.Any(l => l.Kind == "finished"))
+            {
+                PresencePromptsResponse read = await follower.PresencePromptsAsync(new(cursor, PresenceNoticeVocabulary.MaxWaitSeconds), TestContext.Current.CancellationToken);
+                if (read.Notices.Count == 0) continue;
+                cursor = read.Cursor;
+                lines.AddRange(reader.Read(read.Notices));
+            }
+        }, TestContext.Current.CancellationToken);
+        using (var hang = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken))
+        {
+            hang.CancelAfter(TestTiming.HangTimeout);
+            while (host.Service.PresenceNotices.Waiting == 0) await Task.Delay(10, hang.Token);
+        }
 
         OperatorCloseResponse closed = client.OperatorClose(new OperatorCloseRequest(f.Estate.OperatorId, [.. listed.Items.Select(i => i.ToSelection())], All: true));
+        await following.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
 
         Assert.True(closed.Ok, closed.Problem?.Message);
         Assert.Equal(2, closed.Written.Count);
         PresenceHelperStandIn session = Assert.Single(helpers);
         Assert.Equal(2, session.SignedHashes.Count);
         Assert.Empty(custody.Reasons);
+        // The session's terms, nonce, short hashes and end cross the API as fields, and the client computes the helper's fingerprint itself.
+        IReadOnlyList<PresenceNotice> notices = (await client.PresencePromptsAsync(new(start), TestContext.Current.CancellationToken)).Notices;
+        Assert.Equal(["announced", "session", "signed", "signed", "ended", "finished"], notices.Select(n => n.Kind));
+        Assert.Equal(System.Text.Encoding.UTF8.GetString(session.Terms[0]), notices[0].Session!.Terms);
+        Assert.Equal(2, notices[0].Session!.Descriptions!.Count);
+        Assert.Equal(closed.Written.Select(w => w.Hash[7..19]), notices.Where(n => n.Kind == "signed").Select(n => n.ShortHash!));
+        Assert.Equal("closed", notices[4].Session!.Reason);
+        string fingerprint = PresenceSessionRules.Fingerprint(System.Buffers.Text.Base64Url.DecodeFromChars(notices[1].Session!.Nonce), session.Terms[0]);
+        Assert.StartsWith($"Presence check for operator close: the system dialog should show fingerprint {fingerprint}", Assert.Single(lines, l => l.Kind == "session").Text, StringComparison.Ordinal);
+        // The ledger beside the daemon's live store keeps the session.
+        Assert.Equal(fingerprint, Assert.Single(PresenceSessionLedger.Read(host.Service.PresenceLedger!.Folder)).Fingerprint);
     }
 
     [Fact]

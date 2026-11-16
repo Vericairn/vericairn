@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
+using Vericairn.Runtime.Service;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -134,6 +136,119 @@ internal sealed class DeviceOperations(CommandContext context)
                     _ => "written",
                 };
                 context.Output.WriteLine($"{write.At}  device {write.Device} for {write.Principal}  {write.Operation}  {outcome}{(write.Record is null ? string.Empty : $"  {write.Record}{(write.Hash is null ? string.Empty : "  " + write.Hash)}")}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): a device owner's presence setting on the machine holding its key (design/presence-sessions.md § 10), kept
+    /// owner-only in this user's machine state (presence.json under the Vericairn home), never in a record: per-signature, or per-action with
+    /// a limit of 60 to 300 seconds. Without a choice it shows the setting. The estate's charter may ask per-signature, and the stricter wins.
+    /// </summary>
+    public int DevicesPresence(string root, string deviceId, bool perSignature, bool perAction, int? limit, bool json)
+    {
+        if (perSignature && perAction) return context.Fail("Choose one of --per-signature and --per-action.");
+        if (limit is not null && !perAction) return context.Fail("--limit sets a presence session's limit, so it goes with --per-action.");
+        if (limit is < PresenceSessionProtocol.MinLimitSeconds or > PresenceSessionProtocol.MaxLimitSeconds)
+            return context.Fail($"A presence session's limit is {PresenceSessionProtocol.MinLimitSeconds} to {PresenceSessionProtocol.MaxLimitSeconds} seconds.");
+        DeviceRow? row = null;
+        int found = context.WithApi(root, api =>
+        {
+            row = api.Devices().FirstOrDefault(d => d.Id == deviceId);
+            return Clean;
+        }, readOnly: true, presence: false);
+        if (found != Clean) return found;
+        if (row is null) return context.Fail($"Device {deviceId} is not a device of this estate.");
+        if (!row.HeldHere) return context.Fail($"Device {deviceId}'s key is not held on this machine; set its presence on the machine that holds it.");
+
+        string? charter;
+        try
+        {
+            charter = Records.Types.EstateType.PresencePolicy(LoadCopy(root));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return context.Fail(exception.Message);
+        }
+
+        if (perSignature || perAction)
+        {
+            try
+            {
+                PresenceSettings.Write(deviceId, perSignature, limit);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return context.Fail($"The presence setting could not be kept on this machine: {exception.Message}");
+            }
+        }
+
+        PresenceSetting setting = PresenceSettings.Read(deviceId);
+        string owner = setting.PerSignature ? "per-signature" : "per-action";
+        bool charterStricter = charter is not (null or "per-action");
+        string effective = setting.PerSignature || charterStricter ? "per-signature" : "per-action";
+        int sessionLimit = setting.LimitSeconds ?? PresenceSessionProtocol.MaxLimitSeconds;
+        if (json)
+        {
+            context.Output.WriteLine(JsonSerializer.Serialize(new
+            {
+                device = deviceId, presence = owner, limitSeconds = setting.LimitSeconds, charter, effective, required = row.Presence == "required", problem = setting.Problem,
+            }, ProtocolJson.Options));
+            return Clean;
+        }
+
+        context.Output.WriteLine(setting.PerSignature
+            ? $"device {deviceId} ({row.Name}): one presence check per signature, kept owner-only on this machine"
+            : $"device {deviceId} ({row.Name}): an operator action may ask one presence check for the list it announces, a session of at most {sessionLimit} s, kept owner-only on this machine");
+        if (setting.Problem is string problem) context.Output.WriteLine("  " + problem);
+        if (charterStricter)
+            context.Output.WriteLine(charter == "per-signature"
+                ? "  the estate's charter asks one presence check per signature for every device, which wins"
+                : "  the estate's charter states a presence policy that is neither per-signature nor per-action, so every signature asks its own check");
+        if (row.Presence != "required") context.Output.WriteLine("  this device's signatures ask no presence check, so the setting changes nothing for it");
+        context.Output.WriteLine(effective == "per-signature"
+            ? "  in effect: one presence check per signature"
+            : "  in effect: presence sessions where this build and this macOS version open them ('vericairn doctor' says whether they do)");
+        return Clean;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): the presence sessions this machine's runtime opened or tried to open for the estate, from the owner-only ledger
+    /// beside its live store; no daemon is needed.
+    /// </summary>
+    public int DevicesSessions(string root, string? device, bool json)
+    {
+        try
+        {
+            if (!IsEstate(root)) return context.Fail(NotAnEstate(root));
+            List<PresenceSessionEntry> sessions = [.. PresenceSessionLedger.Read(PresenceSessionLedger.DirectoryOf(root)).Where(s => device is null || s.Device == device)];
+            if (json)
+            {
+                context.Output.WriteLine(JsonSerializer.Serialize(sessions, ProtocolJson.Options));
+                return Clean;
+            }
+
+            if (sessions.Count == 0)
+                context.Output.WriteLine(device is null ? "this machine's runtime has opened no presence session for this estate" : $"this machine's runtime has opened no presence session for device {device}");
+            foreach (PresenceSessionEntry session in sessions)
+            {
+                string limit = session.LimitSeconds is int seconds ? $"  limit {seconds} s" : string.Empty;
+                string fingerprint = session.Fingerprint is null ? "  no check asked" : $"  fingerprint {session.Fingerprint}";
+                string opened = session.OpenedAt is null ? "  not opened" : $"  opened {session.OpenedAt}";
+                string ended = session.Ended is null ? "  not ended in the ledger" : $"  ended {session.EndedAt} ({session.Ended})";
+                context.Output.WriteLine($"{session.AnnouncedAt}  session {session.Session}  {session.Named ?? session.Action}  device {session.Device}{limit}{fingerprint}{opened}  {session.Signed.Count} signed{ended}");
+                if (session.Why is string why) context.Output.WriteLine($"  announced as a renewal, because {why}");
+                foreach (PresenceSessionSigned signed in session.Signed)
+                    context.Output.WriteLine($"  signed {signed.Type} {signed.Record}  {signed.Hash}");
+                foreach (PresenceSessionRefused refused in session.Refused)
+                    context.Output.WriteLine($"  refused {refused.Code}{(refused.Hash is null ? string.Empty : $"  {refused.Type} {refused.Hash}")}: {refused.Detail}");
+                if (session.EndedWhy is string text && session.Ended is not null and not "closed") context.Output.WriteLine("  " + text);
             }
 
             return Clean;

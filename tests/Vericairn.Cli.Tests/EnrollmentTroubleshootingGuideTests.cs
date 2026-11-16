@@ -163,7 +163,8 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         Assert.Equal(expected, lines.Length);
         foreach (string line in lines)
         {
-            string placed = values.Aggregate(line, (text, pair) => text.Replace(pair.Value, pair.Key, StringComparison.Ordinal));
+            // From 0.9.4 (CODE-80) a prompt's line ends with the record's short hash, which the guide shows as a placeholder.
+            string placed = ShortHash().Replace(values.Aggregate(line, (text, pair) => text.Replace(pair.Value, pair.Key, StringComparison.Ordinal)), " (<short hash>)");
             Assert.True(guide.Contains("\n" + placed + "\n", StringComparison.Ordinal) || guide.Contains("\n  " + placed + "\n", StringComparison.Ordinal),
                 $"The guide does not quote what the command prints: {placed}");
         }
@@ -186,6 +187,9 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
 
     [GeneratedRegex("<[a-z-]+>")]
     private static partial Regex Placeholder();
+
+    [GeneratedRegex(@" \([0-9a-f]{12}\)$")]
+    private static partial Regex ShortHash();
 
     /// <summary>
     /// A new estate, as <c>estate init</c> writes it, served by an embedded runtime whose operator's key is held by a recording stand-in

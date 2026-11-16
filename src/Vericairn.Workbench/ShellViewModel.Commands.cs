@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Presentation;
+using Vericairn.Sdk;
 
 namespace Vericairn.Workbench;
 
@@ -279,6 +280,8 @@ public sealed partial class ShellViewModel
     /// <summary>
     /// Runs a submission while following the runtime's presence notices (FIX-124): each is written to the activity log, a prompt's
     /// "Signature k of n" line to the status, and the last to <see cref="PresencePrompt"/>. A runtime that keeps none is not followed.
+    /// From 0.9.4 (CODE-80) a presence session's list is shown from its terms with the runtime's descriptions labeled as its own, the
+    /// fingerprint its check's dialog shows is computed here and shown in the status, and so is each signature under the session.
     /// </summary>
     private async Task WithPresenceAsync(IEstateApi? api, Func<CancellationToken, Task> action, CancellationToken token)
     {
@@ -304,6 +307,7 @@ public sealed partial class ShellViewModel
         }
 
         long cursor = position;
+        var reader = new PresenceNoticeReader();
         using var following = CancellationTokenSource.CreateLinkedTokenSource(token);
         Task follow = FollowAsync(following.Token);
         try
@@ -336,14 +340,18 @@ public sealed partial class ShellViewModel
             }
         }
 
+        // From 0.9.4 (CODE-80) one read's notices are one batch for the reader, which shows a session's list from its terms, computes the
+        // fingerprint only from terms an earlier read brought, and names each signature as it is made.
         void Show(IReadOnlyList<PresenceNotice> notices)
         {
-            foreach (PresenceNotice notice in notices.Where(n => n.Sequence > cursor))
+            List<PresenceNotice> batch = [.. notices.Where(n => n.Sequence > cursor)];
+            if (batch.Count == 0) return;
+            cursor = batch[^1].Sequence;
+            foreach (PresenceLine shown in reader.Read(batch))
             {
-                cursor = notice.Sequence;
-                foreach (string line in notice.Text.Split('\n')) Log(line);
-                if (notice.Kind == "prompt") Status = notice.Text;
-                PresencePrompt = notice.Text;
+                foreach (string line in shown.Text.Split('\n')) Log(line);
+                if (shown.Status) Status = shown.Text;
+                PresencePrompt = shown.Text;
             }
         }
     }

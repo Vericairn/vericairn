@@ -93,9 +93,15 @@ internal sealed class PresenceSessionAction(Func<PresenceComposeContext, Presenc
 
 /// <summary>An open presence session: the helper's client, the checks the runtime applies before each record, and its clock.</summary>
 internal sealed class PresenceOpenSession(PresenceSessionClient client, PresenceSessionRules rules, PresenceSessionOpening opening, string device,
-    IReadOnlyList<string> exactIds, TimeProvider clock)
+    IReadOnlyList<string> exactIds, TimeProvider clock, PresenceTally? tally = null)
 {
     private readonly long started = clock.GetTimestamp();
+
+    /// <summary>The session's id, as its terms state it.</summary>
+    internal string Id => Rules.Session;
+
+    /// <summary>From 0.9.4 (CODE-80): the tally of the action the session belongs to, whose notices tell its end.</summary>
+    internal PresenceTally? Tally { get; } = tally;
 
     internal PresenceSessionClient Client { get; } = client;
 
@@ -218,6 +224,16 @@ internal sealed class PresenceSessionService
 
     /// <summary>Raised when a refusal is kept, so attention is derived again.</summary>
     internal Action? OutsideChanged { get; set; }
+
+    /// <summary>From 0.9.4 (CODE-80): the presence session ledger in the runtime's machine state, or null where none is kept.</summary>
+    internal PresenceSessionLedger? Ledger { get; set; }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): how long a session's list waits, before its terms go to the helper, for a client following the notices to read
+    /// them, so that client holds the terms before the nonce exists and can show the fingerprint (design/presence-sessions.md § 6). Nothing
+    /// waits when no client follows.
+    /// </summary>
+    internal TimeSpan DeliveryBound { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>Marks the action's next signature as the one that dispatches an effect with this bound (§ 9).</summary>
     internal void EffectAhead(TimeSpan deadline)
@@ -359,6 +375,7 @@ internal sealed class PresenceSessionService
             catch (PresenceSessionEnded ended) when (ended.Code is string code && code.StartsWith("record.", StringComparison.Ordinal))
             {
                 // The helper refused what the runtime's own checks admitted: a defect or an attack. Nothing is signed; attention is raised.
+                Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), open.Id, "refused") { Code = code, Detail = ended.Message, Record = record.Id, Type = record.Type, Hash = record.Hash });
                 Raise(new PresenceOutsideList(tally.Action, signing.Principal, record.Type, signing.Describe.Key, record.Hash, code, ended.Message,
                     DateTimeOffset.FromUnixTimeSeconds(Host.Clock.GetUtcNow().ToUnixTimeSeconds())));
                 action.Failed = true;
@@ -374,7 +391,9 @@ internal sealed class PresenceSessionService
 
             open.Rules.Signed(record, entry);
             action.Signed.Add(record.Id);
-            counter.SessionSigned(tally, signing.Describe, record.ShortHash, action.Signed.Count + open.Rules.Left, open.Rules.UpTo || action.SessionsOpened > 1);
+            Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), open.Id, "signed") { Record = record.Id, Type = record.Type, Hash = record.Hash, Entry = entry });
+            counter.SessionSigned(tally, signing.Describe, record.ShortHash, action.Signed.Count + open.Rules.Left, open.Rules.UpTo || action.SessionsOpened > 1,
+                new PresenceSessionNotice(open.Id, open.Opening.LimitSeconds, SecondsLeft: signed.Seconds));
             return new RecordSignature(RecordSigning.Algorithm, signing.Device, PresenceText.Base64UrlText(signed.Signature));
         }
 
@@ -443,7 +462,16 @@ internal sealed class PresenceSessionService
 
         string? renewal = action.Renewal;
         action.Renewal = null;
-        counter.SessionNotice(tally, renewal is null ? "announced" : "revised", list.Total, list.Signatures, list.Announcement(tally.Action, signing.Limit, renewal));
+        // From 0.9.4 (CODE-80) the list's notice carries its terms and the runtime's descriptions, and a renewal is its own kind. A client
+        // following the notices reads the terms before they go to the helper, so it holds them before the nonce exists.
+        string text = Encoding.UTF8.GetString(terms);
+        PresenceNotice listed = counter.SessionNotice(tally, renewal is null ? "announced" : "renewed", list.Total, list.Signatures, list.Announcement(tally.Action, signing.Limit, renewal),
+            new PresenceSessionNotice(session, signing.Limit, text, Descriptions(list), Reason: renewal));
+        Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), session, "announced")
+        {
+            Action = list.Action, Named = tally.Action, Principal = signing.Principal, Device = signing.Device, Terms = text, Why = renewal, LimitSeconds = signing.Limit,
+        });
+        counter.Notices.AwaitDelivery(listed.Sequence, DeliveryBound);
         var client = new PresenceSessionClient(channel, signing.PublicKey);
         PresenceSessionOpening opening;
         bool prompted = false;
@@ -454,30 +482,54 @@ internal sealed class PresenceSessionService
                 prompted = true;
                 action.Checks++;
                 action.SessionChecks++;
-                counter.SessionNotice(tally, "prompt", list.Total, [],
-                    string.Create(CultureInfo.InvariantCulture, $"Presence check for {tally.Action}: the system dialog shows fingerprint {fingerprint}; approve it once for {(rules.UpTo ? "up to " : string.Empty)}{list.Total} signatures in {signing.Limit} s. (nonce {nonce})"));
+                Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), session, "prompting") { Nonce = nonce, Fingerprint = fingerprint });
+                counter.SessionNotice(tally, "session", list.Total, [],
+                    string.Create(CultureInfo.InvariantCulture, $"Presence check for {tally.Action}: the system dialog shows fingerprint {fingerprint}; approve it once for {(rules.UpTo ? "up to " : string.Empty)}{list.Total} signatures in {signing.Limit} s. (nonce {nonce})"),
+                    new PresenceSessionNotice(session, signing.Limit, Nonce: nonce));
             }, Host.CheckWait);
         }
         catch (PresenceSessionEnded ended) when (!prompted && ended.Code is not null && !ended.Declined)
         {
             // Refused before any dialog (helper.unsigned, terms.*): no check was asked, so the action keeps one check per signature.
             client.Dispose();
+            NotOpened(tally, session, signing.Limit, ended, $"The release helper refused to open the presence session ({ended.Code}) before any dialog, so each signature asks its own check.");
             action.Off = $"the helper refused to open a session ({ended.Code})";
             devices.TryRemove(new KeyValuePair<string, PresenceSessionAction>(signing.Device, action));
             return false;
         }
-        catch (PresenceSessionEnded)
+        catch (PresenceSessionEnded ended)
         {
             // A declined or unanswered check signs nothing, and never falls back to one check per signature.
             client.Dispose();
+            NotOpened(tally, session, signing.Limit, ended, ended.Declined
+                ? "The presence check was declined or not answered: nothing was signed, and the action stops."
+                : "The presence session did not open: nothing was signed, and the action stops.");
             action.Failed = true;
             devices.TryRemove(new KeyValuePair<string, PresenceSessionAction>(signing.Device, action));
             throw;
         }
 
         action.SessionsOpened++;
-        action.Open = new PresenceOpenSession(client, rules, opening, signing.Device, list.ExactIds, Host.Clock);
+        action.Open = new PresenceOpenSession(client, rules, opening, signing.Device, list.ExactIds, Host.Clock, tally);
+        Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), session, "opened")
+        {
+            OpenedAt = Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.FromUnixTimeSeconds(opening.OpenedAt)), LimitSeconds = opening.LimitSeconds,
+        });
         return true;
+    }
+
+    // The runtime's description of each entry of a list, which the terms do not cover, in the terms' order.
+    private static IReadOnlyList<PresenceEntryDescription> Descriptions(PresenceSessionList list) =>
+        [.. list.Lines.Select((line, index) => new PresenceEntryDescription(index, list.Entries[index].Type, line.Signature.Key, line.Signature.Purpose, line.Changes, line.Flagged))];
+
+    // A session whose check was refused, declined or not answered: its refusal and its end, in the ledger and a notice.
+    private void NotOpened(PresenceTally tally, string session, int limit, PresenceSessionEnded ended, string text)
+    {
+        string at = PresenceSessionLedger.Now(Host.Clock);
+        if (ended.Code is string code) Ledger?.Append(new PresenceSessionEvent(at, session, "refused") { Code = code, Detail = ended.Message });
+        string reason = Reason(ended.Reason);
+        Ledger?.Append(new PresenceSessionEvent(at, session, "ended") { Reason = reason, Detail = text });
+        counter.SessionNotice(tally, "ended", tally.Planned.Count, [], text, new PresenceSessionNotice(session, limit, Reason: reason));
     }
 
     private void EndOpen(PresenceSessionAction action, string? renewal)
@@ -487,10 +539,33 @@ internal sealed class PresenceSessionService
             action.Open = null;
             open.Client.Dispose();
             devices.TryRemove(new KeyValuePair<string, PresenceSessionAction>(open.Device, action));
+            // From 0.9.4 (CODE-80): its end, with why, in the ledger and a notice.
+            string reason = Reason(open.Client.EndReason);
+            string text = reason == "closed"
+                ? renewal is null ? "The presence session ended with its action." : $"The presence session ended, because {renewal}."
+                : $"The presence session ended: {Ended(reason)}.";
+            Ledger?.Append(new PresenceSessionEvent(PresenceSessionLedger.Now(Host.Clock), open.Id, "ended") { Reason = reason, Detail = text });
+            if (open.Tally is { } tally) counter.SessionNotice(tally, "ended", tally.Planned.Count, [], text, new PresenceSessionNotice(open.Id, open.Opening.LimitSeconds, Reason: reason));
         }
 
         if (renewal is not null) action.Renewal = renewal;
     }
+
+    // A reason an ended notice may give: one of the vocabulary's, or refusal for anything else.
+    private static string Reason(string? reason) => reason is null ? "closed" : PresenceNoticeVocabulary.EndReasons.Contains(reason) ? reason : "refusal";
+
+    private static string Ended(string reason) => reason switch
+    {
+        "limit" => "it reached its limit",
+        "lock" => "the screen locked or the user session switched",
+        "sleep" => "the Mac slept",
+        "refusal" => "the release helper refused, so nothing more is signed under it",
+        "parent" => "the process that started the helper exited",
+        "input" => "the helper's input closed",
+        "declined" => "the presence check was declined or not answered",
+        "silent" => "the helper stopped answering and was stopped",
+        _ => "the helper ended it",
+    };
 
     // An action's tally closes: its session ends with it.
     private void Close(PresenceTally tally)

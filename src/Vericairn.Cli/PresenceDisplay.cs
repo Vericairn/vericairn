@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Protocol;
+using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
 
@@ -10,6 +11,11 @@ namespace Vericairn.Cli;
 /// it, embedded or the daemon: the records an operator action will sign with its owner's presence, announced before the first prompt,
 /// "Signature k of n" with what each prompt signs, any it adds, and how many it signed. A command that signs nothing with presence
 /// shows nothing, and a runtime that keeps no notices shows nothing either; standard output keeps the command's own answer.
+/// <para>
+/// From 0.9.4 (CODE-80) a presence session's list is shown from its terms, counted and summarized here with the runtime's descriptions
+/// labeled as the runtime's; the fingerprint the system dialog shows is computed here from the check's nonce and terms received before it,
+/// with a warning in its place otherwise; and each signature under the session is shown as it is made (<see cref="PresenceNoticeReader"/>).
+/// </para>
 /// </summary>
 internal sealed class PresenceDisplay : IDisposable
 {
@@ -21,6 +27,7 @@ internal sealed class PresenceDisplay : IDisposable
     private readonly CancellationTokenSource stopping = new();
     private readonly object writing = new();
     private readonly Task? following;
+    private readonly PresenceNoticeReader reader = new();
     private long cursor;
     private bool stopped;
 
@@ -117,12 +124,10 @@ internal sealed class PresenceDisplay : IDisposable
     {
         lock (writing)
         {
-            foreach (PresenceNotice notice in response.Notices.Where(n => n.Sequence > cursor))
-            {
-                output.WriteLine(notice.Text);
-                Volatile.Write(ref cursor, notice.Sequence);
-            }
-
+            // One read's notices are one batch: the reader holds a session's terms as received before a nonce only once their read is over.
+            List<PresenceNotice> batch = [.. response.Notices.Where(n => n.Sequence > cursor)];
+            foreach (PresenceLine line in reader.Read(batch)) output.WriteLine(line.Text);
+            if (batch.Count > 0) Volatile.Write(ref cursor, batch[^1].Sequence);
             output.Flush();
         }
     }

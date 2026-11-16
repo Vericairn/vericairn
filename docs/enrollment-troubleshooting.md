@@ -14,13 +14,15 @@ below, says what happened.
 ## What the command prints
 
 From 0.9.3 a command that signs with such a device announces every record it will sign before the first prompt, on standard
-error, and counts each prompt ([presence prompts](operator-guide.md#presence-prompts-announced-and-counted-093)). Admitting a
-device you hold, from a device that asks for presence, prints:
+error, and counts each prompt ([presence prompts](operator-guide.md#presence-prompts-announced-and-counted-093)). From 0.9.4
+each prompt's line ends with the record's short hash, the first twelve hexadecimal digits of its content hash, shown below as
+`<short hash>`; with the release build's helper the dialog's own label names the same short hash. Admitting a device you hold, from
+a device that asks for presence, prints:
 
 ```text
 Writing the admission record asks for your presence once, for the one record it signs:
   1. admission device <desktop-id>: admits the device
-Signature 1 of 1: admission device <desktop-id>: admits the device
+Signature 1 of 1: admission device <desktop-id>: admits the device (<short hash>)
 ```
 
 When the signature is made the action ends with `Signed 1 of 1.` and standard output prints the record's path, id and hash.
@@ -105,8 +107,8 @@ error printed:
 Writing the admission record asks for your presence twice, once for each record it signs:
   1. admission device <laptop-id>: admits the device
   2. history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
-Signature 1 of 2: admission device <laptop-id>: admits the device
-Signature 2 of 2: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
+Signature 1 of 2: admission device <laptop-id>: admits the device (<short hash>)
+Signature 2 of 2: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now (<short hash>)
 Stopped at signature 2 of 2, which was not made; 1 was signed.
 warning: No history checkpoint with trigger adoption was written: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
 ```
@@ -135,7 +137,7 @@ The check lists what adoption witnesses and anchors and prints `plan: sha256:<ha
 ```text
 Writing the history-checkpoint record asks for your presence once, for the one record it signs:
   1. history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
-Signature 1 of 1: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
+Signature 1 of 1: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now (<short hash>)
 Signed 1 of 1.
 ```
 
@@ -153,7 +155,7 @@ vericairn devices admit <desktop-id> --by <operator-id> --note "The operator's d
 ```text
 Writing the admission record asks for your presence once, for the one record it signs:
   1. admission device <desktop-id>: admits the device
-Signature 1 of 1: admission device <desktop-id>: admits the device
+Signature 1 of 1: admission device <desktop-id>: admits the device (<short hash>)
 Stopped at signature 1 of 1, which was not made; 0 were signed.
 error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
 ```

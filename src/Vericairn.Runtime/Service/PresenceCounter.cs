@@ -53,9 +53,10 @@ internal sealed class PresenceCounter
 
     /// <summary>
     /// From 0.9.4 (ID-16): counts a signature made under the action's presence session and names it in a notice: "Signature k of up to n,
-    /// under the session's check", with what it signs and the record's short hash. No prompt is shown for it.
+    /// under the session's check", with what it signs and the record's short hash. No prompt is shown for it. From 0.9.4 (CODE-80) the
+    /// notice is <c>signed</c>, with the session, its seconds left and the short hash as fields.
     /// </summary>
-    internal void SessionSigned(PresenceTally tally, PresenceSignature actual, string shortHash, int total, bool upTo)
+    internal void SessionSigned(PresenceTally tally, PresenceSignature actual, string shortHash, int total, bool upTo, PresenceSessionNotice? session = null)
     {
         lock (tally)
         {
@@ -66,17 +67,20 @@ internal sealed class PresenceCounter
             if (index > tally.Planned.Count) tally.Planned.Add(actual);
             else tally.Planned[index - 1] = actual;
             string count = string.Create(CultureInfo.InvariantCulture, $"Signature {index} of {(upTo ? "up to " : string.Empty)}{Math.Max(total, index)}, under the session's check");
-            Notices.Publish("prompt", tally.Action, Math.Max(total, tally.Planned.Count), tally.Signed, [actual], $"{count}: {actual.Describe()} ({shortHash})", index);
+            Notices.Publish("signed", tally.Action, Math.Max(total, tally.Planned.Count), tally.Signed, [actual], $"{count}: {actual.Describe()} ({shortHash})", index, session, shortHash);
         }
     }
 
-    /// <summary>From 0.9.4 (ID-16): raises a notice of the action's presence session: its list, its check's fingerprint, or a renewal.</summary>
-    internal void SessionNotice(PresenceTally tally, string kind, int total, IReadOnlyList<PresenceSignature> signatures, string text)
+    /// <summary>
+    /// From 0.9.4 (ID-16): raises a notice of the action's presence session: its list, its check, a renewal or its end. From 0.9.4
+    /// (CODE-80) with what the notice says of the session: its terms and the runtime's descriptions, its nonce, or why it ended.
+    /// </summary>
+    internal PresenceNotice SessionNotice(PresenceTally tally, string kind, int total, IReadOnlyList<PresenceSignature> signatures, string text, PresenceSessionNotice? session = null)
     {
         lock (tally)
         {
             tally.Announced = true;
-            Notices.Publish(kind, tally.Action, total, tally.Signed, signatures, text);
+            return Notices.Publish(kind, tally.Action, total, tally.Signed, signatures, text, null, session);
         }
     }
 
@@ -126,7 +130,13 @@ internal sealed class PresenceCounter
     /// returns the reason the key's prompt shows. A signature outside any action is an action of its own, which <paramref name="own"/>
     /// returns for <see cref="Signed"/> to close.
     /// </summary>
-    internal string Prompt(PresenceSignature actual, out PresenceTally? own)
+    internal string Prompt(PresenceSignature actual, out PresenceTally? own) => Prompt(actual, null, out own);
+
+    /// <summary>
+    /// Names the prompt as <see cref="Prompt(PresenceSignature, out PresenceTally?)"/> does; from 0.9.4 (CODE-80) its notice carries the
+    /// record's short hash, which the helper's own label shows, when the record's bytes are known.
+    /// </summary>
+    internal string Prompt(PresenceSignature actual, string? shortHash, out PresenceTally? own)
     {
         own = null;
         PresenceTally tally = current.Value ?? (own = new PresenceTally("Writing the " + actual.Type + " record"));
@@ -158,7 +168,7 @@ internal sealed class PresenceCounter
 
             tally.Asked = index;
             string count = string.Create(CultureInfo.InvariantCulture, $"Signature {index} of {tally.Planned.Count}");
-            Notices.Publish("prompt", tally.Action, tally.Planned.Count, tally.Signed, [named], count + ": " + named.Describe(), index);
+            Notices.Publish("prompt", tally.Action, tally.Planned.Count, tally.Signed, [named], count + ": " + named.Describe(), index, null, shortHash);
             return PresenceReason.Text($"sign Vericairn {count.ToLowerInvariant()}: {named.Type} {named.Key}, {named.Purpose}");
         }
     }
@@ -270,22 +280,46 @@ internal sealed class PresenceTally(string action)
     internal PresenceSessionAction? Session { get; init; }
 }
 
-/// <summary>The presence notices of one runtime, kept in memory, newest last, for the clients on its machine to read in order.</summary>
+/// <summary>
+/// The presence notices of one runtime, kept in memory, newest last, for the clients on its machine to read in order. From 0.9.4
+/// (CODE-80) it knows whether a client follows them, a read that waits being under way or having ended a moment ago, and which notices a
+/// read has delivered, so a session's terms reach a following client before the check's nonce (design/presence-sessions.md § 6).
+/// </summary>
 internal sealed class PresenceNotices
 {
+    /// <summary>How long after a waiting read ends a client still counts as following: the moment it takes to show a batch and read again.</summary>
+    internal static readonly TimeSpan FollowGap = TimeSpan.FromSeconds(1);
+
     private readonly object sync = new();
     private readonly List<PresenceNotice> kept = [];
     private long head;
+    private long delivered;
+    private int waiting;
+    private long followEnded = long.MinValue;
     private TaskCompletionSource changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>The clock the follow gap is measured on; tests replace it.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>How many reads that wait are under way now.</summary>
+    internal int Waiting
+    {
+        get
+        {
+            lock (sync) return waiting;
+        }
+    }
 
     /// <summary>Raises a notice in order and wakes every waiting reader.</summary>
-    internal PresenceNotice Publish(string kind, string action, int count, int signed, IReadOnlyList<PresenceSignature> signatures, string text, int? index = null)
+    internal PresenceNotice Publish(string kind, string action, int count, int signed, IReadOnlyList<PresenceSignature> signatures, string text, int? index = null,
+        PresenceSessionNotice? session = null, string? shortHash = null)
     {
         PresenceNotice notice;
         TaskCompletionSource signal;
         lock (sync)
         {
-            notice = new PresenceNotice(++head, kind, action, count, signed, signatures, text, index);
+            notice = new PresenceNotice(++head, kind, action, count, signed, signatures, text, index) { Session = session, ShortHash = shortHash };
             kept.Add(notice);
             if (kept.Count > PresenceNoticeVocabulary.Kept) kept.RemoveRange(0, kept.Count - PresenceNoticeVocabulary.Kept);
             signal = changed;
@@ -294,6 +328,37 @@ internal sealed class PresenceNotices
 
         signal.TrySetResult();
         return notice;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): when a client follows the notices, waits until a read has delivered the notice at this position, or the bound
+    /// passes; true when it was delivered. With no client following it returns false at once: nobody would show the notice sooner.
+    /// </summary>
+    internal bool AwaitDelivery(long sequence, TimeSpan bound)
+    {
+        long until = Clock.GetTimestamp();
+        while (true)
+        {
+            Task signal;
+            lock (sync)
+            {
+                if (delivered >= sequence) return true;
+                bool following = waiting > 0 || followEnded != long.MinValue && Clock.GetElapsedTime(followEnded) < FollowGap;
+                if (!following || Clock.GetElapsedTime(until) >= bound) return false;
+                signal = read.Task;
+            }
+
+            TimeSpan left = bound - Clock.GetElapsedTime(until);
+            if (left <= TimeSpan.Zero) return false;
+            try
+            {
+                signal.Wait(left < FollowGap ? left : FollowGap);
+            }
+            catch (AggregateException)
+            {
+                return false;
+            }
+        }
     }
 
     /// <summary>The notices after a position, waiting up to the seconds asked for one; a position newer than this runtime's reads every notice kept.</summary>
@@ -306,26 +371,61 @@ internal sealed class PresenceNotices
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(wait));
         long? after = request.After;
-        while (true)
+        // A read that waits is a client following the notices; one that does not, such as a read of the head, is not.
+        if (wait > 0)
         {
-            Task signal;
-            lock (sync)
-            {
-                long from = after is not long position ? head : position > head ? 0 : position;
-                after = from;
-                List<PresenceNotice> notices = [.. kept.Where(n => n.Sequence > from)];
-                if (notices.Count > 0 || wait == 0 || deadline.IsCancellationRequested) return new(notices, notices.Count > 0 ? notices[^1].Sequence : head);
-                signal = changed.Task;
-            }
+            lock (sync) waiting++;
+        }
 
-            try
+        try
+        {
+            while (true)
             {
-                await signal.WaitAsync(deadline.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                // The wait ended with nothing new: the next pass answers with what there is.
+                Task signal;
+                lock (sync)
+                {
+                    long from = after is not long position ? head : position > head ? 0 : position;
+                    after = from;
+                    List<PresenceNotice> notices = [.. kept.Where(n => n.Sequence > from)];
+                    if (notices.Count > 0 || wait == 0 || deadline.IsCancellationRequested)
+                    {
+                        if (notices.Count > 0) Delivered(notices[^1].Sequence);
+                        return new(notices, notices.Count > 0 ? notices[^1].Sequence : head);
+                    }
+
+                    signal = changed.Task;
+                }
+
+                try
+                {
+                    await signal.WaitAsync(deadline.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // The wait ended with nothing new: the next pass answers with what there is.
+                }
             }
         }
+        finally
+        {
+            if (wait > 0)
+            {
+                lock (sync)
+                {
+                    waiting--;
+                    followEnded = Clock.GetTimestamp();
+                }
+            }
+        }
+    }
+
+    // Caller holds sync: a read delivered every notice up to this position.
+    private void Delivered(long sequence)
+    {
+        if (sequence <= delivered) return;
+        delivered = sequence;
+        TaskCompletionSource signal = read;
+        read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.TrySetResult();
     }
 }

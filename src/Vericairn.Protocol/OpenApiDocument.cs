@@ -882,6 +882,9 @@ public static class OpenApiDocument
             ["PresencePromptsResponse"] = PresencePromptsResponseSchema(),
             ["PresenceNotice"] = PresenceNoticeSchema(),
             ["PresenceSignature"] = Required(Object(("type", "string"), ("key", "string"), ("purpose", "string")), "type", "key", "purpose"),
+            ["PresenceSessionNotice"] = PresenceSessionNoticeSchema(),
+            ["PresenceEntryDescription"] = Required(Object(("entry", "integer"), ("type", "string"), ("key", "string"), ("purpose", "string"), ("changes", "string"), ("flagged", "boolean")),
+                "entry", "type", "key", "purpose"),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -1311,7 +1314,7 @@ public static class OpenApiDocument
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
         ("GET", "/v1/operator/close") => "Read every current work order whose latest result is completed, has current passing reviews and has no acceptance of that exact result. Includes the exit question, result summary, review summaries and independence, and exact record hashes. Reads sign and write nothing. Not exposed through MCP.",
-        ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody currently checks presence per signature. Not exposed through MCP.",
+        ("POST", "/v1/operator/close") => "Close the exact displayed selections with the operator's admitted signing device. Each acceptance pins its result and names every displayed passing review as its basis. All also pins complete candidate membership. Changed evidence, missing passing reviews and non-operators refuse the whole action without writes. Custody checks presence per signature, or from 0.9.4 once for an announced list of up to 16 acceptances under a presence session where the release helper and the macOS version allow it and neither the charter nor the device's owner asks per signature. Not exposed through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline is validated and recorded but not yet enforced; goal next and goal step hold a run of a flow at limits.consecutiveFailures, which is otherwise validated and recorded but not enforced, and a direct worker start is not held by it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
@@ -1334,7 +1337,7 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/settle") => "Settle an exited run from the worker's retained local observation, by whoever may stop it. Records observed usage and releases the branch. In-flight and already-settled runs are refused; missing, unreadable or insufficient observations remain unresolved with a reason.",
         ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
-        ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. Local socket only; writes nothing. Not exposed through MCP.",
+        ("POST", "/v1/presence/prompts") => "From 0.9.3 (FIX-124): read the presence notices of operator actions on this machine after a position, waiting up to 25 seconds for one: each action's announcement of every record it will sign, \"Signature k of n\" with what each prompt signs, any signatures it adds and how many it signed. From 0.9.4 an action's presence session announces its terms before the check, then its nonce, each signature under it, any renewal and its end. Local socket only; writes nothing. Not exposed through MCP.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
         ("GET", "/v1/operator/unfinished") => "Read this clone's unfinished operator action from its local checkpoint and its records: the signed record's id, type and subject, branch, head, pull request and stage, the recorded merge and latest target-run observation, whether its records alone can finish it, and what finishing it needs. Reading signs, observes and writes nothing. Not exposed through MCP.",
         ("POST", "/v1/operator/unfinished") => "Finish this clone's unfinished operator action from its own records: once its merge is recorded, a passing target run at the merge commit, already recorded or observed now under the merge's original identity, completes it and clears the clone's unfinished mark. Nothing is signed, branched, committed, pushed, opened or merged; any other action is refused with what finishing it needs. waitSeconds bounds the wait for pending target checks from 0 to 240 (default 120). Not exposed through MCP.",
@@ -1566,14 +1569,37 @@ public static class OpenApiDocument
 
     private static JsonObject PresenceNoticeSchema()
     {
-        JsonObject notice = Required(Object(("sequence", "integer"), ("kind", "string"), ("action", "string"), ("count", "integer"), ("made", "integer"), ("signatures", "array"), ("text", "string"), ("index", "integer")),
+        JsonObject notice = Required(Object(("sequence", "integer"), ("kind", "string"), ("action", "string"), ("count", "integer"), ("made", "integer"), ("signatures", "array"), ("text", "string"), ("index", "integer"),
+            ("session", "object"), ("shortHash", "string")),
             "sequence", "kind", "action", "count", "made", "signatures", "text");
         notice["properties"]!["kind"]!["enum"] = new JsonArray(PresenceNoticeVocabulary.Kinds.Select(k => (JsonNode)k).ToArray());
         notice["properties"]!["signatures"]!["items"] = SchemaReference("PresenceSignature");
         notice["properties"]!["index"]!["nullable"] = true;
-        notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1.";
-        notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed.";
+        notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1; from 0.9.4 also for a signature under a presence session.";
+        // From 0.9.4: the presence session the notice is about, for announced and renewed of a session's list, session, signed and ended.
+        notice["properties"]!["session"] = SchemaReference("PresenceSessionNotice");
+        notice["properties"]!["shortHash"]!["nullable"] = true;
+        notice["properties"]!["shortHash"]!["description"] = "From 0.9.4: for signed and a prompt of a record, the first twelve hexadecimal digits of the signed record's content hash.";
+        notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed. "
+            + "From 0.9.4 an action that signs under a presence session raises announced with the session's terms before its check, session with the nonce once the check is asked, "
+            + "signed for each signature under it, renewed with new terms and the reason for a renewal, and ended with why the session ended. A client computes the fingerprint the "
+            + "system dialog shows from the nonce and terms it received before it, and warns instead for terms it receives with the nonce or after it.";
         return notice;
+    }
+
+    private static JsonObject PresenceSessionNoticeSchema()
+    {
+        JsonObject session = Required(Object(("id", "string"), ("limitSeconds", "integer"), ("terms", "string"), ("descriptions", "array"), ("nonce", "string"), ("secondsLeft", "integer"), ("reason", "string")),
+            "id", "limitSeconds");
+        session["properties"]!["limitSeconds"]!["minimum"] = 60;
+        session["properties"]!["limitSeconds"]!["maximum"] = 300;
+        foreach (string name in new[] { "terms", "descriptions", "nonce", "secondsLeft", "reason" }) session["properties"]![name]!["nullable"] = true;
+        session["properties"]!["terms"]!["description"] = "For announced and renewed: the terms' exact compact canonical text (vericairn.presence-session/1), types, hashes, counts and fixed values, never a record's bytes.";
+        session["properties"]!["descriptions"]!["items"] = SchemaReference("PresenceEntryDescription");
+        session["properties"]!["nonce"]!["description"] = "For session: the helper's 16-byte nonce in base64url without padding.";
+        session["properties"]!["reason"]!["description"] = "For renewed: why, in words. For ended: " + string.Join(", ", PresenceNoticeVocabulary.EndReasons) + ".";
+        session["description"] = "From 0.9.4: a presence session as a notice names it. The descriptions are the runtime's own words, which the terms do not cover.";
+        return session;
     }
 
     private static JsonObject EventSelectResponseSchema()

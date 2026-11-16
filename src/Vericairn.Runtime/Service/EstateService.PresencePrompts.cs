@@ -308,7 +308,8 @@ public sealed partial class EstateService
                 if (inner is StoreSigner held && owner.NeedsPresence(held, draft, model))
                 {
                     if (content is not null && owner.SessionSignature(held, draft, model, content) is RecordSignature underSession) return underSession;
-                    string reason = owner.presence.Prompt(DescribeRecord(draft, model), out own);
+                    // From 0.9.4 (CODE-80) the prompt's notice names the record's short hash, as the helper's own label does.
+                    string reason = owner.presence.Prompt(DescribeRecord(draft, model), content is null ? null : PresenceText.Hash(content)[7..19], out own);
                     counted = true;
                     RecordSignature signature = content is null ? held.Sign(digest, reason) : held.SignRecord(content, digest, reason);
                     owner.presence.Signed(own);

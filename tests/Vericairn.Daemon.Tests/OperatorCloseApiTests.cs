@@ -164,6 +164,14 @@ public sealed class OperatorCloseApiTests
         JsonElement schemas = contract.RootElement.GetProperty("components").GetProperty("schemas");
         Assert.Equal(PresenceNoticeVocabulary.Kinds, schemas.GetProperty("PresenceNotice").GetProperty("properties").GetProperty("kind").GetProperty("enum").EnumerateArray().Select(v => v.GetString()!));
         Assert.Equal(["type", "key", "purpose"], schemas.GetProperty("PresenceSignature").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
+        // CODE-80: a notice's session and short hash, and what a session notice and an entry's description hold.
+        JsonElement notice = schemas.GetProperty("PresenceNotice").GetProperty("properties");
+        Assert.Equal("#/components/schemas/PresenceSessionNotice", notice.GetProperty("session").GetProperty("$ref").GetString());
+        Assert.Equal("string", notice.GetProperty("shortHash").GetProperty("type").GetString());
+        Assert.Equal(["id", "limitSeconds"], schemas.GetProperty("PresenceSessionNotice").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
+        Assert.Equal(["id", "limitSeconds", "terms", "descriptions", "nonce", "secondsLeft", "reason"], schemas.GetProperty("PresenceSessionNotice").GetProperty("properties").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["entry", "type", "key", "purpose"], schemas.GetProperty("PresenceEntryDescription").GetProperty("required").EnumerateArray().Select(v => v.GetString()));
+        Assert.Equal(["announced", "added", "revised", "prompt", "finished", "session", "signed", "renewed", "ended"], PresenceNoticeVocabulary.Kinds);
     }
 
     private sealed class MemoryRoutes(IServiceProvider services) : IEndpointRouteBuilder
