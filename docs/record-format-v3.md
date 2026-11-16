@@ -101,10 +101,13 @@ only role is `service` and that holds no other grant. Its `authority` record giv
 reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
 `maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
 reassign a step another assignment still holds, with no result on it, as after a lapse. Another grant to a dispatcher, or a
-dispatch grant to a principal holding another, is `authority.dispatch`. A dispatcher's assignment is `assignment.dispatch` unless,
-at its time, the grant is in force, its work order is a step of a goal the bound names, its role is no reserved action, the day's
-cap is not passed, and a reassignment goes to a principal the goal's roster names for the role, never the dispatcher itself, the
-holder it replaces, a person or a role the roster gives a person; nothing else gives a dispatcher authority to assign. No field or
+dispatch grant to a principal holding another, is `authority.dispatch`. A dispatcher's assignment is `assignment.dispatch`, and
+counts for nothing, unless, at its time, the grant is in force, its work order is a step of a goal the bound names, it goes to anyone
+but the dispatcher itself, its role is no reserved action, the day's cap is not passed, and a reassignment takes over no step a person
+holds and goes to a principal the goal's roster names for the role, never the holder it replaces, a person or a role the roster gives
+a person; nothing else gives a dispatcher authority to assign. The roster, whether a principal is a person, the step's role (from the
+work order's revision the assignment pins) and the dispatcher's own record are read as they stood at the assignment's time. A
+dispatcher never works a step: an attempt, progress claim or result it writes is `dispatch.work` and counts for nothing. No field or
 type is added; an older reader reports the bound as errors and a dispatcher's assignment as `assignment.author`.
 
 Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot

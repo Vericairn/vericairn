@@ -103,6 +103,10 @@ public sealed class DispatchAuthorityTests
         public void Dispose() => F.Dispose();
     }
 
+    private const string Attempt = """{"startedAt":"2026-10-13T12:00:00Z","workspace":"widget, branch work/w-1","note":"Build it."}""";
+
+    private const string Result = """{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}""";
+
     private static string Assignment(string contributor) =>
         $$$"""{"contributor":"{{{contributor}}}","brief":{"outcome":"The work.","sources":[],"permittedChanges":["work"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["work"],"reviewCriteria":["done"],"recovery":"Record a result."}}""";
 
@@ -177,11 +181,11 @@ public sealed class DispatchAuthorityTests
         e.Assign(e.Build, e.F.Estate.BuilderId);
         RecordEnvelope again = e.Assign(e.Build, e.F.Estate.BuilderId);
         RecordEnvelope toItself = e.Assign(e.Build, e.Dispatcher.Id);
-        RecordEnvelope toPerson = e.Assign(e.Build, e.Person.Id);
         RecordEnvelope toSpare = e.Assign(e.Build, e.Spare.Id);
+        RecordEnvelope toPerson = e.Assign(e.Build, e.Person.Id);
         EstateModel model = e.F.Load();
         Assert.Contains("not the holder it replaces", Refused(model, again).Message, StringComparison.Ordinal);
-        Assert.Contains("never goes to the dispatcher itself", Refused(model, toItself).Message, StringComparison.Ordinal);
+        Assert.Contains("never assigns a step to itself", Refused(model, toItself).Message, StringComparison.Ordinal);
         // A person takes a step over by a hand-over they record, never by dispatch.
         Refused(model, toPerson, "assignment.handover");
         // The roster's next principal for the role takes it.
@@ -192,6 +196,54 @@ public sealed class DispatchAuthorityTests
         RecordEnvelope review = e.Assign(e.Review, e.F.Estate.BuilderId);
         model = e.F.Load();
         Assert.Contains("gives role reviewer to a person", Refused(model, review).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AStepAPersonHoldsIsNeverReassignedByDispatch()
+    {
+        // An operator assigns a step to a person, though the roster names only agents for its role: dispatch never takes it over.
+        using var e = new Estate();
+        e.Grant(e.GrantBody(bounds: new JsonArray(Estate.Bound([e.Goal.Id], cap: 20))));
+        e.Assign(e.Build, e.Person.Id, e.F.OperatorSigner, e.F.Estate.OperatorId);
+        RecordEnvelope toSpare = e.Assign(e.Build, e.Spare.Id);
+        EstateModel model = e.F.Load();
+        Assert.Contains("a step a person holds is never reassigned", Refused(model, toSpare).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADispatcherNeverAssignsAStepToItselfAndWhatItWorksCountsForNothing()
+    {
+        // A step no one holds, assigned by the dispatcher to itself: refused, and its own attempt and result on it count for nothing.
+        using var e = new Estate();
+        e.Grant();
+        RecordEnvelope assigned = e.Assign(e.Build, e.Dispatcher.Id);
+        RecordEnvelope attempt = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, assigned.Reference, signer: e.Signer);
+        RecordEnvelope result = e.F.Estate.Add("result", e.Dispatcher.Id, Result, attempt.Reference, signer: e.Signer);
+        EstateModel model = e.F.Load();
+        Assert.Contains("never assigns a step to itself", Refused(model, assigned).Message, StringComparison.Ordinal);
+        Refused(model, attempt, "dispatch.work");
+        Refused(model, result, "dispatch.work");
+        Assert.False(model.Counts(assigned));
+        Assert.False(model.Counts(attempt));
+        Assert.False(model.Counts(result));
+        Assert.Empty(WorkView.AttemptsOf(model, assigned));
+    }
+
+    [Fact]
+    public void TheRosterIsReadAsItStoodAtTheAssignmentsTime()
+    {
+        // A reassignment to the roster's next agent stands; a roster revised later to give the role to a person changes nothing for it.
+        using var e = new Estate();
+        e.Grant(e.GrantBody(bounds: new JsonArray(Estate.Bound([e.Goal.Id], cap: 20))));
+        e.Assign(e.Build, e.F.Estate.BuilderId);
+        RecordEnvelope toSpare = e.Assign(e.Build, e.Spare.Id);
+        string op = e.F.Estate.OperatorId;
+        RecordEnvelope roster = e.F.Load().Current("roster").Single();
+        e.F.Estate.Add("roster", op, $$"""{"roles":[{"role":"builder","principals":["{{e.Spare.Id}}","{{e.F.Estate.BuilderId}}","{{e.Person.Id}}"]},{"role":"reviewer","principals":["{{e.Person.Id}}"]},{"role":"publisher","principals":["{{op}}"]},{"role":"decider","principals":["{{op}}"]}]}""", supersedes: roster.Id, signer: e.F.OperatorSigner);
+        RecordEnvelope later = e.Assign(e.Build, e.F.Estate.BuilderId);
+        EstateModel model = e.F.Load();
+        Assert.Empty(Errors(model, toSpare));
+        Assert.Contains("gives role builder to a person", Refused(model, later).Message, StringComparison.Ordinal);
     }
 
     [Fact]
