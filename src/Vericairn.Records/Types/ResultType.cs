@@ -58,6 +58,7 @@ public sealed class ResultType : IRecordType
     public void Validate(ValidationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        DispatchAuthority.RefuseWork(context);
         BodyReader body = context.Body;
         DutyRecords.Results(context);
         string? outcome = body.Enum("outcome", true, Outcomes);

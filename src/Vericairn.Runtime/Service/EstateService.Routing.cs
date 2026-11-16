@@ -98,7 +98,7 @@ public sealed partial class EstateService
             goalId = current.Id;
             if (!Routing.MayTakeStep(model, current, request.By, DateTimeOffset.UtcNow))
             {
-                return StepProblem(goalId, "refused", $"{PrincipalName(model, request.By)} ({request.By}) does not take steps of goal {goalId}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority. Nothing was recorded.");
+                return StepProblem(goalId, "refused", $"{PrincipalName(model, request.By)} ({request.By}) does not take steps of goal {goalId}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority, or by a dispatcher whose dispatch grant in force names the goal. Nothing was recorded.");
             }
 
             string status = GoalRules.Status(model, current);

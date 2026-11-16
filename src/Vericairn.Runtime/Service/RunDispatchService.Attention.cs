@@ -52,12 +52,13 @@ internal sealed partial class RunDispatchService
 
     // No migration marker is needed: the withdrawals themselves make the next open a no-op. Use the same authoring,
     // validation and journal as live settlement, in one batch for all existing terminal runs. No local observation is evidence
-    // of settlement here, and missing signing authority leaves the asks open with a visible local reconciliation concern.
-    internal void ReconcileSettledAttention()
+    // of settlement here, and missing signing authority leaves the asks open with a visible local reconciliation concern. An opening
+    // passes the model its settlement recovery judged when that stored nothing.
+    internal void ReconcileSettledAttention(EstateModel? judged = null)
     {
         lock (gate)
         {
-            EstateModel model = session.Load();
+            EstateModel model = judged ?? session.Load();
             var pending = AgentRuns.All(model).Where(r => r.Status is "observed-success" or "known-failure" or "canceled")
                 .SelectMany(r => ProcessAttention(model, r).Select(a => (Run: r, Ask: a))).ToList();
             if (pending.Count == 0) return;

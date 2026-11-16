@@ -1085,7 +1085,7 @@ public static class OpenApiDocument
             ["TriggeredCheckpoint"] = Required(Object(("trigger", "string"), ("written", "object"), ("skipped", "string")), "trigger"),
             ["HistoryCheckpointRequest"] = Object(("by", "string"), ("adopt", "boolean"), ("check", "boolean"), ("expectPlan", "string")),
             ["HistoryCheckpointResponse"] = Required(Object(("trigger", "string"), ("applied", "boolean"), ("adopted", "boolean"), ("witnessed", "integer"), ("listed", "integer"), ("heads", "array"),
-                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array"), ("authorityChanges", "array")),
+                ("anchored", "array"), ("notCounting", "array"), ("byRevokedDevices", "array"), ("deletedInHistory", "array"), ("unavailable", "string"), ("written", "object"), ("planHash", "string"), ("uncommitted", "array"), ("authorityChanges", "array"), ("byRemovedRoles", "array")),
                 "trigger", "applied", "adopted", "witnessed", "listed", "heads", "anchored", "notCounting", "byRevokedDevices", "deletedInHistory"),
             ["FirstAuthorityRequest"] = Object(("by", "string"), ("device", "string"), ("admission", "string"), ("check", "boolean"), ("expectPlan", "string")),
             ["FirstAuthorityCandidate"] = Required(Object(("admission", "string"), ("hash", "string"), ("at", "string"), ("path", "string"), ("device", "string"), ("name", "string"),

@@ -174,7 +174,11 @@ public sealed partial class EstateService
         List<HistoryRecordItem> changes = [.. AtTimeReading.Changes(model, atTime).Select(c => Item(c.Record) with { Note = c.Note })];
         return new HistoryCheckpointResponse(trigger, written is not null, state.Adopted, plan.Witnessed, tail.Count, heads,
             [.. plan.Anchored.Select(r => Item(r))], [.. plan.NotCounting.Select(r => Item(r))], [.. plan.ByRevokedDevices.Select(r => Item(r.Record, r.Device))],
-            deleted, unavailable.Count == 0 ? null : string.Join(" ", unavailable), written) { PlanHash = plan.AnchoredHash, Uncommitted = uncommitted, AuthorityChanges = changes };
+            deleted, unavailable.Count == 0 ? null : string.Join(" ", unavailable), written)
+        {
+            PlanHash = plan.AnchoredHash, Uncommitted = uncommitted, AuthorityChanges = changes,
+            ByRemovedRoles = [.. SignedHistory.ByRemovedRoles(model).Select(r => Item(r.Record) with { Note = "roles removed since: " + r.Roles })],
+        };
     }
 
     private static bool IsRepository(string root) => Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
@@ -344,11 +348,11 @@ public sealed partial class EstateService
 
     /// <summary>
     /// What the closing before an act names, when the act needs one (design/signed-history.md § 8; OPS-07): in an estate that has adopted
-    /// history checkpoints, a revocation, a key rotation or a grant revision that narrows the grant; null otherwise, and always null in an
-    /// estate that has not adopted, which writes these acts as before.
+    /// history checkpoints, a revocation, a key rotation, a grant revision that narrows the grant or, from 0.9.4 (ID-14), a principal
+    /// revision that removes a role; null otherwise, and always null in an estate that has not adopted, which writes these acts as before.
     /// </summary>
     private static (string Kind, string Id)? ClosingRequired(EstateModel current, string type, JsonElement body, RecordReference? subject, string? supersedes) =>
-        type is "admission" or "device" or "authority" && supersedes is not null && SignedHistory.Adopted(current)
+        type is "admission" or "device" or "authority" or "principal" && supersedes is not null && SignedHistory.Adopted(current)
             ? ClosingActs.For(current, type, body, subject, supersedes) : null;
 
     /// <summary>
@@ -406,7 +410,18 @@ public sealed partial class EstateService
         {
             RemoveObjects(closing);
             Problem refused = problem ?? new Problem("refused", "Nothing was written.", []);
-            return WriteOutcome.Fail(refused with { Message = $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written." });
+            // When the batch would make records fail that do not fail without it, other than its own, the act is refused for them, and the
+            // message says so rather than describe the batch's closing as what failed; otherwise it says what closing the act needs.
+            static string PathOf(string location) => location.Split('#')[0];
+            var failing = copy.Findings.Where(f => f.Severity == Severity.Error).Select(f => PathOf(f.Location)).ToHashSet(StringComparer.Ordinal);
+            bool elsewhere = refused.Findings.Any(f => f.Severity == "error" && PathOf(f.Location) is var path && path != closing.Record.RelativePath &&
+                path != record.RelativePath && !failing.Contains(path));
+            return WriteOutcome.Fail(refused with
+            {
+                Message = !elsewhere
+                    ? $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written."
+                    : $"{refused.Message.TrimEnd()} The {Act(closes.Kind)} and its closing were judged together and would leave the records the findings name failing, so neither was written.",
+            });
         }
 
         var checkpoint = new TriggeredCheckpoint(ClosingTrigger, written[0], null);
@@ -518,7 +533,7 @@ public sealed partial class EstateService
     /// </summary>
     private static Problem? UnclosedActRefusal(EstateModel proposed, IReadOnlyList<AuthoredRecord> records, Func<EstateModel> current)
     {
-        if (!records.Any(r => r.Envelope.Type is "admission" or "device" or "authority" && r.Envelope.Supersedes is not null) || !SignedHistory.Adopted(proposed)) return null;
+        if (!records.Any(r => r.Envelope.Type is "admission" or "device" or "authority" or "principal" && r.Envelope.Supersedes is not null) || !SignedHistory.Adopted(proposed)) return null;
         EstateModel? before = null;
         for (int i = 0; i < records.Count; i++)
         {
@@ -553,6 +568,7 @@ public sealed partial class EstateService
     {
         "device" => $"vericairn devices revoke {closes.Id} --by {by} --reason \"<why>\"",
         "key" => $"vericairn devices rotate {closes.Id}",
+        "role" => $"vericairn records new principal --by {by} --supersedes {closes.Id} --body <file>",
         _ => $"vericairn records new authority --by {by} --supersedes {closes.Id} --body <file>",
     };
 
@@ -564,6 +580,10 @@ public sealed partial class EstateService
     /// </summary>
     private (string Message, string NextStep, Problem? Problem)? OperatorRecordRemovalRefusal(RecordDraft draft, EstateModel current, AuthoredRecord? authored)
     {
+        // From 0.9.4 (ID-14), in an estate that has adopted, a revision removing a role from a person is written after the person's role
+        // closing, in the same batch, which one signed record carried through a checked merge cannot carry either.
+        if (ClosingRequired(current, draft.Type, draft.Body, draft.Subject, draft.Supersedes) is { Kind: "role" } closes)
+            return (OperatorRecordClosingRefusal(closes), ClosingCommand(closes, draft.By), null);
         if (!TakesRoleAway(draft, current)) return null;
         if (SignedHistory.Adopted(current))
         {
@@ -583,9 +603,12 @@ public sealed partial class EstateService
     /// <summary>The command that writes a revision taking a role away after a history checkpoint (<see cref="StoreRemovalLocked"/>).</summary>
     private static string RemovalCommand(RecordDraft draft, string by) => $"vericairn records new {draft.Type} --by {by} --supersedes {draft.Supersedes} --body <file>";
 
-    private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", _ => "grant revision" };
+    private static string Act(string kind) => kind switch { "device" => "revocation", "key" => "key rotation", "role" => "role removal", _ => "grant revision" };
 
-    private static string Article(string kind) => kind switch { "device" => "a device's revocation", "key" => "a key rotation", _ => "a grant revision that narrows the grant" };
+    private static string Article(string kind) => kind switch
+    {
+        "device" => "a device's revocation", "key" => "a key rotation", "role" => "a principal revision that removes a role", _ => "a grant revision that narrows the grant",
+    };
 
     /// <summary>
     /// Whether a draft takes a role away (signed history and policy authority, 0.9.2): a principal revision whose line gives the operator

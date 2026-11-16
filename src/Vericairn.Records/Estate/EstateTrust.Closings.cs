@@ -9,24 +9,25 @@ using Vericairn.Records.Signing;
 namespace Vericairn.Records.Estate;
 
 /// <summary>
-/// A closing that acts (design/signed-history.md § 8): a history checkpoint naming a device, a key or a grant revision, signed by one
-/// who may perform the act. From it on, what that device or key signed, or what relied on that grant revision, counts only when the
-/// closing, or a checkpoint it follows, witnesses it, whatever date the record states.
+/// A closing that acts (design/signed-history.md § 8): a history checkpoint naming a device, a key, a grant revision or, from 0.9.4
+/// (ID-14), the principal revision whose role a revision removes, signed by one who may perform the act. From it on, what that device or
+/// key signed, what relied on that grant revision, or anything that person wrote, counts only when the closing, or a checkpoint it
+/// follows, witnesses it, whatever date the record states.
 /// </summary>
 /// <param name="Record">The closing checkpoint.</param>
-/// <param name="Kind">device, key or grant.</param>
-/// <param name="Target">The id the closing names: a device record, the device revision whose key is replaced, or the grant revision.</param>
-/// <param name="Identity">For a device or a key, the device's identity.</param>
+/// <param name="Kind">device, key, grant or role.</param>
+/// <param name="Target">The id the closing names: a device record, the device revision whose key is replaced, the grant revision, or the principal revision whose role is removed.</param>
+/// <param name="Identity">For a device or a key, the device's identity; for a role, the person's: the id of their principal line.</param>
 /// <param name="Key">For a key, the public key closed.</param>
 /// <param name="Grant">For a grant, the revision named.</param>
 /// <param name="Rotation">For a key, the rotation that replaces it: the act the closing precedes, which the closing does not refuse.</param>
 /// <param name="Before">The closing and every checkpoint it follows: what they list is what the closing witnesses.</param>
-/// <param name="Line">For a grant, the line of the revision named: the id of its first record.</param>
-/// <param name="Closed">For a grant, the revisions closed: the one named and every revision of its line dated at or before it.</param>
+/// <param name="Line">For a grant or a role, the line of the revision named: the id of its first record.</param>
+/// <param name="Closed">For a grant or a role, the revisions closed: the one named and every revision of its line dated at or before it.</param>
 internal sealed record Closing(RecordEnvelope Record, string Kind, string Target, string? Identity, string? Key, RecordEnvelope? Grant, string? Rotation, IReadOnlySet<string> Before,
     string? Line = null, IReadOnlyList<RecordEnvelope>? Closed = null)
 {
-    /// <summary>Whether this closing closes a grant revision.</summary>
+    /// <summary>Whether this closing closes a grant revision, or for a role a principal revision.</summary>
     internal bool Closes(RecordEnvelope grant) => Closed is not null && Closed.Any(r => r.Id == grant.Id);
 }
 
@@ -70,7 +71,8 @@ internal sealed partial class EstateTrust
     /// stand before any closing, so no closing can be what makes an earlier one act, or itself. Whether a checkpoint following none roots
     /// the path is judged against the closings that act, and those act only when reached from such a root, so the two are settled
     /// together: from every root that verifies, the closings reached are judged, each root whose author may not anchor with those
-    /// closings acting is dropped, and this is repeated until none is. Afterwards every judgment is made afresh.
+    /// closings acting is dropped, and this is repeated until none is. The role closings that act are read against every other closing
+    /// as well (ID-14), settled by judging again until the same ones act. Afterwards every judgment is made afresh.
     /// </summary>
     private void JudgeClosings(Func<string, byte[]?>? objects)
     {
@@ -102,23 +104,39 @@ internal sealed partial class EstateTrust
             .Select(p => byId[p.Id]).Distinct().ToList(), StringComparer.Ordinal);
         ILookup<string, CheckpointBody> followers = checkpoints.SelectMany(c => predecessors[c.Record.Id].Select(p => (Previous: p.Record.Id, Next: c)))
             .ToLookup(x => x.Previous, x => x.Next, StringComparer.Ordinal);
-        var roots = checkpoints.Where(c => c.Previous.Count == 0 && AuthenticWith(c.Record, NoClosings)).Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> verifying = checkpoints.Where(c => c.Previous.Count == 0 && AuthenticWith(c.Record, NoClosings)).Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> roots = verifying;
+
+        // A role closing refuses what its person wrote that it does not witness in every read (ID-14), so the role closings that act are
+        // read when judging every other closing too, before or after them in checkpoint order, though never against themselves: what a
+        // person wrote after their role closing then neither takes another's role nor voids a closing written before. Which role
+        // closings act is settled by judging again with those that acted, until the same ones act; should they depend on one another
+        // without settling, those that acted in every judgment of the cycle are read.
+        IReadOnlyList<Closing> global = NoClosings;
+        var tried = new List<HashSet<string>>();
+        (List<Closing> acting, List<Finding> found) = Settle(global);
         while (true)
         {
-            var findings = new List<Finding>();
-            List<Closing> acting = Judge(findings);
-            // Dropping a root leaves every checkpoint still reached with the same closings before it, so this ends.
-            var kept = roots.Where(id => MayAnchor(byId[id].Record, acting)).ToHashSet(StringComparer.Ordinal);
-            if (kept.Count < roots.Count)
+            List<Closing> roles = [.. acting.Where(c => c.Kind == "role")];
+            var ids = roles.Select(c => c.Record.Id).ToHashSet(StringComparer.Ordinal);
+            if (ids.SetEquals(global.Select(c => c.Record.Id))) break;
+            int seen = tried.FindIndex(t => t.SetEquals(ids));
+            if (seen >= 0)
             {
-                roots = kept;
-                continue;
+                var steady = new HashSet<string>(ids, StringComparer.Ordinal);
+                foreach (HashSet<string> earlier in tried.Skip(seen)) steady.IntersectWith(earlier);
+                global = [.. roles.Where(c => steady.Contains(c.Record.Id))];
+                (acting, found) = Settle(global);
+                break;
             }
 
-            closings = acting;
-            closingFindings.AddRange(findings);
-            break;
+            tried.Add(ids);
+            global = roles;
+            (acting, found) = Settle(global);
         }
+
+        closings = acting;
+        closingFindings.AddRange(found);
 
         grantClosings = closings.Any(c => c.Kind == "grant");
         closingsKnown = true;
@@ -134,8 +152,29 @@ internal sealed partial class EstateTrust
         anchors = NoAnchors;
         anchorsKnown = false;
 
+        // The closings that act, with the role closings given read against every closing but themselves: from every root that verifies,
+        // each root whose author may not anchor with the closings that act is dropped, and this is repeated until none is. Dropping a root
+        // leaves every checkpoint still reached with the same closings before it, so this ends.
+        (List<Closing> Acting, List<Finding> Findings) Settle(IReadOnlyList<Closing> readEverywhere)
+        {
+            roots = verifying;
+            while (true)
+            {
+                var findings = new List<Finding>();
+                List<Closing> judged = Judge(findings, readEverywhere);
+                var kept = roots.Where(id => MayAnchor(byId[id].Record, judged)).ToHashSet(StringComparer.Ordinal);
+                if (kept.Count < roots.Count)
+                {
+                    roots = kept;
+                    continue;
+                }
+
+                return (judged, findings);
+            }
+        }
+
         // The closings that act when the roots given root the path, in checkpoint order.
-        List<Closing> Judge(List<Finding> findings)
+        List<Closing> Judge(List<Finding> findings, IReadOnlyList<Closing> readEverywhere)
         {
             var waiting = checkpoints.ToDictionary(c => c.Record.Id, c => predecessors[c.Record.Id].Count, StringComparer.Ordinal);
             var ready = new SortedSet<string>(waiting.Where(w => w.Value == 0).Select(w => w.Key), StringComparer.Ordinal);
@@ -148,8 +187,8 @@ internal sealed partial class EstateTrust
                 string id = ready.Min!;
                 ready.Remove(id);
                 CheckpointBody checkpoint = byId[id];
-                IReadOnlyList<Closing> bound = Before(id);
-                before[id] = bound;
+                before[id] = Before(id);
+                IReadOnlyList<Closing> bound = Everywhere(before[id], id);
                 // Reached from a root, through checkpoints present with the hashes each names.
                 bool path = checkpoint.Previous.Count == 0
                     ? roots.Contains(id)
@@ -179,6 +218,13 @@ internal sealed partial class EstateTrust
 
             return acting;
 
+            // The closings a checkpoint is judged against: those before it, and the role closings read everywhere but itself.
+            IReadOnlyList<Closing> Everywhere(IReadOnlyList<Closing> earlier, string id)
+            {
+                List<Closing> added = [.. readEverywhere.Where(g => g.Record.Id != id && earlier.All(c => c.Record.Id != g.Record.Id))];
+                return added.Count == 0 ? earlier : [.. earlier, .. added];
+            }
+
             // The closings before a checkpoint: those before each checkpoint it follows, and each of those that acts, in checkpoint order.
             IReadOnlyList<Closing> Before(string id)
             {
@@ -200,28 +246,35 @@ internal sealed partial class EstateTrust
     {
         RecordEnvelope record = checkpoint.Record;
         string location = record.ExpectedPath + "#body.closes";
-        string? expected = closes.Kind switch { "grant" => "authority", "device" or "key" => "device", _ => null };
+        string? expected = closes.Kind switch { "grant" => "authority", "device" or "key" => "device", "role" => "principal", _ => null };
         if (expected is null || !model.ById.TryGetValue(closes.Id, out RecordEnvelope? target) || target.Type != expected)
         {
             findings.Add(new Finding(Severity.Error, "history.checkpoint-invalid", location,
-                $"This closing names {closes.Kind} {closes.Id}, which is not {(expected == "authority" ? "an authority" : "a device")} record here; it closes nothing."));
+                $"This closing names {closes.Kind} {closes.Id}, which is not {(expected switch { "authority" => "an authority", "principal" => "a principal", _ => "a device" })} record here; it closes nothing."));
             return null;
         }
 
-        string? identity = expected == "device" ? IdentityOf(target) : null;
+        string? identity = expected switch { "device" => IdentityOf(target), "principal" => PrincipalIdentity(target), _ => null };
         string? key = closes.Kind == "key" ? EstateModel.BodyString(target, "publicKey") : null;
         // The strongest acts read the signer's role or grant as it still stands: a later revision taking it away, or a closing before this
-        // one closing that grant, withdraws the power. They read it against the closings before this one, which refuse what they do not
-        // witness, and never against this closing itself. A recovery device signs for an operator only.
+        // one closing that grant, withdraws the power, unless the signer's own role closing witnesses this closing, which then keeps the
+        // force it had when it was signed (ID-14). They read it against the closings before this one, which refuse what they do not
+        // witness, and the role closings that act, and never against this closing itself. A recovery device signs for an operator only.
         bool recovery = record.Signatures.Any(s => Recovers(s.Device));
         string? problem = closes.Kind switch
         {
-            "device" => StandingOperator(record.By, record.At, bound) || !recovery && StandingAdministrator(record, bound) ? null
+            "device" => StandingOperator(record.By, record.At, bound, record) || !recovery && StandingAdministrator(record, bound) ? null
                 : "A device is closed only by an operator, a person holding administer or an operator's recovery device, the role or grant still standing.",
             "key" => key is not null && record.By == EstateModel.BodyString(target, "principal") &&
                 record.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? device) && device.Type == "device" && IdentityOf(device) == identity) ? null
                 : "A key is closed only by its own device, for that device's principal.",
-            _ => StandingOperator(record.By, record.At, bound) ? null : "A grant revision is closed only by an operator, who may revise it, the role still standing.",
+            // A role is closed by one who may remove it (ID-14): the root operator or another operator, the role still standing, and never
+            // the root operator's own role, which no revision takes away. Only the operator role has a closing (decision 01M7JSJSHTTX86F10007GDQ238).
+            "role" when !ClosingActs.GivesOperatorRole(target.Body) => $"A role closing closes a person's operator role, and principal revision {target.Id} gives none: removing any other role writes no closing, since that role is read at each record's time.",
+            "role" => identity == RootOperator ? "The root operator's role is never closed: no revision takes the root operator's place."
+                : record.By != identity && StandingOperator(record.By, record.At, bound, record) ? null
+                : "A role is closed only by the root operator or another operator, the role still standing, never by the person whose role it closes.",
+            _ => StandingOperator(record.By, record.At, bound, record) ? null : "A grant revision is closed only by an operator, who may revise it, the role still standing.",
         };
         if (problem is not null)
         {
@@ -246,6 +299,15 @@ internal sealed partial class EstateTrust
                 IdentityOf(previous) == identity && EstateModel.BodyString(previous, "publicKey") == key && EstateModel.BodyString(r, "publicKey") is { } replacing &&
                 replacing != key && DeviceRevisionCounts(r, previous))
             .OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault()?.Id;
+        if (closes.Kind == "role")
+        {
+            // A role closing closes the revision it names and every revision of the person's line dated at or before it, as a grant closing
+            // does, and from it on refuses every record of the person it does not witness (ID-14).
+            List<RecordEnvelope> revisions = [.. principalRecords.Where(r => PrincipalIdentity(r) == identity && string.CompareOrdinal(r.At, target.At) <= 0)
+                .Append(target).DistinctBy(r => r.Id).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)];
+            return new Closing(record, closes.Kind, closes.Id, identity, null, null, null, ancestors, identity, revisions);
+        }
+
         if (closes.Kind != "grant") return new Closing(record, closes.Kind, closes.Id, identity, key, null, rotation, ancestors);
         // A grant closing closes the revision it names and every revision of its line dated at or before it, so a record dated into an
         // earlier revision's time is bounded as one dated into the named revision's.
@@ -290,6 +352,8 @@ internal sealed partial class EstateTrust
     private bool Refuses(Closing closing, RecordEnvelope record)
     {
         if (closing.Kind == "grant" || Witnesses(closing, record)) return false;
+        // A role closing refuses what its person wrote dated up to the act it precedes, whatever device signed it (ID-14).
+        if (closing.Kind == "role") return RefusesForRole(closing, record);
         for (int i = 0; i < record.Signatures.Count; i++)
         {
             SignatureProof proof = Proof(record, i);
@@ -299,6 +363,29 @@ internal sealed partial class EstateTrust
 
         return false;
     }
+
+    /// <summary>
+    /// Whether a role closing refuses a record, witnessing aside (ID-14): the closed person wrote it, at any stated date and whatever device
+    /// signed it. So from the closing on nothing the person writes counts unless the closing, or a checkpoint it follows, witnesses it, or
+    /// an anchor lists it: no decision, grant, revision of their own or another principal's line, admission or closing. The answer depends
+    /// on no other closing.
+    /// </summary>
+    private static bool RefusesForRole(Closing closing, RecordEnvelope record) => record.By == closing.Identity;
+
+    /// <summary>
+    /// The role closing that acts and refuses an unsigned record (ID-14): its person wrote it, the closing does not witness it and no anchor
+    /// lists it. Signed records meet role closings when their signatures are verified
+    /// (<see cref="Refuser"/>); an unsigned one counts only under an optional charter or when anchored, and the first is bounded here.
+    /// </summary>
+    internal Closing? UnsignedRoleRefuser(RecordEnvelope record)
+    {
+        if (!closingsKnown || record.Signatures.Count > 0 || !closings.Any(c => c.Kind == "role")) return null;
+        if (anchorsKnown && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return null;
+        return closings.FirstOrDefault(c => c.Kind == "role" && !Witnesses(c, record) && RefusesForRole(c, record));
+    }
+
+    /// <summary>The finding for a record a role closing refuses (<see cref="UnsignedRoleRefuser"/>).</summary>
+    internal static Finding AfterRoleClosing(RecordEnvelope record, Closing closing) => AfterClosing(record, closing);
 
     /// <summary>Whether a record revokes a closed device from its closing's time on: the act the closing precedes.</summary>
     private bool RevokesFrom(RecordEnvelope record, Closing closing) =>
@@ -504,7 +591,7 @@ internal sealed partial class EstateTrust
         if (anchorsCount && anchorsKnown && anchors.Contains(SignatureChecks.AnchorKey(record.Id, record.ComputedHash))) return null;
         foreach (Closing closing in closings)
         {
-            if (closing.Closed is not { } closed || Witnesses(closing, record)) continue;
+            if (closing.Kind != "grant" || closing.Closed is not { } closed || Witnesses(closing, record)) continue;
             // In force at the record's time: dated at or before it, unexpired then, and no revision that counts replaces it by then.
             if (closed.Any(grant => EstateModel.BodyString(grant, "grantee") == record.By && string.CompareOrdinal(grant.At, record.At) <= 0 &&
                     !EstateModel.Expired(grant, record.AtTime) &&
@@ -554,14 +641,18 @@ internal sealed partial class EstateTrust
     /// <summary>The finding for a record a closing refuses.</summary>
     private static Finding AfterClosing(RecordEnvelope record, Closing closing)
     {
-        string what = closing.Kind == "device"
-            ? $"Signed by device {closing.Identity}, which history checkpoint {closing.Record.Id} closed"
-            : $"Signed with the key of device revision {closing.Target}, which history checkpoint {closing.Record.Id} closed";
         string after = record.Type == "device"
             ? " A revision of a closed device, or one signed with a closed key, changes no key or name."
             : record.Type == "admission"
                 ? " It neither admits nor revokes, and counts for nothing until the root operator or a person holding administer anchors it after reading it."
                 : " It counts for nothing until the root operator or a person holding administer anchors it after reading it.";
+        // A role closing refuses everything its person writes that it does not witness, whatever roles they still hold (ID-14).
+        if (closing.Kind == "role")
+            return new Finding(Severity.Error, "history.after-closing", record.ExpectedPath + (record.Signatures.Count > 0 ? "#signatures" : string.Empty),
+                $"Written by {closing.Identity}, whose role history checkpoint {closing.Record.Id} closed, and that closing does not witness it: a role closing refuses everything its person writes unless the closing or a checkpoint it follows witnesses it, whatever date the record states and whatever roles the person still holds." + after);
+        string what = closing.Kind == "device"
+            ? $"Signed by device {closing.Identity}, which history checkpoint {closing.Record.Id} closed"
+            : $"Signed with the key of device revision {closing.Target}, which history checkpoint {closing.Record.Id} closed";
         return new Finding(Severity.Error, "history.after-closing", record.ExpectedPath + "#signatures",
             what + ", and that closing does not witness it: from a closing on, only what the closing or a checkpoint it follows lists counts, whatever date a record states." + after);
     }
@@ -591,7 +682,11 @@ internal sealed partial class EstateTrust
         foreach (Closing closing in closings)
         {
             if (Followed(closing)) continue;
-            string act = closing.Kind switch { "device" => "revocation of the device", "key" => "rotation to another key, revocation of its device or closing of its device", _ => "revision of the grant" };
+            string act = closing.Kind switch
+            {
+                "device" => "revocation of the device", "key" => "rotation to another key, revocation of its device or closing of its device",
+                "role" => "revision of the person's principal record", _ => "revision of the grant",
+            };
             yield return new Finding(Severity.Warning, "history.closing-unfollowed", closing.Record.ExpectedPath + "#body.closes",
                 string.Create(CultureInfo.InvariantCulture, $"This checkpoint closes {closing.Kind} {closing.Target} as of {closing.Record.At}, and no {act} follows it yet. It closes all the same: from it on, only what it witnesses counts for that {closing.Kind}."));
         }
@@ -612,6 +707,7 @@ internal sealed partial class EstateTrust
             "device" => Revoked(closing.Target),
             "key" => closing.Rotation is { } rotation && model.ById.TryGetValue(rotation, out RecordEnvelope? replacing) && Counts(replacing) ||
                 Revoked(closing.Target) || closings.Any(c => c.Kind == "device" && c.Identity == closing.Identity),
+            "role" => model.ById.TryGetValue(closing.Target, out RecordEnvelope? revision) && AttachedSuccessors(revision).Any(Counts),
             _ => closing.Grant is { } grant && AttachedSuccessors(grant).Any(Counts),
         };
     }
@@ -637,6 +733,7 @@ internal sealed partial class EstateTrust
             {
                 "device" => $"This revocation of device {closes.Id} counts, and no closing names the device, so a record the device signs with an earlier date still counts.",
                 "key" => $"This rotation replaces the key of device revision {closes.Id}, and no closing names that key, so a record signed with it with an earlier date still counts.",
+                "role" => $"This revision removes a role that principal revision {closes.Id} gives, and no closing names that person's role, so a record the person writes with a date while that revision stood still counts, and, for anchoring, adoption and the closings, the closings and the appointments and grants the person wrote before the removal stop acting, those written on another copy included.",
                 _ => $"This revision narrows grant revision {closes.Id}, and no closing names the grant, so a record its grantee writes with a date while that revision was in force still counts.",
             };
             yield return new Finding(Severity.Warning, "history.closing-missing", act.ExpectedPath,
@@ -651,7 +748,8 @@ internal sealed partial class EstateTrust
     private bool Named((string Kind, string Id) closes)
     {
         if (!model.ById.TryGetValue(closes.Id, out RecordEnvelope? target)) return false;
-        if (closes.Kind == "grant") return closings.Any(c => c.Closes(target));
+        if (closes.Kind == "grant") return closings.Any(c => c.Kind == "grant" && c.Closes(target));
+        if (closes.Kind == "role") return closings.Any(c => c.Kind == "role" && c.Closes(target));
         string identity = IdentityOf(target);
         string? key = closes.Kind == "key" ? EstateModel.BodyString(target, "publicKey") : null;
         return closings.Any(c => c.Identity == identity && (c.Kind == "device" || key is not null && c.Kind == "key" && c.Key == key));

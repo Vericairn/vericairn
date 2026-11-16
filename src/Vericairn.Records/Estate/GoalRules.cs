@@ -298,7 +298,7 @@ public static class GoalRules
             }
         }
 
-        named.AddRange(model.OfType("work-order").Where(o => (before is null || Before(o, before)) && Inputs(o).Any(chain.Contains)));
+        named.AddRange(model.WorkOrdersNaming(chain).Where(o => before is null || Before(o, before)));
 
         // A work order is one whatever its revisions: the first record of its chain names it, and its latest revision stands for it.
         var orders = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
@@ -561,7 +561,8 @@ public static class GoalRules
     private static List<RecordEnvelope> Ordered(IEnumerable<RecordEnvelope> records) =>
         records.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
 
-    private static IEnumerable<string> Inputs(RecordEnvelope order) =>
+    /// <summary>The record ids a work order's inputs name.</summary>
+    internal static IEnumerable<string> Inputs(RecordEnvelope order) =>
         order.Body.TryGetProperty("inputs", out JsonElement inputs) && inputs.ValueKind == JsonValueKind.Array
             ? inputs.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.Object && i.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String).Select(i => i.GetProperty("id").GetString()!)
             : [];

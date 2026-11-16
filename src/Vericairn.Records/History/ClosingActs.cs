@@ -4,17 +4,19 @@
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.History;
 
 /// <summary>
-/// The acts a closing precedes (design/signed-history.md § 8; OPS-07): revoking a device, rotating a device's key, and revising a grant
-/// in a way that narrows it. In an estate that has adopted history checkpoints each is stored after its closing, in the same batch.
+/// The acts a closing precedes (design/signed-history.md § 8; OPS-07): revoking a device, rotating a device's key, revising a grant
+/// in a way that narrows it and, from 0.9.4 (ID-14), removing the operator role from a person's principal record. In an estate that has
+/// adopted history checkpoints each is stored after its closing, in the same batch.
 /// </summary>
 internal static class ClosingActs
 {
-    /// <summary>The record types such an act can be: a revision of an admission, a device or an authority record.</summary>
-    internal static readonly IReadOnlyList<string> Types = ["admission", "device", "authority"];
+    /// <summary>The record types such an act can be: a revision of an admission, a device, an authority or a principal record.</summary>
+    internal static readonly IReadOnlyList<string> Types = ["admission", "device", "authority", "principal"];
 
     /// <summary>
     /// The closing a retried act is written after, alone (OPS-07): a closing that counts and acts, names exactly what the act closes,
@@ -36,7 +38,11 @@ internal static class ClosingActs
     /// narrows. A grant revision replaces the nearest record below it in its line that counts (<see cref="EstateTrust.AttachedTo"/>):
     /// the one it supersedes when that counts, otherwise the one that record attaches to, and with none below it that counts it narrows
     /// nothing. A device revision needs no such reading, since it counts only on top of one that counts: a rotation that counts replaces
-    /// a key its device held. Null for any other record.
+    /// a key its device held. From 0.9.4 (ID-14), <c>role</c> and the principal revision a principal revision replaces, read as a grant
+    /// revision's is, when that revision gives a person the operator role and the new one takes it away (<see cref="RemovesOperatorRole"/>),
+    /// other than the root operator's, whom no revision takes the root operator's place from (design/signed-history.md § 8, decision
+    /// 01M7JSJSHTTX86F10007GDQ238). Removing any other role writes no closing: that role is read at each record's time. Null for any other
+    /// record.
     /// </summary>
     internal static (string Kind, string Id)? For(EstateModel model, RecordEnvelope record)
     {
@@ -68,6 +74,10 @@ internal static class ClosingActs
                 trust ??= model.Trust;
                 RecordEnvelope? replaced = trust.Counts(previous) ? previous : trust.AttachedTo(previous);
                 return replaced is not null && Narrows(replaced.Body, body) ? ("grant", replaced.Id) : null;
+            case "principal":
+                trust ??= model.Trust;
+                RecordEnvelope? held = trust.Counts(previous) ? previous : trust.AttachedTo(previous);
+                return held is not null && trust.PrincipalIdentity(held) != trust.RootOperator && RemovesOperatorRole(held.Body, body) ? ("role", held.Id) : null;
             default:
                 return null;
         }
@@ -92,6 +102,17 @@ internal static class ClosingActs
         bool hasBounds = next.TryGetProperty("bounds", out JsonElement after);
         return hadBounds != hasBounds || hadBounds && !JsonElement.DeepEquals(before, after);
     }
+
+    /// <summary>Whether a principal revision gives a person the operator role: it describes a human and states that role.</summary>
+    internal static bool GivesOperatorRole(JsonElement body) =>
+        body.ValueKind == JsonValueKind.Object && Text(body, "kind") == "human" && Strings(body, "roles").Contains(Roles.Operator);
+
+    /// <summary>
+    /// Whether a principal revision takes the operator role away from a person whose revision it replaces gave it (ID-14, decision
+    /// 01M7JSJSHTTX86F10007GDQ238): the replaced revision gives it, and the new one does not, dropping the role or describing another kind
+    /// of principal. Removing any other role is no such act.
+    /// </summary>
+    internal static bool RemovesOperatorRole(JsonElement previous, JsonElement next) => GivesOperatorRole(previous) && !GivesOperatorRole(next);
 
     private static string? Text(JsonElement body, string name) =>
         body.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

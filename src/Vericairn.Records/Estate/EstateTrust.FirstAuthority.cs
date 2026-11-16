@@ -80,10 +80,9 @@ internal sealed partial class EstateTrust
                 .Select(a => judged.IdentityOf(model.ById[a.Subject!.Id])).Distinct(StringComparer.Ordinal).Count();
             int signed = identity is null ? 0 : model.Records.Count(r => r.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? signer) && signer.Type == "device" &&
                 judged.IdentityOf(signer) == identity));
-            // Its own signatures, verified as the judgment with it as the first authority verifies every signature.
-            string? problem = candidate.DeclaredHash != candidate.ComputedHash
-                ? "its content does not match the hash its envelope declares"
-                : judged.Verification(candidate, Mode.Anchors).FirstOrDefault(f => f.Severity == Severity.Error) is { } failed ? failed.Code + ": " + failed.Message : null;
+            // Its own signatures, verified as the judgment with it as the first authority verifies every signature: what the estate reads
+            // before it takes the candidate as its first authority (FIX-134).
+            string? problem = judged.FirstAuthorityProblem();
             evidence.Add(new FirstAuthorityEvidence(candidate, device, identity, device is null ? null : EstateModel.BodyString(device, "principal"), manifest?.FirstAuthority == candidate.Id,
                 ReferenceEquals(candidate, trust.FirstAuthority), history && judged.WitnessedFirst(candidate, trust.AuthorityCandidates), revoked, admits, signed, problem));
         }

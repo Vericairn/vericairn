@@ -183,7 +183,8 @@ public sealed class OperatorRecordTests
     /// <summary>
     /// In an estate that has adopted history checkpoints, a revision that takes an operator's role away is written after a checkpoint, in
     /// the same batch, which one signed record carried through a checked merge cannot carry: operator record refuses it, naming records
-    /// new, and writes nothing; the command it names writes the checkpoint and then the revision.
+    /// new, and writes nothing; the command it names writes the checkpoint and then the revision. From 0.9.4 (ID-14) that checkpoint is the
+    /// person's role closing.
     /// </summary>
     [Fact]
     public void InAnEstateThatAdoptedARemovalIsRefusedWithTheCommandThatWritesItsCheckpointFirst()
@@ -206,7 +207,7 @@ public sealed class OperatorRecordTests
         Assert.Equal("refused", result.Status);
         Assert.Equal(0, signings);
         f.Service.BeforeSigningRecord = null;
-        Assert.Contains("cannot carry the checkpoint", result.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot carry the closing", result.Message, StringComparison.Ordinal);
         Assert.Contains($"vericairn records new principal --by <operator id> --supersedes {o} --body <file>", result.Message, StringComparison.Ordinal);
         Assert.Equal($"vericairn records new principal --by {op} --supersedes {o} --body <file>", result.NextStep);
         Assert.Null(result.Record);
@@ -218,7 +219,11 @@ public sealed class OperatorRecordTests
         WriteOutcome written = f.Service.NewRecord(new NewRecordRequest("principal", op, Person("O", "contributor"), Supersedes: o));
         Assert.True(written.Ok, written.Problem?.Message);
         Assert.NotNull(written.Checkpoint?.Written);
-        Assert.False(f.Service.Session.Load().HasRole(o, Vericairn.Records.Types.Roles.Operator));
+        // From 0.9.4 (ID-14) the checkpoint before the removal is the person's role closing.
+        Assert.Equal("closing", written.Checkpoint!.Trigger);
+        EstateModel after = f.Service.Session.Load();
+        Assert.Equal(("role", o), Vericairn.Records.History.CheckpointBody.ReadCloses(after.ById[written.Checkpoint.Written!.Id].Body));
+        Assert.False(after.HasRole(o, Vericairn.Records.Types.Roles.Operator));
     }
 
     /// <summary>
@@ -339,7 +344,7 @@ public sealed class OperatorRecordTests
         f.Service.BeforeSigningRecord = null;
         Assert.False(resumed.Ok, resumed.Message);
         Assert.Equal("refused", resumed.Status);
-        Assert.Contains("cannot carry the checkpoint", resumed.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot carry the closing", resumed.Message, StringComparison.Ordinal);
         Assert.Null(resumed.Record);
         Assert.Equal(0, signings);
         EstateModel after = f.Service.Session.Load();

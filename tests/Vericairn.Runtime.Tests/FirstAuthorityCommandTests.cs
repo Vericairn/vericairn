@@ -486,6 +486,58 @@ public sealed class FirstAuthorityCommandTests
         }
     }
 
+    [Fact]
+    public void AManifestNamingASelfAdmissionThatDoesNotVerifyReadsNoFirstAuthorityAndTheCommandNamesTheGenuineOne()
+    {
+        // From 0.9.4 (FIX-134) the estate reads a hand-named self-admission whose signature does not verify as no first authority, as the
+        // command's evidence already read it: the listing shows that, keeps refusing the defective one, and names the genuine one.
+        using var f = new HistoryFixture();
+        RecordEnvelope real = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("CFA-20"), signer: f.OperatorSigner);
+        f.Require();
+        RecordEnvelope first = FirstAuthority(f);
+        string keys = Path.Combine(Path.GetTempPath(), "vericairn-first-authority-unverified-" + Records.Identity.Ulid.NewUlid().Value);
+        try
+        {
+            var store = new FileKeyStore(keys);
+            string unrelated = Records.Identity.Ulid.NewUlid().Value;
+            store.Create(unrelated);
+            RecordEnvelope forged = f.Estate.Add("admission", f.Estate.OperatorId, HistoryFixture.Admission(f.Estate.OperatorId, "The first authority."), f.OperatorDevice.Reference,
+                signer: new StoreSigner(store, unrelated, f.OperatorDevice.Id));
+            f.Estate.NameFirstAuthority(forged.Id);
+            EstateModel model = f.Load();
+            Assert.Null(SignatureChecks.FirstAuthority(model, model.RootOperator));
+            Assert.False(model.Counts(model.ById[real.Id]));
+
+            using EstateService api = EstateService.Open(f.Root);
+            FirstAuthorityResponse listed = Ok(api.FirstAuthority(new FirstAuthorityRequest()));
+            Assert.Equal(forged.Id, listed.Named);
+            Assert.Null(listed.FirstAuthority);
+            FindingDto root = Assert.Single(listed.Findings, x => x.Code == "manifest.first-authority");
+            Assert.Contains(forged.Id, root.Message, StringComparison.Ordinal);
+            Assert.Contains("does not verify", root.Message, StringComparison.Ordinal);
+            FirstAuthorityCandidate bad = listed.Candidates.Single(c => c.Admission == forged.Id);
+            Assert.True(bad.Named);
+            Assert.False(bad.Reads);
+            Assert.False(bad.SignatureVerifies);
+            Assert.False(bad.Nameable);
+            Assert.True(listed.Candidates.Single(c => c.Admission == first.Id).Nameable);
+            Assert.Contains("signature does not verify", Refused(api.FirstAuthority(new FirstAuthorityRequest(Admission: forged.Id, Check: true))), StringComparison.Ordinal);
+
+            string plan = Ok(api.FirstAuthority(new FirstAuthorityRequest(Admission: first.Id, Check: true))).PlanHash!;
+            FirstAuthorityResponse named = Ok(api.FirstAuthority(new FirstAuthorityRequest(f.Estate.OperatorId, Admission: first.Id, ExpectPlan: plan)));
+            Assert.Equal(new FirstAuthorityChange(EstateLayout.ManifestPath, forged.Id, first.Id), named.Change);
+            Assert.Equal(first.Id, named.FirstAuthority);
+            Assert.DoesNotContain(named.Remaining, x => x.Code == "manifest.first-authority");
+            model = f.Load();
+            Assert.Equal(first.Id, SignatureChecks.FirstAuthority(model, model.RootOperator)?.Id);
+            Assert.True(model.Counts(model.ById[real.Id]));
+        }
+        finally
+        {
+            if (Directory.Exists(keys)) Directory.Delete(keys, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("unknown-key")]
     [InlineData("duplicate-first-authority")]
