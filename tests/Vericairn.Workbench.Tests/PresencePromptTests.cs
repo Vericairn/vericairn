@@ -45,7 +45,7 @@ public class PresencePromptTests(HeadlessFixture fixture)
         int prompt = Array.FindIndex(log, l => System.Text.RegularExpressions.Regex.IsMatch(l, $"^runtime: Signature 1 of 1: review W-1: records your review of work-order {order} \\([0-9a-f]{{12}}\\)$"));
         int signed = Array.IndexOf(log, "runtime: Signed 1 of 1.");
         Assert.True(announced >= 0 && announced < prompt && prompt < signed, string.Join("\n", log));
-        Assert.Equal($"runtime:   1. review W-1: records your review of work-order {order}", log[announced + 1]);
+        Assert.Equal($"runtime:  1. review W-1: records your review of work-order {order}", log[announced + 1]);
         Assert.Equal("runtime: Signed 1 of 1.", shell.PresencePrompt);
         Assert.Equal($"sign Vericairn signature 1 of 1: review W-1, records your review of work-order {order}", Assert.Single(custody.Reasons));
     }

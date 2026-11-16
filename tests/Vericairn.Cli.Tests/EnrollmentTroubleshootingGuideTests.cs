@@ -37,7 +37,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
 
         CliHarness.Outcome admitted = e.Step(guide, "vericairn devices admit <laptop-id> --by <operator-id> --note \"The first authority.\"");
         e.Values["<admission-id>"] = admitted.Out.Split("  ")[1];
-        Quoted(guide, admitted.Err, e.Values, 7);
+        Quoted(guide, admitted.Err, e.Values, 11);
         Assert.Contains("Stopped at signature 2 of 2, which was not made; 1 was signed.", admitted.Err, StringComparison.Ordinal);
         Assert.Contains("warning: No history checkpoint with trigger adoption was written: The record could not be signed on this machine", admitted.Err, StringComparison.Ordinal);
 
@@ -58,7 +58,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         CliHarness.Outcome check = e.Step(guide, "vericairn estate checkpoint --adopt --check");
         e.Values["<plan>"] = Line(check.Out, "plan: ")["plan: ".Length..];
         CliHarness.Outcome adopted = e.Step(guide, "vericairn estate checkpoint --adopt --expect-plan <plan> --by <operator-id>");
-        Quoted(guide, adopted.Err, e.Values, 4);
+        Quoted(guide, adopted.Err, e.Values, 7);
         Assert.Contains("Signed 1 of 1.", adopted.Err, StringComparison.Ordinal);
         Assert.StartsWith("History: adopted", Line(e.Step(guide, "vericairn status").Out, "History: "), StringComparison.Ordinal);
         e.Step(guide, "vericairn estate check");
@@ -96,7 +96,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         e.Custody.DeclineAt = e.Custody.Reasons.Count + 1;
 
         CliHarness.Outcome expired = e.Step(guide, "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"", refused: true);
-        Quoted(guide, expired.Err, e.Values, 5);
+        Quoted(guide, expired.Err, e.Values, 7);
         Assert.Contains("Stopped at signature 1 of 1, which was not made; 0 were signed.", expired.Err, StringComparison.Ordinal);
         Assert.Contains("error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).", expired.Err, StringComparison.Ordinal);
         Assert.Equal(string.Empty, expired.Out);
@@ -107,7 +107,7 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
         // The one missing step, once, with a fresh prompt.
         e.Custody.DeclineAt = 0;
         CliHarness.Outcome reopened = e.Step(guide, "vericairn devices admit <desktop-id> --by <operator-id> --note \"The operator's desktop.\"");
-        Quoted(guide, reopened.Err, e.Values, 4);
+        Quoted(guide, reopened.Err, e.Values, 6);
         Assert.Contains("Signed 1 of 1.", reopened.Err, StringComparison.Ordinal);
         Assert.Equal("admitted", Listed(e.Step(guide, "vericairn devices list --json"), e.Values["<desktop-id>"]).GetProperty("admission").GetString());
         EstateModel model = e.Api.Session.Load();
@@ -156,7 +156,10 @@ public sealed partial class EnrollmentTroubleshootingGuideTests
             Assert.Contains("(enrollment-troubleshooting.md)", Doc(linking), StringComparison.Ordinal);
     }
 
-    /// <summary>Asserts that each line a command printed on standard error, its identities put back as the guide's placeholders, is in the guide.</summary>
+    /// <summary>
+    /// Asserts that each line a command printed on standard error, its identities put back as the guide's placeholders, is in the guide:
+    /// from 0.9.4 (CODE-80) each row of a runtime line the command line folded to 80 columns.
+    /// </summary>
     private static void Quoted(string guide, string error, Dictionary<string, string> values, int expected)
     {
         string[] lines = [.. error.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Where(l => l.Length > 0)];

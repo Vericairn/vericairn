@@ -224,7 +224,13 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         }
     }
 
-    public int ReportOutcome(WriteOutcome outcome, bool json)
+    public int ReportOutcome(WriteOutcome outcome, bool json) => ReportOutcome(outcome, json, runtimeProblem: false);
+
+    /// <summary>
+    /// Reports a write's outcome as <see cref="ReportOutcome(WriteOutcome, bool)"/> does; from 0.9.4 (CODE-80), for a presence-related
+    /// command, <paramref name="runtimeProblem"/> shows the runtime's problem as its own words, marked and escaped, with the same exit code.
+    /// </summary>
+    public int ReportOutcome(WriteOutcome outcome, bool json, bool runtimeProblem)
     {
         if (outcome.Written is RecordWritten written)
         {
@@ -234,7 +240,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
             if (!json) ReportCheckpoint(outcome.Checkpoint);
             else if (outcome.Checkpoint?.Skipped is { } skipped) Error.WriteLine("warning: " + skipped);
-            if (outcome.Problem is { } interrupted) return Fail(interrupted.Message);
+            if (outcome.Problem is { } interrupted) return runtimeProblem ? Runtime(interrupted.Message) : Fail(interrupted.Message);
             return Clean;
         }
 
@@ -248,11 +254,18 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
 
         if (problem.Code == "rejected")
         {
-            Error.WriteLine(problem.Message);
+            if (runtimeProblem) WriteRuntime(Error, problem.Message);
+            else Error.WriteLine(problem.Message);
             return ReportFindings(new FindingsResponse("rejected", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
         }
 
-        return Fail(problem.Message);
+        return runtimeProblem ? Runtime(problem.Message) : Fail(problem.Message);
+
+        int Runtime(string message)
+        {
+            WriteRuntime(Error, message);
+            return Failed;
+        }
     }
 
     /// <summary>
@@ -293,6 +306,39 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         }
 
         return findings.Errors > 0 ? HasErrors : Clean;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): the columns a writer's rows hold: the terminal's width when it writes to the console's own standard output or
+    /// error and that stream is a terminal, else 80, as for output redirected to a file or a pipe, or a width that cannot be read.
+    /// </summary>
+    internal static int TerminalWidth(TextWriter writer)
+    {
+        const int Fallback = 80;
+        try
+        {
+            // Only the console's own stream to a terminal has a width; a writer that collects text, as a test's or a caller's does, is 80.
+            bool terminal = writer is not StringWriter
+                && (ReferenceEquals(writer, Console.Error) ? !Console.IsErrorRedirected : ReferenceEquals(writer, Console.Out) && !Console.IsOutputRedirected);
+            if (!terminal) return Fallback;
+            int columns = Console.WindowWidth;
+            return columns > 0 ? columns : Fallback;
+        }
+        catch (Exception exception) when (exception is IOException or PlatformNotSupportedException or InvalidOperationException)
+        {
+            return Fallback;
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (CODE-80): writes what the runtime wrote, such as a presence-related action's problem, as the presence display writes the
+    /// runtime's words: every row begins with <c>runtime: </c>, its control characters are shown escaped and its runs of spaces are one
+    /// space, folded to the writer's width, so it cannot pass for a line the command line derived itself.
+    /// </summary>
+    internal static void WriteRuntime(TextWriter writer, string? text)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        writer.WriteLine(PresenceNoticeReader.Fold(PresenceNoticeReader.Runtime(text), TerminalWidth(writer)));
     }
 
     public int Fail(string message)

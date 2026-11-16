@@ -33,10 +33,13 @@ internal sealed class PresenceDisplay : IDisposable
     private long cursor;
     private bool stopped;
 
-    private PresenceDisplay(IEstateApi api, TextWriter output, long? start)
+    private readonly Func<int> width;
+
+    private PresenceDisplay(IEstateApi api, TextWriter output, long? start, Func<int> width)
     {
         this.api = api;
         this.output = output;
+        this.width = width;
         if (start is long position)
         {
             cursor = position;
@@ -50,7 +53,13 @@ internal sealed class PresenceDisplay : IDisposable
     /// Takes the runtime's position before the command acts, so only the notices of what it does are shown, and follows from there.
     /// A runtime that cannot answer is not followed.
     /// </summary>
-    internal static PresenceDisplay Start(IEstateApi api, TextWriter output)
+    internal static PresenceDisplay Start(IEstateApi api, TextWriter output) => Start(api, output, () => CommandContext.TerminalWidth(output));
+
+    /// <summary>
+    /// Starts as <see cref="Start(IEstateApi, TextWriter)"/> does, folding the runtime's lines to the columns <paramref name="width"/>
+    /// gives at each batch: the terminal's width, 80 where output goes elsewhere.
+    /// </summary>
+    internal static PresenceDisplay Start(IEstateApi api, TextWriter output, Func<int> width)
     {
         long? start;
         try
@@ -64,7 +73,7 @@ internal sealed class PresenceDisplay : IDisposable
             start = null;
         }
 
-        return new PresenceDisplay(api, output, start);
+        return new PresenceDisplay(api, output, start, width);
     }
 
     /// <summary>Stops following once the command has its answer, after showing every notice raised until then.</summary>
@@ -130,7 +139,9 @@ internal sealed class PresenceDisplay : IDisposable
         {
             // One read's notices are one batch: the reader holds a session's terms as received before a nonce only once their read is over.
             List<PresenceNotice> batch = [.. response.Notices.Where(n => n.Sequence > cursor)];
-            foreach (PresenceLine line in reader.Read(batch)) output.WriteLine(line.Text);
+            // From the re-check of PR #398, every row of the runtime's words begins with its mark: each line is folded to the terminal's width.
+            int columns = width();
+            foreach (PresenceLine line in reader.Read(batch)) output.WriteLine(PresenceNoticeReader.Fold(line.Text, columns));
             if (batch.Count > 0) Volatile.Write(ref cursor, batch[^1].Sequence);
             output.Flush();
         }

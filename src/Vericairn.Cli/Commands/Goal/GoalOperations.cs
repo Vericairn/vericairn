@@ -329,7 +329,10 @@ internal sealed class GoalOperations(CommandContext context)
                 options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage) { Search = options.Choices?.Search });
             if (!step.Ok)
             {
-                return step.Run?.Problem is { Findings.Count: > 0 } rejected ? context.ReportOutcome(WriteOutcome.Fail(rejected), json) : context.Fail(step.Message);
+                // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
+                if (step.Run?.Problem is { Findings.Count: > 0 } rejected) return context.ReportOutcome(WriteOutcome.Fail(rejected), json, runtimeProblem: true);
+                CommandContext.WriteRuntime(context.Error, step.Message);
+                return Failed;
             }
 
             RunRow? row = step.Outcome == "run" && !options.Detach ? RunConsole.Follow(context, api, step.Run!.Run, options.By) : null;

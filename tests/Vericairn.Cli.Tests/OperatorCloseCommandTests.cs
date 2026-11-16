@@ -176,17 +176,18 @@ public sealed class OperatorCloseCommandTests
 
         Assert.Equal(0, outcome.Code);
         // From 0.9.4 (CODE-80) each prompt's line names the signed record's short hash, as the helper's own label does, and every line
-        // the command line takes from the runtime begins with the runtime's mark.
+        // the command line takes from the runtime begins with the runtime's mark, its runs of spaces one space.
         string Short(string result) => f.Estate.Load().OfType("acceptance").Single(a => a.Subject!.Id == result).ComputedHash[7..19];
-        Assert.Equal($"""
+        // A terminal of 80 columns, as output to a file, shows each line of the runtime's folded, every row marked.
+        Assert.Equal(Vericairn.Sdk.PresenceNoticeReader.Fold($"""
             runtime: operator close asks for your presence twice, once for each record it signs:
-            runtime:   1. acceptance STEP-1: accepts result {first.Result.Id} at its exact hash
-            runtime:   2. acceptance STEP-2: accepts result {second.Result.Id} at its exact hash
+            runtime:  1. acceptance STEP-1: accepts result {first.Result.Id} at its exact hash
+            runtime:  2. acceptance STEP-2: accepts result {second.Result.Id} at its exact hash
             runtime: Signature 1 of 2: acceptance STEP-1: accepts result {first.Result.Id} at its exact hash ({Short(first.Result.Id)})
             runtime: Signature 2 of 2: acceptance STEP-2: accepts result {second.Result.Id} at its exact hash ({Short(second.Result.Id)})
             runtime: Signed 2 of 2.
 
-            """.ReplaceLineEndings("\n"), outcome.Err);
+            """.ReplaceLineEndings("\n"), 80), outcome.Err);
         Assert.DoesNotContain("Signature", outcome.Out, StringComparison.Ordinal);
         Assert.Equal(2, f.Estate.Load().OfType("acceptance").Count());
     }

@@ -38,10 +38,14 @@ internal sealed class DecisionsNewCommand : Command
             if (parse.GetValue(context.JsonOption))
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
-                return response.Ok ? CommandContext.Clean : context.Fail(response.Problem?.Message ?? "The decision batch was not completed.");
+                if (response.Ok) return CommandContext.Clean;
+                if (response.Problem is null) return context.Fail("The decision batch was not completed.");
+                // From 0.9.4 (CODE-80) the runtime's problem is shown as its own words, marked and escaped.
+                CommandContext.WriteRuntime(context.Error, response.Problem.Message);
+                return CommandContext.Failed;
             }
             foreach (RecordWritten pin in response.Pins) context.ReportOutcome(new(pin, null), false);
-            return context.ReportOutcome(new(response.Written, response.Problem), false);
+            return context.ReportOutcome(new(response.Written, response.Problem), false, runtimeProblem: true);
         }));
     }
 

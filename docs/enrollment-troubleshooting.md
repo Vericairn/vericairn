@@ -17,13 +17,17 @@ From 0.9.3 a command that signs with such a device announces every record it wil
 error, and counts each prompt ([presence prompts](operator-guide.md#presence-prompts-announced-and-counted-093)). From 0.9.4
 each prompt's line ends with the record's short hash, the first twelve hexadecimal digits of its content hash, shown below as
 `<short hash>`; with the release build's helper the dialog's own label names the same short hash. Each of these lines begins with
-`runtime:`, since its words are the runtime's: the command line marks every line it takes from the runtime so, and shows its control
-characters escaped. Admitting a device you hold, from a device that asks for presence, prints:
+`runtime:`, since its words are the runtime's: the command line marks every line it takes from the runtime so, shows its control
+characters escaped and folds a line longer than the terminal, or than 80 columns in a file or a pipe, into rows that each begin with
+`runtime:`. The examples show the rows of 80 columns, folded where the full identity, not its shorter placeholder, reaches the last
+column. Admitting a device you hold, from a device that asks for presence, prints:
 
 ```text
-runtime: Writing the admission record asks for your presence once, for the one record it signs:
-runtime:   1. admission device <desktop-id>: admits the device
-runtime: Signature 1 of 1: admission device <desktop-id>: admits the device (<short hash>)
+runtime: Writing the admission record asks for your presence once, for the one
+runtime: record it signs:
+runtime:  1. admission device <desktop-id>: admits the device
+runtime: Signature 1 of 1: admission device <desktop-id>: admits
+runtime: the device (<short hash>)
 ```
 
 When the signature is made the action ends with `runtime: Signed 1 of 1.` and standard output prints the record's path, id and hash.
@@ -105,11 +109,15 @@ You answered the first prompt and left the second. Standard output printed the a
 error printed:
 
 ```text
-runtime: Writing the admission record asks for your presence twice, once for each record it signs:
-runtime:   1. admission device <laptop-id>: admits the device
-runtime:   2. history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
-runtime: Signature 1 of 2: admission device <laptop-id>: admits the device (<short hash>)
-runtime: Signature 2 of 2: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now (<short hash>)
+runtime: Writing the admission record asks for your presence twice, once for
+runtime: each record it signs:
+runtime:  1. admission device <laptop-id>: admits the device
+runtime:  2. history-checkpoint trigger adoption: adopts history checkpoints,
+runtime: witnessing the estate's history up to now
+runtime: Signature 1 of 2: admission device <laptop-id>: admits
+runtime: the device (<short hash>)
+runtime: Signature 2 of 2: history-checkpoint trigger adoption: adopts history
+runtime: checkpoints, witnessing the estate's history up to now (<short hash>)
 runtime: Stopped at signature 2 of 2, which was not made; 1 was signed.
 warning: No history checkpoint with trigger adoption was written: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
 ```
@@ -136,9 +144,12 @@ vericairn estate checkpoint --adopt --expect-plan <plan> --by <operator-id>
 The check lists what adoption witnesses and anchors and prints `plan: sha256:<hash>`; the second command signs it:
 
 ```text
-runtime: Writing the history-checkpoint record asks for your presence once, for the one record it signs:
-runtime:   1. history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now
-runtime: Signature 1 of 1: history-checkpoint trigger adoption: adopts history checkpoints, witnessing the estate's history up to now (<short hash>)
+runtime: Writing the history-checkpoint record asks for your presence once, for
+runtime: the one record it signs:
+runtime:  1. history-checkpoint trigger adoption: adopts history checkpoints,
+runtime: witnessing the estate's history up to now
+runtime: Signature 1 of 1: history-checkpoint trigger adoption: adopts history
+runtime: checkpoints, witnessing the estate's history up to now (<short hash>)
 runtime: Signed 1 of 1.
 ```
 
@@ -154,9 +165,11 @@ vericairn devices admit <desktop-id> --by <operator-id> --note "The operator's d
 ```
 
 ```text
-runtime: Writing the admission record asks for your presence once, for the one record it signs:
-runtime:   1. admission device <desktop-id>: admits the device
-runtime: Signature 1 of 1: admission device <desktop-id>: admits the device (<short hash>)
+runtime: Writing the admission record asks for your presence once, for the one
+runtime: record it signs:
+runtime:  1. admission device <desktop-id>: admits the device
+runtime: Signature 1 of 1: admission device <desktop-id>: admits
+runtime: the device (<short hash>)
 runtime: Stopped at signature 1 of 1, which was not made; 0 were signed.
 error: The record could not be signed on this machine (the device's key store refused to sign, InvalidOperationException).
 ```

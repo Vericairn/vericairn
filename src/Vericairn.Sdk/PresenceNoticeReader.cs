@@ -278,22 +278,32 @@ internal sealed class PresenceNoticeReader
     /// <summary>
     /// A runtime string as one line a person can read: line breaks, tabs, every other control character, format characters (such as
     /// bidirectional overrides) and line and paragraph separators are shown escaped, so the string can neither break a line nor drive the
-    /// terminal.
+    /// terminal; and from the re-check of PR #398, each run of spaces is one space, so no padding can push the string's words to where a
+    /// terminal's soft wrap starts a row.
     /// </summary>
     internal static string Sanitize(string? text)
     {
         if (string.IsNullOrEmpty(text)) return string.Empty;
         var shown = new StringBuilder(text.Length);
+        bool spaced = false;
         foreach (Rune rune in text.EnumerateRunes())
         {
             switch (rune.Value)
             {
-                case '\n': shown.Append("\\n"); continue;
-                case '\r': shown.Append("\\r"); continue;
-                case '\t': shown.Append("\\t"); continue;
+                case '\n': shown.Append("\\n"); spaced = false; continue;
+                case '\r': shown.Append("\\r"); spaced = false; continue;
+                case '\t': shown.Append("\\t"); spaced = false; continue;
             }
 
             UnicodeCategory category = Rune.GetUnicodeCategory(rune);
+            if (category == UnicodeCategory.SpaceSeparator)
+            {
+                if (!spaced) shown.Append(' ');
+                spaced = true;
+                continue;
+            }
+
+            spaced = false;
             if (Rune.IsControl(rune) || category is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
                 or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
                 shown.Append(CultureInfo.InvariantCulture, $"\\u{{{rune.Value:X4}}}");
@@ -304,11 +314,70 @@ internal sealed class PresenceNoticeReader
         return shown.ToString();
     }
 
+    /// <summary>
+    /// Text as a terminal of this many columns shows it: every line the runtime wrote that would reach the terminal's last column is folded
+    /// into rows that each begin with <see cref="RuntimeMarker"/>, so a soft wrap never starts a row of the runtime's words without the
+    /// mark. A character outside ASCII is counted as two columns, never fewer than a terminal gives it. Lines without the mark, the
+    /// client's own, are left as they are.
+    /// </summary>
+    internal static string Fold(string text, int width)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        // A row keeps the last column free, so a terminal that wraps on reaching it starts no row of its own.
+        int room = Math.Max(width - 1 - RuntimeMarker.Length, 8);
+        var rows = new List<string>();
+        foreach (string line in text.Split('\n'))
+        {
+            if (!line.StartsWith(RuntimeMarker, StringComparison.Ordinal) || Columns(line) <= room + RuntimeMarker.Length)
+            {
+                rows.Add(line);
+                continue;
+            }
+
+            string rest = line[RuntimeMarker.Length..];
+            while (rest.Length > 0)
+            {
+                int cut = Cut(rest, room);
+                rows.Add(RuntimeMarker + rest[..cut].TrimEnd(' '));
+                rest = rest[cut..].TrimStart(' ');
+            }
+        }
+
+        return string.Join('\n', rows);
+    }
+
+    /// <summary>The columns a terminal gives a string at most: one for each ASCII character, two for any other.</summary>
+    internal static int Columns(string text)
+    {
+        int columns = 0;
+        foreach (Rune rune in text.EnumerateRunes()) columns += rune.Value < 0x80 ? 1 : 2;
+        return columns;
+    }
+
+    // How many characters of a string fill at most this many columns, breaking after the last space that fits when one does.
+    private static int Cut(string text, int room)
+    {
+        int columns = 0, index = 0, space = -1;
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            int wide = rune.Value < 0x80 ? 1 : 2;
+            if (columns + wide > room) break;
+            columns += wide;
+            index += rune.Utf16SequenceLength;
+            if (rune.Value == ' ') space = index;
+        }
+
+        if (index >= text.Length) return text.Length;
+        // A row that ends just before a space breaks there; otherwise after the last space that fits, or within a word too long for a row.
+        if (text[index] == ' ') return index;
+        return space > 0 ? space : Math.Max(index, text.Length > 1 && char.IsHighSurrogate(text[0]) ? 2 : 1);
+    }
+
     /// <summary>A runtime's text, one marked line for each of its lines, each sanitized.</summary>
     internal static string Runtime(string? text)
     {
         if (string.IsNullOrEmpty(text)) return RuntimeMarker + "(no text)";
-        return string.Join('\n', text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Select(line => RuntimeMarker + Sanitize(line)));
+        return string.Join('\n', text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Select(line => RuntimeMarker + Sanitize(line).TrimEnd(' ')));
     }
 
     /// <summary>The lines for one batch of notices, as one read delivered them, oldest first.</summary>

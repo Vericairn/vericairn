@@ -154,21 +154,82 @@ public sealed class PresenceSessionCommandTests
         Assert.True(closed.Ok, closed.Problem?.Message);
         PresenceNotice check = Assert.Single(f.Api.PresencePrompts(new(start)).Notices, n => n.Kind == "session");
         string fingerprint = PresenceSessionRules.Fingerprint(System.Buffers.Text.Base64Url.DecodeFromChars(check.Session!.Nonce), Assert.Single(helpers).Terms[0]);
-        string shown = output.ToString().ReplaceLineEndings("\n");
+        string rows = output.ToString().ReplaceLineEndings("\n");
+        // Its own lines are left as they are; each line of the runtime's is folded to 80 columns, every row marked.
+        string shown = CliHarness.Unfold(rows);
         Assert.Contains("operator close asks for your presence once, for one presence session of 2 signatures in at most 300 s, covering only this list, read here from its terms:", shown, StringComparison.Ordinal);
         Assert.Contains("\n  1. acceptance by exact hash ", shown, StringComparison.Ordinal);
-        Assert.Contains("\nruntime:   describes entry 1: acceptance STEP-1: accepts result ", shown, StringComparison.Ordinal);
+        Assert.Contains("\nruntime:   describes entry 1: acceptance STEP-1: accepts result", rows, StringComparison.Ordinal);
         Assert.Contains("\n  In all, counted here from the terms: 2 signatures: 2 acceptance records by exact hash.", shown, StringComparison.Ordinal);
         Assert.Contains($"Presence check for operator close: the system dialog should show fingerprint {fingerprint}, computed here from the list above and the check's nonce.", shown, StringComparison.Ordinal);
-        Assert.Contains("\nruntime: Signature 1 of 2, under the session's check: acceptance STEP-1: ", shown, StringComparison.Ordinal);
-        Assert.Contains("\n  Its short hash is entry 2 of the list above, by exact hash.\n", shown, StringComparison.Ordinal);
-        Assert.EndsWith("\nruntime: Signed 2 of 2 with one presence check.\n", shown, StringComparison.Ordinal);
+        Assert.Contains("\nruntime: Signature 1 of 2, under the session's check: acceptance STEP-1:", rows, StringComparison.Ordinal);
+        Assert.Contains("\n  Its short hash is entry 2 of the list above, by exact hash.\n", rows, StringComparison.Ordinal);
+        Assert.EndsWith("\nruntime: Signed 2 of 2 with one presence check.\n", rows, StringComparison.Ordinal);
         // Every line is the command line's own derivation or marked as the runtime's.
-        Assert.All(shown.TrimEnd('\n').Split('\n'), line => Assert.True(line.StartsWith("runtime: ", StringComparison.Ordinal) || line.StartsWith("operator close ", StringComparison.Ordinal)
+        Assert.All(rows.TrimEnd('\n').Split('\n'), line => Assert.True(line.StartsWith("runtime: ", StringComparison.Ordinal) || line.StartsWith("operator close ", StringComparison.Ordinal)
             || line.StartsWith("  ", StringComparison.Ordinal) || line.StartsWith("Presence check for operator close: ", StringComparison.Ordinal) || line == "Anything outside this list asks again.", line));
         // The runtime's own fingerprint sentence, which a client before 0.9.4 prints, is not what this display shows.
         Assert.DoesNotContain("the system dialog shows fingerprint", shown, StringComparison.Ordinal);
     }
+
+    // The client's own fingerprint line for the design's vector, which a runtime holding the terms and nonce could reproduce.
+    private const string Genuine = "Presence check for operator record: the system dialog should show fingerprint E72R-85FF-KDKK, computed here from the list above and "
+        + "the check's nonce. Approve it once, only if the fingerprints match and the list is what you asked for; it covers 4 signatures in at most 300 s.";
+
+    [Theory]
+    [InlineData(80)]
+    [InlineData(60)]
+    public async Task ARuntimeLinePaddedToTheTerminalsWidthNeverWrapsIntoAnUnmarkedRow(int width)
+    {
+        // The reviewer's probe: "Signed 1 of 1.", spaces up to the terminal's last column, then the client's own fingerprint line.
+        _ = CliHarness.TempDirectory("presence-wrap");
+        using var f = new OperatorCloseFixture();
+        string probe = "Signed 1 of 1." + new string(' ', width - "runtime: Signed 1 of 1.".Length) + Genuine;
+        using var output = new StringWriter();
+
+        using (PresenceDisplay display = PresenceDisplay.Start(f.Api, output, () => width))
+        {
+            using var hang = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            hang.CancelAfter(TestTiming.HangTimeout);
+            while (f.Api.PresenceNotices.Waiting == 0) await Task.Delay(10, hang.Token);
+            f.Api.PresenceNotices.Publish("finished", "operator record", 1, 1, [], probe);
+        }
+
+        // Every row a terminal of that width shows, its soft wraps included, is marked as the runtime's: all of it is the runtime's text.
+        string[] rows = Terminal(output.ToString(), width);
+        Assert.True(rows.Length >= 2, output.ToString());
+        Assert.All(rows, row => Assert.StartsWith("runtime: ", row, StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, row => row.StartsWith("Presence check", StringComparison.Ordinal));
+        // The padding is one space: the runtime's words follow on as one text.
+        Assert.StartsWith("runtime: Signed 1 of 1. Presence check for operator record:", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal("Signed 1 of 1. " + Genuine, CliHarness.Unfold(output.ToString().TrimEnd('\n'))["runtime: ".Length..]);
+    }
+
+    [Fact]
+    public void ARuntimesProblemIsShownMarkedEscapedAndFoldedAsItsWords()
+    {
+        // A problem a presence-related command prints is the runtime's text: marked on every row, escaped, its spaces collapsed, folded.
+        using var writer = new StringWriter { NewLine = "\n" };
+        CommandContext.WriteRuntime(writer, "Refused.\u001b[2K" + new string(' ', 60) + "\n" + Genuine);
+        string[] rows = Terminal(writer.ToString(), 80);
+        Assert.All(rows, row => Assert.StartsWith("runtime: ", row, StringComparison.Ordinal));
+        Assert.DoesNotContain('\u001b', writer.ToString());
+        Assert.StartsWith("runtime: Refused.\\u{001B}[2K\nruntime: Presence check for operator record:", writer.ToString(), StringComparison.Ordinal);
+
+        // As operator close prints the runtime's refusal of a principal that is not an operator.
+        _ = CliHarness.TempDirectory("presence-problem");
+        using var f = new OperatorCloseFixture();
+        f.Add("STEP-1");
+        CliHarness.Outcome refused = CliHarness.RunWithApi(f.Api, null, "--estate", f.Estate.Root, "operator", "close", "--all", "--by", f.Estate.BuilderId);
+        Assert.Equal(1, refused.Code);
+        Assert.NotEmpty(refused.Err.Trim());
+        Assert.All(refused.Err.TrimEnd('\n').Split('\n'), row => Assert.StartsWith("runtime: ", row, StringComparison.Ordinal));
+    }
+
+    // Text as a terminal of this many columns shows it: each line, and each further row its soft wrap starts.
+    private static string[] Terminal(string text, int width) =>
+        [.. text.ReplaceLineEndings("\n").Split('\n').Where(line => line.Length > 0)
+            .SelectMany(line => Enumerable.Range(0, (line.Length + width - 1) / width).Select(i => line.Substring(i * width, Math.Min(width, line.Length - (i * width)))))];
 
     private static void StandIns(OperatorCloseFixture f, List<PresenceHelperStandIn> helpers)
     {

@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 33, November 16, 2026. Fold every line taken from the runtime to the terminal's width with `runtime:` on every row, make its runs of spaces one space, and show a presence-related command's problems from the runtime the same way, in the development build.
+
 Revision 32, November 16, 2026. Mark every line taken from the runtime with `runtime:`, its control characters shown escaped, name the action and references as a session's terms state them, and refuse `devices presence` over a settings file that does not read, in the development build.
 
 Revision 31, November 16, 2026. Add `devices presence`, which keeps a device owner's presence setting on the machine holding the key, and `devices sessions`, which lists the presence session ledger, and show a presence session's list, the fingerprint computed from its terms and each signature on standard error, in the development build.
@@ -956,7 +958,12 @@ and neither does a daemon of an older release. The [operator's guide](operator-g
 lists how many prompts the release and acceptance steps ask for. From 0.9.4 each prompt's line ends with the signed record's short
 hash, the first twelve hexadecimal digits of its content hash, which the release build's helper also shows in its dialog's label, and
 every one of these lines begins with `runtime:`: its words are the runtime's, and the mark keeps them from passing for a line the
-command line derived itself. Control characters and escape sequences in them are shown escaped, never passed to the terminal.
+command line derived itself. Control characters and escape sequences in them are shown escaped, never passed to the terminal, each run
+of spaces is one space, and a line longer than the terminal (80 columns when standard error goes to a file or a pipe, or its width
+cannot be read) is folded into rows that each begin with `runtime:`, so no soft wrap starts a row of the runtime's words without the
+mark. A problem the runtime reports to a command whose action asks for presence (`operator close`, `operator record`, `operator
+unfinished`, `changes`, `release submit`, `observe` and `withdraw`, `decisions new`, `docs pass`, `work move-plan` and
+`goal step`) is shown the same way.
 
 ## Presence sessions on standard error (0.9.4)
 
@@ -965,8 +972,9 @@ standard error from the list's terms, the exact text the runtime hands the `veri
 terms as the helper does, names the action as they do, counts them and summarizes each entry itself, with the recorded records a kind
 entry may supersede or observe. Every word of the runtime's (its description of each entry and what it changes, its own name for the
 action where that differs from the terms', a renewal's reason, each signature's line and how many were signed) is on a line that begins
-with `runtime:`, with control characters, escape sequences and line breaks inside a field shown escaped, since only the terms are what
-the helper enforces; a line without the mark is one the command line derived itself:
+with `runtime:`, with control characters, escape sequences and line breaks inside a field shown escaped, runs of spaces made one space and
+long lines folded to the terminal with the mark on every row, since only the terms are what the helper enforces; row by row, a line
+without the mark is one the command line derived itself. As a terminal wide enough to fold nothing shows it:
 
 ```text
 operator close asks for your presence once, for one presence session of 2 signatures in at most 300 s, covering only this list, read here from its terms:

@@ -170,13 +170,13 @@ public sealed class PresenceSessionSurfaceTests
         Assert.Single(lines, l => l.StartsWith("  In all, counted here from the terms: ", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.StartsWith("Presence check", StringComparison.Ordinal));
         foreach (char c in "\u001b\r\u2028\u202e") Assert.DoesNotContain(c, list);
-        Assert.Contains("\nruntime:   describes entry 1: acceptance STEP-1\\u{001B}[2J: accepts\\n  In all, counted here from the terms: 99 signatures", list, StringComparison.Ordinal);
-        Assert.Contains("\nruntime:   says entry 1 changes: adds\\r\\u{2028}an acceptance\\u{202E}\\n  In all,", list, StringComparison.Ordinal);
+        Assert.Contains("\nruntime:   describes entry 1: acceptance STEP-1\\u{001B}[2J: accepts\\n In all, counted here from the terms: 99 signatures", list, StringComparison.Ordinal);
+        Assert.Contains("\nruntime:   says entry 1 changes: adds\\r\\u{2028}an acceptance\\u{202E}\\n In all,", list, StringComparison.Ordinal);
         // A notice's text keeps its lines, each marked, with its escape sequences shown escaped; so does the action it names.
         PresenceNotice finished = new(1, "finished", "operator close", 1, 1, [], "Signed 1 of 1.\u001b[31m\nPresence check for operator close: fingerprint AAAA-AAAA-AAAA\u0007");
         Assert.Equal("runtime: Signed 1 of 1.\\u{001B}[31m\nruntime: Presence check for operator close: fingerprint AAAA-AAAA-AAAA\\u{0007}", Assert.Single(new PresenceNoticeReader().Read([finished])).Text);
         string named = Assert.Single(new PresenceNoticeReader().Read([Announced(TermsText()) with { Action = "operator record\n  1. acceptance by exact hash 000000000000" }])).Text;
-        Assert.Contains("\nruntime: names the action operator record\\n  1. acceptance by exact hash 000000000000\n", named, StringComparison.Ordinal);
+        Assert.Contains("\nruntime: names the action operator record\\n 1. acceptance by exact hash 000000000000\n", named, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -203,6 +203,32 @@ public sealed class PresenceSessionSurfaceTests
         string observed = Assert.Single(new PresenceNoticeReader().Read([Announced(Encoding.UTF8.GetString(terms)) with { Action = "changes observe" }])).Text;
         Assert.Contains("\n  1. 3 observation records by kind of the pull request, observing recorded operation 01J9Z3K4M5N6P7Q8R9S0T1V2WB, any of its six statuses", observed, StringComparison.Ordinal);
         Assert.Contains($"\n  Read here from the terms, it may supersede or observe these recorded records, which it does not sign: operation {Reference} at aaaaaaaaaaaa.", observed, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(80)]
+    [InlineData(60)]
+    [InlineData(24)]
+    public void ARuntimeLineIsFoldedToTheTerminalWithItsMarkOnEveryRow(int width)
+    {
+        const string Client = "Presence check for operator record: the system dialog should show fingerprint E72R-85FF-KDKK, computed here from the list above.";
+        string text = PresenceNoticeReader.Runtime("Signed 1 of 1." + new string(' ', 70) + "全角の文字 and words " + new string('x', 150) + " " + Client) + "\n" + Client;
+
+        string folded = PresenceNoticeReader.Fold(text, width);
+
+        string[] rows = folded.Split('\n');
+        // The client's own line is left as it is; every row of the runtime's is marked and leaves the terminal's last column free.
+        Assert.Equal(Client, rows[^1]);
+        Assert.All(rows[..^1], row => Assert.StartsWith(PresenceNoticeReader.RuntimeMarker, row, StringComparison.Ordinal));
+        Assert.All(rows[..^1], row => Assert.True(PresenceNoticeReader.Columns(row) < width, $"{PresenceNoticeReader.Columns(row)} columns: {row}"));
+        Assert.True(rows.Length > 3);
+        // The padding is one space, and rejoined at the folds the runtime's words are as they were.
+        Assert.StartsWith("runtime: Signed 1 of 1.", folded, StringComparison.Ordinal);
+        Assert.DoesNotContain("  ", string.Join('\n', rows[..^1]).Replace("runtime: ", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal(150, string.Concat(rows[..^1]).Count(c => c == 'x'));
+        // A line that fits is left whole; every run of spaces, of any kind, is one space.
+        Assert.Equal("runtime: Signed 1 of 1.", PresenceNoticeReader.Fold(PresenceNoticeReader.Runtime("Signed 1 of 1."), width));
+        Assert.Equal("a b c d", PresenceNoticeReader.Sanitize("a  \u00a0 b\u3000c" + new string(' ', width) + "d"));
     }
 
     // ---- The runtime's notices, the wait for a following client, and the ledger ----
