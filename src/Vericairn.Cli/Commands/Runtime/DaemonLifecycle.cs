@@ -9,6 +9,7 @@ using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
 using Vericairn.Sdk;
 using static Vericairn.Cli.CommandContext;
@@ -158,6 +159,12 @@ internal sealed class DaemonLifecycle(CommandContext context)
         foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve", "--detached"]))
         {
             info.ArgumentList.Add(argument);
+        }
+
+        // From 0.9.4 (ID-16) a release build starts its daemon with the .NET diagnostics channel off, read only from the environment.
+        foreach ((string name, string value) in PresenceSessionBuild.Current.RuntimeEnvironment)
+        {
+            info.Environment[name] = value;
         }
 
         NativeMethods.KeepStandardHandlesFromChildren();

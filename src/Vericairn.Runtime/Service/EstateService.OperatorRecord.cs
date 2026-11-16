@@ -61,6 +61,7 @@ public sealed partial class EstateService
         string identity = "operator-record";
         string resume = OperatorResume(request);
         OperatorCheckpoint? checkpoint = null;
+        RecordDraft? ownDraft = null;
         RecordWritten? written = null;
         ChangeResponse? change = null;
         string? active = null;
@@ -108,8 +109,10 @@ public sealed partial class EstateService
             // observation it repeats while checks run is announced before it asks (FIX-124).
             OperatorCheckpoint? planned = checkpoint;
             string? earlierAction = active;
-            using IDisposable counted = presence.Action("operator record " + request.Type,
-                PresencePlan(request.By, () => OperatorRecordPresence(request, identity, planned, earlierAction, configuration)));
+            // From 0.9.4 (ID-16) the same action composes its presence session's list at its first signature that needs presence.
+            using IDisposable counted = SessionAction("operator record " + request.Type,
+                PresencePlan(request.By, () => OperatorRecordPresence(request, identity, planned, earlierAction, configuration)),
+                OperatorRecordSession(request, identity, () => ownDraft, () => checkpoint, earlierAction));
 
             // An earlier action whose merge is recorded is finished from its own records first, when its target checks pass.
             // Any other earlier action is truly unfinished and still refuses a new one.
@@ -147,6 +150,7 @@ public sealed partial class EstateService
                     string at = Now();
                     var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(at), id);
                     EstateModel model = session.Load();
+                    ownDraft = draft;
                     (authored, string? refusal) = AuthorLocked(draft, model);
                     if (authored is null) throw new ProviderRefusedException(refusal!);
                     // A revision taking a role away is written after a history checkpoint, which this path cannot carry, or is refused where
@@ -207,8 +211,8 @@ public sealed partial class EstateService
                         RecordReference? subject = null;
                         if (request.Subject is not null && !TryParseSubject(request.Subject, out subject))
                             throw new ProviderRefusedException("The resumed subject is invalid.");
-                        (authored, string? refusal) = AuthorLocked(new(request.Type, request.By, request.Body, subject,
-                            request.Supersedes, ParseAt(checkpoint.At), checkpoint.Id), session.Load());
+                        ownDraft = new(request.Type, request.By, request.Body, subject, request.Supersedes, ParseAt(checkpoint.At), checkpoint.Id);
+                        (authored, string? refusal) = AuthorLocked(ownDraft, session.Load());
                         if (authored is null) throw new ProviderRefusedException(refusal!);
                     }
                     if (authored.Envelope.ComputedHash != checkpoint.Hash) throw new ProviderRefusedException("The resumed record differs from the original intent.");
@@ -557,8 +561,8 @@ public sealed partial class EstateService
         RecordEnvelope merge = progress.Merge!;
         // Finishing observes the target run at the merge commit, once and again while it runs, each announced before it asks (FIX-124).
         string pull = "pull request " + progress.PullRequest;
-        using IDisposable counted = presence.Action("operator unfinished --finish",
-            progress.CheckStatus == "passed" ? null : PresencePlan(by, () => ObservationPresence(pull, "target-run")));
+        using IDisposable counted = SessionAction("operator unfinished --finish",
+            progress.CheckStatus == "passed" ? null : PresencePlan(by, () => ObservationPresence(pull, "target-run")), FinishSession(identity, merge, waitSeconds));
         ChangeResponse change = progress.CheckStatus == "passed"
             ? new(EstateModel.BodyString(merge, "identity")!, "observed-success", "The pinned merge and its target checks are recorded as successful.", true,
                 new(merge.ExpectedPath, merge.Id, merge.ComputedHash), new(progress.Target!.ExpectedPath, progress.Target.Id, progress.Target.ComputedHash),

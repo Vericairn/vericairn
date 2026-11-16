@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
     <InternalsVisibleTo Include="Vericairn.Remote.Tests" />
     <InternalsVisibleTo Include="Vericairn.Sdk" />
+    <!-- From 0.9.4 (ID-16): the daemon's service definitions start the runtime with a release build's environment. -->
+    <InternalsVisibleTo Include="Vericairn.Daemon" />
   </ItemGroup>
 
   <ItemGroup>

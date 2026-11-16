@@ -44,12 +44,23 @@ public static class ServiceInstaller
         EstateManifest manifest = EstateManifest.Load(root, findings) ?? throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
         string platform = VericairnHome.Platform();
         uint? user = platform is "macos" or "linux" ? GetUid() : null;
-        return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), VericairnHome.Path(), user);
+        return Plan(platform, root, manifest.Estate, CurrentLauncher(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), VericairnHome.Path(), user,
+            PresenceSessionBuild.Current.RuntimeEnvironment);
     }
 
     /// <summary>The plan for a platform, pure: no file is touched and no command runs.</summary>
-    public static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId)
+    public static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId) =>
+        Plan(platform, root, estateId, launcher, userHome, vericairnHome, userId, new Dictionary<string, string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): the plan for a platform with the environment the service's runtime starts with, pure. A release build passes the
+    /// .NET diagnostics channel off (DOTNET_EnableDiagnostics=0), which .NET reads only from a process's environment at its start; launchd
+    /// and systemd carry it, and Windows, which opens no presence session, does not.
+    /// </summary>
+    public static ServicePlan Plan(string platform, string root, string estateId, IReadOnlyList<string> launcher, string userHome, string vericairnHome, uint? userId,
+        IReadOnlyDictionary<string, string> environment)
     {
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(platform);
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(estateId);
@@ -81,6 +92,14 @@ public static class ServiceInstaller
                 }
 
                 plist.Append("  </array>\n");
+                if (environment.Count > 0)
+                {
+                    plist.Append("  <key>EnvironmentVariables</key>\n  <dict>\n");
+                    foreach ((string name, string value) in environment.OrderBy(e => e.Key, StringComparer.Ordinal))
+                        plist.Append("    <key>").Append(SecurityElement.Escape(name)).Append("</key><string>").Append(SecurityElement.Escape(value)).Append("</string>\n");
+                    plist.Append("  </dict>\n");
+                }
+
                 plist.Append("  <key>RunAtLoad</key><true/>\n");
                 plist.Append("  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n");
                 plist.Append("  <key>StandardOutPath</key><string>").Append(SecurityElement.Escape(log)).Append("</string>\n");
@@ -103,7 +122,8 @@ public static class ServiceInstaller
                 string? xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
                 string unitPath = Path.Combine(string.IsNullOrWhiteSpace(xdg) ? Path.Combine(userHome, ".config") : xdg, "systemd", "user", label + ".service");
                 string exec = string.Join(' ', arguments.Select(SystemdQuote));
-                string unit = $"[Unit]\nDescription=Vericairn runtime for estate {estateId}\n\n[Service]\nExecStart={exec}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
+                string variables = string.Concat(environment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"Environment={SystemdQuote(e.Key + "=" + e.Value)}\n"));
+                string unit = $"[Unit]\nDescription=Vericairn runtime for estate {estateId}\n\n[Service]\n{variables}ExecStart={exec}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
                 return new ServicePlan(
                     platform,
                     label,

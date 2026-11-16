@@ -57,6 +57,38 @@ public sealed class ChangesFlowTests
         }
     }
 
+    [Fact]
+    public void WithPresenceSessionsEachChangeCommandAsksOneCheckForItsStepByKindBoundToItsHead()
+    {
+        // ID-16: the operator's device needs presence, its file key held by a recording stand-in for that custody; the helper is a stand-in.
+        using var f = new Fixture();
+        WriteOutcome created = f.Service.DeviceCreate(new(f.Estate.OperatorId, "Operator device", "file"));
+        Assert.True(created.Ok, created.Problem?.Message);
+        string device = created.Written!.Id;
+        Assert.True(f.Service.DeviceAdmit(new(device, f.Estate.OperatorId, "Admit the operator's own device.")).Ok);
+        var custody = new RecordingCustody(Vericairn.Records.Signing.VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = d => d == device;
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Service.PresenceHost = StandInSessions.Host(helpers);
+
+        ChangeResponse pushed = f.Service.ChangesPush(f.Push);
+        ChangeResponse opened = f.Service.ChangesOpen(f.Open);
+        ChangeResponse merged = f.Service.ChangesMerge(f.Merge with { PullRequest = opened.PullRequest! });
+
+        Assert.True(pushed.Ok && opened.Ok && merged.Ok, pushed.Message + opened.Message + merged.Message);
+        Assert.Empty(custody.Reasons);
+        Assert.Equal([6, 3, 9], helpers.Select(h => h.SignedHashes.Count));
+        Vericairn.Records.Signing.PresenceSessionRules push = Vericairn.Records.Signing.PresenceSessionRules.ReadTerms(helpers[0].Terms[0]);
+        Assert.Equal("changes push", push.Action);
+        Assert.Equal(Head, push.Entries[0].Fixed["head"]);
+        Assert.Equal("work/change", push.Entries[0].Fixed["branch"]);
+        Assert.Equal("push-head", push.Entries[1].Observation);
+        Vericairn.Records.Signing.PresenceSessionRules merge = Vericairn.Records.Signing.PresenceSessionRules.ReadTerms(helpers[2].Terms[0]);
+        Assert.Equal(opened.PullRequest, merge.Entries[0].Fixed["pullRequest"]);
+        Assert.Equal(0, f.Service.Validate().Errors);
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("pending")]

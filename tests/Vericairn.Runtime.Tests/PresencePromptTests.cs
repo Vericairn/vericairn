@@ -280,6 +280,106 @@ public sealed class PresencePromptTests
     }
 
     [Fact]
+    public void WithPresenceSessionsASubmissionAndItsObservationAskOneCheckEachAndAPublicationKeepsItsOwn()
+    {
+        // ID-16: the release gate's checkpoint and the release build's records by kind share the submission's one check; the build's
+        // revision and the candidate share the observation's; the publication, a single signature, keeps its own check.
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string device) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+        HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
+
+        // The ref is the commit, so the release build's records state the commit the entry fixes.
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId, Ref: provider.HeadSha,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+        Assert.True(submitted.Ok, submitted.Message);
+        Assert.Single(provider.Dispatches);
+        PresenceHelperStandIn submission = Assert.Single(helpers);
+        Assert.Equal(3, submission.SignedHashes.Count);
+        Assert.Empty(custody.Reasons);
+        Assert.Equal(3, SignedSince(f, before, device));
+        Assert.Equal(1, submission.Statuses);
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(submission.Terms[0]);
+        Assert.Equal("release submit", terms.Action);
+        Assert.Equal(["history-checkpoint", "operation"], terms.Entries.Select(e => e.Type));
+        Assert.Equal(provider.HeadSha, terms.Entries[1].Fixed["commit"]);
+
+        provider.CompleteRun("Example/widget", submitted.Run!, success: true, "1.1.0");
+        ReleaseResponse candidate = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, [], [], "unsigned developer build", Product: product.Id));
+        Assert.True(candidate.Candidate is not null, candidate.Message);
+        Assert.Equal(2, helpers.Count);
+        Assert.Equal(2, helpers[1].SignedHashes.Count);
+        Assert.Empty(custody.Reasons);
+
+        RecordEnvelope recorded = f.Api.Session.Load().ById[candidate.Candidate!.Id];
+        WriteOutcome accepted = f.Api.NewRecord(new("acceptance", f.Records.Estate.OperatorId,
+            PolicyFixture.Element(new JsonObject { ["statement"] = "Accept the presence fixture's candidate.", ["basis"] = new JsonArray(), ["self"] = true }),
+            $"release:{recorded.Id}:{recorded.ComputedHash}"));
+        Assert.True(accepted.Ok, accepted.Problem?.Message);
+        provider.Publish("Example/widget", "v1.1.0");
+        ReleaseResponse published = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, Product: product.Id));
+        Assert.True(published.Release is not null, published.Message);
+        Assert.Equal(2, helpers.Count);
+        // The acceptance, a single write, and the publication each kept their own check.
+        Assert.Equal(2, custody.Reasons.Count);
+    }
+
+    [Fact]
+    public void WithPresenceSessionsAWithdrawalListsTheWithdrawnReleaseAndTheDraftsDeletionByExactHash()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string _) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId, Ref: provider.HeadSha,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+        Assert.True(submitted.Ok, submitted.Message);
+        provider.CompleteRun("Example/widget", submitted.Run!, success: true, "1.1.0");
+        ReleaseResponse candidate = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, [], [], "unsigned developer build", Product: product.Id));
+        Assert.True(candidate.Candidate is not null, candidate.Message);
+        RecordEnvelope recorded = f.Api.Session.Load().ById[candidate.Candidate!.Id];
+
+        ReleaseResponse withdrawn = f.Api.ReleaseWithdraw(new(recorded.Id, f.Records.Estate.OperatorId, recorded.ComputedHash, provider.Provider, "The candidate is replaced."));
+
+        Assert.True(withdrawn.Ok, withdrawn.Message);
+        Assert.Equal(3, helpers.Count);
+        Assert.Empty(custody.Reasons);
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(helpers[2].Terms[0]);
+        Assert.Equal("release withdraw", terms.Action);
+        Assert.Equal(["release", "operation"], terms.Entries.Select(e => e.Type));
+        Assert.All(terms.Entries, e => Assert.True(e.Exact));
+        EstateModel model = f.Api.Session.Load();
+        Assert.Equal([model.ById[withdrawn.ReleaseId!].ComputedHash, model.ById[withdrawn.Operation!.Id].ComputedHash], terms.Entries.Select(e => e.Hash));
+    }
+
+    [Fact]
+    public void ASubmissionWhoseRefIsNoCommitListsNoReleaseBuildAndKeepsOneCheckPerSignature()
+    {
+        using var f = new HistoryTriggerTests.Fixture();
+        RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+        (FakeReleaseProvider provider, RecordingCustody custody, string _) = PresenceRelease(f);
+        HeldClock clock = MinuteAhead();
+        Hold(f, provider, clock);
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+
+        ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,
+            Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+        Assert.True(submitted.Ok, submitted.Message);
+        Assert.Empty(helpers);
+        Assert.Equal(3, custody.Reasons.Count);
+    }
+
+    [Fact]
     public void ASubmissionWhoseBasisChangesBeforeDispatchAnnouncesItsRevisedPathBeforeItsNextPrompt()
     {
         using var f = new HistoryTriggerTests.Fixture();

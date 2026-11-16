@@ -35,6 +35,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
             : SecureEnclaveKeyStore.Available()
                 ? new("present", "secure-enclave", "Secure Enclave custody available (record format 2): a person's device asks for Touch ID or the login password at every signature unless it is created with --presence false; an agent's never asks")
                 : new("unavailable", null, SecureEnclaveCustody.HelperPath() is null ? $"no {SecureEnclaveCustody.HelperName} helper beside the command line" : "no Secure Enclave available to this process");
+        Probe presence = Presence(root, estate);
         string records = string.Join(", ", RecordFormats.Reads);
         string writes = $"writes an estate's own format, at most {RecordFormats.Current}";
         (string? sqlite, string? searchProblem) = Vericairn.Runtime.Search.SearchEngine.Probe();
@@ -58,6 +59,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
                 ["estate"] = estate ? new Probe("present", full, "manifest present") : new Probe("missing", full, $"not an estate root (no {EstateLayout.ManifestPath})"),
                 ["custody"] = new Probe("present", custody, $"{custodyDetail}; per-user state at {VericairnHome.Path()}"),
                 ["enclave"] = enclave,
+                ["presence"] = presence,
                 ["records"] = new Probe("present", records, writes),
                 ["search"] = searchProblem is null ? new Probe("present", search, null) : new Probe("unavailable", null, searchProblem),
                 ["daemon"] = !estate ? new Probe("not-applicable", null, null)
@@ -78,6 +80,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
         if (OperatingSystem.IsMacOS())
         {
             context.Output.WriteLine(enclave.State == "present" ? "enclave   " + enclave.Detail : $"enclave   Secure Enclave custody unavailable ({enclave.Detail})");
+            context.Output.WriteLine("presence  " + presence.Detail);
         }
         context.Output.WriteLine($"records   reads record formats {records}; {writes}");
         context.Output.WriteLine(searchProblem is null ? $"search    {search}" : $"search    keyword index unavailable: {searchProblem}");
@@ -92,6 +95,41 @@ internal sealed class MachineDiagnostics(CommandContext context)
         }
 
         return Clean;
+    }
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): whether presence sessions may open here, and why not (design/presence-sessions.md §§ 10 and 11): present with
+    /// "sessions" when this release build's signed helper may open them on this macOS version, unavailable with "per-signature" and the
+    /// reason otherwise; the estate's charter policy, the owners' settings file and, in a release build, this process's .NET diagnostics
+    /// channel follow. Not applicable off macOS, where every signature with a presence key keeps its own check.
+    /// </summary>
+    private static Probe Presence(string root, bool estate)
+    {
+        if (!OperatingSystem.IsMacOS()) return new("not-applicable", null, null);
+        string? off = Vericairn.Runtime.Service.EstateService.PresenceSessionsOff();
+        var notes = new List<string>();
+        if (estate)
+        {
+            try
+            {
+                using var reader = Vericairn.Runtime.Service.EstateService.OpenReadOnly(root);
+                string? policy = reader.EstatePresencePolicy();
+                notes.Add(policy is null ? "the estate's charter states no presence policy (per-action)" : $"the estate's charter asks {policy} presence");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                notes.Add("the estate's charter could not be read");
+            }
+        }
+
+        if (File.Exists(PresenceSettings.PathOf())) notes.Add($"device owners' settings in {PresenceSettings.FileName} may ask one check per signature");
+        PresenceSessionBuild build = PresenceSessionBuild.Current;
+        if (build.Release && !PresenceSessionBuild.DiagnosticsOff)
+            notes.Add($"this process's .NET diagnostics channel is on; set {PresenceSessionBuild.DiagnosticsVariable}=0 to turn it off for the embedded runtime");
+        string tail = notes.Count == 0 ? string.Empty : "; " + string.Join("; ", notes);
+        return off is null
+            ? new("present", "sessions", $"presence sessions on: one check for an action's announced list, at most 300 s, at most 16 judgments to a check{tail}")
+            : new("unavailable", "per-signature", $"presence sessions off because {off}; every signature with a presence key asks its own check{tail}");
     }
 
     // The per-user state, the estate's live store directory and its database, when they exist: one that cannot be made owner-only is

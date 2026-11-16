@@ -76,6 +76,74 @@ public static class CustodyGuard
     }
 
     /// <summary>
+    /// From 0.9.4 (ID-16): whether an agent run this machine's worker started is unsettled under this operating-system user, the agent
+    /// condition of design/presence-sessions.md § 10 (decision 4): while one is, every exact entry of a presence session's list gets its own
+    /// check and only kind entries share one, so an approval the person did not mean gives that run no batch of judgments. The worker runs
+    /// an agent as the user it runs as, and keeps each run's observed state under that user's Vericairn home, so the runs found there are
+    /// this user's: one counts until its settlement is recorded while its harness, or its worker before the harness starts, may still run.
+    /// A state that cannot be read counts as under way. An agent the runtime did not start is not seen.
+    /// </summary>
+    public static bool UnsettledAgentRuns(string? home = null)
+    {
+        string estates = Path.Combine(home ?? VericairnHome.Path(), "estates");
+        if (!Directory.Exists(estates)) return false;
+        try
+        {
+            foreach (string runs in Directory.EnumerateDirectories(estates).Select(e => Path.Combine(e, "runs")).Where(Directory.Exists))
+            {
+                foreach (string state in Directory.EnumerateDirectories(runs).Select(r => Path.Combine(r, "state.json")).Where(File.Exists))
+                {
+                    if (UnderWay(state)) return true;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool UnderWay(string path)
+    {
+        RunObservedState? state;
+        try
+        {
+            state = System.Text.Json.JsonSerializer.Deserialize<RunObservedState>(File.ReadAllBytes(path), Protocol.ProtocolJson.Options);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return true;
+        }
+
+        if (state is null) return true;
+        if (state.Settled is not null) return false;
+        if (state.ProcessId is int harness && DateTimeOffset.TryParse(state.LaunchedAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset launched))
+            return !RunProcesses.Gone(harness, launched) || Alive(state.Supervisor);
+        return Alive(state.Supervisor);
+    }
+
+    private static bool Alive(int processId)
+    {
+        if (processId <= 0) return false;
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
     /// The principals whose devices the guard checks for a run of a goal: every operator, and the goal's sponsor; never the agent the
     /// run launches, whose own key its MCP server signs with.
     /// </summary>
