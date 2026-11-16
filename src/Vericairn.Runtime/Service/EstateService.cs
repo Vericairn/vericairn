@@ -3084,7 +3084,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
     /// themselves, a new admission or revocation that would count for nothing, a decision dated after its own record, an acceptance by a
     /// principal other than the operator on a review that did not pass, a record whose author is no known principal, a result whose output location carries a URL scheme, a result whose
-    /// output no longer has the bytes it claims, and a goal recorded impossible without its evaluator's verdict of impossible. Records not stored yet get the content checks a stored file gets, on their canonical
+    /// output no longer has the bytes it claims, a goal recorded impossible without its evaluator's verdict of impossible, and a flow decision that leaves out a record its rules read or whose rules do not hold with the states they name read now. Records not stored yet get the content checks a stored file gets, on their canonical
     /// bytes, since the checks of stored files cannot see them.
     /// </summary>
     private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
@@ -3151,6 +3151,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         // keep their reading.
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is OperationType.IntentKeptCode or OperationType.TargetKeptCode
             && records.Any(r => f.Location == r.RelativePath + "#body.intent" || f.Location == r.RelativePath + "#body.target")))
+        {
+            relevant.Add(finding with { Severity = Severity.Error });
+        }
+
+        // From 0.9.4 (PROC-19), a new flow decision names every record its rules read, and its rules hold with the derived states they name
+        // read now, when it is written; decisions already in the estate keep their reading, so a later record or a later change of a state
+        // never invalidates one or blocks an unrelated write.
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Info && f.Code is FlowDecisions.ReadCode or FlowDecisions.StateCode
+            && records.Any(r => f.Location.StartsWith(r.RelativePath + "#", StringComparison.Ordinal))))
         {
             relevant.Add(finding with { Severity = Severity.Error });
         }

@@ -51,6 +51,7 @@ public sealed class ResultType : IRecordType
         new("provenance", "object", false, ProducedBy.Description, 3),
         new("progressClaim", "object", false, "The last agent claim retained as context: phase, note, at, optional typed progress and statusText. Never evidence of completion or acceptance.", 3),
         new("duties", "object[]", false, "Exact originating policy, rule, tagged occurrence, examined subject, scope, coverage and supporting proof bindings. This is a signed claim, not acceptance.", 3),
+        new("decision", "object", false, "From 0.9.4, the decision of a run's decision step, recorded by the principal holding its assignment: paths (the path or paths of the step's transition it takes), reasons, and evidence, each {type, id, hash} of an exact record. Only a completed result of an assignment of a decision step whose role decides its transition carries it; a decision the flow requires of a person, or one never delegated, is a person's. Distinct from the estate's decision records, and it performs nothing reserved. A reader lacking the field shows the record and reads the step undecided.", 3),
     ];
 
     /// <inheritdoc />
@@ -112,6 +113,7 @@ public sealed class ResultType : IRecordType
             claim.NoOtherKeys();
         }
         ProducedBy.Read(context, body);
+        FlowDecisions.Validate(context, body, outcome);
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {

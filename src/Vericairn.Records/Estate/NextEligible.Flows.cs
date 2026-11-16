@@ -25,9 +25,10 @@ public static partial class NextEligible
 {
     /// <summary>
     /// The route states the one-step operation acts on for a run: an agent's run, a person's assignment and ask, the sponsor's ask for
-    /// required attention, or the operator request of a reserved act.
+    /// required attention, the operator request of a reserved act, and from 0.9.4 (PROC-19) a rule's decision, or a missed deadline's
+    /// default, recorded as the position derives it.
     /// </summary>
-    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention", "request"];
+    public static readonly ImmutableArray<string> FlowDispatching = ["agent", "person", "reserved", "attention", "request", "rule"];
 
     /// <summary>One step instance of a run, with its route from this machine when it is a ready work or review step, a review before hand-off, or required attention.</summary>
     /// <param name="Step">The step instance and its derived state.</param>
@@ -90,10 +91,23 @@ public static partial class NextEligible
         foreach (FlowPosition.StepInstance instance in position.Steps)
         {
             // Required attention of a held step is routed to the sponsor as an ask, never to another contributor; from 0.9.4 (PROC-18) so is
-            // a missed deadline's, whatever the step's kind.
-            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind == "missed"))
+            // a missed deadline's, and from 0.9.4 (PROC-19) a decision's path back past its limit, whatever the step's kind.
+            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind is "missed" or "loop"))
             {
                 steps.Add(new FlowStepRoute(instance, AttentionOf(model, current, status, instance.Step.Role, attention, machine)));
+                continue;
+            }
+
+            // From 0.9.4 (PROC-19) a rule's decision, or a missed deadline's default, not yet on record is recorded by the one-step
+            // operation, signed by who takes the step; no contributor carries it.
+            if (position.Work is not null && position.Flow is not null && instance.State == "next" && instance.Decision is { State: "pending", Record: null, Decider: "rule" or "default" or "deadline" } ruling)
+            {
+                IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
+                string by = ruling.Decider == "deadline" ? "its deadline's default" : ruling.Rule == "default" ? "its rule's default" : $"its rule {ruling.Rule}";
+                string what = ruling.Rule == "none"
+                    ? $"the round's kind: no rule held as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}, so its role decides; goal step records that, signed by who takes the step, and then routes the step to its role"
+                    : $"a decision by {by}: path {string.Join(", ", ruling.Paths)}, as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}; goal step records it, signed by who takes the step, and no contributor carries it";
+                steps.Add(new FlowStepRoute(instance, new Route(instance.Step.Role, null, new Routing.Source(null, "the run's own rule, recorded by who takes the step"), [], "rule", null, null, null, null, null, fence, [], what)));
                 continue;
             }
 
@@ -137,8 +151,12 @@ public static partial class NextEligible
 
             string role = instance.Step.Role;
             bool person = position.Flow.Role(role)?.Holder == "person";
-            Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => person && candidate.IsAgent
-                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, $"the flow marks the {role} role a person's, and an agent never holds it"] }
+            // From 0.9.4 (PROC-19) a decision the flow requires of a person, or one never delegated, is never routed to an agent.
+            string? personal = instance.Step.Decides && instance.Step.Transition is { PersonOnly: true } transition
+                ? $"step {instance.Step.Key}'s decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}, and an agent never decides it"
+                : null;
+            Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
+                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"] }
                 : candidate);
             steps.Add(new FlowStepRoute(instance, route));
         }

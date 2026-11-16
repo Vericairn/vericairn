@@ -237,6 +237,16 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>True while a run in the last observation has a due time to show.</summary>
     public bool HasDue => Due.Count > 0;
 
+    /// <summary>
+    /// From 0.9.4 (PROC-19), the decisions of the estate's runs from the last observation: who decided what and why, or that a step waits
+    /// on its decider. Remote shows them; a person decides with goal decide through the runtime that serves the estate.
+    /// </summary>
+    public IReadOnlyList<DecisionRow> Decisions { get => decisions; private set { if (Set(ref decisions, value)) Raise(nameof(HasDecisions)); } }
+    private IReadOnlyList<DecisionRow> decisions = [];
+
+    /// <summary>True while a run in the last observation has a decision to show.</summary>
+    public bool HasDecisions => Decisions.Count > 0;
+
     /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
     public string StopsAsOf { get => stopsAsOf; private set => Set(ref stopsAsOf, value); }
     private string stopsAsOf = string.Empty;
@@ -396,6 +406,7 @@ public sealed partial class RemoteViewModel : Observable
         Products = observation?.Products ?? [];
         Stops = view?.Stops ?? [];
         Due = view?.Due ?? [];
+        Decisions = view?.Decisions ?? [];
         StopsAsOf = view?.StopsAsOf ?? string.Empty;
         History = view?.History ?? string.Empty;
         Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";

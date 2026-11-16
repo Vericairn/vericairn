@@ -296,6 +296,17 @@ public sealed partial class ToolRegistry
                 async (api, a, token) => OptionalArg(a, "goal") is string id ? (await api.GoalAsync(id, cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Json.GetRawText(), false) : NotFound("goal", id) : Json((await api.GoalsAsync(cancellationToken: token).ConfigureAwait(false)))),
             Read("goal_progress", "A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records.", Arguments(("goal", "Goal record id (ULID), any revision.")), "goal",
                 async (api, a, token) => (await api.GoalAsync(Arg(a, "goal"), cancellationToken: token).ConfigureAwait(false)) is GoalResponse goal ? new ToolCallResult(goal.Text, false) : NotFound("goal", Arg(a, "goal"))),
+            Write("goal_decide", "From 0.9.4: records the decision of a run's decision step by the acting principal, which holds the step's current assignment: the path or paths its transition takes, the reasons and the evidence by hash, as the result of that assignment, signed by its own device. The first decision of a round is final. Choosing a path performs nothing reserved and dispatches nothing; goal step takes the steps it makes eligible. A decision the flow requires of a person is refused for an agent, and a rule's decision is recorded by goal step, never here.",
+                DecideArguments(), ["goal", "step", "paths", "reasons"],
+                async (api, a, token) =>
+                {
+                    if (!TryStrings(a, "paths", out IReadOnlyList<string>? paths, out string? problem) || !TryStrings(a, "evidence", out IReadOnlyList<string>? evidence, out problem))
+                    {
+                        return new ToolCallResult(problem!, true);
+                    }
+
+                    return Outcome(await api.GoalDecideAsync(Arg(a, "goal"), new GoalDecideRequest(by, Arg(a, "step"), paths ?? [], Arg(a, "reasons"), evidence), token).ConfigureAwait(false));
+                }),
             Read("asks_list", "What waits on a principal, or on every principal when none is named: the asks still open or notified, oldest first, at most three in one delivery to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order. As text, or as the canonical JSON when form is json. Reading them answers nothing: an ask is answered by a decision of the principal it is put to, which no tool records.", Arguments(("to", "The principal asked (ULID); omitted, every principal."), ("form", "text (the default) or json.")),
                 async (api, a, token) => OptionalArg(a, "form") switch
                 {
@@ -403,6 +414,15 @@ public sealed partial class ToolRegistry
             ["required"] = new JsonArray("id", "hash"), ["additionalProperties"] = false,
         };
         schema["required"] = new JsonArray("product", "version", "by", "commit", "expected", "clientBuild");
+        return schema;
+    }
+
+    /// <summary>The arguments of goal_decide: the goal, the step, the paths, the reasons and the evidence.</summary>
+    private static JsonObject DecideArguments()
+    {
+        JsonObject schema = Arguments(("goal", "Goal record id (ULID), any revision."), ("step", "The decision step's key."), ("reasons", "Why this path, from the evidence named."));
+        schema["properties"]!["paths"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The path or paths of the step's transition the decision takes; several only where the flow allows." };
+        schema["properties"]!["evidence"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The records the decision rests on, each as id or type:id, pinned at their current hash." };
         return schema;
     }
 

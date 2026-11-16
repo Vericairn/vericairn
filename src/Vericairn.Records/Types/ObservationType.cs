@@ -12,13 +12,13 @@ namespace Vericairn.Records.Types;
 public sealed class ObservationType : IRecordType
 {
     /// <summary>What kinds of subject are observed so far.</summary>
-    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package", "vericairn-release", "operator-request", SecurityReportRules.TriageKind];
+    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package", "vericairn-release", "operator-request", SecurityReportRules.TriageKind, FlowDecisions.ObservationKind];
 
     /// <inheritdoc />
     public string Name => "observation";
 
     /// <inheritdoc />
-    public string Summary => "Something reported or measured about an exact subject with an as-of time: a repository, release or workflow run; from record format 2, a person's explicit observation of an estate; from format 3, package registry state with response evidence, and the operator's security triage of an advisory. Facts, never permission or health.";
+    public string Summary => "Something reported or measured about an exact subject with an as-of time: a repository, release or workflow run; from record format 2, a person's explicit observation of an estate; from format 3, package registry state with response evidence, the operator's security triage of an advisory, and from 0.9.4 a run's rule decision as the runtime evaluated it. Facts, never permission or health.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -32,7 +32,7 @@ public sealed class ObservationType : IRecordType
         new("kind", string.Join('|', Kinds), true, "What was observed; estate requires record format 2, a human author and an exact estate subject."),
         new("asOf", FieldKinds.Timestamp, true, "When the observation was made."),
         new("summary", "string", true, "The observation in a sentence."),
-        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash. An operator-request observation requires outcome (done), destination, location and evidenceHash, and its signed exact request subject. Format-3 package facts pin provider, product, productHash, package and version, with either release and releaseHash or reserved (the same version declared reserved in that exact product, with no release pins). The subject is the exact release, reserved product declaration or original account-holder intent. A format-3 security-triage, by the operator only, pins the exact GitHub repository resource and carries exactly advisory (GHSA identifier), repository (owner/name), contentHash (the provider response's hash), disposition (security, duplicate or no-action) and reason (at most 500 characters, required for no-action); never the advisory's text."),
+        new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash. An operator-request observation requires outcome (done), destination, location and evidenceHash, and its signed exact request subject. Format-3 package facts pin provider, product, productHash, package and version, with either release and releaseHash or reserved (the same version declared reserved in that exact product, with no release pins). The subject is the exact release, reserved product declaration or original account-holder intent. A format-3 security-triage, by the operator only, pins the exact GitHub repository resource and carries exactly advisory (GHSA identifier), repository (owner/name), contentHash (the provider response's hash), disposition (security, duplicate or no-action) and reason (at most 500 characters, required for no-action); never the advisory's text. From 0.9.4 a format-3 flow-decision records a run's rule decision, or the default its deadline takes, as the runtime evaluated it: its subject is the exact goal revision, its author takes the run's steps, and its facts are step, paths (the one path the rule takes), rule (the rule's number from 1, default or deadline; or none, with no path, recording under rule-then-role that no rule held, so the role decides the round, by who takes the run's steps or the principal holding the step's assignment) and read (each record the rule read as its type, id and hash separated by spaces); asOf is when the rule read the records, the round's start, and only the first for a round counts."),
         new("limitations", "string[]", true, "What the observation does not establish; may be empty."),
         new("evidence", "object[]", false, "For package observations: exact public registry url, response-body hash, HTTP status, byte count and content encoding for each response; hashes cover bytes before gzip decoding.", 3),
     ];
@@ -48,6 +48,7 @@ public sealed class ObservationType : IRecordType
         BodyReader? facts = body.Nested("facts", true);
         if (kind == "operator-request") OperatorRequestRules.Observation(context, facts, asOf);
         if (kind == SecurityReportRules.TriageKind) SecurityReportRules.Triage(context, facts);
+        if (kind == FlowDecisions.ObservationKind) FlowDecisions.ValidateObservation(context, facts, asOf);
         if (facts is not null)
         {
             if (kind == "vericairn-release") VericairnReleaseObservation.Validate(context, facts);

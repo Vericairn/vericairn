@@ -80,7 +80,20 @@ public sealed partial class EstateService
         }
 
         var criteria = new List<string>();
-        if (step.Kind == "review")
+        if (step.Decides && step.Transition is FlowTransition transition)
+        {
+            // From 0.9.4 (PROC-19) a decision step's brief names its paths and how its decision is recorded; nothing reserved is in it.
+            string paths = string.Join("; ", transition.Paths.Select(p => $"{p.Name}, to {p.Leads}{(p.Limit is int limit ? $", at most {limit} times" : string.Empty)}"));
+            outputs.Clear();
+            outputs.Add(Clip($"The decision of step {instance.Name}: the path{(transition.Several ? " or paths" : string.Empty)} taken among {paths}, the reasons, and the evidence by hash.", 2000));
+            criteria.Add(Clip($"Decide among its paths ({paths}){(transition.Several ? ", several at once where they meet at their join" : ", one of them")}, and record it with vericairn goal decide {goal.Id} --step {instance.Name} --path <path> --reason <why> --evidence <record> --by {route.Principal}.", 2000));
+            criteria.Add("Choosing a path performs nothing reserved: it only makes the steps it leads to eligible, and a reserved step still waits on the operator.");
+            if (transition.Review is { Independence: not "none" } required)
+            {
+                criteria.Add($"An agent's decision takes effect only after a review ({required.Independence}{(required.Role is null ? string.Empty : ", in the " + required.Role + " role")}) by a principal other than its decider.");
+            }
+        }
+        else if (step.Kind == "review")
         {
             FlowInput reviewed = step.Inputs.First(i => i.Step is not null);
             FlowPosition.StepInstance? producer = taken.Flow.Find(new FlowRuns.StepRef(reviewed.Step!, flow.Step(reviewed.Step)?.Each is null ? null : instance.Instance));

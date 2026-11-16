@@ -407,6 +407,10 @@ public sealed record GoalStepResponse(string Goal, string Outcome, string Messag
     /// <summary>For a run's reserved act, the operator request this call wrote, carrying the step's exact command; it grants nothing (0.9.2).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RecordWritten? Request { get; init; }
+
+    /// <summary>From 0.9.4, for a decision step its rule decides, the flow-decision observation this call wrote, recording the rule's decision, or a missed deadline's default, as the run derived it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public RecordWritten? Decision { get; init; }
 }
 
 /// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
@@ -487,6 +491,19 @@ public sealed record GoalAcceptRequest(string By, string Statement)
 /// <param name="Reason">The reason for every unsettled step <paramref name="StepReasons"/> gives none.</param>
 /// <param name="StepReasons">The reasons for single unsettled steps.</param>
 public sealed record GoalCloseRequest(string By, string? Reason = null, IReadOnlyList<GoalStepReason>? StepReasons = null);
+
+/// <summary>
+/// Decide a run's decision step (from 0.9.4, PROC-19; the estate's design/flow.md § 5): the principal holding the step's assignment, the
+/// person or the agent its role reached, records the path or paths its transition takes, the reasons and the evidence by hash, as the
+/// result of that assignment, signed by its own device. Choosing a path performs nothing reserved: it only makes the steps the path leads to
+/// eligible, which goal step then takes. A decision the flow requires of a person, or one never delegated, is a person's.
+/// </summary>
+/// <param name="By">The deciding principal: the contributor of the step's current assignment.</param>
+/// <param name="Step">The step instance: its key, or key[instance] for a step that runs over a list.</param>
+/// <param name="Paths">The path or paths taken; several only where the flow allows.</param>
+/// <param name="Reasons">Why this path.</param>
+/// <param name="Evidence">The records it rests on, each as id or type:id, pinned at their current hash.</param>
+public sealed record GoalDecideRequest(string By, string Step, IReadOnlyList<string> Paths, string Reasons, IReadOnlyList<string>? Evidence = null);
 
 /// <summary>A reason for one unsettled step of a run.</summary>
 /// <param name="Step">The step instance: its key, or key[instance] for a step that runs over a list.</param>

@@ -412,6 +412,25 @@ internal sealed class GoalOperations(CommandContext context)
         return context.WithApi(root, api => context.ReportOutcome(api.GoalClose(goal, new GoalCloseRequest(by, reason, steps.Count == 0 ? null : steps)), json));
     }
 
+    /// <summary>
+    /// Decides a run's decision step (from 0.9.4, PROC-19): the path or paths taken, the reasons and the evidence, recorded as the result of
+    /// the step's assignment by the principal holding it. It performs nothing reserved and dispatches nothing.
+    /// </summary>
+    public int GoalDecide(string root, string goal, string by, string step, string[] paths, string reason, string[] evidence, bool json)
+    {
+        if (paths.Length == 0)
+        {
+            return context.Fail("A decision names the path it takes: --path <name>, repeated for several paths at once where the flow allows.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return context.Fail("A decision records its reasons: --reason <why this path>.");
+        }
+
+        return context.WithApi(root, api => context.ReportOutcome(api.GoalDecide(goal, new GoalDecideRequest(by, step, paths, reason, evidence.Length == 0 ? null : evidence)), json));
+    }
+
     /// <summary>The --reason option of goal close and goal accept.</summary>
     internal static Option<string?> ReasonOption() => new("--reason")
     {

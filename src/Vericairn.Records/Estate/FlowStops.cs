@@ -318,7 +318,7 @@ public static class FlowStops
                 stops.Add(kind switch
                 {
                     "reserved" => Reserved(model, position, instance),
-                    "attention" => instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind == "missed")
+                    "attention" => instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind is "missed" or "loop")
                         ? Attending(model, goal, instance.Name, instance.Ref, instance.Step.Title, attention, sponsor)
                         : new RunStop("attention", instance.Name, instance.Step.Title, instance.Ref, sponsor, Last(instance), "outside", null),
                     _ => Person(model, instance),
@@ -520,6 +520,17 @@ public static class FlowStops
                     return (JsonNode)due;
                 }).ToArray());
             }
+            // From 0.9.4 (PROC-19) each step's decision: who decided what and why, or that it waits on its decider.
+            if (run.Steps.Where(s => s.Decision is not null).ToList() is { Count: > 0 } decided)
+            {
+                shown["decisions"] = new JsonArray(decided.Select(s =>
+                {
+                    JsonObject decision = FlowPosition.DecisionJson(model, s.Decision!);
+                    decision.Insert(0, "name", s.Name);
+                    return (JsonNode)decision;
+                }).ToArray());
+            }
+
             if (FlowPosition.ClosingJson(model, run) is JsonObject closed)
             {
                 shown["closed"] = closed;
@@ -558,6 +569,12 @@ public static class FlowStops
             {
                 // From 0.9.4 (PROC-18) a step's due time is shown before it runs.
                 text.Append("    Due: ").Append(timed.Name).Append(' ').Append(FlowPosition.DueText(timed.Due!)).Append('\n');
+            }
+
+            foreach (FlowPosition.StepInstance decided in run.Steps.Where(s => s.Decision is not null))
+            {
+                // From 0.9.4 (PROC-19) who decided what and why.
+                text.Append("    Decision: ").Append(decided.Name).Append(' ').Append(FlowPosition.DecisionText(model, decided.Decision!)).Append('\n');
             }
 
             AppendText(text, model, run.Stops, "    ");

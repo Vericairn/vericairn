@@ -240,6 +240,156 @@ public class FlowCliJourneyTests
         }
     }
 
+    [Fact]
+    public void APersonDecidesARunsDecisionStepWithGoalDecideAndGoalStepTakesThePath()
+    {
+        string root = CliHarness.TempDirectory("flow-decide");
+        string scratch = CliHarness.TempDirectory("flow-decide-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Runs.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string agent = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "agent.json", """{"kind":"agent","name":"Writer","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+            JsonObject flow = FlowFixture.Gate();
+            JsonObject release = flow["steps"]![2]!.AsObject();
+            release["kind"] = "work";
+            release.Remove("done");
+            release["outputs"] = new JsonArray(FlowFixture.FileItem("notes"));
+            File.WriteAllText(Path.Combine(root, "docs", "templates", "example-gate-1.0.0.json"), flow.ToJsonString());
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json",
+                $$$"""{"roles":[{"role":"writer","principals":["{{{op}}}"]},{"role":"approver","principals":["{{{op}}}"]}]}"""));
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+                """{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and decide its release.","scope":["path:song/"],"exitQuestion":"Is the song decided?","inputs":[],"deliverables":["the song"]}""")).Id;
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Decide the song", "--objective", "Draft the song and decide its release.",
+                "--done", """{"type":"work-order","fields":{"key":"SONG-1"}}""", "--work-order", order, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2",
+                "--flow", "example/gate@1.0.0", "--subject", "recording=" + order).Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string drafting = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step").GetProperty("assignment").GetProperty("id").GetString()!;
+            string lyrics = Carry(root, scratch, op, drafting, "lyrics", null, 'a').GetProperty("id").GetString()!;
+
+            // Before goal step gives the decision to the approver, nothing holds it; a decision names a path and its reasons.
+            Refused(root, "No assignment holds step gate", ["goal", "decide", goal, "--by", op, "--step", "gate", "--path", "ship", "--reason", "Ready."]);
+            JsonElement asked = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step");
+            Assert.Equal(("ask", "gate", "person"), (asked.GetProperty("outcome").GetString(), asked.GetProperty("step").GetString(), asked.GetProperty("route").GetString()));
+            Refused(root, "'elsewhere' is not a path of step gate", ["goal", "decide", goal, "--by", op, "--step", "gate", "--path", "elsewhere", "--reason", "Somewhere."]);
+            Refused(root, "takes one path", ["goal", "decide", goal, "--by", op, "--step", "gate", "--path", "ship", "--path", "drop", "--reason", "Both."]);
+            Refused(root, "does not hold it", ["goal", "decide", goal, "--by", agent, "--step", "gate", "--path", "ship", "--reason", "The agent's choice."]);
+
+            // The approver decides: the decision is the result of the assignment, with its reasons and evidence by hash.
+            string decided = CliHarness.Ok("--estate", root, "--json", "goal", "decide", goal, "--by", op, "--step", "gate", "--path", "ship", "--reason", "The lyrics are ready.", "--evidence", "result:" + lyrics).Id;
+            JsonElement record = CliHarness.Ok("--estate", root, "--json", "records", "show", decided).Json;
+            Assert.Equal("ship", record.GetProperty("body").GetProperty("decision").GetProperty("paths")[0].GetString());
+            Assert.Equal(lyrics, record.GetProperty("body").GetProperty("decision").GetProperty("evidence")[0].GetProperty("id").GetString());
+            string shown = CliHarness.Ok("--estate", root, "goal", "show", goal).Out;
+            Assert.Contains("decision: taken, decided by role in this run; path ship by Operator, a person", shown, StringComparison.Ordinal);
+            Assert.Contains("Decision: gate taken", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+            Refused(root, "is not waiting on its decider", ["goal", "decide", goal, "--by", op, "--step", "gate", "--path", "drop", "--reason", "Changed my mind."]);
+
+            // goal step takes the path chosen: release is next, and is assigned and asked as any step is.
+            JsonElement next = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step");
+            Assert.Equal(("ask", "release"), (next.GetProperty("outcome").GetString(), next.GetProperty("step").GetString()));
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void AnAgentDecidesThroughMcpAndGoalStepRecordsARulesDecision()
+    {
+        // Review finding 12: an agent limited to MCP decides with goal_decide; and finding 5: goal step records a rule's decision.
+        string root = CliHarness.TempDirectory("flow-decide-mcp");
+        string scratch = CliHarness.TempDirectory("flow-decide-mcp-scratch");
+        try
+        {
+            (string op, string agent, string goal, string order) = GateRun(root, scratch, approverIsAgent: true, rule: false);
+            string first = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Operator device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", first, "--by", op, "--note", "The first authority.");
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", agent, "--name", "Writer device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "The writer's device.");
+            string orderHash = CliHarness.Ok("--estate", root, "--json", "records", "show", order).Json.GetProperty("hash").GetString()!;
+            string assignment = CliHarness.Ok("--estate", root, "--json", "records", "new", "assignment", "--by", op, "--subject", $"work-order:{order}:{orderHash}", "--body", CliHarness.WriteJson(scratch, "gate.json",
+                $$$"""{"contributor":"{{{agent}}}","step":{"key":"gate"},"brief":{"outcome":"Decide the gate.","sources":[],"permittedChanges":["path:song/"],"prohibitedEffects":["publication"],"workspace":["song repository"],"limits":[],"expectedOutputs":["the decision"],"reviewCriteria":["a path"],"recovery":"Decide again."}}""")).Id;
+            using (Vericairn.Runtime.Service.EstateService api = Vericairn.Runtime.Service.EstateService.Open(root))
+            {
+                var registry = new Vericairn.Mcp.ToolRegistry(api, agent);
+                Vericairn.Mcp.ToolCallResult refused = registry.Call("goal_decide", new JsonObject { ["goal"] = goal, ["step"] = "gate", ["paths"] = new JsonArray("elsewhere"), ["reasons"] = "Somewhere." });
+                Assert.True(refused.IsError, refused.Text);
+                Assert.Contains("is not a path of step gate", refused.Text, StringComparison.Ordinal);
+                Vericairn.Mcp.ToolCallResult decided = registry.Call("goal_decide", new JsonObject { ["goal"] = goal, ["step"] = "gate", ["paths"] = new JsonArray("ship"), ["reasons"] = "The lyrics are ready." });
+                Assert.False(decided.IsError, decided.Text);
+            }
+
+            JsonElement gate = CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("flow").GetProperty("steps").EnumerateArray().Single(s => s.GetProperty("key").GetString() == "gate");
+            Assert.Equal(("done", "agent", agent), (gate.GetProperty("state").GetString(), gate.GetProperty("decision").GetProperty("decidedBy").GetString(), gate.GetProperty("decision").GetProperty("by").GetString()));
+            Assert.Equal(assignment, CliHarness.Ok("--estate", root, "--json", "records", "show", gate.GetProperty("decision").GetProperty("record").GetProperty("id").GetString()!).Json.GetProperty("subject").GetProperty("id").GetString() is string attempt
+                ? CliHarness.Ok("--estate", root, "--json", "records", "show", attempt).Json.GetProperty("subject").GetProperty("id").GetString() : null);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+
+        root = CliHarness.TempDirectory("flow-decide-rule");
+        scratch = CliHarness.TempDirectory("flow-decide-rule-scratch");
+        try
+        {
+            (string op, _, string goal, _) = GateRun(root, scratch, approverIsAgent: false, rule: true);
+            JsonElement ruled = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step");
+            Assert.Equal(("decided", "gate", "rule"), (ruled.GetProperty("outcome").GetString(), ruled.GetProperty("step").GetString(), ruled.GetProperty("route").GetString()));
+            string observation = ruled.GetProperty("decision").GetProperty("id").GetString()!;
+            JsonElement recorded = CliHarness.Ok("--estate", root, "--json", "records", "show", observation).Json.GetProperty("body");
+            Assert.Equal(("flow-decision", "drop", "default"), (recorded.GetProperty("kind").GetString(), recorded.GetProperty("facts").GetProperty("paths")[0].GetString(), recorded.GetProperty("facts").GetProperty("rule").GetString()));
+            Assert.Contains("decision: taken, decided by rule in this run; path drop by its rule's default", CliHarness.Ok("--estate", root, "goal", "show", goal).Out, StringComparison.Ordinal);
+            Assert.Contains("every step of goal", CliHarness.Ok("--estate", root, "goal", "step", goal, "--by", op).Out, StringComparison.Ordinal);
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    /// <summary>
+    /// A run of the gate flow from the command line, its draft carried by the operator: the gate decided by the approver, the operator or
+    /// the writer agent, or by its rule (approved ships, else drop); release a work step. Returns the operator, the agent, the goal and the work order.
+    /// </summary>
+    private static (string Op, string Agent, string Goal, string Order) GateRun(string root, string scratch, bool approverIsAgent, bool rule)
+    {
+        string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Runs.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+        string agent = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "agent.json", """{"kind":"agent","name":"Writer","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+        Directory.CreateDirectory(Path.Combine(root, "docs", "templates"));
+        JsonObject flow = FlowFixture.Gate();
+        JsonObject release = flow["steps"]![2]!.AsObject();
+        release["kind"] = "work";
+        release.Remove("done");
+        release["outputs"] = new JsonArray(FlowFixture.FileItem("notes"));
+        if (rule)
+        {
+            JsonObject transition = flow["steps"]![1]!["transition"]!.AsObject();
+            transition["decider"] = "rule";
+            transition["rules"] = new JsonArray(new JsonObject { ["path"] = "ship", ["when"] = new JsonArray(FlowFixture.Marker("APPROVED")) });
+            transition["default"] = "drop";
+        }
+
+        File.WriteAllText(Path.Combine(root, "docs", "templates", "example-gate-1.0.0.json"), flow.ToJsonString());
+        CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json",
+            $$$"""{"roles":[{"role":"writer","principals":["{{{op}}}"]},{"role":"approver","principals":["{{{(approverIsAgent ? agent : op)}}}"]}]}"""));
+        string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json",
+            """{"key":"SONG-1","kind":"ordinary","title":"Produce the song","intent":"Produce a song and decide its release.","scope":["path:song/"],"exitQuestion":"Is the song decided?","inputs":[],"deliverables":["the song"]}""")).Id;
+        string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Decide the song", "--objective", "Draft the song and decide its release.",
+            "--done", """{"type":"work-order","fields":{"key":"SONG-1"}}""", "--work-order", order, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2",
+            "--flow", "example/gate@1.0.0", "--subject", "recording=" + order).Id;
+        CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+        string drafting = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step").GetProperty("assignment").GetProperty("id").GetString()!;
+        Carry(root, scratch, op, drafting, "lyrics", null, 'a');
+        return (op, agent, goal, order);
+    }
+
     private static void Refused(string root, string because, string[] args)
     {
         CliHarness.Outcome outcome = CliHarness.Run(["--estate", root, .. args]);

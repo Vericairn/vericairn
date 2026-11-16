@@ -26,6 +26,10 @@ store, and no real-device qualification is recorded for it.
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
     From 0.9.4, below them, the due times of the runs' timed steps, each step with when it is due and why, its timing, zone,
     deadline and a missed-time rule it took, as canonical status gives them, before the step runs; Remote starts none of them.
+    From 0.9.4 (PROC-19), below them, the decisions of the runs' decision steps: who decided each path, a rule, its default, a
+    deadline, an agent or a person, when and why, with the evidence or the records a rule read by hash, or that a step waits on
+    its decider, as canonical status gives them. A person decides with `vericairn goal decide` through the runtime that serves the
+    estate; Remote records no decision of a run's step in this build.
     From 0.9.3, a work order proposed for a goal whose plan says `sponsor-approves` is a decision needed for the goal's
     sponsor, waiting for the sponsor, with the command that approves it; Remote approves nothing
     ([goals](operator-guide.md#17-goals-predicates-and-evaluation)).

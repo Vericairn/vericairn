@@ -85,6 +85,12 @@ public class GoalApiTests
         Assert.Contains($"Goal {goal} is not a run of a flow", notARun.Problem.Message, StringComparison.Ordinal);
         Assert.Contains("an agent never closes a run", api.GoalClose(goal, new GoalCloseRequest(builder, "Mine.")).Problem!.Message, StringComparison.Ordinal);
         Assert.Equal("not-found", (await api.GoalCloseAsync("01M4TRNE1GYEK4P8MXQAB3C8Q4", new GoalCloseRequest(op, "Gone."), TestContext.Current.CancellationToken)).Problem!.Code);
+
+        // From 0.9.4 a run's decision step is decided through the API as goal decide does: a goal that runs no flow and a missing goal are refused.
+        WriteOutcome undecided = api.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["ship"], "Ready."));
+        Assert.Equal("refused", undecided.Problem!.Code);
+        Assert.Contains($"Goal {goal} is not a run of a flow", undecided.Problem.Message, StringComparison.Ordinal);
+        Assert.Equal("not-found", (await api.GoalDecideAsync("01M4TRNE1GYEK4P8MXQAB3C8Q4", new GoalDecideRequest(op, "gate", ["ship"], "Gone."), TestContext.Current.CancellationToken)).Problem!.Code);
         Assert.Equal(0, api.Check().Errors);
     }
 

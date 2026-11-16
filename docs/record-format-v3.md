@@ -466,6 +466,78 @@ closed run's steps that are neither done nor off read `unsettled` with their
 reasons, never `done`, and the goal may still be accepted. `goal close` and
 `goal accept --reason` write it ([operator guide](operator-guide.md#closing-a-run-094)).
 
+### Decisions of a run's steps (0.9.4)
+
+PROC-19 adds one optional field to `result` and one observation kind within
+format 3, and no record type. A result without `decision` and every other
+observation behave as before, and a flow's decision transition is template
+content of kind `flow` ([Templates](templates.md#decision-transitions-094)),
+not a record.
+
+| Record | Additive contract |
+| --- | --- |
+| `result` | Optional `decision: {paths, reasons, evidence}` records the decision of a run's decision step by the principal holding its current assignment: `paths`, the path or paths of the step's transition it takes; `reasons`, never blank; and `evidence`, each `{type, id, hash}` of an exact record, possibly none. It is the step's item of kind decision, distinct from the estate's `decision` records, and it performs nothing reserved. |
+| `observation` | Kind `flow-decision` records a rule's decision of a run's decision step, or the default its missed deadline takes, as the runtime evaluated it: its subject is the goal's exact revision, its author a principal who takes the run's steps, `asOf` the round's start, when the rule read the records, and its `facts` are `step`, `paths` (the one path taken), `rule` (the matching rule's number from 1, `default`, `deadline`, or `none` with no path, recording under `rule-then-role` that no rule held, so the role decides the round) and `read` (each record the rule read as its type, id and hash, separated by spaces). |
+
+Validation refuses a `decision` on a result that is not completed; on a result
+whose attempt is not on an assignment of a decision step of a run's flow, or is
+on a review assignment; for a step whose transition its role does not decide in
+the run's configuration; naming a path the transition does not declare, a path
+twice, or several paths where the flow takes one or where one of them goes back,
+ends the run or hands it to another flow; by an agent where the decision is a
+person's, because the flow requires a person, the decision is one the
+operating-modes design never delegates or the flow marks the step's role a
+person's; on an assignment a later assignment of the step displaced before it;
+after an earlier decision of the same assignment that still stands in its round,
+not sent back by a review and not a hold that took effect; and evidence that is
+not an estate record at its recorded hash. It reports a decision whose paths
+would turn off a step an estate policy requires or a required reserved step
+(`result.decision-protected`); such a step stays on. Under `rule-then-role` it
+also refuses a decision under an assignment made after a round began and before
+that round's rule decision was recorded, since a round in which a rule held is
+the rule's, and one with no `flow-decision` observation recording that no rule
+held at or before it. Validation refuses a `flow-decision` observation whose goal is not a
+run, whose author does not take the run's steps (for `none`, nor holds the step's
+assignment), whose step's transition a rule
+does not decide in the run's configuration, whose `default` is recorded where a
+rule alone does not decide (under `rule-then-role` the role decides when no rule
+holds), whose `none` is recorded where the step is not decided by a rule then
+its role or names a path, whose `deadline` is recorded where a rule decides, the transition takes
+no default at a deadline, the run's timing sets no deadline or the decision is a
+person's, whose path is not the one its rule names, whose read records are not
+estate records at their hashes, whose `asOf` is later than it is recorded, or
+for a round whose rule decision is already recorded. Its rules are evaluated
+again as of `asOf` over only the records it read, each at its hash, with the
+as-of evaluation the position uses: validation refuses one whose rule does not
+hold there or after an earlier rule that holds, and a `default` or `none` when
+any rule holds. A predicate over a derived state is left out of that
+evaluation, which stays fixed; the write boundary refuses a new one whose rules
+do not hold with the states they name read when it is written
+(`observation.flow-decision-state`), or whose `read` leaves out a record its
+rules count as of `asOf` (`observation.flow-decision-read`), both read as the
+records stood when it was recorded, so a later record or state change never
+invalidates it or blocks an unrelated write. On one already in the estate,
+written around the runtime, either is information, and the run's position
+ignores that record. A result under `rule-then-role` is refused unless the
+first kind recorded for the latest round start named at or before it, one the
+position counts, records that no rule held, and no hold or path back of the step
+taken since opened another round. It reports a
+deadline's default naming a deadline by which a decision of the step's current
+assignment stood, and a rule's decision or deadline's default whose path would
+turn off a step an estate policy requires (`observation.flow-decision-protected`);
+such a step stays on. Whether a deadline had passed, and when a round began, are
+the run's position's to derive: it counts a deadline's default only when it is
+recorded at or after the deadline it derives and names it, and a rule's decision
+only when its `asOf` is its round's start. An assignment of a decision step is
+refused where a rule decides it in the run, and an agent's where the decision is
+a person's. Which decision counts, its review before it takes effect and a path
+back past its limit are derived when the run is read, never stored. A reader of
+format 3 that predates the field refuses a result that carries it as an unknown
+key, as any later format-3 field; a reader of it that cannot resolve the run's
+flow shows the result and reads the step undecided. `records describe result`
+includes this contract, and the generic record reader advances to
+`vericairn.records/readers/9`.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

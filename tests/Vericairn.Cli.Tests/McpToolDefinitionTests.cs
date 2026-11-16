@@ -37,6 +37,7 @@ public partial class McpToolDefinitionTests
         ["work_result"] = (false, false),
         ["work_review"] = (false, false),
         ["document_review"] = (false, false),
+        ["goal_decide"] = (false, false),
         ["work_amend"] = (false, false),
         ["prompt_save"] = (true, false),
         ["prompt_preference"] = (true, false),
