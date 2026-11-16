@@ -463,6 +463,7 @@ public sealed class OperatorRecordTests
         f.Service.KeyStores = [custody];
         f.Service.PresenceRequired = device => device == f.Device;
         var helpers = new List<PresenceHelperStandIn>();
+        f.Service.HostsEmbedded = true;
         f.Service.PresenceHost = StandInSessions.Host(helpers);
         HashSet<string> before = [.. f.Service.Session.Load().Records.Select(r => r.Id)];
         long start = f.Service.PresencePrompts(new()).Cursor;
@@ -523,6 +524,7 @@ public sealed class OperatorRecordTests
             var custody = new RecordingCustody(VericairnHome.Path());
             f.Service.KeyStores = [custody];
             f.Service.PresenceRequired = device => device == f.Device;
+            f.Service.HostsEmbedded = true;
             f.Service.PresenceHost = StandInSessions.Host(helpers);
             return custody;
         }
@@ -537,6 +539,7 @@ public sealed class OperatorRecordTests
         f.Service.KeyStores = [custody];
         f.Service.PresenceRequired = device => device == f.Device;
         var helpers = new List<PresenceHelperStandIn>();
+        f.Service.HostsEmbedded = true;
         f.Service.PresenceHost = StandInSessions.Host(helpers);
         int reads = 0;
         f.Remote.Read = p => ++reads == 1 ? p with { Checks = [new(Required[0], Head, "queued", null)] } : p;

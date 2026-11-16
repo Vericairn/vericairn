@@ -50,8 +50,29 @@ internal sealed record PresenceSessionBuild(string? Team, string HelperIdentifie
         ? new Dictionary<string, string>(StringComparer.Ordinal) { [DiagnosticsVariable] = "0" }
         : new Dictionary<string, string>(StringComparer.Ordinal);
 
-    /// <summary>Whether this process's .NET diagnostics channel is off.</summary>
-    internal static bool DiagnosticsOff => Environment.GetEnvironmentVariable(DiagnosticsVariable) == "0";
+    /// <summary>
+    /// This process's .NET diagnostics channel as its environment set it at start (<see cref="Diagnostics(Func{string, string?})"/>).
+    /// </summary>
+    internal static PresenceDiagnostics DiagnosticsHere => Diagnostics(Environment.GetEnvironmentVariable);
+
+    /// <summary>
+    /// The .NET diagnostics channel as an environment sets it, read as .NET 10 reads it: each setting under DOTNET_ and, when that is not
+    /// set, under COMPlus_. EnableDiagnostics=0 closes the diagnostic IPC socket and the debugger's pipes, and with them profiler
+    /// attachment; EnableDiagnostics_IPC=0 closes the IPC socket alone (startup hooks, tracing and dumps), leaving the debugger's pipes.
+    /// The runtime configuration file's knobs are not honored for either.
+    /// </summary>
+    internal static PresenceDiagnostics Diagnostics(Func<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        (string? all, string? allName) = Setting("EnableDiagnostics");
+        if (all == "0") return new PresenceDiagnostics(true, true, allName + "=0");
+        (string? ipc, string? ipcName) = Setting("EnableDiagnostics_IPC");
+        return ipc == "0" ? new PresenceDiagnostics(false, true, ipcName + "=0") : new PresenceDiagnostics(false, false, null);
+
+        (string? Value, string? Name) Setting(string name) =>
+            environment("DOTNET_" + name) is string value ? (value, "DOTNET_" + name)
+            : environment("COMPlus_" + name) is string legacy ? (legacy, "COMPlus_" + name) : (null, null);
+    }
 
     /// <summary>
     /// The release helper's designated requirement: anchored in Apple's Developer ID certificates (the Developer ID intermediate and a
@@ -83,6 +104,18 @@ internal sealed record PresenceSessionBuild(string? Team, string HelperIdentifie
 
         return new PresenceSessionBuild(validTeam, identifier, versions);
     }
+}
+
+/// <summary>A process's .NET diagnostics channel: whether all of it is off, whether its IPC socket is, and the variable that closed it.</summary>
+/// <param name="Off">The IPC socket and the debugger's pipes are closed.</param>
+/// <param name="IpcOff">The diagnostic IPC socket is closed.</param>
+/// <param name="Variable">The setting that closed it, such as DOTNET_EnableDiagnostics=0; null when it is open.</param>
+internal sealed record PresenceDiagnostics(bool Off, bool IpcOff, string? Variable)
+{
+    /// <summary>The channel's state as doctor says it.</summary>
+    internal string Describe() => Off ? $"this process's .NET diagnostics channel is off ({Variable})"
+        : IpcOff ? $"this process's .NET diagnostic IPC socket is off ({Variable}), and its debugger channel is on; set {PresenceSessionBuild.DiagnosticsVariable}=0 to turn both off"
+        : $"this process's .NET diagnostics channel is on; set {PresenceSessionBuild.DiagnosticsVariable}=0 before the command line starts to turn it off for the embedded runtime";
 }
 
 /// <summary>Why a helper does not meet the release requirement, or null when it does (design/presence-sessions.md § 11).</summary>

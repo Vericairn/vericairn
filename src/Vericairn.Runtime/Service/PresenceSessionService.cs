@@ -285,7 +285,7 @@ internal sealed class PresenceSessionService
         {
             if (action.Open is null || action.Open.Client.Ended)
             {
-                if (action.Open is not null) EndOpen(action, action.Renewal ?? "the session ended");
+                if (action.Open is { } over) EndOpen(action, action.Renewal ?? Why(over.Client.EndReason));
                 if (signing.WhyOff() is string off)
                 {
                     action.Off = off;
@@ -319,7 +319,24 @@ internal sealed class PresenceSessionService
             if (effect is TimeSpan deadline)
             {
                 TimeSpan margin = deadline + EffectMargin;
-                (int _, int seconds) = open.Client.Status();
+                int seconds;
+                try
+                {
+                    (_, seconds) = open.Client.Status();
+                }
+                catch (PresenceSessionEnded ended) when (Lapsed(ended) && attempt == 0)
+                {
+                    // The session lapsed before the effect: a lock, sleep, switch of user session, its limit or a helper gone. It renews.
+                    EndOpen(action, Why(ended.Reason));
+                    continue;
+                }
+                catch (PresenceSessionEnded)
+                {
+                    action.Failed = true;
+                    EndOpen(action, null);
+                    throw;
+                }
+
                 if (seconds < margin.TotalSeconds && signing.Limit >= margin.TotalSeconds && attempt == 0)
                 {
                     EndOpen(action, $"fewer than {margin.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds remain, the effect's bound and a minute, so the session is renewed before the effect is dispatched");
@@ -334,9 +351,9 @@ internal sealed class PresenceSessionService
             {
                 signed = open.Client.Sign(content);
             }
-            catch (PresenceSessionEnded ended) when (ended.Code is null or "session.ended" && ended.Reason is "limit" or "lock" or "sleep" && attempt == 0)
+            catch (PresenceSessionEnded ended) when (Lapsed(ended) && attempt == 0)
             {
-                EndOpen(action, ended.Reason == "limit" ? "the session reached its limit" : "the session ended when the Mac locked or slept");
+                EndOpen(action, Why(ended.Reason));
                 continue;
             }
             catch (PresenceSessionEnded ended) when (ended.Code is string code && code.StartsWith("record.", StringComparison.Ordinal))
@@ -363,6 +380,20 @@ internal sealed class PresenceSessionService
 
         return null;
     }
+
+    // A session that lapsed rather than refused: it reached its limit, the screen locked or the user session switched, the Mac slept, or
+    // the helper is gone or stopped answering. The next signature renews with a new list and one more check.
+    private static bool Lapsed(PresenceSessionEnded ended) =>
+        ended.Code is null or "session.ended" && ended.Reason is "limit" or "lock" or "sleep" or "input" or "silent";
+
+    private static string Why(string? reason) => reason switch
+    {
+        "limit" => "the session reached its limit",
+        "lock" => "the session ended when the screen locked or the user session switched",
+        "sleep" => "the session ended when the Mac slept",
+        "silent" => "the helper stopped answering and was stopped",
+        _ => "the helper ended the session",
+    };
 
     private static string Uncovered(string code) => code switch
     {

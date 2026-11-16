@@ -81,23 +81,38 @@ public static class CustodyGuard
     /// check and only kind entries share one, so an approval the person did not mean gives that run no batch of judgments. The worker runs
     /// an agent as the user it runs as, and keeps each run's observed state under that user's Vericairn home, so the runs found there are
     /// this user's: one counts until its settlement is recorded while its harness, or its worker before the harness starts, may still run.
-    /// A state that cannot be read counts as under way. An agent the runtime did not start is not seen.
+    /// Anything that cannot be listed or read counts as under way. An agent the runtime did not start is not seen.
     /// </summary>
     public static bool UnsettledAgentRuns(string? home = null)
     {
+        // Every read fails closed: an estates or runs directory, a run directory or a state that cannot be listed or read counts as a run
+        // under way. Only a directory that is absent counts as no run.
         string estates = Path.Combine(home ?? VericairnHome.Path(), "estates");
-        if (!Directory.Exists(estates)) return false;
         try
         {
-            foreach (string runs in Directory.EnumerateDirectories(estates).Select(e => Path.Combine(e, "runs")).Where(Directory.Exists))
+            foreach (string estate in Directory.EnumerateDirectories(estates))
             {
-                foreach (string state in Directory.EnumerateDirectories(runs).Select(r => Path.Combine(r, "state.json")).Where(File.Exists))
+                IEnumerable<string> runs;
+                try
                 {
-                    if (UnderWay(state)) return true;
+                    runs = Directory.EnumerateDirectories(Path.Combine(estate, "runs")).ToList();
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    continue;
+                }
+
+                foreach (string run in runs)
+                {
+                    if (UnderWay(Path.Combine(run, "state.json"))) return true;
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return true;
         }
@@ -111,6 +126,11 @@ public static class CustodyGuard
         try
         {
             state = System.Text.Json.JsonSerializer.Deserialize<RunObservedState>(File.ReadAllBytes(path), Protocol.ProtocolJson.Options);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // A run directory whose worker has not yet written its state, or one removed meanwhile: nothing runs from it.
+            return false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

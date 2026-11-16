@@ -25,6 +25,45 @@ public sealed partial class EstateService
 
     private PresenceSessionService PresenceSessions => LazyInitializer.EnsureInitialized(ref presenceSessionService, () => new PresenceSessionService(presence) { OutsideChanged = MarkEventsDirty });
 
+    /// <summary>From 0.9.4 (ID-16): the profile of a runtime the command line hosts in its own process, one of the two a presence session opens on.</summary>
+    public const string EmbeddedProfile = "embedded";
+
+    /// <summary>From 0.9.4 (ID-16): the profile of a request the daemon receives over its local socket or named pipe, the other of the two.</summary>
+    public const string LocalSocketProfile = "local-socket";
+
+    private readonly AsyncLocal<string?> presenceProfile = new();
+
+    /// <summary>
+    /// Whether this service is the runtime a command line hosts in its own process: its own callers then act on the embedded profile. The
+    /// command line sets it for the embedded runtime it opens; the daemon never does, so a call reaching its service by any other way than
+    /// its local socket opens no presence session.
+    /// </summary>
+    internal bool HostsEmbedded { get; set; }
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): marks the operation in flight as a request the daemon received over its local socket or named pipe, where the
+    /// person at the machine reads the notices. Disposing it restores the caller's profile. Only the daemon's own listener calls it.
+    /// </summary>
+    public IDisposable ForLocalSocketRequest()
+    {
+        string? previous = presenceProfile.Value;
+        presenceProfile.Value = LocalSocketProfile;
+        return new ProfileScope(this, previous);
+    }
+
+    // The profile a presence session may open on, named positively: the embedded runtime's or the local socket's; null for every other.
+    private string? PresenceProfile => presenceProfile.Value ?? (HostsEmbedded ? EmbeddedProfile : null);
+
+    private sealed class ProfileScope(EstateService service, string? previous) : IDisposable
+    {
+        private int disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0) service.presenceProfile.Value = previous;
+        }
+    }
+
     /// <summary>A test's replacement for what presence sessions depend on outside the runtime: the build, the platform, the helper and the clock.</summary>
     internal PresenceSessionHost PresenceHost
     {
@@ -85,12 +124,14 @@ public sealed partial class EstateService
 
     /// <summary>
     /// Signs one record under the open action's presence session, or null when it keeps its own check (§§ 7 and 10): only on the embedded
-    /// and local-socket profiles, only for a person's device whose key is in the Secure Enclave with presence required, by its own key.
+    /// and local-socket profiles, which the host names (<see cref="HostsEmbedded"/>, <see cref="ForLocalSocketRequest"/>), only for a
+    /// person's device whose key is in the Secure Enclave with presence required, by its own key.
     /// </summary>
     private RecordSignature? SessionSignature(StoreSigner held, RecordDraft draft, EstateModel model, byte[] content)
     {
         if (presence.Current?.Session is null) return null;
-        if (requestDevice.Value is { Closed: false }) return null;
+        // Only the embedded and local-socket profiles, named positively, and never a request a paired device signed.
+        if (PresenceProfile is not (EmbeddedProfile or LocalSocketProfile) || requestDevice.Value is { Closed: false }) return null;
         if (held.KeyId != held.DeviceId) return null;
         RecordEnvelope? device = model.Current("device").FirstOrDefault(d => model.Chain(d)[0] == held.DeviceId);
         if (device is null || EstateModel.BodyString(device, "principal") is not string principal || principal != draft.By || EstateModel.BodyString(device, "publicKey") is not string publicKey)
@@ -113,12 +154,23 @@ public sealed partial class EstateService
     {
         if (held.Custody != SecureEnclaveCustody.Kind) return $"{held.Custody} custody keeps one check per signature";
         if (model.CurrentPrincipal(principal) is not { } person || EstateModel.BodyString(person, "kind") != "human") return "only a person's device opens a presence session";
-        if (EstateType.PresencePolicy(model) == "per-signature") return "the estate's charter asks one presence check per signature";
+        if (CharterPresenceOff(model) is string charter) return charter;
         if (setting.Problem is not null) return setting.Problem;
         if (setting.PerSignature) return "the device's owner asks one presence check per signature on this machine";
         PresenceSessionHost host = PresenceSessions.Host;
         return host.MachineOff(host.HelperOf(held));
     }
+
+    /// <summary>
+    /// Why the estate's charter keeps one check per signature, or null when it allows presence sessions: it asks per-signature, or it
+    /// states a value that is neither per-signature nor per-action, which fails closed whether or not the charter validates.
+    /// </summary>
+    internal static string? CharterPresenceOff(EstateModel model) => EstateType.PresencePolicy(model) switch
+    {
+        null or "per-action" => null,
+        "per-signature" => "the estate's charter asks one presence check per signature",
+        _ => "the estate's charter states a presence policy that is neither per-signature nor per-action, so every signature asks its own check",
+    };
 
     /// <summary>
     /// Composes the open action's list for the record about to be signed: its exact entries not yet signed, from the first, at most 16, each
@@ -152,7 +204,7 @@ public sealed partial class EstateService
                     Exact = true, Type = draft.Type, Action = draft.Type == "operation" ? BodyText(draft.Body, "action") : null,
                     Hash = unsigned.Envelope.ComputedHash, Bytes = RecordAuthor.ContentBytes(unsigned.Bytes),
                 });
-                lines.Add((DescribeRecord(draft, model), ChangeLine(draft, model), SameHarnessReview(draft, model)));
+                lines.Add((DescribeRecord(draft, model), ChangeLine(draft, model), SameHarnessReview(draft, model, Providers.Launchers)));
                 exactIds.Add(id);
             }
         }
@@ -195,7 +247,8 @@ public sealed partial class EstateService
             return null;
         }
 
-        if (OwnEntry(record, signing, model, agentRun || exactIds.Count == PresenceSessionProtocol.MaxExact, now) is not { } own) return null;
+        var actionRecords = new HashSet<string>(references.Keys.Concat(action.Signed), StringComparer.Ordinal);
+        if (OwnEntry(record, signing, model, agentRun || exactIds.Count == PresenceSessionProtocol.MaxExact, now, entries, actionRecords) is not { } own) return null;
         foreach (string id in own.References)
         {
             if (!references.ContainsKey(id) && ReferenceOf(model, id) is { } reference) references[id] = reference;
@@ -262,16 +315,22 @@ public sealed partial class EstateService
         return bytes is null ? null : new PresenceListReference(record.Id, record.Type, record.ComputedHash, RecordAuthor.ContentBytes(bytes));
     }
 
-    // An entry of a record's own, for a record no planned entry covers: exact where § 10's allow-list admits it and its time is inside the
-    // helper's window, unless the list may hold no more exact entries; a kind entry of the closed set fixed by the record's own values.
-    private static (PresenceListEntry Entry, string Changes, IReadOnlyList<string> References)? OwnEntry(PresenceRecord record, RecordDraft draft, EstateModel model, bool noExact, long now)
+    /// <summary>
+    /// An entry of a record's own, for a record the composed list does not cover, held to the action (§ 5): an exact entry where § 10's
+    /// allow-list admits the record, its time is inside the helper's window and the list may hold one more; otherwise a kind entry only
+    /// where it re-issues one the action planned: the same kind with every value that entry fixes (provider, repository, product, product
+    /// hash, branch or pull request, and the head the action's changes state; or the release build's provider, destination, version,
+    /// product and commit, through <see cref="ReleaseBuildEntry"/>), or an observation of one of the action's own operations, of an
+    /// observation the action planned. Its count is what remains of that record's step, the record included. A record of another branch,
+    /// head, pull request, destination or version gets none and keeps its own check.
+    /// </summary>
+    internal static (PresenceListEntry Entry, string Changes, IReadOnlyList<string> References)? OwnEntry(PresenceRecord record, RecordDraft draft, EstateModel model,
+        bool noExact, long now, List<PresenceListEntry> planned, HashSet<string> actionRecords)
     {
         string? action = record.Field("action"), status = record.Field("status");
         bool kind = record.Type == "history-checkpoint" && record.Field("trigger") == "release"
             || record.Type == "release" && status is "candidate" or "published"
             || record.Type == "operation" && action is not null && PresenceSessionProtocol.KindActions.Contains(action);
-        List<string> references = [];
-        if (record.Supersedes is string previous) references.Add(previous);
         if (!kind)
         {
             if (noExact || !PresenceSessionProtocol.ExactAllowed(record.Type, action, status) || record.At < now - 100 || record.At > now + 50) return null;
@@ -279,63 +338,80 @@ public sealed partial class EstateService
                 ChangeLine(draft, model), []);
         }
 
-        string[] statuses = PresenceSessionProtocol.OperationStatuses;
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        void Put(string name, string? value)
-        {
-            if (value is not null) values[name] = value;
-        }
-
-        PresenceListEntry entry;
+        List<string> references = record.Supersedes is string previous && actionRecords.Contains(previous) ? [previous] : [];
+        if (record.Supersedes is not null && references.Count == 0) return null;
+        int remaining = Remaining(record, model);
         switch (record.Type)
         {
             case "history-checkpoint":
-                entry = new PresenceListEntry { Type = record.Type, Count = 1, Trigger = "release" };
-                break;
+                return planned.Any(p => p.Type == "history-checkpoint") ? (ReleaseCheckpointEntry().Entry, "adds the release gate's history checkpoint", references) : null;
             case "release":
-                Put("product", record.Subject?.Id);
-                Put("version", record.Field("version"));
-                Put("destination", record.Field("repository"));
-                Put("commit", record.Field("commit"));
-                entry = new PresenceListEntry { Type = record.Type, Count = 1, Statuses = [status!], Fixed = values };
-                break;
-            default:
-                Put("provider", record.Field("provider"));
-                if (action == "dispatch-release-workflow")
-                {
-                    Put("destination", record.Target("repository") ?? record.Target("destination"));
-                    Put("version", record.Target("version"));
-                    Put("product", record.Target("product"));
-                    Put("commit", record.Target("commit") ?? record.Target("ref"));
-                    entry = new PresenceListEntry { Type = record.Type, Action = action, Count = 3, AtMost = true, Statuses = statuses, Fixed = values };
-                    break;
-                }
-
-                if (action == "change-observe")
-                {
-                    if (record.Target("operation") is not string observed) return null;
-                    references.Add(observed);
-                    entry = new PresenceListEntry
-                    {
-                        Type = record.Type, Action = action, Count = 3, AtMost = true, Statuses = statuses, Fixed = new Dictionary<string, string>(StringComparer.Ordinal),
-                        Observation = record.Target("observation"), ObservesReference = observed,
-                    };
-                    break;
-                }
-
-                Put("repository", record.Target("repository"));
-                Put("product", record.Target("product"));
-                Put("productHash", record.Target("productHash"));
-                Put("head", record.Target("head"));
-                if (action == "change-merge") Put("pullRequest", record.Target("pullRequest"));
-                else Put("branch", record.Target("branch"));
-                entry = new PresenceListEntry { Type = record.Type, Action = action, Count = 3, AtMost = true, Statuses = statuses, Fixed = values };
-                break;
+                PresenceListEntry? release = planned.FirstOrDefault(p => p.Type == "release" && p.Statuses.Contains(status!, StringComparer.Ordinal)
+                    && p.Fixed.GetValueOrDefault("product") == record.Subject?.Id && p.Fixed.GetValueOrDefault("version") == record.Field("version")
+                    && p.Fixed.GetValueOrDefault("destination") == record.Field("repository") && p.Fixed.GetValueOrDefault("commit") == record.Field("commit"));
+                return release is not null && ReleaseRecordEntry(release.Fixed["product"], release.Fixed["version"], release.Fixed["destination"], release.Fixed["commit"], [status!], 1) is { } releaseEntry
+                    ? (releaseEntry.Entry, releaseEntry.Changes, references) : null;
         }
 
-        string what = record.Type == "operation" ? $"records the {OperationName(action)} as it is now known" : "records " + record.Type;
-        return (entry, what + ", by the values the record itself states", references);
+        if (action == "change-observe")
+        {
+            // An observation of one of the action's own operations, of an observation the action planned.
+            if (record.Target("operation") is not string observed || !actionRecords.Contains(observed)
+                || !planned.Any(p => p.Action == "change-observe" && p.Observation == record.Target("observation"))) return null;
+            references.Add(observed);
+            return (new PresenceListEntry
+            {
+                Type = "operation", Action = action, Count = remaining, Statuses = PresenceSessionProtocol.OperationStatuses,
+                Fixed = new Dictionary<string, string>(StringComparer.Ordinal), Observation = record.Target("observation"), ObservesReference = observed,
+            }, $"adds what remains of an observation of recorded operation {observed}", references);
+        }
+
+        if (action == "dispatch-release-workflow")
+        {
+            // The release build the action planned, its count what remains of this step: composed by ReleaseBuildEntry alone.
+            PresenceListEntry? build = planned.FirstOrDefault(p => p.Action == action);
+            if (build is null) return null;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (record.Target("ref") is string stated) settings["ref"] = stated;
+            if (record.Target("commit") is string named) settings["commit"] = named;
+            return ReleaseBuildEntry(build.Fixed["provider"], build.Fixed["destination"], build.Fixed["version"], build.Fixed["product"], build.Fixed.GetValueOrDefault("commit"), settings, remaining) is { } rebuilt
+                ? (rebuilt.Entry with { AtMost = false }, rebuilt.Changes, references) : null;
+        }
+
+        // A push, an opening or a merge: a planned entry of the same action whose every fixed value the record states, at the head the
+        // action's own changes state; a merge's pull request only one the action's opening recorded.
+        string? head = record.Target("head");
+        string? actionHead = actionRecords.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()
+            .Where(r => r.Type == "operation" && EstateModel.BodyString(r, "action") is string a && PresenceSessionProtocol.ChangeActions.Contains(a))
+            .Select(r => r.Body.TryGetProperty("target", out JsonElement t) ? ChangeText(t, "head") : null).FirstOrDefault(h => h is not null);
+        if (head is null || actionHead is not null && head != actionHead) return null;
+        string? Value(string name) => name == "provider" ? record.Field("provider") : record.Target(name);
+        PresenceListEntry? change = planned.FirstOrDefault(p => p.Action == action && p.Fixed.All(f => Value(f.Key) == f.Value));
+        if (change is null) return null;
+        var values = new Dictionary<string, string>(change.Fixed, StringComparer.Ordinal) { ["head"] = head };
+        if (action == "change-merge" && !values.ContainsKey("pullRequest"))
+        {
+            string? pull = record.Target("pullRequest");
+            bool opened = pull is not null && actionRecords.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().Any(r => EstateModel.BodyString(r, "action") == "change-open"
+                && r.Body.TryGetProperty("target", out JsonElement t) && ChangeText(t, "pullRequest") == pull);
+            if (!opened) return null;
+            values["pullRequest"] = pull!;
+        }
+
+        return (new PresenceListEntry { Type = "operation", Action = action, Count = remaining, Statuses = PresenceSessionProtocol.OperationStatuses, Fixed = values },
+            $"adds what remains of the {OperationName(action)} the action planned, at head {head[..Math.Min(12, head.Length)]}", references);
     }
+
+    // What remains of a record's step, the record included: an intent, its dispatch and its outcome (3); a retry, uncertain over a known
+    // failure or a cancellation, likewise; a dispatch, or an uncertainty a reconciliation settles, and its outcome (2); an outcome alone (1).
+    private static int Remaining(PresenceRecord record, EstateModel model) => record.Field("status") switch
+    {
+        "not-started" => 3,
+        "uncertain" when record.Supersedes is string previous && model.ById.TryGetValue(previous, out RecordEnvelope? before)
+            && EstateModel.BodyString(before, "status") is "known-failure" or "canceled" => 3,
+        "dispatched" or "uncertain" => 2,
+        _ => 1,
+    };
 
     private static string KindKey(PresenceListEntry entry)
     {
@@ -391,29 +467,52 @@ public sealed partial class EstateService
     /// a review whose author and the reviewed result's author are agents of one product, or a self review; or an acceptance whose basis
     /// holds such a review.
     /// </summary>
-    internal static bool SameHarnessReview(RecordDraft draft, EstateModel model)
+    internal static bool SameHarnessReview(RecordDraft draft, EstateModel model, IReadOnlyList<Workers.IAgentLauncher> launchers)
     {
         if (draft.Type == "review" && draft.Subject is { } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? reviewed))
-            return BodyText(draft.Body, "independence") == "self" || SameHarness(model, draft.By, reviewed.By);
+            return BodyText(draft.Body, "independence") == "self" || SameHarness(model, draft.By, reviewed.By, launchers);
         if (draft.Type != "acceptance" || draft.Body.ValueKind != JsonValueKind.Object || !draft.Body.TryGetProperty("basis", out JsonElement basis) || basis.ValueKind != JsonValueKind.Array)
             return false;
         foreach (JsonElement item in basis.EnumerateArray())
         {
             if (item.ValueKind == JsonValueKind.String && model.ById.TryGetValue(item.GetString()!, out RecordEnvelope? review) && review.Type == "review"
                 && review.Subject is { } result && model.ById.TryGetValue(result.Id, out RecordEnvelope? work)
-                && (EstateModel.BodyString(review, "independence") == "self" || SameHarness(model, review.By, work.By)))
+                && (EstateModel.BodyString(review, "independence") == "self" || SameHarness(model, review.By, work.By, launchers)))
                 return true;
         }
 
         return false;
     }
 
-    private static bool SameHarness(EstateModel model, string reviewer, string author)
+    private static bool SameHarness(EstateModel model, string reviewer, string author, IReadOnlyList<Workers.IAgentLauncher> launchers)
     {
         string? Harness(string principal) => model.CurrentPrincipal(principal) is { } record && EstateModel.BodyString(record, "kind") == "agent"
             && record.Body.TryGetProperty("agent", out JsonElement agent) && agent.ValueKind == JsonValueKind.Object
-            && agent.TryGetProperty("product", out JsonElement product) && product.ValueKind == JsonValueKind.String ? product.GetString()?.Trim() : null;
-        return Harness(reviewer) is { Length: > 0 } first && Harness(author) is { Length: > 0 } second && string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
+            && agent.TryGetProperty("product", out JsonElement product) && product.ValueKind == JsonValueKind.String ? HarnessIdentity(product.GetString(), launchers) : null;
+        return Harness(reviewer) is { Length: > 0 } first && Harness(author) is { Length: > 0 } second && first == second;
+    }
+
+    /// <summary>
+    /// An agent principal's product as the harness it names, the way routing reads it: the id of the launcher whose harness name or id it
+    /// matches, ignoring case, so a harness named by either of the two spellings routing accepts reads as one; otherwise the name itself,
+    /// lower-cased with its spaces, underscores and dots as hyphens, the form launcher ids take. Null for an empty product.
+    /// </summary>
+    internal static string? HarnessIdentity(string? product, IReadOnlyList<Workers.IAgentLauncher> launchers)
+    {
+        ArgumentNullException.ThrowIfNull(launchers);
+        string? named = product?.Trim();
+        if (string.IsNullOrEmpty(named)) return null;
+        if (launchers.FirstOrDefault(l => l.Harness is not null && (string.Equals(l.Harness, named, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(l.Launcher, named, StringComparison.OrdinalIgnoreCase))) is { } launcher) return launcher.Launcher.ToLowerInvariant();
+        var identity = new StringBuilder(named.Length);
+        foreach (char c in named.ToLowerInvariant())
+        {
+            char next = c is ' ' or '_' or '.' or '\t' ? '-' : c;
+            if (next == '-' && (identity.Length == 0 || identity[^1] == '-')) continue;
+            identity.Append(next);
+        }
+
+        return identity.ToString().TrimEnd('-');
     }
 
     /// <summary>Machine-local attention: each refusal that ended a presence session here (presence.outside-list), for the principal it signed for.</summary>

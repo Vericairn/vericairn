@@ -33,13 +33,18 @@ public sealed class EstateType : IRecordType
         new("progressRequest", "object", false, "Default requested progress: optional types (accurate, best-effort, not-measurable; all by default), statusText (false by default), and cadence (perStep true, positive minutes, or both). More specific requests replace it.", 3),
     ];
 
-    /// <summary>From 0.9.4 (ID-16): the presence an estate's charter asks of every person's device: per-signature, per-action, or null when it states none.</summary>
+    /// <summary>
+    /// From 0.9.4 (ID-16): the presence an estate's charter states for every person's device, as it states it: per-signature,
+    /// per-action, any other text it holds (which validation refuses), an empty text for a value that is no text, or null when it states
+    /// none. A reader holds anything but per-action and null to one check per signature.
+    /// </summary>
     public static string? PresencePolicy(Estate.EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
         Model.RecordEnvelope? charter = model.Current("estate").FirstOrDefault();
-        return charter is not null && charter.Body.TryGetProperty("policies", out System.Text.Json.JsonElement policies) && policies.ValueKind == System.Text.Json.JsonValueKind.Object
-            && policies.TryGetProperty("presence", out System.Text.Json.JsonElement presence) && presence.ValueKind == System.Text.Json.JsonValueKind.String ? presence.GetString() : null;
+        if (charter is null || !charter.Body.TryGetProperty("policies", out System.Text.Json.JsonElement policies) || policies.ValueKind != System.Text.Json.JsonValueKind.Object
+            || !policies.TryGetProperty("presence", out System.Text.Json.JsonElement presence)) return null;
+        return presence.ValueKind == System.Text.Json.JsonValueKind.String ? presence.GetString() ?? string.Empty : string.Empty;
     }
 
     /// <inheritdoc />

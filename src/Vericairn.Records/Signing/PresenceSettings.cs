@@ -36,15 +36,32 @@ internal static class PresenceSettings
     /// <summary>The settings file under a home, this user's by default.</summary>
     internal static string PathOf(string? home = null) => Path.Combine(home ?? VericairnHome.Path(), FileName);
 
-    /// <summary>A device's setting: the default when none is kept, per-signature when the file cannot be read.</summary>
+    /// <summary>
+    /// A device's setting: the default when the file or its directory is absent, per-signature when either cannot be read or the file's
+    /// form is not this one, so a setting that cannot be read never loosens presence.
+    /// </summary>
     internal static PresenceSetting Read(string device, string? home = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(device);
         string path = PathOf(home);
-        if (!File.Exists(path)) return PresenceSetting.Default;
+        byte[] bytes;
         try
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return PresenceSetting.Default;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The file is there or may be, and cannot be read, its directory not searchable among them: it never loosens presence.
+            return Unreadable("it cannot be read");
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("format", out JsonElement format) || format.GetString() != Format
                 || !root.TryGetProperty("devices", out JsonElement devices) || devices.ValueKind != JsonValueKind.Object)

@@ -76,10 +76,11 @@ internal sealed class PresenceHelperStandIn : IPresenceHelperChannel
     /// <inheritdoc />
     public void Send(byte[] message)
     {
+        // The helper exits once its session ends, whatever ended it: a later message finds its input closed.
+        if (ended) throw new IOException("The helper's input is closed.");
         using JsonDocument document = JsonDocument.Parse(message);
         JsonElement root = document.RootElement;
         string? type = root.GetProperty("type").GetString();
-        if (ended) return;
         switch (type)
         {
             case "open":
@@ -98,6 +99,12 @@ internal sealed class PresenceHelperStandIn : IPresenceHelperChannel
                 break;
         }
     }
+
+    /// <summary>
+    /// Ends the session by itself, as the helper does at a screen lock, a switch of user session (both lock), sleep or its limit: it
+    /// writes ended with the reason and exits, so the runtime's next message finds its input closed.
+    /// </summary>
+    internal void EndSession(string reason) => End(reason);
 
     /// <inheritdoc />
     public JsonElement? Receive(TimeSpan wait) => answers.TryTake(out JsonElement message, wait < TimeSpan.Zero ? TimeSpan.Zero : wait) ? message : null;

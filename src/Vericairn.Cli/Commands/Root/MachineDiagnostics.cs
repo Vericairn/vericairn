@@ -113,8 +113,13 @@ internal sealed class MachineDiagnostics(CommandContext context)
             try
             {
                 using var reader = Vericairn.Runtime.Service.EstateService.OpenReadOnly(root);
-                string? policy = reader.EstatePresencePolicy();
-                notes.Add(policy is null ? "the estate's charter states no presence policy (per-action)" : $"the estate's charter asks {policy} presence");
+                notes.Add(reader.EstatePresencePolicy() switch
+                {
+                    null => "the estate's charter states no presence policy (per-action)",
+                    "per-action" => "the estate's charter asks per-action presence",
+                    "per-signature" => "the estate's charter asks per-signature presence, so every signature asks its own check",
+                    _ => "the estate's charter states a presence policy that is neither per-signature nor per-action, so every signature asks its own check",
+                });
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
@@ -124,8 +129,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
 
         if (File.Exists(PresenceSettings.PathOf())) notes.Add($"device owners' settings in {PresenceSettings.FileName} may ask one check per signature");
         PresenceSessionBuild build = PresenceSessionBuild.Current;
-        if (build.Release && !PresenceSessionBuild.DiagnosticsOff)
-            notes.Add($"this process's .NET diagnostics channel is on; set {PresenceSessionBuild.DiagnosticsVariable}=0 to turn it off for the embedded runtime");
+        if (build.Release) notes.Add(PresenceSessionBuild.DiagnosticsHere.Describe());
         string tail = notes.Count == 0 ? string.Empty : "; " + string.Join("; ", notes);
         return off is null
             ? new("present", "sessions", $"presence sessions on: one check for an action's announced list, at most 300 s, at most 16 judgments to a check{tail}")

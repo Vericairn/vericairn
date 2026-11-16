@@ -291,6 +291,104 @@ public sealed class PresenceSessionRulesTests
         Assert.Throws<PresenceSessionEnded>(() => client.Sign(vectors.RecordBytes("candidate", DeviceKey.PublicKey)));
     }
 
+    [Theory]
+    [InlineData("lock", false)]
+    [InlineData("sleep", false)]
+    [InlineData("limit", false)]
+    [InlineData("lock", true)]
+    [InlineData("sleep", true)]
+    public void AnEndTheHelperWroteBeforeItsInputClosedIsReadAsItsReasonNotAsAClosedPipe(string reason, bool status)
+    {
+        // The helper ends a session by itself at a lock, a switch of user session (both lock), sleep or its limit, writes ended and exits:
+        // the runtime's next message finds its input closed, and the client reads the end it wrote to say why.
+        SessionVectors vectors = SessionVectors.Load();
+        byte[] terms = vectors.TermsBytes(vectors.Session("release submit"), DeviceKey.PublicKey);
+        var helper = new PresenceHelperStandIn(DeviceKey.Sign, DeviceKey.PublicKeyBytes, new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(vectors.Now)));
+        using var client = new PresenceSessionClient(helper, DeviceKey.PublicKey);
+        client.Open(terms, [], null);
+        client.Sign(vectors.RecordBytes("checkpoint", DeviceKey.PublicKey));
+        helper.EndSession(reason);
+
+        PresenceSessionEnded ended = Assert.Throws<PresenceSessionEnded>(() =>
+        {
+            if (status) client.Status();
+            else client.Sign(vectors.RecordBytes("dispatchIntent", DeviceKey.PublicKey));
+        });
+
+        Assert.Equal(reason, ended.Reason);
+        Assert.Equal(reason == "limit" ? "session.ended" : null, ended.Code);
+        Assert.Equal(reason, client.EndReason);
+        Assert.True(client.Ended);
+        Assert.Single(helper.SignedHashes);
+    }
+
+    [Fact]
+    public void AClosedPipeWithNoEndWrittenIsReadAsTheHelpersInputClosed()
+    {
+        SessionVectors vectors = SessionVectors.Load();
+        byte[] terms = vectors.TermsBytes(vectors.Session("release submit"), DeviceKey.PublicKey);
+        var helper = new PresenceHelperStandIn(DeviceKey.Sign, DeviceKey.PublicKeyBytes, new SteppedClock(DateTimeOffset.FromUnixTimeSeconds(vectors.Now)));
+        using var client = new PresenceSessionClient(helper, DeviceKey.PublicKey);
+        client.Open(terms, [], null);
+        helper.Kill();
+
+        Assert.Equal("input", Assert.Throws<PresenceSessionEnded>(() => client.Sign(vectors.RecordBytes("checkpoint", DeviceKey.PublicKey))).Reason);
+    }
+
+    [Fact]
+    public void TheDiagnosticsChannelIsReadAsDotNetReadsItsSwitches()
+    {
+        PresenceDiagnostics Read(params (string Name, string Value)[] variables) =>
+            PresenceSessionBuild.Diagnostics(name => variables.FirstOrDefault(v => v.Name == name).Value);
+
+        Assert.Equal(new PresenceDiagnostics(false, false, null), Read());
+        Assert.Equal(new PresenceDiagnostics(true, true, "DOTNET_EnableDiagnostics=0"), Read(("DOTNET_EnableDiagnostics", "0")));
+        Assert.Equal(new PresenceDiagnostics(true, true, "COMPlus_EnableDiagnostics=0"), Read(("COMPlus_EnableDiagnostics", "0")));
+        // The IPC switch closes the diagnostic socket and leaves the debugger's pipes.
+        Assert.Equal(new PresenceDiagnostics(false, true, "DOTNET_EnableDiagnostics_IPC=0"), Read(("DOTNET_EnableDiagnostics_IPC", "0")));
+        Assert.Equal(new PresenceDiagnostics(false, true, "COMPlus_EnableDiagnostics_IPC=0"), Read(("COMPlus_EnableDiagnostics_IPC", "0")));
+        // The DOTNET_ form wins over the COMPlus_ one, as .NET reads them.
+        Assert.Equal(new PresenceDiagnostics(false, false, null), Read(("DOTNET_EnableDiagnostics", "1"), ("COMPlus_EnableDiagnostics", "0")));
+        Assert.Contains("is on; set DOTNET_EnableDiagnostics=0", Read().Describe(), StringComparison.Ordinal);
+        Assert.Contains("debugger channel is on", Read(("DOTNET_EnableDiagnostics_IPC", "0")).Describe(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AHomeWhoseSettingsCannotBeReachedAsksOneCheckPerSignature()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            Assert.Skip("Unix permissions bind only a user other than root.");
+            return;
+        }
+
+        string home = Path.Combine(Path.GetTempPath(), "vericairn-presence-" + Guid.NewGuid().ToString("N"));
+        const string device = "01J9Z3K4M5N6P7Q8R9S0T1V2W4";
+        try
+        {
+            PresenceSettings.Write(device, perSignature: false, limitSeconds: 120, home);
+            // A home that cannot be searched hides the file: it never reads as absent, so it never loosens presence.
+            File.SetUnixFileMode(home, UnixFileMode.None);
+            PresenceSetting hidden = PresenceSettings.Read(device, home);
+            Assert.True(hidden.PerSignature);
+            Assert.NotNull(hidden.Problem);
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(PresenceSettings.PathOf(home), UnixFileMode.None);
+            Assert.True(PresenceSettings.Read(device, home).PerSignature);
+            // A home that is absent keeps the default.
+            Assert.Equal(PresenceSetting.Default, PresenceSettings.Read(device, Path.Combine(home, "absent")));
+        }
+        finally
+        {
+            if (Directory.Exists(home))
+            {
+                File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                if (File.Exists(PresenceSettings.PathOf(home))) File.SetUnixFileMode(PresenceSettings.PathOf(home), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                Directory.Delete(home, recursive: true);
+            }
+        }
+    }
+
     [Fact]
     public void ARefusalADeclinedCheckASilentHelperAndASignatureThatDoesNotVerifyEachEndTheSession()
     {
@@ -472,6 +570,32 @@ public sealed class PresenceSessionProcessTests(EnclaveSessionFixture fixture) :
 
         client.Close();
         Assert.Contains("dialog: open Vericairn session " + shown + ": release submit, 5 signatures in 300 s", process.Diagnostics, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("lock")]
+    [InlineData("sleep")]
+    public void WhenTheHelpersSessionEndsAtALockOrSleepTheRuntimeReadsWhy(string signal)
+    {
+        string helper = fixture.Helper;
+        if (!OperatingSystem.IsMacOS()) return;
+        SessionVectors vectors = SessionVectors.Load();
+        byte[] terms = vectors.TermsBytes(vectors.Session("release submit"), fixture.Key.PublicKey);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["VERICAIRN_TEST_NOW"] = vectors.Now.ToString(CultureInfo.InvariantCulture), ["VERICAIRN_TEST_SKIP_SELF_CHECK"] = "1", ["VERICAIRN_TEST_SCREEN"] = "unlocked",
+        };
+        using PresenceHelperProcess process = PresenceHelperProcess.Start(helper, ["session", fixture.Key.Blob], environment);
+        using var client = new PresenceSessionClient(process, fixture.Key.PublicKey);
+        client.Open(terms, [], null);
+        client.Sign(vectors.RecordBytes("checkpoint", fixture.Key.PublicKey));
+        // The test build's signal stands in for the screen locking or the Mac sleeping: the helper writes ended and exits.
+        process.Send(Encoding.UTF8.GetBytes("{\"signal\":\"" + signal + "\",\"type\":\"test-signal\"}"));
+
+        PresenceSessionEnded ended = Assert.Throws<PresenceSessionEnded>(() => client.Sign(vectors.RecordBytes("dispatchIntent", fixture.Key.PublicKey)));
+
+        Assert.Equal(signal, ended.Reason);
+        Assert.Null(ended.Code);
     }
 
     [Fact]

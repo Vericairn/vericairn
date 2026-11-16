@@ -238,6 +238,7 @@ internal sealed class PresenceSessionClient : IDisposable
     {
         if (ended) return;
         ended = true;
+        EndReason ??= "closed";
         try
         {
             channel.Send(Canonical(new JsonObject { ["type"] = "close" }));
@@ -264,18 +265,47 @@ internal sealed class PresenceSessionClient : IDisposable
         channel.Dispose();
     }
 
+    // A helper ends a session by itself on its limit, a screen lock, sleep or a switch of user session: it writes ended, and its refusal
+    // first if it refused, then exits. Its end is read before anything is sent, and again when a send finds its input closed, so the
+    // runtime learns why the session ended (and renews where it lapsed) rather than taking the closed pipe for a failure.
     private void Send(JsonObject message)
     {
-        if (ended) throw Fail("session.ended", "closed", "The presence session has ended.");
+        if (ended) throw Fail("session.ended", EndReason ?? "closed", "The presence session has ended.");
+        if (Ending(TimeSpan.Zero) is PresenceSessionEnded already) throw already;
         try
         {
             channel.Send(Canonical(message));
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
+            PresenceSessionEnded? told = Ending(EndWait);
             Kill();
-            throw Fail(null, "input", "The helper no longer reads its input.");
+            throw told ?? Fail(null, "input", "The helper no longer reads its input.");
         }
+    }
+
+    // The end the helper wrote, if it wrote one within the wait: its refusal's code and its reason; null when nothing came.
+    private PresenceSessionEnded? Ending(TimeSpan wait)
+    {
+        if (channel.Receive(wait) is not JsonElement message) return null;
+        string? type = Text(message, "type");
+        if (type == "refused")
+        {
+            string code = Text(message, "code") ?? "refusal";
+            string reason = channel.Receive(EndWait) is JsonElement end && Text(end, "type") == "ended" ? Text(end, "reason") ?? "refusal" : "refusal";
+            Kill();
+            return Fail(code, reason, $"The presence session was refused ({code}): {Text(message, "detail") ?? "the helper refused."}");
+        }
+
+        if (type == "ended")
+        {
+            string reason = Text(message, "reason") ?? "refusal";
+            Kill();
+            return Fail(reason == "limit" ? "session.ended" : null, reason, $"The presence session ended ({reason}).");
+        }
+
+        Kill();
+        return Fail(null, "refusal", $"The helper wrote {type ?? "a message it does not name"} unasked.");
     }
 
     private JsonElement Expect(TimeSpan wait, string type)
@@ -319,8 +349,12 @@ internal sealed class PresenceSessionClient : IDisposable
     private PresenceSessionEnded Fail(string? code, string reason, string message)
     {
         ended = true;
+        EndReason ??= reason;
         return new PresenceSessionEnded(code, reason, message);
     }
+
+    /// <summary>Why the session ended, once it has: closed, limit, lock, sleep, input, silent, declined or refusal.</summary>
+    internal string? EndReason { get; private set; }
 
     private static byte[] Canonical(JsonObject message)
     {

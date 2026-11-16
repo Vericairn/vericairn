@@ -290,6 +290,7 @@ public sealed class PresencePromptTests
         HeldClock clock = MinuteAhead();
         Hold(f, provider, clock);
         var helpers = new List<PresenceHelperStandIn>();
+        f.Api.HostsEmbedded = true;
         f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
         HashSet<string> before = [.. f.Api.Session.Load().Records.Select(r => r.Id)];
 
@@ -338,6 +339,7 @@ public sealed class PresencePromptTests
         HeldClock clock = MinuteAhead();
         Hold(f, provider, clock);
         var helpers = new List<PresenceHelperStandIn>();
+        f.Api.HostsEmbedded = true;
         f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
         ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId, Ref: provider.HeadSha,
             Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
@@ -369,6 +371,7 @@ public sealed class PresencePromptTests
         HeldClock clock = MinuteAhead();
         Hold(f, provider, clock);
         var helpers = new List<PresenceHelperStandIn>();
+        f.Api.HostsEmbedded = true;
         f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
 
         ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId,

@@ -70,6 +70,7 @@ public sealed class ChangesFlowTests
         f.Service.KeyStores = [custody];
         f.Service.PresenceRequired = d => d == device;
         var helpers = new List<PresenceHelperStandIn>();
+        f.Service.HostsEmbedded = true;
         f.Service.PresenceHost = StandInSessions.Host(helpers);
 
         ChangeResponse pushed = f.Service.ChangesPush(f.Push);

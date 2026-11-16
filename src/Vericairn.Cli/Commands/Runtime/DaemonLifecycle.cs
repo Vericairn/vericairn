@@ -154,18 +154,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
 
         // The daemon gets streams of its own and writes to its log: it never inherits this command's output, which a caller
         // (Workbench, a script capturing the output) may be reading to the end while the daemon runs for as long as it serves.
-        IReadOnlyList<string> launcher = ServiceInstaller.CurrentLauncher();
-        var info = new ProcessStartInfo(launcher[0]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve", "--detached"]))
-        {
-            info.ArgumentList.Add(argument);
-        }
-
-        // From 0.9.4 (ID-16) a release build starts its daemon with the .NET diagnostics channel off, read only from the environment.
-        foreach ((string name, string value) in PresenceSessionBuild.Current.RuntimeEnvironment)
-        {
-            info.Environment[name] = value;
-        }
+        ProcessStartInfo info = DaemonStart(ServiceInstaller.CurrentLauncher(), root, PresenceSessionBuild.Current);
 
         NativeMethods.KeepStandardHandlesFromChildren();
         using Process? process = Process.Start(info);
@@ -197,6 +186,28 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         throw new ClientTimeoutException(true);
+    }
+
+    /// <summary>
+    /// How the daemon of an estate is started: this command line's launcher with runtime serve --detached, streams of its own, and, from
+    /// 0.9.4 (ID-16) in a release build, the .NET diagnostics channel off (DOTNET_EnableDiagnostics=0), read only from the environment.
+    /// </summary>
+    internal static ProcessStartInfo DaemonStart(IReadOnlyList<string> launcher, string root, PresenceSessionBuild build)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        ArgumentNullException.ThrowIfNull(build);
+        var info = new ProcessStartInfo(launcher[0]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve", "--detached"]))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        foreach ((string name, string value) in build.RuntimeEnvironment)
+        {
+            info.Environment[name] = value;
+        }
+
+        return info;
     }
 
     public int RuntimeStop(string root, bool json)
