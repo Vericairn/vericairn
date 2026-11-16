@@ -491,12 +491,19 @@ every template.
   the close is that operator's own authentic `operator-request-close` with
   outcome `done`, pinning a revision of the request with the same step and
   command, made no earlier than the goal revision that gave the run its current
-  flow pin, subject and options and every step the step waits on done, and no
-  later than the time the run is read. Anything else leaves `{request}` unbound.
+  flow pin, subject and options, every step the step waits on done, and, from
+  0.9.4 (FIX-144), every optional step it waits on skipped, by the operator's
+  dismissal, by a revision that turned it off or with the skipped step that
+  feeds it, and no later than the time the run is read. Anything else leaves
+  `{request}` unbound.
   A revision that changes the pin, subject or options, such as a corrective
   version, asks the step again; one that changes only the budget, objective or
   other fields does not, and from 0.9.4 (FIX-142) neither does one whose options
-  only turn optional steps or optional items off. From 0.9.4 the addressed
+  only turn optional steps or optional items off. From 0.9.4 (FIX-146) a
+  revision that changes `until` asks every step again, the configurations
+  compared are those resolved when each revision was activated, and a step
+  whose optional item a revision turns off counts as done from that revision
+  unless the item was satisfied before it. From 0.9.4 the addressed
   operator's own close of that request with outcome `dismissed` settles an
   optional reserved step as skipped, `off` with the dismissal as its reason,
   without a revision of the goal; a required step, or one an estate policy
@@ -571,9 +578,43 @@ every template.
   reserved step. The
   [operator guide](operator-guide.md#stops-and-their-surfaces-092) shows the
   request that carries it.
-- `when` is a due time, `{"due": {"after": "P1D", "from": "<step>"}}`, or a
-  watch, `{"watch": {"every": "PT6H", "limit": "P7D"}}` repeated until the done
-  predicates hold; a work or review step has no watch.
+- `when` is the step's timing contract; a step without one is instant. From
+  0.9.4 (PROC-18) it starts one way, at most one of: `instant: true`, as soon
+  as what it waits on is done and its preconditions hold; `delay`,
+  `{"after": "PT2H", "from": "<point>"}`, a duration after `close`, the close of
+  the steps it waits on and the default, `activation`, the run's activation,
+  an earlier step's key, its close, or `<step>.<item>`, the time of that item's
+  record; `at`, an instant such as `{"time": "2026-11-20T09:00:00Z"}`, a local
+  date and time in the step's zone such as `{"time": "2026-11-20T09:00"}`, or
+  the time a field of an earlier item's record gives,
+  `{"output": "<step>.<item>", "field": "publishedAt"}`; `schedule`, days of
+  the week and times of day, `{"days": ["mon", "thu"], "times": ["09:00"]}`,
+  every day when it names no days, its first occurrence once the step is
+  ready; `event`, an event kind of the event journal and a record predicate,
+  `{"kind": "record", "predicate": {...}}`, due at the first record the
+  predicate counts after the step is ready, the records read again and no
+  event trusted; `watch`, `{"every": "PT6H", "limit": "P7D"}`, repeated until
+  the done predicates hold, never on a work or review step; or `due`, as
+  before 0.9.4, `{"after": "P1D", "from": "<step>"}`, a delay after a named
+  step's close, which holds a reserved step until then rather than arming it. Any of them takes a `window`, the spans the step may start in,
+  `open`, and those it never starts in, `quiet`, each
+  `{"days": ["mon"], "from": "09:00", "to": "17:00"}`, every day when it names
+  none and ending the next day when it ends at or before its start, so a step
+  due two hours after a close late on a Friday starts when the window next
+  opens; a `zone`, the IANA time zone its local times are read in, overriding
+  the run's; a `deadline`, a duration after its due time; and `missed`, the
+  rule for a deadline that passes before the step is taken by an assignment
+  or its act: `late` runs it late, `skip` skips an optional step from its
+  deadline, and `attention`, the default, asks the sponsor and runs it once,
+  late, once the ask is answered. `fixed: true` keeps any configuration from
+  changing the timing, as an embargo needs. Local times are read in the
+  step's zone, else the run's configured `zone`, else UTC; a local time a
+  daylight-saving change skips moves forward by the change's length, so 02:30
+  on a night the clocks go from 02:00 to 03:00 is 03:30, and one a change
+  repeats is its first occurrence. A zone is one every machine reads alike:
+  an IANA name the Unicode CLDR maps to a Windows zone, such as
+  `Europe/London` or `America/New_York`. Each due time is computed from the
+  records and the runtime's clock, never an author's claim.
 - `effect` names its route (`api`, `person` or `browser`), `exchange` its export
   (material by input, question, answer format, expiry and route) and intake
   route, and a `flow` step the pin of the flow it runs.
@@ -629,7 +670,16 @@ turns one off or removes a reserved marking; a `template-defaults` record or goa
 that turns off a step or item an active estate policy requires, by a
 [`vericairn.estate/flow-steps`](policies.md#required-flow-steps-092) rule, is
 refused, as is a run whose wider configuration leaves one off or whose `until`
-ends it before one. `docs new` and `docs adopt` refuse a flow, and a living
+ends it before one. From 0.9.4 (PROC-18) a configuration also sets `zone`, the
+venture's IANA time zone, and `when.<step>`, a step's timing as JSON text such
+as `{"delay":{"after":"PT2H"}}`, for a step whose timing the flow does not fix,
+the narrowest winning; a timing it sets is checked as the flow's own is, and
+one for a fixed step is refused (`flow.timing-fixed`). From 0.9.4 (FIX-146) a run keeps the configuration resolved
+when its current goal revision was activated, the run's product read as its
+work order stood then: `template-defaults` recorded later apply to new runs and
+to the run's next revision, which its sponsor signs and activates, as later
+defaults never rewrite a document instance, so nothing but a revision changes
+a running run's steps. `docs new` and `docs adopt` refuse a flow, and a living
 document never pins one.
 
 ### The software pack's flows (0.9.2)

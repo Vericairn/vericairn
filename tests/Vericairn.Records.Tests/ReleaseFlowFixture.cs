@@ -22,7 +22,7 @@ public sealed class ReleaseFlowFixture : IDisposable
 
     public const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
-    public ReleaseFlowFixture(bool firstParty = false, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? policy = null, Action<JsonObject>? extension = null)
+    public ReleaseFlowFixture(bool firstParty = false, JsonObject? options = null, Func<ReleaseFlowFixture, JsonObject>? policy = null, Action<JsonObject>? extension = null, string? until = null)
     {
         Records = new PolicyFixture();
         RecordEnvelope basis = Add("decision", Records.DecisionBody());
@@ -47,7 +47,7 @@ public sealed class ReleaseFlowFixture : IDisposable
         }
 
         Flow = firstParty ? InstallFirstParty(Estate, extension) : SoftwareFlows.ReleaseFlow;
-        Goal = Add("goal", GoalBody(Version, options));
+        Goal = Add("goal", GoalBody(Version, options, until: until));
         Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: Goal.Reference);
     }
 
@@ -76,7 +76,7 @@ public sealed class ReleaseFlowFixture : IDisposable
     public RecordEnvelope ByReviewer(string type, JsonObject body, RecordReference? subject = null) =>
         Estate.Add(type, Reviewer, body.ToJsonString(), subject);
 
-    public JsonObject GoalBody(string version, JsonObject? options = null, int attempts = 3)
+    public JsonObject GoalBody(string version, JsonObject? options = null, int attempts = 3, string? until = null)
     {
         var plan = new JsonObject
         {
@@ -90,6 +90,7 @@ public sealed class ReleaseFlowFixture : IDisposable
             },
         };
         if (options is not null) plan["options"] = options;
+        if (until is not null) plan["until"] = until;
         return new JsonObject
         {
             ["title"] = "Release " + version, ["objective"] = "Release the product from its placed work to its closed carrier.",
@@ -101,12 +102,22 @@ public sealed class ReleaseFlowFixture : IDisposable
         };
     }
 
-    /// <summary>The sponsor revises the run for a corrective version, as after a withdrawal, or with its own options.</summary>
-    public RecordEnvelope Revise(string version, JsonObject? options = null)
+    /// <summary>The sponsor revises the run for a corrective version, as after a withdrawal, or with its own options and until step.</summary>
+    public RecordEnvelope Revise(string version, JsonObject? options = null, string? until = null)
     {
-        Goal = Add("goal", GoalBody(version, options), supersedes: Goal.Id);
+        Goal = Add("goal", GoalBody(version, options, until: until), supersedes: Goal.Id);
         return Goal;
     }
+
+    /// <summary>The sponsor activates the run's current revision, which a revision needs afresh.</summary>
+    public RecordEnvelope Activate() =>
+        Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated again for the test." }, subject: Goal.Reference);
+
+    /// <summary>The operator's template-defaults for the run's flow at the estate.</summary>
+    public RecordEnvelope Defaults(JsonObject options) => Add("template-defaults", new JsonObject
+    {
+        ["template"] = FlowFixture.Pin(Flow), ["scope"] = new JsonObject { ["kind"] = "estate" }, ["options"] = options, ["reason"] = "The estate's configuration of its releases.",
+    });
 
     /// <summary>The sponsor revises the run's budget alone, granting more attempts: its flow pin, subject and options are unchanged.</summary>
     public RecordEnvelope ReviseBudget(int attempts)

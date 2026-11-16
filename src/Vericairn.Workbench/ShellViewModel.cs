@@ -106,6 +106,12 @@ public sealed partial class ShellViewModel : Observable
     /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
     public string StopsAsOf { get; private set; } = string.Empty;
 
+    /// <summary>From 0.9.4 (PROC-18), the due times of the estate's runs, from status: each step whose timing gates its start, before it runs.</summary>
+    public ObservableCollection<DueRow> Due { get; } = [];
+
+    /// <summary>True while a run has a due time to show.</summary>
+    public bool HasDue => Due.Count > 0;
+
     /// <summary>Recently opened estates.</summary>
     public ObservableCollection<string> Recent { get; }
 
@@ -340,8 +346,10 @@ public sealed partial class ShellViewModel : Observable
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
             Replace(Stops, estate.Stops);
+            Replace(Due, estate.Due);
             StopsAsOf = estate.StopsAsOf;
             Raise(nameof(HasStops));
+            Raise(nameof(HasDue));
             Raise(nameof(StopsAsOf));
             List<CompanionCatalogDocument> catalogs = Documents.OfType<CompanionCatalogDocument>().ToList();
             if (catalogs.Count > 0)

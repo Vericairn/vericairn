@@ -40,9 +40,10 @@ public static partial class FlowPosition
 
     /// <summary>
     /// The kinds of required attention a run raises, each an ask to the sponsor (design/flow.md §§ 7 and 8): an uncertain effect, a failed
-    /// step whose failure route stops, a spent retry budget, the goal's limit of consecutive failed steps, and an evaluation of impossible.
+    /// step whose failure route stops, a spent retry budget, the goal's limit of consecutive failed steps, an evaluation of impossible, and
+    /// from 0.9.4 (PROC-18) a step that missed its deadline under the rule that asks the sponsor.
     /// </summary>
-    public static readonly ImmutableArray<string> AttentionKinds = ["uncertain", "failed", "exhausted", "consecutive-failures", "impossible"];
+    public static readonly ImmutableArray<string> AttentionKinds = ["uncertain", "failed", "exhausted", "consecutive-failures", "impossible", "missed"];
 
     /// <summary>The wait before the first run after a failed run; each further failed run in a row doubles it (design/flow.md § 7).</summary>
     public static readonly TimeSpan RetryBackoff = TimeSpan.FromMinutes(1);
@@ -132,6 +133,37 @@ public static partial class FlowPosition
     /// <param name="Route">Its failure route.</param>
     public sealed record Failure(RecordEnvelope Record, string Summary, FlowFailure Route);
 
+    /// <summary>
+    /// A step's due time under its timing contract (from 0.9.4, PROC-18; design/flow.md § 7), computed from the records and the runtime's
+    /// clock, never an author's claim: when it is due and why, the zone its local times are read in, its deadline and, once the deadline
+    /// passed before the step was taken, the missed-time rule it took.
+    /// </summary>
+    /// <param name="At">When it is due: it starts no earlier, within its window; null while the time it counts from is not yet in the records.</param>
+    /// <param name="Reason">Why, in words: what it counts from and how, or what it still waits for.</param>
+    public sealed record StepDue(DateTimeOffset? At, string Reason)
+    {
+        /// <summary>The step's timing in words.</summary>
+        public string Timing { get; init; } = "instant";
+
+        /// <summary>The IANA time zone its local times are read in.</summary>
+        public string Zone { get; init; } = FlowTiming.Utc;
+
+        /// <summary>The latest time it may start before it is missed; null without a deadline, or while it is not yet due.</summary>
+        public DateTimeOffset? Deadline { get; init; }
+
+        /// <summary>The missed-time rule it took once its deadline passed before it was taken: late, skip or attention; null while it is not missed.</summary>
+        public string? Missed { get; init; }
+
+        /// <summary>The record its due time counts from, about which a missed step asks the sponsor.</summary>
+        internal RecordEnvelope? From { get; init; }
+
+        /// <summary>The reason a step not yet due is blocked, when it differs from the due time's own words.</summary>
+        internal string? Blocking { get; init; }
+
+        /// <summary>True when the sponsor answered an ask about the record it counts from, so a missed step runs once, late.</summary>
+        internal bool Answered { get; init; }
+    }
+
     /// <summary>One instance of a step: the step, once or once per name its each field lists, with its derived state.</summary>
     /// <param name="Step">The flow's step.</param>
     /// <param name="Instance">The instance, for a step that runs over a list under each.</param>
@@ -195,6 +227,12 @@ public static partial class FlowPosition
         /// never answers this ask. Null for every other step.
         /// </summary>
         public DateTimeOffset? AskedSince { get; init; }
+
+        /// <summary>
+        /// Its due time under its timing contract (from 0.9.4, PROC-18), for a step neither done nor off whose timing gates its start: a
+        /// delay, a time, a schedule, an event, a window or a deadline; null for an instant step and a watch.
+        /// </summary>
+        public StepDue? Due { get; init; }
 
         /// <summary>
         /// For an optional step that is off, when it was skipped in the run's current shape (from 0.9.4, FIX-144): the operator's dismissal
@@ -403,6 +441,7 @@ public static partial class FlowPosition
         private readonly DateTimeOffset at;
         private IReadOnlyList<RecordEnvelope>? shape;
         private readonly Dictionary<string, FlowRuns.Configuration> configured = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, FlowTiming> timings = new(StringComparer.Ordinal);
         private readonly Dictionary<FlowRuns.StepRef, StepInstance> derived = [];
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> held;
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> reviewing;
@@ -622,20 +661,71 @@ public static partial class FlowPosition
             bool vacuous = complete && FlowContract.Untimed(step.Kind, step.Outputs.Count, step.Done) && Dependencies(step, item).Any(w => w.State is not ("done" or "off"));
             complete &= !vacuous;
             bool doneMet = done.All(d => d.Verdict.Value == "met");
+            // From 0.9.4 (FIX-146) the reviews and verifications that satisfy its items count too: it is done only once the last of them is.
             DateTimeOffset? doneAt = complete ? new[] { step.Reserved is null ? result : null, review }.Concat(outputs.Select(o => o.Carrier)).Concat(done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)))
+                .Concat(items.Where(i => i.Satisfied).SelectMany(i => i.Evidence.Prepend(i.Review)))
                 .OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max() : null;
             List<Input> inputs = Inputs(step, item, holder, complete && holder is null ? doneAt : null);
             List<AttemptState> attempts = AttemptsOf(assignments);
             List<AgentRuns.Run> carried = RunsOf(assignments);
             int used = carried.Count(r => r.Charged);
-            StepInstance Shaped(StepInstance instance) => instance with { Attempts = attempts, AttemptsUsed = used, AttemptsAllowed = ledger.AttemptsPerStep, AskedSince = asked };
+
+            // From 0.9.4 (PROC-18) the step's timing contract: when it is due, computed from the records and the clock, and whether it
+            // missed its deadline. A step late under its rule says so after its other reasons.
+            FlowTiming timing = TimingOf(step);
+            List<StepInstance> waits = Dependencies(step, item).ToList();
+            StepDue? due = DueOf(step, item, timing, waits, bindings, holder);
+            StepInstance Shaped(StepInstance instance) => instance with
+            {
+                Attempts = attempts, AttemptsUsed = used, AttemptsAllowed = ledger.AttemptsPerStep, AskedSince = asked,
+                Due = instance.State is "done" or "off" ? null : due,
+                Reasons = instance.State is not ("done" or "off") && due is { Missed: not null, Deadline: DateTimeOffset missedAt } && (due.Missed is "late" or "skip" || due.Answered || step.Reserved is not null)
+                    ? [.. instance.Reasons, Late(due, missedAt)] : instance.Reasons,
+            };
 
             // A review step's own review names the exact result it judged, so a review of the current result is never stale.
             bool stale = inputs.Any(i => i.Change is not null) && (complete || holder is not null) && !(step.Kind == "review" && complete);
             Return? reopened = complete && !stale ? Reopened(step, item, doneAt) : null;
+            string? lapsed = null;
             if (complete && !stale && reopened is null)
             {
-                return Shaped(new StepInstance(step, item, "done", [Completed(step, result, review, done)], Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
+                // From 0.9.4 (FIX-146) an optional item a goal revision of the run's current shape turned off settles its step as a step
+                // turned off settles the steps after it: the step counts as done no earlier than that revision, unless the item was
+                // satisfied before it, so no step after it reads asked from an earlier result that lacked the item.
+                RecordEnvelope? judged = step.Reserved is not null ? (result is not null && IsReservedAct(model, result) ? result : null) : result;
+                IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
+                RecordEnvelope? stepReview = step.Kind == "review" ? review : null;
+                List<string> reasons = [Completed(step, result, review, done)];
+                if (ItemsTurnedOff(step, output => Judge(step, output, judged, done, assignments, reviews, authors, stepReview, on: true)) is { } settled && doneAt is DateTimeOffset finished && settled.At > finished)
+                {
+                    doneAt = settled.At;
+                    reasons.Add(settled.Why);
+                }
+
+                // From 0.9.4 (PROC-18) a reserved act at a time is checked when it is armed and again when it runs: the operator's act
+                // recorded before its due time, such as arming a platform's scheduler, counts only once that time has come, and only while
+                // its author still holds the act then; an act recorded at or after its time was checked when it was made. A due time as
+                // before 0.9.4 keeps its meaning: it holds the step until then, and arms nothing.
+                if (step.Reserved is null || timing.Start == "due" || due?.At is not DateTimeOffset dueAt)
+                {
+                    return Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
+                }
+
+                List<RecordEnvelope> acts = done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)).DistinctBy(r => r.Id).ToList();
+                if (dueAt > at)
+                {
+                    return Shaped(new StepInstance(step, item, "blocked", [$"armed: the operator's act, recorded at {Time(doneAt ?? at)}, counts from {Time(dueAt)}, when the step is due ({due.Reason}), while its author still holds the act then"],
+                        Who(holder), holder, result, review, outputs, items, inputs, done, null));
+                }
+
+                lapsed = acts.Where(r => r.AtTime < dueAt).FirstOrDefault(r => !HoldsActAt(r.By, dueAt)) is RecordEnvelope gone
+                    ? $"the operator's act {gone.Type} {gone.Id} no longer counts: {Routing.NameOf(model, gone.By)} does not hold the act at {Time(dueAt)}, when the step runs"
+                    : null;
+                if (lapsed is null)
+                {
+                    reasons.Add($"its act counts from {Time(dueAt)}, when it was due ({due.Reason})");
+                    return Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt is DateTimeOffset acted && acted > dueAt ? acted : dueAt));
+                }
             }
 
             // From 0.9.4 (FIX-142): an optional reserved step whose request for this ask the operator dismissed settles as skipped, with no
@@ -658,7 +748,6 @@ public static partial class FlowPosition
             // Blocked: what it waits on is not done, or a precondition, a trap, a due time or its role brief does not hold; every reason is
             // listed. A stale step shows stale, and reruns once nothing it waits on holds it.
             var blocked = new List<string>();
-            List<StepInstance> waits = Dependencies(step, item).ToList();
             foreach (StepInstance wait in waits.Where(w => w.State != "done"))
             {
                 blocked.Add(wait.State == "off" ? $"it takes an input from {wait.Name}, which is off" : $"it waits on {wait.Name}, which is {wait.State}");
@@ -678,12 +767,45 @@ public static partial class FlowPosition
                 }
             }
 
-            if (TJson.Object(step.When, "due") is { ValueKind: JsonValueKind.Object } due && FlowContract.ParseDuration(TJson.Text(due, "after")) is TimeSpan delay)
+            // From 0.9.4 (PROC-18) a step starts no earlier than it is due, and only within its window; a reserved act due later that
+            // nothing else holds is armed instead, its request put to the operator ahead of its time.
+            string? notYet = null;
+            if (due is not null)
             {
-                StepInstance? from = InstanceOf(TJson.Text(due, "from")!, item);
-                if (from?.DoneAt is DateTimeOffset start && start + delay > at)
+                if (due.At is not DateTimeOffset dueAt)
                 {
-                    blocked.Add($"it is due at {Time(start + delay)}, {TJson.Text(due, "after")} after {from.Name} was done");
+                    if (waits.All(w => w.State is "done" or "off"))
+                    {
+                        blocked.Add(due.Reason);
+                    }
+                }
+                else if (dueAt > at)
+                {
+                    notYet = due.Blocking ?? $"it is due at {Time(dueAt)}: {due.Reason}";
+                    blocked.Add(notYet);
+                }
+                else if (timing.Windowed && holder is null && FlowTiming.TryZoneOf(due.Zone) is TimeZoneInfo zone && !timing.InWindow(at, zone))
+                {
+                    DateTimeOffset? opens = timing.NextOpen(at, zone);
+                    blocked.Add($"it starts only within its window ({timing.Describe()}, in {due.Zone}){(opens is DateTimeOffset next ? $": it opens next at {Time(next)}" : ", which does not open again")}");
+                }
+            }
+
+            // A step that missed its deadline before it was taken takes its rule: an optional one its rule skips is skipped from the
+            // deadline; under attention, the default, the sponsor is asked and it runs once, late, when answered; under late it runs late.
+            // A reserved act's request, already put to the operator, says it is late.
+            if (due is { Missed: string missed, Deadline: DateTimeOffset deadline } && step.Reserved is null)
+            {
+                if (missed == "skip" && !step.Required && !PolicyRequires(step))
+                {
+                    return Off(step, item, $"skipped: it missed its deadline at {Time(deadline)} ({due.Reason}), and its timing skips an optional step that misses it") with { SkippedAt = deadline };
+                }
+
+                if (missed == "attention" && !due.Answered)
+                {
+                    string summary = $"step {reference} missed its deadline at {Time(deadline)} without being taken ({due.Reason}): it runs once, late, when the sponsor answers, and only what depends on it waits";
+                    return Shaped(new StepInstance(step, item, "stopped", ["required attention: " + summary, .. blocked], Who(holder), holder, result, review, outputs, items, inputs, done, null))
+                        with { Stop = "attention", Attention = new Attention("missed", due.From ?? goal, summary) };
                 }
             }
 
@@ -693,6 +815,11 @@ public static partial class FlowPosition
             if (briefDue is not null && (holder is null || stale))
             {
                 blocked.Add(briefDue);
+            }
+
+            if (step.Reserved is not null && timing.Start != "due" && notYet is not null && blocked.Count == 1 && blocked[0] == notYet)
+            {
+                blocked.Clear();
             }
 
             // A reserved act whose input changed after it was done waits on the operator again, with the command the records give now.
@@ -731,6 +858,16 @@ public static partial class FlowPosition
                 }
 
                 var waiting = new List<string> { $"a reserved act, {act}: it waits on a person who holds it, the operator, and no agent carries it without a grant in force within its bounds, none of which this build issues" };
+                if (due?.At is DateTimeOffset armedFor && armedFor > at)
+                {
+                    waiting.Add($"armed: its act is due at {Time(armedFor)} ({due.Reason}); the operator may arm the platform's scheduler for that time, which is the act itself, or carry the act then, and the act counts from then while its author still holds it");
+                }
+
+                if (lapsed is not null)
+                {
+                    waiting.Add(lapsed);
+                }
+
                 if (actAgain)
                 {
                     waiting.AddRange(inputs.Where(i => i.Change is not null).Select(i => i.Change! + ", so the act is carried again"));
@@ -799,7 +936,7 @@ public static partial class FlowPosition
                 return Make("in-review", pending ?? $"its result {result.Id} is {outcome}{(doneMet ? string.Empty : ", and its done predicates do not hold")}: a review with findings sends it back for another attempt") with { Reviews = completion.Reviews };
             }
 
-            if (TJson.Object(step.When, "watch") is { ValueKind: JsonValueKind.Object } watch)
+            if (timing.Start == "watch" && TJson.Object(timing.Element, "watch") is { ValueKind: JsonValueKind.Object } watch)
             {
                 DateTimeOffset? started = waits.Select(w => w.DoneAt).Where(t => t is not null).Max() ?? Activated();
                 TimeSpan limit = FlowContract.ParseDuration(TJson.Text(watch, "limit")) ?? TimeSpan.Zero;
@@ -1179,6 +1316,251 @@ public static partial class FlowPosition
                 : null;
         }
 
+        /// <summary>A step's timing in this run (from 0.9.4, PROC-18): the one its configuration sets, unless the flow fixes it, else the flow's own.</summary>
+        private FlowTiming TimingOf(FlowStep step)
+        {
+            if (!timings.TryGetValue(step.Key, out FlowTiming? timing))
+            {
+                timing = configuration.Timing(step);
+                timings[step.Key] = timing;
+            }
+
+            return timing;
+        }
+
+        /// <summary>
+        /// A step instance's due time under its timing (from 0.9.4, PROC-18; design/flow.md § 7), from the records and the clock: instant
+        /// from when what it waits on was done, or the run's activation when it waits on nothing; a delay after the point it names; at the
+        /// instant it names, a local time in its zone, or the time an output's record gives; the first time its schedule gives once it is
+        /// ready; the first record after it is ready that its event's predicate counts, the records read again rather than any event
+        /// trusted; then the first time its window opens. Its deadline follows its due time, and a deadline that passed before the step
+        /// was taken, by an assignment or its act, is missed under its rule. Null for an instant step with no window or deadline, and for
+        /// a watch.
+        /// </summary>
+        private StepDue? DueOf(FlowStep step, string? item, FlowTiming timing, List<StepInstance> waits, IReadOnlyDictionary<string, string> bindings, RecordEnvelope? holder)
+        {
+            if (timing.Untimed || timing.Start == "watch")
+            {
+                return null;
+            }
+
+            string zoneName = timing.Zone ?? configuration.Zone;
+            if (FlowTiming.TryZoneOf(zoneName) is not TimeZoneInfo zone)
+            {
+                return new StepDue(null, $"its time zone {zoneName} has no rules on this machine, so its due time is not computed here") { Timing = timing.Describe(), Zone = zoneName };
+            }
+
+            (DateTimeOffset At, RecordEnvelope Record, string What)? ready = Ready(waits);
+            DateTimeOffset? dueAt = null;
+            RecordEnvelope? from = null;
+            string? blocking = null;
+            string reason;
+            switch (timing.Start)
+            {
+                case "delay" or "due":
+                    if (Point(timing.From, item, ready) is { } point)
+                    {
+                        dueAt = point.At + timing.After!.Value;
+                        from = point.Record;
+                        reason = $"{FlowTiming.Text(timing.After)} after {point.What} at {Time(point.At)}";
+                        blocking = timing.Start == "due" ? $"it is due at {Time(dueAt.Value)}, {TJson.Text(TJson.Object(timing.Element, "due"), "after")} after {point.Name} was done" : null;
+                    }
+                    else
+                    {
+                        reason = $"it is due {FlowTiming.Text(timing.After)} after {PointWords(timing.From)}, which the records do not give yet";
+                    }
+
+                    break;
+                case "at" when timing.Time is string time:
+                    dueAt = FlowTiming.ParseInstant(time, out DateTimeOffset instant) ? instant : FlowTiming.LocalTime(time, out DateTime local) ? FlowTiming.LocalToInstant(local, zone) : null;
+                    from = configuration.Values.GetValueOrDefault(FlowTiming.WhenOption + step.Key)?.Record ?? ActivationRecord() ?? goal;
+                    reason = FlowTiming.ParseInstant(time, out _) ? $"at {time}" : $"at {time} in {zoneName}";
+                    break;
+                case "at":
+                    RecordEnvelope? carrier = ItemCarrier(timing.Output!, item);
+                    string? given = carrier is null ? null : FieldText(carrier.Body, timing.Field!);
+                    if (given is not null && FlowTiming.ParseInstant(given, out DateTimeOffset taken))
+                    {
+                        dueAt = taken;
+                        from = carrier;
+                        reason = $"at {Time(taken)}, the time field {timing.Field} of item {timing.Output} gives in {carrier!.Type} {carrier.Id}";
+                    }
+                    else
+                    {
+                        reason = $"it is due at the time field {timing.Field} of item {timing.Output} gives, which the records do not give yet";
+                    }
+
+                    break;
+                case "schedule":
+                    if (ready is { } readyAt)
+                    {
+                        dueAt = timing.NextScheduled(readyAt.At, zone);
+                        from = readyAt.Record;
+                        reason = $"the first time its schedule gives ({timing.Describe()}) at or after it was ready, at {readyAt.What} at {Time(readyAt.At)}, in {zoneName}";
+                    }
+                    else
+                    {
+                        reason = "it is due on its schedule once what it waits on is done";
+                    }
+
+                    break;
+                case "event":
+                    JsonElement bound = FlowRuns.Bind(timing.Predicate, bindings);
+                    if (ready is { } waiting && GoalPredicates.Matching(model, bound).Where(r => r.AtTime >= waiting.At).MinBy(r => r.AtTime) is RecordEnvelope happened)
+                    {
+                        dueAt = happened.AtTime;
+                        from = happened;
+                        reason = $"a {timing.EventKind} event whose predicate holds ({GoalPredicates.DescribePredicate(bound)}): {happened.Type} {happened.Id} at {Time(happened.AtTime)}, read from the records";
+                    }
+                    else
+                    {
+                        reason = ready is { } since
+                            ? $"it waits for a {timing.EventKind} event whose predicate holds ({GoalPredicates.DescribePredicate(bound)}) after it was ready at {Time(since.At)}; the records are read again, never the event trusted"
+                            : $"it waits for a {timing.EventKind} event whose predicate holds ({GoalPredicates.DescribePredicate(bound)}) once what it waits on is done";
+                    }
+
+                    break;
+                default:
+                    if (ready is { } readied)
+                    {
+                        dueAt = readied.At;
+                        from = readied.Record;
+                        reason = $"ready at {readied.What} at {Time(readied.At)}";
+                    }
+                    else
+                    {
+                        reason = "it starts once what it waits on is done";
+                    }
+
+                    break;
+            }
+
+            if (dueAt is DateTimeOffset unwindowed && timing.Windowed)
+            {
+                dueAt = timing.NextOpen(unwindowed, zone);
+                reason += dueAt is not DateTimeOffset opened ? $", and its window ({timing.Describe()}) does not open after it" : opened == unwindowed ? string.Empty : $", in its window from {Time(opened)}";
+                blocking = null;
+            }
+
+            DateTimeOffset? deadline = dueAt + timing.Deadline;
+            string? missed = ready is not null && deadline is DateTimeOffset passed && passed < at && (holder is null || holder.AtTime > passed) ? timing.Missed : null;
+            return new StepDue(dueAt, reason)
+            {
+                Timing = timing.Describe(), Zone = zoneName, Deadline = deadline, Missed = missed, From = from, Blocking = blocking,
+                Answered = missed == "attention" && from is not null && Answered(from),
+            };
+        }
+
+        /// <summary>When a step instance is ready to start: the latest time a step it waits on was done, or the run's activation when none gives one; null while one is not done or off.</summary>
+        private (DateTimeOffset At, RecordEnvelope Record, string What)? Ready(List<StepInstance> waits)
+        {
+            if (waits.Any(w => w.State is not ("done" or "off")))
+            {
+                return null;
+            }
+
+            StepInstance? latest = waits.Where(w => w.State == "done" && w.DoneAt is not null).MaxBy(w => w.DoneAt);
+            if (latest is not null)
+            {
+                return (latest.DoneAt!.Value, DoneRecord(latest), $"{latest.Name}'s close");
+            }
+
+            return ActivationRecord() is RecordEnvelope activation ? (activation.AtTime, activation, "the run's activation") : null;
+        }
+
+        /// <summary>The point a delay counts from, with its record and in words: the close of what the step waits on, the run's activation, a step's close or an item's record.</summary>
+        private (DateTimeOffset At, RecordEnvelope Record, string What, string Name)? Point(string? from, string? item, (DateTimeOffset At, RecordEnvelope Record, string What)? ready)
+        {
+            if (from is null or FlowTiming.Close)
+            {
+                return ready is { } readyAt ? (readyAt.At, readyAt.Record, readyAt.What, readyAt.What) : null;
+            }
+
+            if (from == FlowTiming.Activation)
+            {
+                return ActivationRecord() is RecordEnvelope activation ? (activation.AtTime, activation, "the run's activation", "the run's activation") : null;
+            }
+
+            if (from.Contains('.', StringComparison.Ordinal))
+            {
+                return ItemCarrier(from, item) is RecordEnvelope carrier ? (carrier.AtTime, carrier, $"the time of item {from}", from) : null;
+            }
+
+            return InstanceOf(from, item) is { State: "done", DoneAt: DateTimeOffset closed } instance ? (closed, DoneRecord(instance), $"{instance.Name}'s close", instance.Name) : null;
+        }
+
+        private static string PointWords(string? from) => from switch
+        {
+            null or FlowTiming.Close => "the close of the steps it waits on",
+            FlowTiming.Activation => "the run's activation",
+            _ when from.Contains('.', StringComparison.Ordinal) => $"the time of item {from}",
+            _ => $"{from}'s close",
+        };
+
+        /// <summary>The record that carries an item of an earlier step instance, step.item, as it exists now; null while it does not.</summary>
+        private RecordEnvelope? ItemCarrier(string reference, string? item)
+        {
+            string[] parts = reference.Split('.');
+            return InstanceOf(parts[0], item)?.Items.FirstOrDefault(i => i.Declared.Name == parts[1] && i.State != "off")?.Value?.Carrier;
+        }
+
+        /// <summary>A field of a record's body by a dotted path; undefined when it has none.</summary>
+        private static JsonElement FieldOf(JsonElement body, string path)
+        {
+            JsonElement value = body;
+            foreach (string part in path.Split('.'))
+            {
+                value = TJson.Object(value, part);
+            }
+
+            return value;
+        }
+
+        private static string? FieldText(JsonElement body, string path) => FieldOf(body, path) is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
+
+        /// <summary>The record a step instance was done by at its done time: its result, review, an item's record, review or evidence, or a record its done predicates count.</summary>
+        private RecordEnvelope DoneRecord(StepInstance instance)
+        {
+            List<RecordEnvelope> records = new[] { instance.Result, instance.Review }.Concat(instance.Outputs.Select(o => o.Carrier))
+                .Concat(instance.Items.Where(i => i.Satisfied).SelectMany(i => i.Evidence.Prepend(i.Review)))
+                .Concat(instance.Done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, Admit(instance.Step))))
+                .OfType<RecordEnvelope>().ToList();
+            return records.FirstOrDefault(r => r.AtTime == instance.DoneAt) ?? records.MaxBy(r => r.AtTime) ?? ActivationRecord() ?? goal;
+        }
+
+        /// <summary>The goal revision's activation that counts, the first; null before it is activated.</summary>
+        private RecordEnvelope? ActivationRecord() =>
+            GoalRules.Statuses(model, goal).FirstOrDefault(s => EstateModel.BodyString(s, "status") == "active");
+
+        /// <summary>True when an ask about a record, or a revision of it, was answered by a decision of who it was put to.</summary>
+        private bool Answered(RecordEnvelope trigger)
+        {
+            IReadOnlyList<string> chain = model.Chain(trigger);
+            return Routing.AsksOf(model, goal).Any(a => model.Latest(a).Subject is RecordReference subject && chain.Contains(subject.Id) && Asks.State(model, a).State == "answered");
+        }
+
+        /// <summary>
+        /// Whether a principal holds a reserved act at a time (from 0.9.4, PROC-18): its principal record as it stood then, the latest
+        /// revision dated at or before it, is a person's with the operator role, so a timed act is checked again when it runs.
+        /// </summary>
+        private bool HoldsActAt(string principal, DateTimeOffset when)
+        {
+            if (model.CurrentPrincipal(principal) is not RecordEnvelope current)
+            {
+                return false;
+            }
+
+            RecordEnvelope? then = model.Chain(current).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().LastOrDefault(r => r.AtTime <= when);
+            return then is not null && EstateModel.BodyString(then, "kind") == "human" && TJson.Strings(then.Body, "roles").Contains(Roles.Operator, StringComparer.Ordinal);
+        }
+
+        /// <summary>A late step's words: when it missed its deadline, and that it runs once, late.</summary>
+        private static string Late(StepDue due, DateTimeOffset missedAt) => due.Answered
+            ? $"it missed its deadline at {Time(missedAt)}, and the sponsor answered the ask about it: it runs once, late"
+            : due.Missed == "late" ? $"it missed its deadline at {Time(missedAt)}: its timing runs it once, late"
+            : due.Missed == "skip" ? $"it missed its deadline at {Time(missedAt)}, and an estate policy requires it, so it is not skipped: it runs once, late"
+            : $"it missed its deadline at {Time(missedAt)}: its request to the operator stays, late";
+
         /// <summary>True when an estate policy in force requires the step of the run's flow or a base it extends, so that nothing skips it.</summary>
         private bool PolicyRequires(FlowStep step)
         {
@@ -1368,11 +1750,11 @@ public static partial class FlowPosition
         /// exact hash and is of its kind; unproven while the record that produced it does not show the declared provenance; unverified
         /// while a named check does not pass at its exact hash; and its review, the step's when it declares none, recorded at that hash
         /// by a principal of the reviewer role with the declared independence: in review until one passes, stale when only an earlier
-        /// version passed, satisfied once one passes.
+        /// version passed, satisfied once one passes. With <paramref name="on"/>, an item configured off is judged as it would be on.
         /// </summary>
-        private ItemState Judge(FlowStep step, FlowOutput output, RecordEnvelope? result, List<Check> done, List<RecordEnvelope> assignments, List<RecordEnvelope> reviews, IReadOnlySet<string> authors, RecordEnvelope? stepReview)
+        private ItemState Judge(FlowStep step, FlowOutput output, RecordEnvelope? result, List<Check> done, List<RecordEnvelope> assignments, List<RecordEnvelope> reviews, IReadOnlySet<string> authors, RecordEnvelope? stepReview, bool on = false)
         {
-            if (configuration.ItemsOff.TryGetValue(step.Key + "." + output.Name, out string? off))
+            if (!on && configuration.ItemsOff.TryGetValue(step.Key + "." + output.Name, out string? off))
             {
                 return new ItemState(output, "off", [off], null, null, null, []);
             }
@@ -1687,7 +2069,7 @@ public static partial class FlowPosition
                 }
             }
 
-            if (TJson.Text(TJson.Object(step.When, "due"), "from") is string from)
+            if (TimingOf(step).Waited is string from)
             {
                 foreach (StepInstance wait in Through(from, step.Each, item, seen, passed))
                 {
@@ -1773,7 +2155,9 @@ public static partial class FlowPosition
         /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
         /// From 0.9.4 (FIX-142) a revision that only turns optional steps or optional items off asks nothing again either: what it leaves
         /// in the run keeps its command, so the operator's closes already recorded keep answering the same asks. A step that waited on a
-        /// step such a revision turns off is asked only from that revision (FIX-144, <see cref="TurnedOff"/>).
+        /// step such a revision turns off is asked only from that revision (FIX-144, <see cref="TurnedOff"/>), and one that waited on a
+        /// step whose item such a revision turns off likewise (FIX-146, <see cref="ItemsTurnedOff"/>). From 0.9.4 (FIX-146) a revision
+        /// that changes until asks each step anew, and the configurations compared are those resolved at each revision's activation.
         /// </summary>
         private DateTimeOffset ShapedAt() => Shape()[0].AtTime;
 
@@ -1803,21 +2187,14 @@ public static partial class FlowPosition
         /// </summary>
         private DateTimeOffset? TurnedOff(FlowStep step, string? item)
         {
-            IReadOnlyList<RecordEnvelope> revisions = Shape();
-            int first = revisions.Count - 1;
-            while (first > 0 && ConfigurationOf(revisions[first - 1]).Off.ContainsKey(step.Key))
-            {
-                first--;
-            }
-
-            if (first == 0)
+            if (OffSince(c => c.Off.ContainsKey(step.Key)) is not RecordEnvelope revision)
             {
                 return null;
             }
 
             // Before that revision the step was part of the run: derived as it would be in it, it was done, or skipped, at a time the
             // records give, or it held the steps after it until the revision.
-            DateTimeOffset turned = revisions[first].AtTime;
+            DateTimeOffset turned = revision.AtTime;
             StepInstance running = Running(step, item);
             DateTimeOffset? settled = running.State switch
             {
@@ -1826,6 +2203,58 @@ public static partial class FlowPosition
                 _ => null,
             };
             return settled is DateTimeOffset earlier && earlier < turned ? earlier : turned;
+        }
+
+        /// <summary>
+        /// The goal revision of the run's current shape since which every revision's configuration holds a condition, such as a step or an
+        /// item off, when an earlier revision of the shape did not; null when every revision since the run took its shape holds it.
+        /// </summary>
+        private RecordEnvelope? OffSince(Func<FlowRuns.Configuration, bool> off)
+        {
+            IReadOnlyList<RecordEnvelope> revisions = Shape();
+            int first = revisions.Count - 1;
+            while (first > 0 && off(ConfigurationOf(revisions[first - 1])))
+            {
+                first--;
+            }
+
+            return first == 0 ? null : revisions[first];
+        }
+
+        /// <summary>
+        /// From 0.9.4 (FIX-146): when a step done now settled for the steps after it, given that a goal revision of the run's current shape
+        /// turned one of its optional items off, as a step turned off settles them (<see cref="TurnedOff"/>): for each such item, the
+        /// revision since which every revision turns it off, or, when the item was satisfied before that revision, that earlier time, the
+        /// latest of them with why; null when no revision of the shape turned an item of the step off. <paramref name="judge"/> judges an
+        /// item as it would be with the item on.
+        /// </summary>
+        private (DateTimeOffset At, string Why)? ItemsTurnedOff(FlowStep step, Func<FlowOutput, ItemState> judge)
+        {
+            (DateTimeOffset At, string Why)? latest = null;
+            foreach (FlowOutput output in step.Outputs.Where(o => !o.Required && configuration.ItemsOff.ContainsKey(step.Key + "." + o.Name)))
+            {
+                string key = step.Key + "." + output.Name;
+                if (OffSince(c => c.ItemsOff.ContainsKey(key)) is not RecordEnvelope revision)
+                {
+                    continue;
+                }
+
+                // Before that revision the item was part of the step: satisfied at a time the records give, it settled the step then; else
+                // the step was not done until the revision turned the item off.
+                ItemState on = judge(output);
+                DateTimeOffset? satisfied = on.Satisfied
+                    ? new[] { on.Value?.Carrier, on.Review }.Concat(on.Evidence).OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max()
+                    : null;
+                (DateTimeOffset At, string Why) settled = satisfied is DateTimeOffset earlier && earlier < revision.AtTime
+                    ? (earlier, $"its optional item {output.Name}, which goal revision {revision.Id} turned off, was satisfied at {Time(earlier)}")
+                    : (revision.AtTime, $"it counts as done from {Time(revision.AtTime)}, when goal revision {revision.Id} turned its optional item {output.Name} off, so the steps after it are asked from then");
+                if (latest is null || settled.At > latest.Value.At)
+                {
+                    latest = settled;
+                }
+            }
+
+            return latest;
         }
 
         /// <summary>The run's configuration under a goal revision of its current shape: the current one's, or the earlier revision's own.</summary>
@@ -1846,26 +2275,24 @@ public static partial class FlowPosition
         }
 
         /// <summary>
-        /// True when an earlier goal revision gives the run the asks the current one does: the same flow pin and subject, and options that
-        /// are the same in effect but for optional steps or items the current revision turns off.
+        /// True when an earlier goal revision gives the run the asks the current one does: the same flow pin and subject, the same until
+        /// step, and a configuration that is the same in effect but for optional steps or items the current revision turns off. From
+        /// 0.9.4 (FIX-146) a revision that changes until asks every step again, and each revision's configuration is compared as it was
+        /// resolved at its activation, so template defaults a revision takes in are compared even when the goal's own options are unchanged.
         /// </summary>
         private bool SameAsks(RecordEnvelope earlier)
         {
             JsonElement now = FlowRuns.Plan(goal);
             JsonElement then = FlowRuns.Plan(earlier);
-            if (Member(now, "pin") != Member(then, "pin") || Member(now, "subject") != Member(then, "subject"))
+            if (Member(now, "pin") != Member(then, "pin") || Member(now, "subject") != Member(then, "subject") || TJson.Text(now, "until") != TJson.Text(then, "until"))
             {
                 return false;
             }
 
-            if (Member(now, "options") == Member(then, "options"))
-            {
-                return true;
-            }
-
             FlowRuns.Configuration before = ConfigurationOf(earlier);
             return configuration.Values.Values.All(setting => before.Value(setting.Option) == setting.Value
-                || (setting.Value == "off" && (setting.Option.StartsWith(FlowContract.StepOption, StringComparison.Ordinal) || setting.Option.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))));
+                || (setting.Value == "off" && (setting.Option.StartsWith(FlowContract.StepOption, StringComparison.Ordinal) || setting.Option.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))))
+                && before.Values.Keys.All(configuration.Values.ContainsKey);
         }
 
         /// <summary>A member of a goal revision's plan.flow, its pin, subject or options, as canonical JSON; "-" when it has none.</summary>
@@ -2071,6 +2498,40 @@ public static partial class FlowPosition
 
     private static string Time(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
+    /// <summary>A step's due time in words (from 0.9.4, PROC-18): when, why, its timing and zone, its deadline and a missed-time rule it took.</summary>
+    public static string DueText(StepDue due)
+    {
+        ArgumentNullException.ThrowIfNull(due);
+        var text = new StringBuilder(due.At is DateTimeOffset at ? Time(at) : "not yet known");
+        text.Append(" (").Append(due.Reason).Append("); timing: ").Append(due.Timing).Append(", in ").Append(due.Zone);
+        if (due.Deadline is DateTimeOffset deadline)
+        {
+            text.Append("; deadline ").Append(Time(deadline));
+        }
+
+        if (due.Missed is string missed)
+        {
+            text.Append("; missed, its rule: ").Append(missed);
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>A step's due time as JSON (from 0.9.4, PROC-18), the same on every machine for the same records and time.</summary>
+    public static JsonObject DueJson(StepDue due)
+    {
+        ArgumentNullException.ThrowIfNull(due);
+        return new JsonObject
+        {
+            ["at"] = due.At is DateTimeOffset at ? Time(at) : null,
+            ["reason"] = due.Reason,
+            ["timing"] = due.Timing,
+            ["zone"] = due.Zone,
+            ["deadline"] = due.Deadline is DateTimeOffset deadline ? Time(deadline) : null,
+            ["missed"] = due.Missed,
+        };
+    }
+
     /// <summary>A closed run's words after its count of steps done: who closed it, when, and how many steps it left unsettled; null for a run that is not closed.</summary>
     internal static string? Closed(Position position)
     {
@@ -2136,6 +2597,11 @@ public static partial class FlowPosition
             foreach (string reason in step.Reasons)
             {
                 text.Append("       ").Append(reason).Append('\n');
+            }
+
+            if (step.Due is StepDue due)
+            {
+                text.Append("       due: ").Append(DueText(due)).Append('\n');
             }
 
             foreach (ItemState item in step.Items)
@@ -2205,7 +2671,7 @@ public static partial class FlowPosition
         json["attention"] = new JsonArray(position.RunAttention.Select(a => (JsonNode)AttentionJson(a)).ToArray());
         json["next"] = new JsonArray(position.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray());
         json["stops"] = FlowStops.RenderJson(model, position.Stops, commands);
-        json["steps"] = new JsonArray(position.Steps.Select(s => (JsonNode)new JsonObject
+        json["steps"] = new JsonArray(position.Steps.Select(s => (JsonNode)WithDue(new JsonObject
         {
             ["key"] = s.Step.Key,
             ["instance"] = s.Instance,
@@ -2278,8 +2744,19 @@ public static partial class FlowPosition
             }).ToArray()),
             ["attention"] = s.Attention is null ? null : AttentionJson(s.Attention),
             ["failed"] = s.Failed is null ? null : new JsonObject { ["record"] = Reference(s.Failed.Record), ["summary"] = s.Failed.Summary, ["route"] = s.Failed.Route.Route, ["branch"] = s.Failed.Route.Branch, ["step"] = s.Failed.Route.Step },
-        }).ToArray());
+        }, s.Due)).ToArray());
         return json;
+
+        // From 0.9.4 (PROC-18) a step whose timing gates its start carries its due time.
+        static JsonObject WithDue(JsonObject step, StepDue? due)
+        {
+            if (due is not null)
+            {
+                step["due"] = DueJson(due);
+            }
+
+            return step;
+        }
 
         static JsonObject? Reference(RecordEnvelope? record) => record is null ? null : new JsonObject { ["type"] = record.Type, ["id"] = record.Id, ["hash"] = record.ComputedHash };
 

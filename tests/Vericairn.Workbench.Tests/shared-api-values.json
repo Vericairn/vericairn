@@ -76,7 +76,8 @@
     "failed",
     "exhausted",
     "consecutive-failures",
-    "impossible"
+    "impossible",
+    "missed"
   ],
   "Vericairn.Records.Estate.FlowPosition.ItemStates": [
     "satisfied",
@@ -261,6 +262,39 @@
     "record",
     "text",
     "list"
+  ],
+  "Vericairn.Records.Templates.FlowTiming.Days": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+  ],
+  "Vericairn.Records.Templates.FlowTiming.EventKinds": [
+    "record",
+    "attention",
+    "ask",
+    "step",
+    "request",
+    "due",
+    "run",
+    "presence"
+  ],
+  "Vericairn.Records.Templates.FlowTiming.MissedRules": [
+    "late",
+    "skip",
+    "attention"
+  ],
+  "Vericairn.Records.Templates.FlowTiming.Starts": [
+    "instant",
+    "delay",
+    "at",
+    "schedule",
+    "event",
+    "watch",
+    "due"
   ],
   "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
     "work-order",

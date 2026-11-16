@@ -15,7 +15,10 @@ namespace Vericairn.Records.Tests;
 /// first-party extension's X post is made optional as its revision in the estate makes it, beside the other posts. A close of a later
 /// step's request counts only when made after that step was asked in the run's current shape (FIX-144, decision
 /// 01M7GSDXATT5GM3X8G4W1CKHJR): skipping an optional step, by a dismissal or by a revision that only turns it off, asks the steps after
-/// it from then, so a close made while they waited on it never counts.
+/// it from then, so a close made while they waited on it never counts. A running run keeps its configuration (FIX-146, decision
+/// 01M7H25PQC4603AKDM4QKPXXA6): template defaults written after its activation change none of its steps until the sponsor's next
+/// revision; a revision that changes until asks every step again; and an optional item a revision turns off settles its step from then,
+/// as a step turned off does.
 /// </summary>
 public class ReleaseFlowCompletionTests
 {
@@ -272,6 +275,141 @@ public class ReleaseFlowCompletionTests
         Assert.Equal(("stopped", Listing, dismissal.AtTime), (listing.State, listing.Command, listing.AskedSince));
         run.Done(run.Request("mcp-registry"));
         Assert.Equal("done", run.State("mcp-registry"));
+    }
+
+    [Fact]
+    public void TemplateDefaultsWrittenAfterActivationChangeNoStepUntilTheSponsorsNextRevision()
+    {
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX))
+        {
+            ToPublication(run);
+            Assert.Equal(("stopped", "blocked"), (run.State("announce-x"), run.State("mcp-registry")));
+            run.Done(run.Request("mcp-registry", command: Listing));
+
+            // The estate's defaults turn the X post off after the run was activated: the running run keeps its configuration, so the X
+            // post still waits on the operator, the listing still waits on it, and the close made while the listing waited counts for
+            // nothing.
+            RecordEnvelope defaults = run.Defaults(new JsonObject { ["step.announce-x"] = "off" });
+            run.AssertValid();
+            Assert.Equal(("stopped", "blocked"), (run.State("announce-x"), run.State("mcp-registry")));
+            Assert.Equal(("on", "the flow's default"), (run.Position().Configuration!.Value("step.announce-x"), run.Position().Configuration!.Values["step.announce-x"].Source));
+
+            // The next revision the sponsor signs takes the defaults in, proposed and once activated: the X post is off from the revision,
+            // and the listing is asked from then, so the early close still counts for nothing and a close made after it counts.
+            RecordEnvelope revision = run.Revise(ReleaseFlowFixture.Version);
+            Assert.Equal($"configured off by the estate defaults (template-defaults {defaults.Id})", run.Step("announce-x").Reasons[0]);
+            run.Activate();
+            FlowPosition.StepInstance listing = run.Step("mcp-registry");
+            Assert.Equal(("off", "stopped", revision.AtTime), (run.State("announce-x"), listing.State, listing.AskedSince));
+            run.Done(run.Request("mcp-registry"));
+            Assert.Equal("done", run.State("mcp-registry"));
+            run.AssertValid();
+        }
+
+        // Defaults that turn a step on take effect only at the next revision too, even one that changes only the budget, and since they
+        // change more than steps turned off, that revision asks every reserved step again.
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: OptionalX))
+        {
+            ToPublication(run);
+            run.Done(run.Request("mcp-registry"));
+            run.Defaults(new JsonObject { ["step.upgrade-estate"] = "on" });
+            Assert.Equal(("off", "done"), (run.State("upgrade-estate"), run.State("mcp-registry")));
+            RecordEnvelope revision = run.ReviseBudget(5);
+            run.Activate();
+            Assert.Equal("on", run.Position().Configuration!.Value("step.upgrade-estate"));
+            FlowPosition.StepInstance listing = run.Step("mcp-registry");
+            Assert.Equal(("stopped", revision.AtTime), (listing.State, listing.AskedSince));
+        }
+    }
+
+    [Fact]
+    public void ARevisionThatChangesUntilAsksEveryStepAgain()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX, until: "announce-x");
+        run.AssertValid();
+        ToPublication(run);
+        Assert.Equal(("off", "after announce-x, the step the run ends at"), (run.State("mcp-registry"), run.Step("mcp-registry").Reasons[0]));
+        run.Done(run.Request("announce-x"));
+        Assert.Equal("done", run.State("announce-x"));
+        run.Done(run.Request("mcp-registry", command: Listing));
+
+        // The sponsor's revision ends the run no longer at the X post: every step is asked again from it, so the X post's close made
+        // before counts no more, and the listing's close made while it was off never counts.
+        RecordEnvelope revision = run.Revise(ReleaseFlowFixture.Version);
+        run.Activate();
+        run.AssertValid();
+        FlowPosition.StepInstance post = run.Step("announce-x");
+        Assert.Equal(("stopped", revision.AtTime), (post.State, post.AskedSince));
+        Assert.Equal("blocked", run.State("mcp-registry"));
+        RecordEnvelope again = run.Done(run.Request("announce-x"));
+        FlowPosition.StepInstance listing = run.Step("mcp-registry");
+        Assert.Equal(("stopped", again.AtTime), (listing.State, listing.AskedSince));
+        run.Done(run.Request("mcp-registry"));
+        Assert.Equal("done", run.State("mcp-registry"));
+    }
+
+    [Fact]
+    public void AnItemARevisionTurnsOffSettlesItsStepFromThen()
+    {
+        // The announcement is drafted without the X summary: the draft is not done, and a close of the discussion's request made while
+        // the discussion waited on the draft counts for nothing once a revision turns the summary off; the draft counts as done from the
+        // revision, and a close made after it counts.
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: OptionalXItem))
+        {
+            run.AssertValid();
+            RecordEnvelope candidate = ToAcceptanceOfBase(run);
+            RecordEnvelope draft = run.WorkStep("draft-announcement", ("discussion", ReleaseFlowFixture.Hash('d'), "text/markdown"));
+            run.ByReviewer("review", new JsonObject { ["independence"] = "independent-agent", ["outcome"] = "pass", ["summary"] = "Read the draft.", ["findings"] = new JsonArray() }, draft.Reference);
+            run.Published(candidate);
+            Assert.NotEqual("done", run.State("draft-announcement"));
+            Assert.Equal("blocked", run.State("announce-discussions"));
+            run.Done(run.Request("announce-discussions", command: Discussion));
+
+            RecordEnvelope revision = run.Revise(ReleaseFlowFixture.Version, new JsonObject { ["item.draft-announcement.x-post"] = "off" });
+            run.Activate();
+            run.AssertValid();
+            FlowPosition.StepInstance drafted = run.Step("draft-announcement");
+            Assert.Equal(("done", revision.AtTime), (drafted.State, drafted.DoneAt));
+            Assert.Contains($"it counts as done from {RecordParser.FormatTimestamp(revision.AtTime)}, when goal revision {revision.Id} turned its optional item x-post off, so the steps after it are asked from then", drafted.Reasons);
+            Assert.Equal(("off", "its input x-post is item x-post of draft-announcement, which is off"), (run.State("announce-x"), run.Step("announce-x").Reasons[0]));
+            FlowPosition.StepInstance discussion = run.Step("announce-discussions");
+            Assert.Equal(("stopped", Discussion, revision.AtTime), (discussion.State, discussion.Command, discussion.AskedSince));
+            run.Done(run.Request("announce-discussions"));
+            Assert.Equal("done", run.State("announce-discussions"));
+        }
+
+        // The draft carries the X summary, reviewed, before the revision turns it off: it was done then, so the discussion's close made
+        // since keeps counting.
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: OptionalXItem))
+        {
+            ToPublication(run);
+            DateTimeOffset? drafted = run.Step("draft-announcement").DoneAt;
+            run.Done(run.Request("announce-discussions"));
+            Assert.Equal("done", run.State("announce-discussions"));
+            run.Revise(ReleaseFlowFixture.Version, new JsonObject { ["item.draft-announcement.x-post"] = "off" });
+            run.Activate();
+            Assert.Equal(("done", drafted), (run.State("draft-announcement"), run.Step("draft-announcement").DoneAt));
+            Assert.Equal("done", run.State("announce-discussions"));
+        }
+    }
+
+    /// <summary>The discussion post's command for the fixture's version and the draft's reviewed hash, as the first-party extension gives it.</summary>
+    private static string Discussion => $"Post the reviewed announcement {ReleaseFlowFixture.Hash('d')} of Vericairn {ReleaseFlowFixture.Version} in the Announcements category of github.com/orgs/Vericairn/discussions";
+
+    /// <summary>
+    /// The first-party extension with the X post optional, as <see cref="OptionalX"/> makes it, and the X summary the draft carries an
+    /// optional item, on by default, so that a revision turning it off turns the X post off with it.
+    /// </summary>
+    private static void OptionalXItem(JsonObject extension)
+    {
+        OptionalX(extension);
+        extension["version"] = "1.0.4";
+        var steps = (JsonArray)extension["steps"]!;
+        JsonObject draft = steps.First(s => s!["key"]!.GetValue<string>() == "draft-announcement")!.AsObject();
+        JsonObject post = draft["outputs"]!.AsArray().First(o => o!["name"]!.GetValue<string>() == "x-post")!.AsObject();
+        post.Remove("required");
+        post["optional"] = true;
+        post["default"] = "on";
     }
 
     /// <summary>

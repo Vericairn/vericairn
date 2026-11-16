@@ -89,8 +89,9 @@ public static partial class NextEligible
         var steps = new List<FlowStepRoute>();
         foreach (FlowPosition.StepInstance instance in position.Steps)
         {
-            // Required attention of a held step is routed to the sponsor as an ask, never to another contributor.
-            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && instance.Step.IsRouted)
+            // Required attention of a held step is routed to the sponsor as an ask, never to another contributor; from 0.9.4 (PROC-18) so is
+            // a missed deadline's, whatever the step's kind.
+            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind == "missed"))
             {
                 steps.Add(new FlowStepRoute(instance, AttentionOf(model, current, status, instance.Step.Role, attention, machine)));
                 continue;

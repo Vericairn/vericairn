@@ -295,7 +295,7 @@ public static partial class FlowContract
             ? TJson.Strings(step, "after").ToList()
             : previous is null ? [] : [previous];
         List<string> also = TJson.Array(step, "inputs").Select(i => TJson.Text(i, "step")).OfType<string>().ToList();
-        if (TJson.Text(TJson.Object(TJson.Object(step, "when"), "due"), "from") is string from)
+        if (FlowTiming.WaitedOf(TJson.Object(step, "when")) is string from)
         {
             also.Add(from);
         }
@@ -516,14 +516,12 @@ public static partial class FlowContract
             }
         }
 
-        BodyReader? when = step.Nested("when", false);
-        if (when is not null)
+        // From 0.9.4 (PROC-18) a step's when is its timing contract (design/flow.md § 7).
+        if (step.Nested("when", false) is BodyReader when)
         {
-            When(when, earlier, extension, done.Count > 0);
-            if (when.Has("watch") && kind is not null && Routed.IndexOf(kind) >= 0)
-            {
-                when.Error("flow.when", "watch", "A watch reads the records until its predicates hold; a work or review step is carried by an assignment instead.");
-            }
+            FlowTiming.Check(when, new FlowTiming.TimingShape(kind, !TJson.Flag(step.Element, "optional"), done.Count > 0,
+                extension ? null : key => earlier.FirstOrDefault(e => e.Key == key)?.Outputs.Keys.ToList(),
+                predicate => Predicate(predicate, subject, extension, each is not null, declaredInputs)));
         }
 
         BodyReader? flow = step.Nested("flow", kind == "flow");
@@ -821,44 +819,6 @@ public static partial class FlowContract
         exchange.NoOtherKeys();
     }
 
-    /// <summary>A step's timing (design/flow.md § 7): a due time after an earlier step is done, or a watch repeated until its done predicates hold or a limit passes.</summary>
-    private static void When(BodyReader when, List<StepShape> earlier, bool extension, bool hasDone)
-    {
-        bool due = when.Has("due");
-        bool watch = when.Has("watch");
-        if (due == watch)
-        {
-            when.Error("flow.when", "due", "A step's timing is a due time or a watch, one of them.");
-        }
-
-        BodyReader? at = when.Nested("due", false);
-        if (at is not null)
-        {
-            Duration(at, "after", true);
-            string? from = at.Text("from", true, 100, Patterns.Slug, "a step key");
-            if (from is not null && !extension && !earlier.Any(e => e.Key == from))
-            {
-                at.Error("flow.when", "from", $"'{from}' is not a step declared before this one; a due time counts from an earlier step's completion.");
-            }
-
-            at.NoOtherKeys();
-        }
-
-        BodyReader? repeated = when.Nested("watch", false);
-        if (repeated is not null)
-        {
-            Duration(repeated, "every", true);
-            Duration(repeated, "limit", true);
-            repeated.NoOtherKeys();
-            if (!hasDone)
-            {
-                repeated.Error("flow.when", "watch", "A watch repeats until the step's done predicates hold; declare them.");
-            }
-        }
-
-        when.NoOtherKeys();
-    }
-
     private static void ReadOptions(BodyReader body)
     {
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -872,6 +832,15 @@ public static partial class FlowContract
                 option.Error("template.option", "default", "Allowed values are distinct and include the default.");
             option.NoOtherKeys();
         }
+    }
+
+    /// <summary>The check of a record predicate one step of a resolved flow names, such as its event timing's (from 0.9.4, PROC-18).</summary>
+    internal static Action<BodyReader> PredicateCheck(FlowDefinition flow, FlowStep step)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        HashSet<string> inputs = step.Inputs.Select(i => i.Name).ToHashSet(StringComparer.Ordinal);
+        return predicate => Predicate(predicate, flow.SubjectFields, false, step.Each is not null, inputs);
     }
 
     /// <summary>

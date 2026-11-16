@@ -39,6 +39,26 @@ public static class FlowRuns
     {
         /// <summary>The value of a flow option, or null when the flow has none by that name.</summary>
         public string? Value(string option) => Values.TryGetValue(option, out Setting? setting) ? setting.Value : null;
+
+        /// <summary>The run's time zone (from 0.9.4, PROC-18): the IANA name its configuration sets as zone, or UTC.</summary>
+        public string Zone => Value(FlowTiming.ZoneOption) ?? FlowTiming.Utc;
+
+        /// <summary>
+        /// A step's timing (from 0.9.4, PROC-18): the one its configuration sets as when.&lt;key&gt;, the narrowest winning, unless the flow
+        /// fixes it; otherwise the flow's own.
+        /// </summary>
+        public FlowTiming Timing(FlowStep step)
+        {
+            ArgumentNullException.ThrowIfNull(step);
+            FlowTiming declared = FlowTiming.Read(step.When);
+            if (declared.Fixed || !Values.TryGetValue(FlowTiming.WhenOption + step.Key, out Setting? setting))
+            {
+                return declared;
+            }
+
+            using JsonDocument configured = JsonDocument.Parse(setting.Value);
+            return FlowTiming.Read(configured.RootElement);
+        }
     }
 
     /// <summary>A goal's plan.flow, or undefined when its plan names no flow.</summary>
@@ -110,7 +130,10 @@ public static class FlowRuns
     /// The product a run serves: the subject's product field when it binds one, else the product its work order is placed for or plans
     /// a release of. Null when it names none.
     /// </summary>
-    public static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow)
+    public static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow) => Product(model, goal, flow, null);
+
+    /// <summary>The product a run serves, with its work order read at its revision current before a record when one is given.</summary>
+    private static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
         JsonElement subject = TJson.Object(Plan(goal), "subject");
@@ -124,8 +147,33 @@ public static class FlowRuns
         }
 
         RecordEnvelope? order = Work(model, goal);
+        if (order is not null && before is not null)
+        {
+            order = model.Chain(order).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().LastOrDefault(r => GoalRules.Before(r, before)) ?? order;
+        }
+
         string? product = order is null ? null : TJson.Text(TJson.Object(order.Body, "placement"), "product") ?? TJson.Text(TJson.Object(order.Body, "releasePlan"), "product");
         return product is null ? null : LivingDocuments.ProductIdentity(model, product);
+    }
+
+    /// <summary>
+    /// The record a run's configuration is resolved at (from 0.9.4, FIX-146): the first activation of the goal revision that counts, so a
+    /// running run keeps the configuration it was activated with; for a revision never activated, the revision that superseded it, when
+    /// one did before <paramref name="before"/>; otherwise <paramref name="before"/>, null for the records as they stand. A revision needs
+    /// a fresh activation, so the configuration changes under a run only by a goal revision its sponsor signs and activates.
+    /// </summary>
+    internal static RecordEnvelope? ResolvedAt(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        if (GoalRules.Statuses(model, goal, before).FirstOrDefault(s => EstateModel.BodyString(s, "status") == "active") is RecordEnvelope activation)
+        {
+            return activation;
+        }
+
+        return model.SupersededBy.TryGetValue(goal.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && (before is null || GoalRules.Before(successor, before))
+            ? successor
+            : before;
     }
 
     /// <summary>
@@ -187,7 +235,9 @@ public static class FlowRuns
     /// A run's configuration from the records, before a record when one is given: each option from the flow's default, the estate's,
     /// the flow's domain's and the run's product's template-defaults for the exact flow pin, then the goal's plan, the narrowest
     /// winning; and the steps that are off: turned off by an extension, configured off, after the run's until step, or optional and
-    /// fed by a step that is off.
+    /// fed by a step that is off. From 0.9.4 (FIX-146) the template-defaults and the run's product are read as they stood when the goal
+    /// revision was activated (<see cref="ResolvedAt"/>), so a running run keeps its configuration: a template-defaults record written
+    /// later applies to new runs and to the run's next revision, which its sponsor signs and activates, and never to the running one.
     /// </summary>
     public static Configuration Configure(EstateModel model, RecordEnvelope goal, FlowDefinition flow, RecordEnvelope? before = null)
     {
@@ -196,7 +246,8 @@ public static class FlowRuns
         ArgumentNullException.ThrowIfNull(flow);
         JsonElement plan = Plan(goal);
         var values = flow.Options.ToDictionary(o => o.Key, o => new Setting(o.Key, TJson.Text(o.Value, "default")!, "the flow's default", null), StringComparer.Ordinal);
-        string? product = Product(model, goal, flow);
+        RecordEnvelope? resolved = ResolvedAt(model, goal, before);
+        string? product = Product(model, goal, flow, resolved);
         string? domain = TJson.Text(flow.Definition.Content, "domain");
         foreach ((string kind, string? target) in new[] { ("estate", (string?)null), ("domain", domain), ("product", product) })
         {
@@ -205,7 +256,7 @@ public static class FlowRuns
                 continue;
             }
 
-            RecordEnvelope? defaults = model.OfType("template-defaults").Where(r => CurrentBefore(model, r, before)).Where(r =>
+            RecordEnvelope? defaults = model.OfType("template-defaults").Where(r => CurrentBefore(model, r, resolved)).Where(r =>
                 TJson.Text(TJson.Object(r.Body, "template"), "id") == flow.Pin.Id && TJson.Text(TJson.Object(r.Body, "template"), "version") == flow.Pin.Version
                 && TJson.Text(TJson.Object(r.Body, "template"), "hash") == flow.Pin.Hash && TJson.Text(TJson.Object(r.Body, "scope"), "kind") == kind
                 && (target is null || ScopeTarget(model, kind, TJson.Text(TJson.Object(r.Body, "scope"), "target")) == target))
@@ -285,6 +336,11 @@ public static class FlowRuns
                 {
                     values[choice.Name] = new Setting(choice.Name, choice.Value.GetString()!, source, record);
                 }
+                else if (choice.Value.ValueKind == JsonValueKind.String && Timed(flow, choice.Name, choice.Value.GetString()!).Count == 0)
+                {
+                    // From 0.9.4 (PROC-18) a venture's time zone and a step's timing the flow does not fix, the narrowest winning.
+                    values[choice.Name] = new Setting(choice.Name, choice.Value.GetString()!, source, record);
+                }
             }
         }
     }
@@ -310,6 +366,13 @@ public static class FlowRuns
         foreach (JsonProperty choice in choices.EnumerateObject())
         {
             string? value = choice.Value.ValueKind == JsonValueKind.String ? choice.Value.GetString() : null;
+            if (!flow.Options.ContainsKey(choice.Name) && (choice.Name == FlowTiming.ZoneOption || choice.Name.StartsWith(FlowTiming.WhenOption, StringComparison.Ordinal)))
+            {
+                // From 0.9.4 (PROC-18): a venture's time zone, and a timing for a step whose timing the flow does not fix.
+                refusals.AddRange(value is null ? [("flow.option", $"'{choice.Name}' is configured by text.")] : Timed(flow, choice.Name, value));
+                continue;
+            }
+
             if (choice.Name.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))
             {
                 string[] parts = choice.Name[FlowContract.ItemOption.Length..].Split('.');
@@ -375,6 +438,49 @@ public static class FlowRuns
         }
 
         return refusals;
+    }
+
+    /// <summary>
+    /// Why a configuration's time zone or step timing is refused (from 0.9.4, PROC-18; design/flow.md § 7): zone names an IANA time zone
+    /// every machine reads alike; when.&lt;key&gt; names a step of the flow whose timing the flow does not fix, such as an embargo, with a
+    /// timing as JSON text that the step may take. Empty when it holds, and for any other option.
+    /// </summary>
+    internal static IReadOnlyList<(string Code, string Message)> Timed(FlowDefinition flow, string option, string value)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        if (option == FlowTiming.ZoneOption)
+        {
+            return FlowTiming.KnownZone(value) ? [] : [("flow.zone", $"'{value}' is not an IANA time zone, such as Europe/London or America/New_York, that every machine reads alike.")];
+        }
+
+        if (!option.StartsWith(FlowTiming.WhenOption, StringComparison.Ordinal))
+        {
+            return [("flow.option", $"'{option}' is not an option of flow {flow.Pin.Id}.")];
+        }
+
+        FlowStep? step = flow.Step(option[FlowTiming.WhenOption.Length..]);
+        if (step is null)
+        {
+            return [("flow.option", $"'{option}' names no step of flow {flow.Pin.Id}; a step's timing is configured as when.<step>.")];
+        }
+
+        if (FlowTiming.Read(step.When).Fixed)
+        {
+            return [("flow.timing-fixed", $"Step {step.Key}'s timing is fixed by flow {flow.Pin.Id}, as an embargo is: no configuration changes it.")];
+        }
+
+        IReadOnlyList<string> problems = FlowTiming.Configured(value, TimingShape(flow, step)).Problems;
+        return problems.Count == 0 ? [] : [("flow.when", $"The timing configured for step {step.Key} is refused: {string.Join(" ", problems)}")];
+    }
+
+    /// <summary>What checking a timing for one step of a resolved flow needs: the steps before it with their items, and its predicate check.</summary>
+    internal static FlowTiming.TimingShape TimingShape(FlowDefinition flow, FlowStep step)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        List<FlowStep> earlier = flow.Steps.TakeWhile(s => s.Key != step.Key).ToList();
+        return new FlowTiming.TimingShape(step.Kind, step.Required, step.Done.Count > 0,
+            key => earlier.FirstOrDefault(s => s.Key == key)?.Outputs.Select(o => o.Name).ToList(), FlowContract.PredicateCheck(flow, step));
     }
 
     /// <summary>

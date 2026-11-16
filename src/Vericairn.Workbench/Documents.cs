@@ -126,6 +126,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>True while the goal shown is a run with a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>From 0.9.4 (PROC-18), for a run, each step whose timing gates its start with its due time, before it runs.</summary>
+    public ObservableCollection<DueRow> Due { get; } = [];
+
+    /// <summary>True while the goal shown is a run with a due time to show.</summary>
+    public bool HasDue => Due.Count > 0;
+
     /// <summary>Work orders proposed for the goal shown that wait for its sponsor's approval.</summary>
     public ObservableCollection<ProposedRow> Proposed { get; } = [];
 
@@ -240,12 +246,18 @@ public sealed class GoalsWorkspace : Document
             Stops.Add(row);
         }
 
+        foreach (DueRow row in view.Due)
+        {
+            Due.Add(row);
+        }
+
         foreach (ProposedRow row in view.Proposed)
         {
             Proposed.Add(row);
         }
 
         Raise(nameof(HasStops));
+        Raise(nameof(HasDue));
         Raise(nameof(HasProposed));
     }
 }

@@ -318,7 +318,7 @@ public static class FlowStops
                 stops.Add(kind switch
                 {
                     "reserved" => Reserved(model, position, instance),
-                    "attention" => instance.Attention is FlowPosition.Attention attention && instance.Step.IsRouted
+                    "attention" => instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind == "missed")
                         ? Attending(model, goal, instance.Name, instance.Ref, instance.Step.Title, attention, sponsor)
                         : new RunStop("attention", instance.Name, instance.Step.Title, instance.Ref, sponsor, Last(instance), "outside", null),
                     _ => Person(model, instance),
@@ -509,6 +509,17 @@ public static class FlowStops
                 ["next"] = new JsonArray(run.Steps.Where(s => s.State == "next").Select(s => (JsonNode)s.Name).ToArray()),
                 ["stops"] = RenderJson(model, run.Stops, commands: false),
             };
+
+            // From 0.9.4 (PROC-18) each step whose timing gates its start, with its due time, before it runs.
+            if (run.Steps.Where(s => s.Due is not null).ToList() is { Count: > 0 } timed)
+            {
+                shown["due"] = new JsonArray(timed.Select(s =>
+                {
+                    JsonObject due = FlowPosition.DueJson(s.Due!);
+                    due.Insert(0, "name", s.Name);
+                    return (JsonNode)due;
+                }).ToArray());
+            }
             if (FlowPosition.ClosingJson(model, run) is JsonObject closed)
             {
                 shown["closed"] = closed;
@@ -543,6 +554,12 @@ public static class FlowStops
             text.Append("flow ").Append(run.Flow.Pin.Id).Append(' ').Append(run.Flow.Pin.Version).Append(", ").Append(running.Count(s => s.State == "done").ToString(CultureInfo.InvariantCulture))
                 .Append(" of ").Append(running.Count.ToString(CultureInfo.InvariantCulture)).Append(running.Count == 1 ? " step" : " steps").Append(" done")
                 .Append(run.Closing is null ? "; next: " + (next.Count == 0 ? "none" : string.Join(", ", next)) : FlowPosition.Closed(run) + "; unsettled: " + FlowPosition.UnsettledText(run)).Append('\n');
+            foreach (FlowPosition.StepInstance timed in run.Steps.Where(s => s.Due is not null))
+            {
+                // From 0.9.4 (PROC-18) a step's due time is shown before it runs.
+                text.Append("    Due: ").Append(timed.Name).Append(' ').Append(FlowPosition.DueText(timed.Due!)).Append('\n');
+            }
+
             AppendText(text, model, run.Stops, "    ");
         }
 

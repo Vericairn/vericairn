@@ -24,6 +24,8 @@ store, and no real-device qualification is recorded for it.
     them, the operator's next reserved step among them, as canonical status gives them, as of the estate's newest record and
     without its command, which a live read shows. Remote carries none of them out;
     a reserved act stays the operator's ([stops](operator-guide.md#stops-and-their-surfaces-092)).
+    From 0.9.4, below them, the due times of the runs' timed steps, each step with when it is due and why, its timing, zone,
+    deadline and a missed-time rule it took, as canonical status gives them, before the step runs; Remote starts none of them.
     From 0.9.3, a work order proposed for a goal whose plan says `sponsor-approves` is a decision needed for the goal's
     sponsor, waiting for the sponsor, with the command that approves it; Remote approves nothing
     ([goals](operator-guide.md#17-goals-predicates-and-evaluation)).
