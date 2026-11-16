@@ -883,8 +883,7 @@ public static class OpenApiDocument
             ["PresenceNotice"] = PresenceNoticeSchema(),
             ["PresenceSignature"] = Required(Object(("type", "string"), ("key", "string"), ("purpose", "string")), "type", "key", "purpose"),
             ["PresenceSessionNotice"] = PresenceSessionNoticeSchema(),
-            ["PresenceEntryDescription"] = Required(Object(("entry", "integer"), ("type", "string"), ("key", "string"), ("purpose", "string"), ("changes", "string"), ("flagged", "boolean")),
-                "entry", "type", "key", "purpose"),
+            ["PresenceEntryDescription"] = PresenceEntryDescriptionSchema(),
             ["AttentionAcknowledgeResponse"] = acknowledgment,
             ["AttentionNotice"] = attentionNotice,
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -1576,8 +1575,9 @@ public static class OpenApiDocument
         notice["properties"]!["signatures"]!["items"] = SchemaReference("PresenceSignature");
         notice["properties"]!["index"]!["nullable"] = true;
         notice["properties"]!["index"]!["description"] = "For a prompt, which signature it is, from 1; from 0.9.4 also for a signature under a presence session.";
-        // From 0.9.4: the presence session the notice is about, for announced and renewed of a session's list, session, signed and ended.
-        notice["properties"]!["session"] = SchemaReference("PresenceSessionNotice");
+        // From 0.9.4: the presence session the notice is about, for announced and renewed of a session's list, session, signed and ended;
+        // null on every other notice.
+        notice["properties"]!["session"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(SchemaReference("PresenceSessionNotice")) };
         notice["properties"]!["shortHash"]!["nullable"] = true;
         notice["properties"]!["shortHash"]!["description"] = "From 0.9.4: for signed and a prompt of a record, the first twelve hexadecimal digits of the signed record's content hash.";
         notice["description"] = "announced lists every record before the first prompt; added lists those added before their prompts; prompt names the signature being asked for; finished says how many were signed. "
@@ -1585,6 +1585,15 @@ public static class OpenApiDocument
             + "signed for each signature under it, renewed with new terms and the reason for a renewal, and ended with why the session ended. A client computes the fingerprint the "
             + "system dialog shows from the nonce and terms it received before it, and warns instead for terms it receives with the nonce or after it.";
         return notice;
+    }
+
+    private static JsonObject PresenceEntryDescriptionSchema()
+    {
+        JsonObject description = Required(Object(("entry", "integer"), ("type", "string"), ("key", "string"), ("purpose", "string"), ("changes", "string"), ("flagged", "boolean")),
+            "entry", "type", "key", "purpose");
+        description["properties"]!["changes"]!["nullable"] = true;
+        description["description"] = "From 0.9.4: the runtime's description of one entry of a session's list, which the terms do not cover; a client shows it as the runtime's.";
+        return description;
     }
 
     private static JsonObject PresenceSessionNoticeSchema()

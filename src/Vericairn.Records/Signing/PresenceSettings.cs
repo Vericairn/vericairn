@@ -85,7 +85,12 @@ internal static class PresenceSettings
         }
     }
 
-    /// <summary>Keeps a device's setting, owner-only; a limit is 60 to 300 seconds, or none for the protocol's.</summary>
+    /// <summary>
+    /// Keeps a device's setting, owner-only; a limit is 60 to 300 seconds, or none for the protocol's. From 0.9.4 (CODE-80) a settings file
+    /// that does not read as this format, which counts as per-signature for every device, is never replaced: writing one device's setting
+    /// over it would loosen every other device's. <see cref="UnreadableSettingsException"/> says which file and how to clear it, and the
+    /// file is left as it was. Another device's entry the file keeps as it stands, whatever it holds.
+    /// </summary>
     internal static void Write(string device, bool perSignature, int? limitSeconds = null, string? home = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(device);
@@ -94,11 +99,33 @@ internal static class PresenceSettings
         string path = PathOf(home);
         OwnerOnlyState.CreateDirectory(Path.GetDirectoryName(path)!, home ?? VericairnHome.Path());
         JsonObject root;
-        try
+        if (File.Exists(path))
         {
-            root = File.Exists(path) && JsonNode.Parse(File.ReadAllBytes(path)) is JsonObject existing && existing["devices"] is JsonObject ? existing : new JsonObject();
+            string? problem;
+            JsonObject? existing;
+            try
+            {
+                existing = JsonNode.Parse(File.ReadAllBytes(path)) as JsonObject;
+                problem = existing is null ? "it is not a JSON object"
+                    : existing["format"] is not JsonValue format || !format.TryGetValue(out string? name) || name != Format ? "its form is not " + Format
+                    : existing["devices"] is not JsonObject ? "it holds no devices object"
+                    : null;
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                existing = null;
+                problem = "it is not well-formed JSON";
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                existing = null;
+                problem = "it cannot be read";
+            }
+
+            if (problem is not null) throw new UnreadableSettingsException(path, problem);
+            root = existing!;
         }
-        catch (JsonException)
+        else
         {
             root = new JsonObject();
         }
@@ -115,4 +142,16 @@ internal static class PresenceSettings
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
     private static PresenceSetting Unreadable(string why) => new(true, null, $"The presence settings in {FileName} cannot be used ({why}), so every signature asks its own check.");
+}
+
+/// <summary>
+/// From 0.9.4 (CODE-80): the device owners' presence settings file is there and does not read as its format, so every device counts as
+/// per-signature, and no setting is written over it.
+/// </summary>
+internal sealed class UnreadableSettingsException(string path, string problem)
+    : InvalidOperationException($"The presence settings in {path} cannot be used ({problem}), so every device on this machine counts as per-signature and nothing was written. "
+        + $"Repair the file to the form {PresenceSettings.Format}, or remove it to return every device on this machine to the default, per-action presence sessions, then set each device again.")
+{
+    /// <summary>The settings file.</summary>
+    internal string Path { get; } = path;
 }

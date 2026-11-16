@@ -66,6 +66,19 @@ public sealed class PresenceSessionCommandTests
         Assert.Equal(("per-action", "per-signature", "per-signature"), (charter.GetProperty("presence").GetString(), charter.GetProperty("charter").GetString(), charter.GetProperty("effective").GetString()));
         Assert.Contains("the estate's charter asks one presence check per signature for every device, which wins", CliHarness.Ok("--estate", estate.Root, "devices", "presence", device).Out, StringComparison.Ordinal);
 
+        // A settings file that does not read counts as per-signature for every device: no setting is written over it.
+        string settings = PresenceSettings.PathOf();
+        File.WriteAllText(settings, "{ not json");
+        CliHarness.Outcome damaged = CliHarness.Run("--estate", estate.Root, "devices", "presence", device, "--per-action", "--limit", "120");
+        Assert.NotEqual(0, damaged.Code);
+        Assert.Contains(settings, damaged.Err, StringComparison.Ordinal);
+        Assert.Contains("nothing was written", damaged.Err, StringComparison.Ordinal);
+        Assert.Contains("remove it to return every device on this machine to the default", damaged.Err, StringComparison.Ordinal);
+        Assert.Equal("{ not json", File.ReadAllText(settings));
+        // Removed, as the refusal says, the file starts again with the default for every device.
+        File.Delete(settings);
+        CliHarness.Ok("--estate", estate.Root, "devices", "presence", device, "--per-action", "--limit", "90");
+
         // A key this machine does not hold is set where it is held.
         new FileKeyStore(VericairnHome.Path()).Remove(device);
         Assert.Contains("is not held on this machine", CliHarness.Run("--estate", estate.Root, "devices", "presence", device, "--per-signature").Err, StringComparison.Ordinal);
@@ -144,12 +157,15 @@ public sealed class PresenceSessionCommandTests
         string shown = output.ToString().ReplaceLineEndings("\n");
         Assert.Contains("operator close asks for your presence once, for one presence session of 2 signatures in at most 300 s, covering only this list, read here from its terms:", shown, StringComparison.Ordinal);
         Assert.Contains("\n  1. acceptance by exact hash ", shown, StringComparison.Ordinal);
-        Assert.Contains("\n     the runtime's description: acceptance STEP-1: accepts result ", shown, StringComparison.Ordinal);
+        Assert.Contains("\nruntime:   describes entry 1: acceptance STEP-1: accepts result ", shown, StringComparison.Ordinal);
         Assert.Contains("\n  In all, counted here from the terms: 2 signatures: 2 acceptance records by exact hash.", shown, StringComparison.Ordinal);
         Assert.Contains($"Presence check for operator close: the system dialog should show fingerprint {fingerprint}, computed here from the list above and the check's nonce.", shown, StringComparison.Ordinal);
-        Assert.Contains("Signature 1 of 2, under the session's check: acceptance STEP-1: ", shown, StringComparison.Ordinal);
-        Assert.Contains("; entry 2 of its list, by exact hash", shown, StringComparison.Ordinal);
-        Assert.EndsWith("Signed 2 of 2 with one presence check.\n", shown, StringComparison.Ordinal);
+        Assert.Contains("\nruntime: Signature 1 of 2, under the session's check: acceptance STEP-1: ", shown, StringComparison.Ordinal);
+        Assert.Contains("\n  Its short hash is entry 2 of the list above, by exact hash.\n", shown, StringComparison.Ordinal);
+        Assert.EndsWith("\nruntime: Signed 2 of 2 with one presence check.\n", shown, StringComparison.Ordinal);
+        // Every line is the command line's own derivation or marked as the runtime's.
+        Assert.All(shown.TrimEnd('\n').Split('\n'), line => Assert.True(line.StartsWith("runtime: ", StringComparison.Ordinal) || line.StartsWith("operator close ", StringComparison.Ordinal)
+            || line.StartsWith("  ", StringComparison.Ordinal) || line.StartsWith("Presence check for operator close: ", StringComparison.Ordinal) || line == "Anything outside this list asks again.", line));
         // The runtime's own fingerprint sentence, which a client before 0.9.4 prints, is not what this display shows.
         Assert.DoesNotContain("the system dialog shows fingerprint", shown, StringComparison.Ordinal);
     }

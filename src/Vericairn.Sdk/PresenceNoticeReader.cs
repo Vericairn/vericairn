@@ -45,6 +45,13 @@ internal sealed class PresenceSessionView
     /// <summary>The entries, in the terms' order.</summary>
     internal IReadOnlyList<PresenceTermsEntry> Entries => rules.Entries;
 
+    /// <summary>The records a kind entry may supersede or observe that the session does not sign, by id, type and hash, as the terms list them.</summary>
+    internal IReadOnlyList<PresenceTermsReference> References => rules.References;
+
+    /// <summary>The references as one line: each recorded record's type, id and short hash; null when the terms list none.</summary>
+    internal string? ReferenceLine() => References.Count == 0 ? null
+        : "it may supersede or observe these recorded records, which it does not sign: " + string.Join("; ", References.Select(r => $"{r.Type} {r.Id} at {Short(r.Hash)}"));
+
     /// <summary>
     /// Reads terms as a notice carries them: their exact compact canonical text, checked as the helper checks terms at opening; null, with
     /// why, when they are not terms the helper would open a session for.
@@ -229,7 +236,11 @@ internal sealed class PresenceSessionView
     private static string Commit(string? commit) => commit is { Length: > 12 } ? commit[..12] : commit ?? "?";
 }
 
-/// <summary>One line a client shows for a presence notice: the notice's kind, the text, and whether it belongs in a status line.</summary>
+/// <summary>
+/// What a client shows for a presence notice, one line or more: the notice's kind, the text, and whether it belongs in a status line.
+/// Every line taken from the runtime begins with <see cref="PresenceNoticeReader.RuntimeMarker"/>; a line without it is one the client
+/// derived itself.
+/// </summary>
 /// <param name="Kind">The notice's kind.</param>
 /// <param name="Text">What to show, one line or more.</param>
 /// <param name="Status">Whether it names a check or a signature, which a status line shows as it happens.</param>
@@ -237,17 +248,68 @@ internal sealed record PresenceLine(string Kind, string Text, bool Status);
 
 /// <summary>
 /// From 0.9.4 (CODE-80): turns the presence notices a client reads, batch by batch in order, into what the command line and Workbench show
-/// (design/presence-sessions.md § 7). A session's list is shown from its terms, counted and summarized here, with the runtime's
-/// descriptions labeled as the runtime's. When the check is asked, the fingerprint the system dialog shows is computed here from the nonce
-/// and the terms, and only for terms this reader received in an earlier read than the nonce: terms that arrive with the nonce or after it,
-/// or that the helper would refuse, get a warning in place of a fingerprint, so a runtime cannot choose the list after it learns the nonce.
-/// Each signature is shown as it is made; every other notice, and every notice a runtime before 0.9.4 raises, is shown by its text.
+/// (design/presence-sessions.md § 7). A session's list is shown from its terms, counted and summarized here; when the check is asked, the
+/// fingerprint the system dialog shows is computed here from the nonce and the terms, and only for terms this reader received in an earlier
+/// read than the nonce: terms that arrive with the nonce or after it, or that the helper would refuse, get a warning in place of a
+/// fingerprint, so a runtime cannot choose the list after it learns the nonce. Only what the client derives is shown in its own form.
+/// Everything the runtime wrote (a notice's text, its action, the descriptions, a reason) is shown with <see cref="RuntimeMarker"/> at the
+/// start of every line it occupies, its control and format characters shown escaped and its line breaks, inside a field, shown as
+/// <c>\n</c>; a notice the reader cannot check is shown that way whole, after a warning, never in the client's form.
 /// </summary>
 internal sealed class PresenceNoticeReader
 {
+    /// <summary>What begins every line a client shows that the runtime wrote; no line the client derives begins with it.</summary>
+    internal const string RuntimeMarker = "runtime: ";
+
     private const int Kept = 32;
     private readonly Dictionary<string, Held> sessions = new(StringComparer.Ordinal);
     private readonly Queue<string> order = new();
+
+    /// <summary>Whether a line shown, with or without a log's time before it, is the runtime's.</summary>
+    internal static bool IsRuntimeLine(string? line)
+    {
+        if (line is null) return false;
+        if (line.StartsWith(RuntimeMarker, StringComparison.Ordinal)) return true;
+        // A log line: its time, two spaces, then the line.
+        int at = line.IndexOf("  ", StringComparison.Ordinal);
+        return at >= 0 && line.AsSpan(at + 2).StartsWith(RuntimeMarker, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A runtime string as one line a person can read: line breaks, tabs, every other control character, format characters (such as
+    /// bidirectional overrides) and line and paragraph separators are shown escaped, so the string can neither break a line nor drive the
+    /// terminal.
+    /// </summary>
+    internal static string Sanitize(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        var shown = new StringBuilder(text.Length);
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            switch (rune.Value)
+            {
+                case '\n': shown.Append("\\n"); continue;
+                case '\r': shown.Append("\\r"); continue;
+                case '\t': shown.Append("\\t"); continue;
+            }
+
+            UnicodeCategory category = Rune.GetUnicodeCategory(rune);
+            if (Rune.IsControl(rune) || category is UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
+                or UnicodeCategory.Surrogate or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned)
+                shown.Append(CultureInfo.InvariantCulture, $"\\u{{{rune.Value:X4}}}");
+            else
+                shown.Append(rune.ToString());
+        }
+
+        return shown.ToString();
+    }
+
+    /// <summary>A runtime's text, one marked line for each of its lines, each sanitized.</summary>
+    internal static string Runtime(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return RuntimeMarker + "(no text)";
+        return string.Join('\n', text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').Select(line => RuntimeMarker + Sanitize(line)));
+    }
 
     /// <summary>The lines for one batch of notices, as one read delivered them, oldest first.</summary>
     internal IReadOnlyList<PresenceLine> Read(IEnumerable<PresenceNotice> batch)
@@ -270,24 +332,38 @@ internal sealed class PresenceNoticeReader
         PresenceSessionNotice? session = notice.Session;
         switch (notice.Kind)
         {
-            case "announced" or "renewed" when session?.Terms is not null:
+            case "announced" when session is not null:
+            case "renewed":
+                if (session?.Terms is null) return Unchecked(notice, "it is a presence session's list without its terms", false);
                 return List(notice, session, arrived);
-            case "session" when session is not null:
-                return Check(notice, session);
+            case "session":
+                if (session is null) return Unchecked(notice, "it is a presence check without its session", true);
+                return Check(session);
             case "signed":
-                string signed = notice.Text;
-                if (session is not null && notice.ShortHash is string shortHash && sessions.TryGetValue(session.Id, out Held? of) && of.View?.ExactEntry(shortHash) is int entry)
-                    signed += string.Create(CultureInfo.InvariantCulture, $"; entry {entry} of its list, by exact hash");
-                return new PresenceLine(notice.Kind, signed, true);
-            case "prompt":
-                bool hashed = notice.ShortHash is not null && !notice.Text.Contains(notice.ShortHash, StringComparison.Ordinal);
-                return new PresenceLine(notice.Kind, hashed ? $"{notice.Text} ({notice.ShortHash})" : notice.Text, true);
+                if (session is null) return Unchecked(notice, "it is a signature under a presence session without its session", true);
+                return Signed(notice, session);
             case "ended" when session?.Reason == "closed":
                 // Its action's end or its renewal says the rest.
                 return null;
+            case "prompt":
+                string hash = notice.ShortHash is null ? string.Empty : " (" + Sanitize(notice.ShortHash) + ")";
+                return new PresenceLine(notice.Kind, Runtime(notice.Text) + hash, true);
             default:
-                return new PresenceLine(notice.Kind, notice.Text, false);
+                return new PresenceLine(notice.Kind, Runtime(notice.Text), false);
         }
+    }
+
+    // A notice of a session's kind whose shape the reader cannot check: a warning of the client's, then the runtime's text, marked.
+    private static PresenceLine Unchecked(PresenceNotice notice, string why, bool status) =>
+        new(notice.Kind, $"Warning: this display cannot check the next notice, since {why}; what follows is the runtime's text, unchecked, and no fingerprint is shown for it.\n"
+            + Runtime(notice.Text), status);
+
+    private PresenceLine Signed(PresenceNotice notice, PresenceSessionNotice session)
+    {
+        string text = Runtime(notice.Text);
+        if (notice.ShortHash is string shortHash && sessions.TryGetValue(session.Id, out Held? of) && of.View?.ExactEntry(shortHash) is int entry)
+            text += string.Create(CultureInfo.InvariantCulture, $"\n  Its short hash is entry {entry} of the list above, by exact hash.");
+        return new PresenceLine(notice.Kind, text, true);
     }
 
     private PresenceLine List(PresenceNotice notice, PresenceSessionNotice session, List<Held> arrived)
@@ -302,41 +378,49 @@ internal sealed class PresenceNoticeReader
         var held = new Held(view, problem);
         Keep(session.Id, held);
         arrived.Add(held);
-        if (view is null) return new PresenceLine(notice.Kind, $"{notice.Text}\nThis display cannot read the list's terms: {problem}. No fingerprint can be shown for its check.", false);
+        if (view is null)
+            return new PresenceLine(notice.Kind, $"Warning: this display cannot read a presence session's terms ({problem}), so it shows no list and no fingerprint for its check; "
+                + "what follows is the runtime's text, unchecked.\n" + Runtime(notice.Text), false);
 
         var text = new StringBuilder();
         string covered = string.Create(CultureInfo.InvariantCulture, $"{(view.UpTo ? "up to " : string.Empty)}{view.Total} signatures in at most {view.LimitSeconds} s");
         text.Append(notice.Kind == "renewed"
-            ? $"{notice.Action} renews its presence session and asks once more, for {covered}, covering only this list, read here from its terms"
-                + (session.Reason is string reason ? $" (the runtime's reason: {reason})" : string.Empty) + ":"
-            : $"{notice.Action} asks for your presence once, for one presence session of {covered}, covering only this list, read here from its terms:");
+            ? $"{view.Action} renews its presence session and asks once more, for {covered}, covering only this list, read here from its terms:"
+            : $"{view.Action} asks for your presence once, for one presence session of {covered}, covering only this list, read here from its terms:");
+        // The runtime's own words, each marked: its name for the action where it differs from the terms', and a renewal's reason.
+        if (!string.Equals(notice.Action, view.Action, StringComparison.Ordinal)) text.Append('\n').Append(RuntimeMarker).Append("names the action ").Append(Sanitize(notice.Action));
+        if (notice.Kind == "renewed" && session.Reason is string reason) text.Append('\n').Append(RuntimeMarker).Append("gives the reason: ").Append(Sanitize(reason));
         IReadOnlyList<PresenceEntryDescription> descriptions = session.Descriptions ?? [];
         for (int i = 0; i < view.Entries.Count; i++)
         {
             text.Append(CultureInfo.InvariantCulture, $"\n  {i + 1}. {PresenceSessionView.Summary(view.Entries[i])}");
             if (descriptions.FirstOrDefault(d => d.Entry == i) is not { } described) continue;
-            text.Append("\n     the runtime's description: ").Append(described.Type).Append(' ').Append(described.Key).Append(": ").Append(described.Purpose);
-            if (described.Changes is string changes) text.Append("\n     what it changes, in the runtime's words: ").Append(changes);
-            if (described.Flagged) text.Append("\n     flagged by the runtime: a review here is by the same agent harness that authored the work it reviews");
+            text.Append(CultureInfo.InvariantCulture, $"\n{RuntimeMarker}  describes entry {i + 1}: ").Append(Sanitize(described.Type)).Append(' ').Append(Sanitize(described.Key))
+                .Append(": ").Append(Sanitize(described.Purpose));
+            if (described.Changes is string changes) text.Append(CultureInfo.InvariantCulture, $"\n{RuntimeMarker}  says entry {i + 1} changes: ").Append(Sanitize(changes));
+            if (described.Flagged) text.Append(CultureInfo.InvariantCulture, $"\n{RuntimeMarker}  flags entry {i + 1}: a review there is by the same agent harness that authored the work it reviews");
         }
 
+        if (view.ReferenceLine() is string references) text.Append("\n  Read here from the terms, ").Append(references).Append('.');
         text.Append("\n  In all, counted here from the terms: ").Append(view.Counts()).Append('.');
         text.Append("\nAnything outside this list asks again.");
         return new PresenceLine(notice.Kind, text.ToString(), false);
     }
 
-    private PresenceLine Check(PresenceNotice notice, PresenceSessionNotice session)
+    // The check: a fingerprint the client computed, or its warning; never the runtime's words.
+    private PresenceLine Check(PresenceSessionNotice session)
     {
-        if (!sessions.TryGetValue(session.Id, out Held? held) || !held.Before)
-            return new PresenceLine(notice.Kind, $"Presence check for {notice.Action}: warning, no fingerprint is shown, because this display received the list's terms only with the check's nonce or after it, "
-                + "so the list it would show may not be the one the system dialog covers. Approve the dialog only if you asked for exactly this action, or decline it.", true);
+        const string Decline = "Approve the system dialog only if you asked for exactly this action, or decline it.";
+        if (!sessions.TryGetValue(session.Id, out Held? held))
+            return new PresenceLine("session", "Presence check: warning, no fingerprint is shown, because this display has not received the terms of the list this check covers. " + Decline, true);
+        if (!held.Before)
+            return new PresenceLine("session", "Presence check: warning, no fingerprint is shown, because this display received the list's terms only with the check's nonce, "
+                + "so the list it shows may not be the one the system dialog covers. " + Decline, true);
         if (held.View is null)
-            return new PresenceLine(notice.Kind, $"Presence check for {notice.Action}: warning, no fingerprint is shown, because this display cannot read the list's terms ({held.Problem}). "
-                + "Decline the system dialog unless you asked for exactly this action.", true);
+            return new PresenceLine("session", $"Presence check: warning, no fingerprint is shown, because this display cannot read the list's terms ({held.Problem}). " + Decline, true);
         if (held.View.FingerprintFor(session.Nonce) is not string fingerprint)
-            return new PresenceLine(notice.Kind, $"Presence check for {notice.Action}: warning, no fingerprint is shown, because the check's nonce is not 16 bytes in base64url. "
-                + "Decline the system dialog unless you asked for exactly this action.", true);
-        return new PresenceLine(notice.Kind, $"Presence check for {notice.Action}: the system dialog should show fingerprint {fingerprint}, computed here from the list above and the check's nonce. "
+            return new PresenceLine("session", "Presence check: warning, no fingerprint is shown, because the check's nonce is not 16 bytes in base64url. " + Decline, true);
+        return new PresenceLine("session", $"Presence check for {held.View.Action}: the system dialog should show fingerprint {fingerprint}, computed here from the list above and the check's nonce. "
             + string.Create(CultureInfo.InvariantCulture, $"Approve it once, only if the fingerprints match and the list is what you asked for; it covers {(held.View.UpTo ? "up to " : string.Empty)}{held.View.Total} signatures in at most {held.View.LimitSeconds} s."), true);
     }
 

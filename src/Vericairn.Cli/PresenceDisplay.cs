@@ -15,6 +15,8 @@ namespace Vericairn.Cli;
 /// From 0.9.4 (CODE-80) a presence session's list is shown from its terms, counted and summarized here with the runtime's descriptions
 /// labeled as the runtime's; the fingerprint the system dialog shows is computed here from the check's nonce and terms received before it,
 /// with a warning in its place otherwise; and each signature under the session is shown as it is made (<see cref="PresenceNoticeReader"/>).
+/// Every line taken from the runtime's own words begins with <c>runtime:</c>, its control characters shown escaped; a line without it is
+/// one the command line derived itself.
 /// </para>
 /// </summary>
 internal sealed class PresenceDisplay : IDisposable
@@ -38,7 +40,9 @@ internal sealed class PresenceDisplay : IDisposable
         if (start is long position)
         {
             cursor = position;
-            following = Task.Run(FollowAsync);
+            // From 0.9.4 (CODE-80) the first waiting read is made before the command acts, so the runtime counts this display as
+            // following from the start and lets it read a session's terms before their nonce exists.
+            following = FollowAsync();
         }
     }
 

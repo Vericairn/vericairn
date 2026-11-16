@@ -183,6 +183,11 @@ internal sealed class DeviceOperations(CommandContext context)
             {
                 PresenceSettings.Write(deviceId, perSignature, limit);
             }
+            catch (UnreadableSettingsException unreadable)
+            {
+                // A damaged settings file counts as per-signature for every device; writing one device's setting would loosen the rest.
+                return context.Fail(unreadable.Message);
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 return context.Fail($"The presence setting could not be kept on this machine: {exception.Message}");

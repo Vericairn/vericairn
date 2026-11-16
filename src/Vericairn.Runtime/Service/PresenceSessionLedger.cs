@@ -118,19 +118,28 @@ internal sealed class PresenceSessionLedger
     /// <summary>The ledger's directory for the estate at a root, under this user's Vericairn home, as a client finds it.</summary>
     internal static string DirectoryOf(string root) => Path.GetDirectoryName(EstateLocations.EndpointFilePath(root))!;
 
-    /// <summary>Appends one line, flushed before it returns; the file is created readable and writable by its owner only.</summary>
+    /// <summary>
+    /// Appends one line, flushed before it returns; the file is created readable and writable by its owner only, and narrowed to that when
+    /// it is found wider. A link, a FIFO or any other path that is not a regular file of this user's is never written through, and nothing
+    /// that goes wrong here reaches the action: the line is dropped.
+    /// </summary>
     internal void Append(PresenceSessionEvent entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry, Json) + "\n");
         lock (gate)
         {
             try
             {
+                byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(entry, Json) + "\n");
                 Records.Signing.OwnerOnlyState.CreateDirectory(Folder);
+                if ((File.Exists(path) || new FileInfo(path).LinkTarget is not null) && Records.Signing.OwnerOnlyState.IsOwnRegularFile(path) == false) return;
                 var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.Read, Options = FileOptions.WriteThrough };
-                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = Records.Signing.OwnerOnlyState.FileMode;
                 using var stream = new FileStream(path, options);
+                // Only a regular file seeks: whatever else was put at the path between the check and the opening is left as it is.
+                if (!stream.CanSeek) return;
+                if (!OperatingSystem.IsWindows() && File.GetUnixFileMode(stream.SafeFileHandle) != Records.Signing.OwnerOnlyState.FileMode)
+                    File.SetUnixFileMode(stream.SafeFileHandle, Records.Signing.OwnerOnlyState.FileMode);
                 // A torn tail stays its own ignored line, never a prefix of this one.
                 if (stream.Length > 0)
                 {
@@ -142,7 +151,7 @@ internal sealed class PresenceSessionLedger
                 stream.Write(line);
                 stream.Flush(flushToDisk: true);
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // The ledger is a diagnostic: a line it cannot keep is dropped, and the action goes on.
             }
@@ -156,7 +165,10 @@ internal sealed class PresenceSessionLedger
     internal static IReadOnlyList<PresenceSessionEvent> Events(string directory)
     {
         string file = Path.Combine(directory, FileName);
-        if (!File.Exists(file)) return [];
+        if (!File.Exists(file) && new FileInfo(file).LinkTarget is null) return [];
+        // A link, a FIFO or another user's file is never read: a FIFO would wait for a writer.
+        if (Records.Signing.OwnerOnlyState.IsOwnRegularFile(file) == false)
+            throw new IOException($"The presence session ledger {FileName} beside the estate's live store is not a regular file of this user's, so it is not read; remove it, and the runtime starts a new one.");
         var events = new List<PresenceSessionEvent>();
         foreach (string line in File.ReadLines(file).Where(l => l.Length > 0))
         {

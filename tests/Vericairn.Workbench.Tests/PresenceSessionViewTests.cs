@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text.Json;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 
@@ -32,6 +35,9 @@ public class PresenceSessionViewTests(HeadlessFixture fixture)
         string order = Seed.LastId(root, "work-order");
         ServiceConnection? connection = null;
         var shell = new ShellViewModel(r => connection = new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-session"))) { ActingOverride = op };
+        MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
+        try
+        {
         await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         (string terms, string nonce, string fingerprint) = FingerprintVector();
         bool delivered = false;
@@ -59,13 +65,32 @@ public class PresenceSessionViewTests(HeadlessFixture fixture)
         string[] log = [.. shell.Activity.Reverse().Select(line => line[(line.IndexOf("  ", StringComparison.Ordinal) + 2)..])];
         int listedAt = Array.IndexOf(log, "operator record asks for your presence once, for one presence session of 4 signatures in at most 300 s, covering only this list, read here from its terms:");
         int checkAt = Array.FindIndex(log, l => l.StartsWith($"Presence check for operator record: the system dialog should show fingerprint {fingerprint}, computed here", StringComparison.Ordinal));
-        int signedAt = Array.IndexOf(log, "Signature 1 of 4, under the session's check: acceptance STEP-1: accepts result at its exact hash (0604e646bd69); entry 1 of its list, by exact hash");
+        int signedAt = Array.IndexOf(log, "runtime: Signature 1 of 4, under the session's check: acceptance STEP-1: accepts result at its exact hash (0604e646bd69)");
         Assert.True(listedAt >= 0 && listedAt < checkAt && checkAt < signedAt, string.Join("\n", log));
         Assert.Equal("  1. acceptance by exact hash 0604e646bd69", log[listedAt + 1]);
-        Assert.Equal("     the runtime's description: acceptance STEP-1: accepts result at its exact hash", log[listedAt + 2]);
+        Assert.Equal("runtime:   describes entry 1: acceptance STEP-1: accepts result at its exact hash", log[listedAt + 2]);
+        Assert.Equal("  Its short hash is entry 1 of the list above, by exact hash.", log[signedAt + 1]);
         Assert.Contains("  In all, counted here from the terms: 4 signatures: 1 acceptance record by exact hash; 3 push records by kind.", log);
         Assert.DoesNotContain(log, l => l.Contains("the runtime's own", StringComparison.Ordinal));
-        Assert.Equal("Signed 1 of 1.", shell.PresencePrompt);
+        Assert.Equal("runtime: Signed 1 of 1.", shell.PresencePrompt);
+
+        // The activity log shows the runtime's lines in a style of their own, and the client's own lines without it.
+        List<(string Text, bool Runtime)> shown = await fixture.Ui(() =>
+        {
+            window.UpdateLayout();
+            return window.ActivityList.GetVisualDescendants().OfType<TextBlock>()
+                .Where(t => t.Text is not null && t.Text.Length > 10 && t.Text[2] == ':').Select(t => (t.Text!, t.Classes.Contains("runtime"))).ToList();
+        });
+        Assert.True(shown.Any(l => l.Runtime && l.Text.EndsWith("  runtime: Signed 1 of 1.", StringComparison.Ordinal)), string.Join("\n", shown.Select(l => (l.Runtime ? "R " : "- ") + l.Text)));
+        Assert.Contains(shown, l => !l.Runtime && l.Text.Contains("  Its short hash is entry 1 of the list above, by exact hash.", StringComparison.Ordinal));
+        Assert.All(shown, l => Assert.Equal(l.Text[10..].StartsWith("runtime: ", StringComparison.Ordinal), l.Runtime));
+        Assert.Equal(true, PresenceLineStyle.Runtime.Convert("runtime: Signature 1 of 1", typeof(bool), null, CultureInfo.InvariantCulture));
+        Assert.Equal(false, PresenceLineStyle.Runtime.Convert("Presence check for operator record: the system dialog should show fingerprint E72R-85FF-KDKK", typeof(bool), null, CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            await fixture.Ui(window.Close);
+        }
     }
 
     // The design's fingerprint vector: its terms, its nonce and the fingerprint they give.

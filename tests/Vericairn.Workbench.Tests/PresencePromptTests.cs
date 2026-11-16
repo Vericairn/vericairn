@@ -39,13 +39,14 @@ public class PresencePromptTests(HeadlessFixture fixture)
 
         Assert.StartsWith("Written: review", workspace.Status, StringComparison.Ordinal);
         string[] log = [.. shell.Activity.Reverse().Select(line => line[(line.IndexOf("  ", StringComparison.Ordinal) + 2)..])];
-        int announced = Array.IndexOf(log, "Writing the review record asks for your presence once, for the one record it signs:");
-        // From 0.9.4 (CODE-80) the prompt's line names the record's short hash, as the helper's own label does.
-        int prompt = Array.FindIndex(log, l => System.Text.RegularExpressions.Regex.IsMatch(l, $"^Signature 1 of 1: review W-1: records your review of work-order {order} \\([0-9a-f]{{12}}\\)$"));
-        int signed = Array.IndexOf(log, "Signed 1 of 1.");
+        // From 0.9.4 (CODE-80) every line taken from the runtime begins with the runtime's mark, and the prompt's line names the record's
+        // short hash, as the helper's own label does.
+        int announced = Array.IndexOf(log, "runtime: Writing the review record asks for your presence once, for the one record it signs:");
+        int prompt = Array.FindIndex(log, l => System.Text.RegularExpressions.Regex.IsMatch(l, $"^runtime: Signature 1 of 1: review W-1: records your review of work-order {order} \\([0-9a-f]{{12}}\\)$"));
+        int signed = Array.IndexOf(log, "runtime: Signed 1 of 1.");
         Assert.True(announced >= 0 && announced < prompt && prompt < signed, string.Join("\n", log));
-        Assert.Equal($"  1. review W-1: records your review of work-order {order}", log[announced + 1]);
-        Assert.Equal("Signed 1 of 1.", shell.PresencePrompt);
+        Assert.Equal($"runtime:   1. review W-1: records your review of work-order {order}", log[announced + 1]);
+        Assert.Equal("runtime: Signed 1 of 1.", shell.PresencePrompt);
         Assert.Equal($"sign Vericairn signature 1 of 1: review W-1, records your review of work-order {order}", Assert.Single(custody.Reasons));
     }
 

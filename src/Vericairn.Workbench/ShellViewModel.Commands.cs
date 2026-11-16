@@ -349,8 +349,10 @@ public sealed partial class ShellViewModel
             cursor = batch[^1].Sequence;
             foreach (PresenceLine shown in reader.Read(batch))
             {
-                foreach (string line in shown.Text.Split('\n')) Log(line);
-                if (shown.Status) Status = shown.Text;
+                // Each line keeps its mark: a line the runtime wrote begins with it, and the log and status show it in the runtime's style.
+                string[] lines = shown.Text.Split('\n');
+                foreach (string line in lines) Log(line);
+                if (shown.Status) Status = lines[0];
                 PresencePrompt = shown.Text;
             }
         }

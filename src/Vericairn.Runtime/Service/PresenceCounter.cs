@@ -282,8 +282,10 @@ internal sealed class PresenceTally(string action)
 
 /// <summary>
 /// The presence notices of one runtime, kept in memory, newest last, for the clients on its machine to read in order. From 0.9.4
-/// (CODE-80) it knows whether a client follows them, a read that waits being under way or having ended a moment ago, and which notices a
-/// read has delivered, so a session's terms reach a following client before the check's nonce (design/presence-sessions.md § 6).
+/// (CODE-80) it keeps where each client that follows them stands: a read that waits is a follower at the position it reads from, and
+/// when it returns, the same follower stands at the cursor it returned until its next read continues from there, or until it has not read
+/// again for <see cref="FollowGap"/>. A notice is delivered once every follower stands at or past it, so a session's terms reach every
+/// following client before the check's nonce exists (design/presence-sessions.md § 6).
 /// </summary>
 internal sealed class PresenceNotices
 {
@@ -292,14 +294,14 @@ internal sealed class PresenceNotices
 
     private readonly object sync = new();
     private readonly List<PresenceNotice> kept = [];
+    private readonly List<long> waitingFrom = [];
+    private readonly List<(long Position, long At)> between = [];
     private long head;
-    private long delivered;
-    private int waiting;
-    private long followEnded = long.MinValue;
+    private int awaiting;
     private TaskCompletionSource changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private TaskCompletionSource read = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource moved = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    /// <summary>The clock the follow gap is measured on; tests replace it.</summary>
+    /// <summary>The clock the follow gap and a delivery's bound are measured on; tests replace it.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
     /// <summary>How many reads that wait are under way now.</summary>
@@ -307,7 +309,16 @@ internal sealed class PresenceNotices
     {
         get
         {
-            lock (sync) return waiting;
+            lock (sync) return waitingFrom.Count;
+        }
+    }
+
+    /// <summary>How many deliveries are being waited for now: a test's signal that the runtime holds a list's terms back.</summary>
+    internal int Awaiting
+    {
+        get
+        {
+            lock (sync) return awaiting;
         }
     }
 
@@ -330,35 +341,59 @@ internal sealed class PresenceNotices
         return notice;
     }
 
+    /// <summary>Whether every client that follows the notices has read the one at this position; false while one has not, or none follows.</summary>
+    internal bool IsDelivered(long sequence)
+    {
+        lock (sync) return DeliveredLocked(sequence) == true;
+    }
+
     /// <summary>
-    /// From 0.9.4 (CODE-80): when a client follows the notices, waits until a read has delivered the notice at this position, or the bound
-    /// passes; true when it was delivered. With no client following it returns false at once: nobody would show the notice sooner.
+    /// From 0.9.4 (CODE-80): when a client follows the notices, waits until every following client has read the notice at this position,
+    /// or the bound passes; true when it was delivered. With no client following it returns false at once: nobody would show it sooner.
     /// </summary>
     internal bool AwaitDelivery(long sequence, TimeSpan bound)
     {
-        long until = Clock.GetTimestamp();
-        while (true)
+        long started = Clock.GetTimestamp();
+        lock (sync) awaiting++;
+        try
         {
-            Task signal;
-            lock (sync)
+            while (true)
             {
-                if (delivered >= sequence) return true;
-                bool following = waiting > 0 || followEnded != long.MinValue && Clock.GetElapsedTime(followEnded) < FollowGap;
-                if (!following || Clock.GetElapsedTime(until) >= bound) return false;
-                signal = read.Task;
-            }
+                Task signal;
+                lock (sync)
+                {
+                    bool? delivered = DeliveredLocked(sequence);
+                    if (delivered is not false) return delivered == true;
+                    if (Clock.GetElapsedTime(started) >= bound) return false;
+                    signal = moved.Task;
+                }
 
-            TimeSpan left = bound - Clock.GetElapsedTime(until);
-            if (left <= TimeSpan.Zero) return false;
-            try
-            {
+                TimeSpan left = bound - Clock.GetElapsedTime(started);
+                if (left <= TimeSpan.Zero) return false;
+                // A follower that stops reading leaves after the gap, so the wait looks again at least that often.
                 signal.Wait(left < FollowGap ? left : FollowGap);
             }
-            catch (AggregateException)
-            {
-                return false;
-            }
         }
+        finally
+        {
+            lock (sync) awaiting--;
+        }
+    }
+
+    // Caller holds sync. Null when no client follows; otherwise whether every follower stands at or past the position.
+    private bool? DeliveredLocked(long sequence)
+    {
+        between.RemoveAll(b => Clock.GetElapsedTime(b.At) >= FollowGap);
+        if (waitingFrom.Count == 0 && between.Count == 0) return null;
+        return waitingFrom.All(p => p >= sequence) && between.All(b => b.Position >= sequence);
+    }
+
+    // Caller holds sync: a follower moved, so a delivery waited for looks again.
+    private void Moved()
+    {
+        TaskCompletionSource signal = moved;
+        moved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.TrySetResult();
     }
 
     /// <summary>The notices after a position, waiting up to the seconds asked for one; a position newer than this runtime's reads every notice kept.</summary>
@@ -371,12 +406,10 @@ internal sealed class PresenceNotices
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(wait));
         long? after = request.After;
-        // A read that waits is a client following the notices; one that does not, such as a read of the head, is not.
-        if (wait > 0)
-        {
-            lock (sync) waiting++;
-        }
-
+        // A read that waits is a follower, standing where it reads from: the follower that returned that cursor, continuing. A read that
+        // does not wait, such as a read of the head, follows nothing.
+        long? standing = null;
+        long returned = 0;
         try
         {
             while (true)
@@ -386,11 +419,20 @@ internal sealed class PresenceNotices
                 {
                     long from = after is not long position ? head : position > head ? 0 : position;
                     after = from;
+                    if (wait > 0 && standing is null)
+                    {
+                        standing = from;
+                        int continuing = between.FindIndex(b => b.Position == from);
+                        if (continuing >= 0) between.RemoveAt(continuing);
+                        waitingFrom.Add(from);
+                        Moved();
+                    }
+
                     List<PresenceNotice> notices = [.. kept.Where(n => n.Sequence > from)];
                     if (notices.Count > 0 || wait == 0 || deadline.IsCancellationRequested)
                     {
-                        if (notices.Count > 0) Delivered(notices[^1].Sequence);
-                        return new(notices, notices.Count > 0 ? notices[^1].Sequence : head);
+                        returned = notices.Count > 0 ? notices[^1].Sequence : head;
+                        return new(notices, returned);
                     }
 
                     signal = changed.Task;
@@ -408,24 +450,16 @@ internal sealed class PresenceNotices
         }
         finally
         {
-            if (wait > 0)
+            if (standing is long position)
             {
                 lock (sync)
                 {
-                    waiting--;
-                    followEnded = Clock.GetTimestamp();
+                    waitingFrom.Remove(position);
+                    // A read cancelled by its client leaves no follower behind; one that answered stands at the cursor it returned.
+                    if (!cancellationToken.IsCancellationRequested) between.Add((returned == 0 ? position : returned, Clock.GetTimestamp()));
+                    Moved();
                 }
             }
         }
-    }
-
-    // Caller holds sync: a read delivered every notice up to this position.
-    private void Delivered(long sequence)
-    {
-        if (sequence <= delivered) return;
-        delivered = sequence;
-        TaskCompletionSource signal = read;
-        read = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        signal.TrySetResult();
     }
 }

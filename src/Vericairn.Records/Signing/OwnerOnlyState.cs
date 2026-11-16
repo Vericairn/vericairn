@@ -227,6 +227,39 @@ internal static class OwnerOnlyState
         }
     }
 
+    /// <summary>
+    /// From 0.9.4 (CODE-80): whether an existing path is a regular file this user owns, read without following a link at the path: false for
+    /// a link, a directory, a FIFO, a device, a socket or another user's file; null where the platform cannot tell (Windows, or no native
+    /// status), where a caller relies on the link and directory checks alone.
+    /// </summary>
+    internal static bool? IsOwnRegularFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (new FileInfo(path).LinkTarget is not null || Directory.Exists(path)) return false;
+        if (OperatingSystem.IsWindows()) return null;
+        return OwnRegular(path);
+    }
+
+    // The file's type and owner from its status, which names a regular file 0x8000 in the type bits (0xF000) of its mode; the mode's
+    // permission bits are checked against .NET's before the layout is trusted.
+    [UnsupportedOSPlatform("windows")]
+    private static bool? OwnRegular(string path)
+    {
+        try
+        {
+            var status = new byte[256];
+            if (Stat(path, status) != 0) return null;
+            int mode = BinaryPrimitives.ReadInt32LittleEndian(status.AsSpan(4));
+            if ((mode & 0xFFF) != (int)File.GetUnixFileMode(path)) return null;
+            uint owner = BinaryPrimitives.ReadUInt32LittleEndian(status.AsSpan(8));
+            return (mode & 0xF000) == 0x8000 && (CurrentUser() is not uint self || owner == self);
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     private static uint? CurrentUser()
     {
         try
