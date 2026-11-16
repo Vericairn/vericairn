@@ -226,25 +226,27 @@ public sealed partial class EstateService
     });
 
     /// <summary>
-    /// The release build's kind entry (§ 5): its provider, its destination (the release's repository), its version, its product and the
-    /// commit it builds; null when the submission names no commit, or states another ref or commit in a field that may carry it, so the
-    /// build keeps one check per signature. The only place a release build entry is composed: a field the entry should also fix, such as
-    /// the workflow, is added here and to the helper's closed set together.
+    /// The release build's kind entry (§ 5): its provider, its destination (the release's repository), its version, its product, the
+    /// commit it builds and, from decision 01M7J7J6MRZPDMYDRGK0MDEZR7, the workflow its dispatch names (its <c>workflow</c> setting); null
+    /// when the submission names no commit, states another ref or commit in a field that may carry it, or names no workflow, or one outside
+    /// the branch's character set, so the build keeps one check per signature. The only place a release build entry is composed: a field
+    /// the entry should also fix is added here and to the helper's closed set together.
     /// </summary>
     internal static PresencePlannedKind? ReleaseBuildEntry(string provider, string destination, string version, string product, string? commit,
         IReadOnlyDictionary<string, string> settings, int count)
     {
         if (!PresenceText.IsCommit(commit)) return null;
         if (settings.TryGetValue("ref", out string? stated) && stated != commit || settings.TryGetValue("commit", out string? named) && named != commit) return null;
+        if (!settings.TryGetValue("workflow", out string? workflow)) return null;
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["provider"] = provider, ["destination"] = destination, ["version"] = version, ["product"] = product, ["commit"] = commit!,
+            ["provider"] = provider, ["destination"] = destination, ["version"] = version, ["product"] = product, ["commit"] = commit!, ["workflow"] = workflow,
         };
         if (!values.All(v => PresenceSessionProtocol.ValidFixed(v.Key, v.Value))) return null;
         return new PresencePlannedKind(new PresenceListEntry
         {
             Type = "operation", Action = global::Vericairn.Runtime.Release.ReleaseFlow.DispatchAction, Count = count, AtMost = true, Statuses = AllStatuses, Fixed = values,
-        }, "records the release build's intent, dispatch and outcome", $"adds or revises the release build of {version} at commit {commit![..12]} to {destination}");
+        }, "records the release build's intent, dispatch and outcome", $"adds or revises the release build of {version} at commit {commit![..12]} by workflow {workflow} to {destination}");
     }
 
     /// <summary>A release record's kind entry (§ 5): its product, version, destination and commit, with the statuses it may state.</summary>
@@ -263,13 +265,22 @@ public sealed partial class EstateService
         "witnesses the estate's history before the release check", "adds the release gate's history checkpoint");
 
     /// <summary>
-    /// The goal step's list (§ 5), composed here until its action, behind routing, passes it to its tally: the records the step signs
-    /// together once its route is known, the step's assignment and, for a step routed to a person, the ask, or for one routed to an agent,
-    /// the intent of the agent's run, each authored completely with its id and time (<see cref="Fixed"/>) before the first signature and
-    /// listed by exact hash. <paramref name="drafts"/> is read at the step's first signature, so routing fills it once the route is known.
+    /// The goal step's list (§ 5): the records the step's route authors completely in advance, each with its id and time
+    /// (<see cref="Fixed"/>), listed by exact hash from the one being signed on, in the order the step signs them: a person's assignment and
+    /// ask, which one check covers, or an agent's assignment, a single signature that keeps its own check. <paramref name="drafts"/> is
+    /// read at each composition, so routing fills it once the route is known. A record the route did not author in advance composes no
+    /// list and keeps its own check: an agent run's intent, which the worker authors after its preflight, and everything outside § 10's
+    /// allow-list, such as a rule's flow-decision observation.
     /// </summary>
-    internal static PresenceSessionAction GoalStepSession(string goal, Func<IReadOnlyList<RecordDraft>> drafts) =>
-        new(_ => drafts() is { Count: > 0 } known && known.All(d => d.Id is not null && d.At is not null)
-            ? new PresenceSessionPlan { Action = "goal step", Identity = "goal step:" + goal, Exact = known }
-            : null);
+    internal static PresenceSessionAction GoalStepSession(string goal, IReadOnlyList<RecordDraft> drafts) => new(context =>
+    {
+        if (context.Signing.Id is not string signing || drafts.Count == 0 || drafts.Any(d => d.Id is null || d.At is null)) return null;
+        int from = -1;
+        for (int i = 0; i < drafts.Count && from < 0; i++)
+        {
+            if (drafts[i].Id == signing) from = i;
+        }
+
+        return from < 0 ? null : new PresenceSessionPlan { Action = "goal step", Identity = "goal step:" + goal, Exact = [.. drafts.Skip(from)] };
+    });
 }

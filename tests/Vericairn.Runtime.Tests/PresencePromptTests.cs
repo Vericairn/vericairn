@@ -309,6 +309,11 @@ public sealed class PresencePromptTests
         Assert.Equal("release submit", terms.Action);
         Assert.Equal(["history-checkpoint", "operation"], terms.Entries.Select(e => e.Type));
         Assert.Equal(provider.HeadSha, terms.Entries[1].Fixed["commit"]);
+        // The entry fixes the workflow the dispatch names, the provider's default here, and the intent states it (decision 01M7J7J6MRZPDMYDRGK0MDEZR7).
+        Assert.Equal("release.yml", terms.Entries[1].Fixed["workflow"]);
+        RecordEnvelope intent = f.Api.Session.Load().Current("operation").Single(r => EstateModel.BodyString(r, "action") == "dispatch-release-workflow");
+        Assert.Equal("release.yml", intent.Body.GetProperty("target").GetProperty("workflow").GetString());
+        Assert.Equal("release.yml", Assert.Single(provider.Dispatches).Settings["workflow"]);
 
         provider.CompleteRun("Example/widget", submitted.Run!, success: true, "1.1.0");
         ReleaseResponse candidate = f.Api.ReleaseObserve(new("1.1.0", "Example/widget", f.Records.Estate.OperatorId, [], [], "unsigned developer build", Product: product.Id));
@@ -316,6 +321,9 @@ public sealed class PresencePromptTests
         Assert.Equal(2, helpers.Count);
         Assert.Equal(2, helpers[1].SignedHashes.Count);
         Assert.Empty(custody.Reasons);
+        // The observation's build entry fixes the workflow the observed build's dispatch names.
+        PresenceSessionRules observed = PresenceSessionRules.ReadTerms(helpers[1].Terms[0]);
+        Assert.Equal("release.yml", observed.Entries.Single(e => e.Action == "dispatch-release-workflow").Fixed["workflow"]);
 
         RecordEnvelope recorded = f.Api.Session.Load().ById[candidate.Candidate!.Id];
         WriteOutcome accepted = f.Api.NewRecord(new("acceptance", f.Records.Estate.OperatorId,
@@ -380,6 +388,52 @@ public sealed class PresencePromptTests
         Assert.True(submitted.Ok, submitted.Message);
         Assert.Empty(helpers);
         Assert.Equal(3, custody.Reasons.Count);
+    }
+
+    [Fact]
+    public void ASubmissionNamingAnotherWorkflowFixesThatWorkflowAndOneOutsideTheBranchsCharactersKeepsOneCheckPerSignature()
+    {
+        // Decision 01M7J7J6MRZPDMYDRGK0MDEZR7: the release build entry fixes the workflow the submission's dispatch names, whichever it is.
+        using (var f = new HistoryTriggerTests.Fixture())
+        {
+            RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+            (FakeReleaseProvider provider, RecordingCustody custody, string _) = PresenceRelease(f);
+            HeldClock clock = MinuteAhead();
+            Hold(f, provider, clock);
+            var helpers = new List<PresenceHelperStandIn>();
+            f.Api.HostsEmbedded = true;
+            f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+
+            ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId, Ref: provider.HeadSha, Workflow: "ship.yml",
+                Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+            Assert.True(submitted.Ok, submitted.Message);
+            Assert.Equal("ship.yml", Assert.Single(provider.Dispatches).Settings["workflow"]);
+            PresenceHelperStandIn submission = Assert.Single(helpers);
+            Assert.Equal(3, submission.SignedHashes.Count);
+            Assert.Empty(custody.Reasons);
+            Assert.Equal("ship.yml", PresenceSessionRules.ReadTerms(submission.Terms[0]).Entries.Single(e => e.Action == "dispatch-release-workflow").Fixed["workflow"]);
+        }
+
+        // A workflow the helper's character set does not hold is never a release build entry: the checkpoint alone is one signature, so
+        // no session opens and each of the three records keeps its own check, as a ref that is no commit does.
+        using (var f = new HistoryTriggerTests.Fixture())
+        {
+            RecordEnvelope product = f.Records.Add("product", ReleaseLineFixture.ProductBody());
+            (FakeReleaseProvider provider, RecordingCustody custody, string _) = PresenceRelease(f);
+            HeldClock clock = MinuteAhead();
+            Hold(f, provider, clock);
+            var helpers = new List<PresenceHelperStandIn>();
+            f.Api.HostsEmbedded = true;
+            f.Api.PresenceHost = StandInSessions.Host(helpers, clock: clock);
+
+            ReleaseResponse submitted = f.Api.ReleaseSubmit(new(product.Id, "1.1.0", "Example/widget", f.Records.Estate.OperatorId, Ref: provider.HeadSha, Workflow: "Release build",
+                Provider: provider.Provider, Commit: provider.HeadSha, Expected: product.ComputedHash) { ClientBuild = EstateService.Version });
+
+            Assert.True(submitted.Ok, submitted.Message);
+            Assert.Empty(helpers);
+            Assert.Equal(3, custody.Reasons.Count);
+        }
     }
 
     [Fact]

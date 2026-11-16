@@ -75,8 +75,8 @@ internal sealed partial class ReleaseCoordinationService(
 
     /// <summary>
     /// A submission's presence session (design/presence-sessions.md § 5): the release gate's history checkpoint in an estate that has
-    /// adopted, and the release build's intent, dispatch and outcome under its provider, destination, version, product and commit; the
-    /// current operation of its identity, which a retry supersedes, as a reference.
+    /// adopted, and the release build's intent, dispatch and outcome under its provider, destination, version, product, commit and the
+    /// workflow its settings name; the current operation of its identity, which a retry supersedes, as a reference.
     /// </summary>
     private PresenceSessionAction SubmitSession(ReleaseSubmitRequest request, string provider, string destination, string identity, string? commit,
         IReadOnlyDictionary<string, string> settings) => new(_ =>
@@ -111,6 +111,8 @@ internal sealed partial class ReleaseCoordinationService(
             var settings = new Dictionary<string, string>(StringComparer.Ordinal);
             if (Text(target, "ref") is string stated) settings["ref"] = stated;
             if (Text(target, "commit") is string named) settings["commit"] = named;
+            // The workflow the observed build's dispatch names, which its revisions keep (decision 01M7J7J6MRZPDMYDRGK0MDEZR7).
+            if (Text(target, "workflow") is string workflow) settings["workflow"] = workflow;
             // From where the observation stands: the build's revisions while its outcome is unconfirmed, then the candidate, or the
             // publication of the candidate recorded; a path of one signature keeps its own check.
             EstateModel model = session.Load();

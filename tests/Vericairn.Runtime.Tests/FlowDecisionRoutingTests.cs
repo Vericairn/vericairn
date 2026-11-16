@@ -180,7 +180,7 @@ public class FlowDecisionRoutingTests
     }
 
     /// <summary>The gate flow decided by its role, which a venture may give a rule then the role: approved ships, else the role decides.</summary>
-    private static JsonObject RuleThenRole()
+    internal static JsonObject RuleThenRole()
     {
         JsonObject flow = Gate();
         JsonObject transition = flow["steps"]![1]!["transition"]!.AsObject();
@@ -199,7 +199,7 @@ public class FlowDecisionRoutingTests
     }
 
     /// <summary>The run's roles, the operator writing and approving, and its gate's decider.</summary>
-    private static void Configured(JsonObject body, string op, string decider = "rule-then-role")
+    internal static void Configured(JsonObject body, string op, string decider = "rule-then-role")
     {
         Roles(body, op, op);
         body["plan"]!["flow"]!["options"] = new JsonObject { ["decider.gate"] = decider };
