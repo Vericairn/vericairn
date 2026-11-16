@@ -13,6 +13,8 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
+Revision 29, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its assignment, and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
+
 Revision 28, November 15, 2026. Add `goal close`, and `--reason` and `--step-reason` on `goal accept`, which close a run of a flow that will never complete with a reason for each unsettled step, in the development build.
 
 Revision 27, November 13, 2026. Describe 0.9.3's command additions as released commands rather than development builds.
@@ -456,6 +458,22 @@ an agent is refused; every refusal comes at once, before anything is written. `g
 closes the run with the acceptance, as one batch. `goal show`, `goal next` and `status` read a closed run with each of those
 steps `unsettled` and its reason; the goal reads `closed` until it is accepted or stopped, and is never resumed. See
 [closing a run](operator-guide.md#closing-a-run-094).
+
+From PROC-19 (0.9.4), a step whose flow ends it in a decision transition ([Templates](templates.md#decision-transitions-094))
+shows its decision: `goal show` prints the step's `decision:` line, its state (`pending`, `held`, `in-review`, `taken`,
+`returning` or `attention`), the decider in this run, and once decided its paths, who decided and when, why, and the evidence or,
+for a rule, the records it read, each by hash; `status` prints each run's `Decision:` lines. With `--json`, `goal show`'s flow
+gains that step's `decision` (`state`, `decider`, `paths`, `decidedBy`, `by`, `byName`, `record`, `reasons`, `evidence`, `at`,
+`since`, `review` and `taken`), and status's `runs` gain `decisions`, each named. A rule decides at once; a step its role decides
+routes as any step does, to an agent or, assigned and asked, to a person, and `goal step` never routes one the flow requires of a
+person to an agent. `goal decide <goal> --by <id> --step <step> --path <name> --reason <text>` records the decision of the
+principal holding the step's assignment as the result of that assignment, signed by its own device: `--path` repeats for several
+paths at once where the flow allows, and `--evidence <id or type:id>`, repeatable, pins each record it rests on at its current
+hash. It refuses, at once and before anything is written, a step that is not a decision step its role decides in this run, one not
+waiting on its decider, a principal not holding its assignment, an agent where the decision is a person's, a path the transition
+does not offer or several where it takes one, blank reasons and unknown evidence. Choosing a path dispatches nothing and performs
+nothing reserved: `goal step` takes the steps it makes eligible, and a reserved one still waits on the operator. A path back past
+its limit and a missed deadline under the `attention` rule route as `attention`, and `goal step` asks the sponsor once.
 
 ## `vericairn estate cache rebuild` (0.9.2)
 

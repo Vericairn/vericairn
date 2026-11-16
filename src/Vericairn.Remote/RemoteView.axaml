@@ -211,6 +211,19 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock FontWeight="SemiBold" IsVisible="{Binding HasDecisions}" Text="Decisions of runs: who decided what and why" />
+              <ListBox ItemsSource="{Binding Decisions}" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions of runs: who decided each path and why">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="p:DecisionRow">
+                    <Border Classes="card">
+                      <StackPanel Spacing="2">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Heading}" TextWrapping="Wrap" />
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock FontWeight="SemiBold" Text="Local drafts and original submissions" />
               <ListBox ItemsSource="{Binding DecisionDrafts}" SelectedItem="{Binding SelectedDraft}" AutomationProperties.Name="Drafts and submissions for this exact phone connection">
                 <ListBox.ItemTemplate>

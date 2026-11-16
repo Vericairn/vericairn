@@ -259,6 +259,9 @@ public partial interface IEstateApi
     /// <summary>From 0.9.4: closes a goal's run that will not complete, recording each step it has not settled with its reason, none of them done: by who decides for the goal, a person; never an agent. Neither accepts nor stops the goal.</summary>
     WriteOutcome GoalClose(string goal, GoalCloseRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support closing a goal's run.", []));
 
+    /// <summary>From 0.9.4: records the decision of a run's decision step by the principal holding its assignment, its path, reasons and evidence by hash; never a reserved act, and a person's where the decision is a person's.</summary>
+    WriteOutcome GoalDecide(string goal, GoalDecideRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support deciding a run's step.", []));
+
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
     IReadOnlyList<ProviderRow> Providers();
 

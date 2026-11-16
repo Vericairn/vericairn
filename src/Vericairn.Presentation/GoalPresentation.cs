@@ -109,6 +109,55 @@ public sealed record DueRow(string Name, string? At, string Reason, string Timin
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }
 
+/// <summary>
+/// A step's decision as every surface shows it (the estate's design/flow.md § 5; from 0.9.4, PROC-19): its state, who decided what and
+/// why, the evidence by hash, or that it waits on its decider, read from the runtime's position or status and never derived here.
+/// </summary>
+public sealed record DecisionRow(string Name, string State, string Decider, IReadOnlyList<string> Paths, string? DecidedBy, string? By, string? Record, string? Reasons, string? At, IReadOnlyList<string> Evidence)
+{
+    /// <summary>The step and its decision in brief: the paths taken and who took them, or its state.</summary>
+    public string Heading => Paths.Count == 0
+        ? $"{Name}: decision {State}, by {Decider}"
+        : $"{Name}: path{(Paths.Count == 1 ? string.Empty : "s")} {string.Join(", ", Paths)}, {Who}{(At is null ? string.Empty : $" at {At}")} ({State})";
+
+    /// <summary>Why, the record that carries it and the evidence it rests on.</summary>
+    public string Detail => (Reasons ?? (State == "pending" ? "It waits on its decider." : State == "held" ? "Held: its decider decides again." : string.Empty))
+        + (Record is null ? string.Empty : $" Recorded as result {Record}.")
+        + (Evidence.Count == 0 ? string.Empty : $" {(Record is null ? "Records read" : "Evidence")}: {string.Join(", ", Evidence)}.");
+
+    private string Who => DecidedBy switch
+    {
+        "rule" => "by its rule",
+        "default" => "by its rule's default",
+        "deadline" => "by its deadline",
+        "person" => $"by {By}, a person",
+        "agent" => $"by {By}, an agent",
+        _ => "not yet",
+    };
+
+    /// <summary>The rows of decisions as status gives them, each named, or a position's steps that carry one; none when the runtime gave none.</summary>
+    public static IReadOnlyList<DecisionRow> From(JsonElement items) =>
+        items.ValueKind != JsonValueKind.Array ? [] : items.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.Object).Select(i =>
+        {
+            JsonElement decision = i.TryGetProperty("decision", out JsonElement nested) && nested.ValueKind == JsonValueKind.Object ? nested : i;
+            string name = Str(i, "name") ?? (Str(i, "instance") is string instance ? $"{Str(i, "key")}[{instance}]" : Str(i, "key")) ?? "?";
+            if (decision.ValueKind != JsonValueKind.Object || !decision.TryGetProperty("state", out _) || !decision.TryGetProperty("decider", out _))
+            {
+                return null;
+            }
+
+            List<string> paths = decision.TryGetProperty("paths", out JsonElement taken) && taken.ValueKind == JsonValueKind.Array ? taken.EnumerateArray().Select(p => p.GetString() ?? "?").ToList() : [];
+            List<string> evidence = decision.TryGetProperty("evidence", out JsonElement read) && read.ValueKind == JsonValueKind.Array
+                ? read.EnumerateArray().Select(e => $"{Str(e, "type")} {Str(e, "id")}{(Str(e, "hash") is string hash ? " at " + hash : string.Empty)}").ToList()
+                : [];
+            string? record = decision.TryGetProperty("record", out JsonElement carrier) && carrier.ValueKind == JsonValueKind.Object ? Str(carrier, "id") : null;
+            return new DecisionRow(name, Str(decision, "state") ?? "?", Str(decision, "decider") ?? "?", paths, Str(decision, "decidedBy"), Str(decision, "byName") ?? Str(decision, "by"), record, Str(decision, "reasons"), Str(decision, "at"), evidence);
+        }).OfType<DecisionRow>().ToList();
+
+    private static string? Str(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+}
+
 /// <summary>One unit of a goal's budget with what its runs were charged.</summary>
 public sealed record SpendRow(string Unit, string Detail);
 
@@ -177,6 +226,9 @@ public sealed class GoalPresentation
     /// <summary>For a run, from 0.9.4 (PROC-18), each step whose timing gates its start with its due time, before it runs; none otherwise.</summary>
     public IReadOnlyList<DueRow> Due { get; private set; } = [];
 
+    /// <summary>For a run, from 0.9.4 (PROC-19), each step's decision: who decided what and why, or that it waits on its decider; none otherwise.</summary>
+    public IReadOnlyList<DecisionRow> Decisions { get; private set; } = [];
+
     /// <summary>Work orders proposed for the goal that wait for its sponsor's approval; none unless its plan says sponsor-approves.</summary>
     public IReadOnlyList<ProposedRow> Proposed { get; private set; } = [];
 
@@ -200,6 +252,7 @@ public sealed class GoalPresentation
         }).ToList();
         view.Stops = StopRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("stops", out JsonElement stops) ? stops : default);
         view.Due = DueRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("steps", out JsonElement timed) ? timed : default);
+        view.Decisions = DecisionRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("steps", out JsonElement decided) ? decided : default);
         view.Proposed = Items(goal, "proposed").Select(p => new ProposedRow(Str(p, "key") ?? "?", Str(p, "title") ?? "?", Str(p, "id") ?? "?", Str(p, "byName") ?? Str(p, "by") ?? "?", Str(p, "approve"))).ToList();
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();

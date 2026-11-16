@@ -166,6 +166,17 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock Text="Decisions of runs: who decided what and why, from the records" FontWeight="SemiBold" Margin="0,8,0,0" IsVisible="{Binding HasDecisions}" />
+              <ListBox Name="DecisionList" Focusable="True" ItemsSource="{Binding Decisions}" MaxHeight="240" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions of runs">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:DecisionRow">
+                    <StackPanel MinHeight="32">
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
               <TextBlock Text="Progress, from the records (Enter opens the report)" FontWeight="SemiBold" Margin="0,8,0,0" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="This status view's depth" VerticalAlignment="Center" />
@@ -664,6 +675,17 @@
                       </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock Text="{Binding Next}" TextWrapping="Wrap" />
+                    <TextBlock Text="Decisions: who decided what and why" FontWeight="SemiBold" IsVisible="{Binding HasDecisions}" />
+                    <ListBox ItemsSource="{Binding Decisions}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasDecisions}" AutomationProperties.Name="Decisions">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="pres:DecisionRow">
+                          <StackPanel MinHeight="32">
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <SelectableTextBlock MinHeight="24" Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
                     <TextBlock Text="Due times: when each timed step is due, before it runs" FontWeight="SemiBold" IsVisible="{Binding HasDue}" />
                     <ListBox ItemsSource="{Binding Due}" Focusable="True" MaxHeight="240" IsVisible="{Binding HasDue}" AutomationProperties.Name="Due times">
                       <ListBox.ItemTemplate>

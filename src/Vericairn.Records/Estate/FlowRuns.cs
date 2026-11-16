@@ -40,6 +40,17 @@ public static class FlowRuns
         /// <summary>The value of a flow option, or null when the flow has none by that name.</summary>
         public string? Value(string option) => Values.TryGetValue(option, out Setting? setting) ? setting.Value : null;
 
+        /// <summary>
+        /// A step's decider in this run (from 0.9.4, PROC-19): the one its configuration chooses as decider.&lt;key&gt;, the narrowest winning,
+        /// where the flow lets a venture choose; otherwise the flow's own. Rule, role or rule-then-role; role for a step with no transition.
+        /// </summary>
+        public string Decider(FlowStep step)
+        {
+            ArgumentNullException.ThrowIfNull(step);
+            return step.Transition is not FlowTransition transition ? "role"
+                : Value(step.DeciderOption) is string chosen && transition.Deciders.Contains(chosen, StringComparer.Ordinal) ? chosen : transition.Decider;
+        }
+
         /// <summary>The run's time zone (from 0.9.4, PROC-18): the IANA name its configuration sets as zone, or UTC.</summary>
         public string Zone => Value(FlowTiming.ZoneOption) ?? FlowTiming.Utc;
 
@@ -399,6 +410,16 @@ public static class FlowRuns
                     itemsOff.Add(owner!.Key + "." + item.Name);
                 }
 
+                continue;
+            }
+
+            // From 0.9.4 (PROC-19) a step's decider is chosen only among the deciders its flow allows.
+            if (choice.Name.StartsWith(FlowTransition.DeciderOption, StringComparison.Ordinal) && !flow.Options.ContainsKey(choice.Name))
+            {
+                FlowStep? decided = flow.Step(choice.Name[FlowTransition.DeciderOption.Length..]);
+                refusals.Add(decided?.Transition is FlowTransition fixedTransition
+                    ? ("flow.decider", $"Step {decided.Key}'s decider is fixed by flow {flow.Pin.Id} as {fixedTransition.Decider}: no configuration changes it.")
+                    : ("flow.option", $"'{choice.Name}' names no step of flow {flow.Pin.Id} with a decision transition; a step's decider is configured as decider.<step>."));
                 continue;
             }
 
@@ -1014,6 +1035,11 @@ public static class FlowRuns
         {
             context.Error("assignment.step", $"Step {declared.Key} is a {declared.Kind} step; an assignment carries a work or review step.");
         }
+        else if (declared.Decides && TJson.Object(step.Element, "review").ValueKind != JsonValueKind.Object && Configure(context.Model, run, flow, context.Record).Decider(declared) == "rule")
+        {
+            // From 0.9.4 (PROC-19) a decision step is assigned to its role only where its role decides it in this run.
+            context.Error("assignment.step", $"Step {declared.Key}'s transition is decided by a rule in this run, from the records; it is assigned to no one.");
+        }
 
         // A reserved act and a person's role are never an agent's (design/flow.md §§ 8 and 13).
         string? contributor = EstateModel.BodyString(context.Record, "contributor");
@@ -1027,6 +1053,10 @@ public static class FlowRuns
             if (flow.Role(declared.Role)?.Holder == "person" && TJson.Object(step.Element, "review").ValueKind != JsonValueKind.Object)
             {
                 context.Error("assignment.step", $"Step {declared.Key} is carried in the {declared.Role} role, which the flow marks a person's: it is never assigned to an agent.");
+            }
+            else if (declared.Transition is { PersonOnly: true } personal && declared.Decides && TJson.Object(step.Element, "review").ValueKind != JsonValueKind.Object)
+            {
+                context.Error("assignment.step", $"Step {declared.Key}'s decision is a person's{(personal.Undelegable is string act ? $", an act the operating-modes design never delegates ({act})" : ", as the flow requires")}: it is never assigned to an agent.");
             }
         }
 
@@ -1085,8 +1115,10 @@ public static class FlowRuns
         }
 
         Configuration configuration = Configure(context.Model, run, flow, context.Record);
-        // Requirements compare as routing groups them: a review that names no role is the estate's reviewer role's.
-        List<FlowReview> requirements = reviewed.Select(o => ReviewRequirement(flow, configuration, declared, o)).Select(r => r with { Role = r.Role ?? Roles.Reviewer }).Distinct().ToList();
+        // Requirements compare as routing groups them: a review that names no role is the estate's reviewer role's. From 0.9.4 (PROC-19) a
+        // decision step's review is its transition's, of an agent's decision before it takes effect.
+        List<FlowReview> requirements = (declared.Decides && items.Count == 0 ? [declared.Transition!.Review ?? new FlowReview("none", null)] : reviewed.Select(o => ReviewRequirement(flow, configuration, declared, o)))
+            .Select(r => r with { Role = r.Role ?? Roles.Reviewer }).Distinct().ToList();
         if (requirements.Count != 1)
         {
             context.Error("assignment.review", $"The items of one review take one review requirement; these take {string.Join(", ", requirements.Select(r => r.Independence + " in the " + r.Role + " role"))}.");

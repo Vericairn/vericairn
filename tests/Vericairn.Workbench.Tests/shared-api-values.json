@@ -77,7 +77,16 @@
     "exhausted",
     "consecutive-failures",
     "impossible",
-    "missed"
+    "missed",
+    "loop"
+  ],
+  "Vericairn.Records.Estate.FlowPosition.DecisionStates": [
+    "pending",
+    "held",
+    "in-review",
+    "taken",
+    "returning",
+    "attention"
   ],
   "Vericairn.Records.Estate.FlowPosition.ItemStates": [
     "satisfied",
@@ -295,6 +304,29 @@
     "event",
     "watch",
     "due"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.DeadlineRules": [
+    "default",
+    "attention"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.DeciderKinds": [
+    "rule",
+    "role",
+    "rule-then-role"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.GatePaths": [
+    "go",
+    "recycle",
+    "hold",
+    "kill"
+  ],
+  "Vericairn.Records.Templates.FlowTransition.Undelegables": [
+    "administration",
+    "charter",
+    "grant",
+    "legal-commitment",
+    "ownership-transfer",
+    "destructive"
   ],
   "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
     "work-order",

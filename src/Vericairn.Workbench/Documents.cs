@@ -132,6 +132,12 @@ public sealed class GoalsWorkspace : Document
     /// <summary>True while the goal shown is a run with a due time to show.</summary>
     public bool HasDue => Due.Count > 0;
 
+    /// <summary>From 0.9.4 (PROC-19), for a run, each step's decision: who decided what and why, or that it waits on its decider.</summary>
+    public ObservableCollection<DecisionRow> Decisions { get; } = [];
+
+    /// <summary>True while the goal shown is a run with a decision to show.</summary>
+    public bool HasDecisions => Decisions.Count > 0;
+
     /// <summary>Work orders proposed for the goal shown that wait for its sponsor's approval.</summary>
     public ObservableCollection<ProposedRow> Proposed { get; } = [];
 
@@ -186,8 +192,12 @@ public sealed class GoalsWorkspace : Document
         Asks.Clear();
         Evaluations.Clear();
         Stops.Clear();
+        Due.Clear();
+        Decisions.Clear();
         Proposed.Clear();
         Raise(nameof(HasStops));
+        Raise(nameof(HasDue));
+        Raise(nameof(HasDecisions));
         Raise(nameof(HasProposed));
         IEstateApi? estate = api();
         if (selected is null || estate is null)
@@ -251,6 +261,11 @@ public sealed class GoalsWorkspace : Document
             Due.Add(row);
         }
 
+        foreach (DecisionRow row in view.Decisions)
+        {
+            Decisions.Add(row);
+        }
+
         foreach (ProposedRow row in view.Proposed)
         {
             Proposed.Add(row);
@@ -258,6 +273,7 @@ public sealed class GoalsWorkspace : Document
 
         Raise(nameof(HasStops));
         Raise(nameof(HasDue));
+        Raise(nameof(HasDecisions));
         Raise(nameof(HasProposed));
     }
 }

@@ -130,16 +130,26 @@ public sealed record FlowBranch(string Name, IReadOnlyList<JsonElement> When, IR
 /// <param name="Element">The step's declared content.</param>
 /// <param name="DeclaredIn">The flow version that declares it.</param>
 /// <param name="Failure">A work step's declared failure route; null when it declares none, and then a failure stops.</param>
+/// <param name="Transition">From 0.9.4 (PROC-19), the decision transition it ends in, among named paths; null when it declares none.</param>
 public sealed record FlowStep(string Key, string Title, string Kind, string Role, bool Required, bool DefaultOn, string? Reserved, IReadOnlyList<string> After,
     IReadOnlyList<JsonElement> Requires, IReadOnlyList<JsonElement> Done, string? Action, string Recovery, IReadOnlyList<FlowTrap> Traps,
     IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn,
-    FlowFailure? Failure = null)
+    FlowFailure? Failure = null, FlowTransition? Transition = null)
 {
     /// <summary>The failure route it takes: the one it declares, or a stop.</summary>
     public FlowFailure FailureRoute => Failure ?? FlowFailure.Stop;
 
-    /// <summary>True for the kinds the conductor routes as an assignment of the run's work order: work and review.</summary>
-    public bool IsRouted => FlowContract.Routed.IndexOf(Kind) >= 0;
+    /// <summary>
+    /// True for the steps the conductor routes as an assignment of the run's work order: work and review, and from 0.9.4 (PROC-19) a
+    /// decision step whose transition its role may decide, routed to the role's principal to decide and record its path.
+    /// </summary>
+    public bool IsRouted => FlowContract.Routed.IndexOf(Kind) >= 0 || Decides;
+
+    /// <summary>From 0.9.4 (PROC-19), true for a decision step whose transition its role may decide in some configuration.</summary>
+    public bool Decides => Kind == "decision" && Transition is { MayBeRole: true };
+
+    /// <summary>From 0.9.4 (PROC-19), the option that chooses its decider, where the flow allows a venture to: decider.&lt;key&gt;.</summary>
+    public string DeciderOption => FlowTransition.DeciderOption + Key;
 
     /// <summary>The option that configures an optional step: step.&lt;key&gt;.</summary>
     public string Option => FlowContract.StepOption + Key;
@@ -496,9 +506,20 @@ public sealed class FlowDefinition
             errors.Add($"{FlowContract.UnclosableCode}: {FlowContract.UnclosableMessage(reserved, waited)}");
         }
 
+        // From 0.9.4 (PROC-19) each decision transition's paths lead to steps and branches of the merged flow as their kind requires.
+        List<FlowTransition.StepShape> shapes = steps.Select(s => new FlowTransition.StepShape(s.Key, s.Kind, s.After,
+            s.Inputs.Select(i => i.Step).Append(FlowTiming.WaitedOf(s.When)).OfType<string>().ToList(), s.Each, s.Transition)).ToList();
+        errors.AddRange(FlowTransition.Structure(shapes, branches.GroupBy(b => b.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Steps, StringComparer.Ordinal)).Select(e => "flow.transition: " + e.Message));
+
         if (errors.Count > 0)
         {
             throw new InvalidOperationException("The flow does not resolve: " + string.Join(" ", errors));
+        }
+
+        // From 0.9.4 (PROC-19) a step whose transition a venture may decide otherwise is configured by its decider option.
+        foreach (FlowStep step in steps.Where(s => s.Transition is { Deciders.Count: > 1 } && !turnedOff.ContainsKey(s.Key)))
+        {
+            options[step.DeciderOption] = Choice(step.DeciderOption, step.Transition!.Deciders, step.Transition.Decider);
         }
 
         // An optional step a base declares and no extension turned off is configured by its own option, and so is each optional item.
@@ -516,6 +537,17 @@ public sealed class FlowDefinition
         }
 
         return new FlowDefinition(definition, chain.Select(d => new TemplatePin(d.Id, d.Version, d.Hash)).ToList(), subject, roles, steps, branches, never, triggers, turnedOff, turnedOffItems, options);
+    }
+
+    private static JsonElement Choice(string id, IReadOnlyList<string> values, string chosen)
+    {
+        var option = new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = id,
+            ["values"] = new System.Text.Json.Nodes.JsonArray(values.Select(v => (System.Text.Json.Nodes.JsonNode)v).ToArray()),
+            ["default"] = chosen,
+        };
+        return JsonSerializer.SerializeToElement(option);
     }
 
     private static JsonElement OnOff(string id, bool on)
@@ -619,7 +651,8 @@ public sealed class FlowDefinition
             !TJson.Flag(content, "optional"), TJson.Text(content, "default") != "off", TJson.Text(content, "reserved"), after,
             TJson.Array(content, "requires").ToList(), TJson.Array(content, "done").ToList(), TJson.Text(content, "action"), TJson.Text(content, "recovery")!,
             traps, inputs, outputs, ReviewOf(TJson.Object(content, "review")), TJson.Text(content, "each"), TJson.Object(content, "when"), content.Clone(), pin,
-            TJson.Object(content, "failure") is { ValueKind: JsonValueKind.Object } failure ? new FlowFailure(TJson.Text(failure, "route")!, TJson.Text(failure, "branch"), TJson.Text(failure, "step")) : null);
+            TJson.Object(content, "failure") is { ValueKind: JsonValueKind.Object } failure ? new FlowFailure(TJson.Text(failure, "route")!, TJson.Text(failure, "branch"), TJson.Text(failure, "step")) : null,
+            FlowTransition.Read(TJson.Object(content, "transition"), TJson.Text(content, "key")!));
     }
 
     private static FlowReview? ReviewOf(JsonElement review) => review.ValueKind switch

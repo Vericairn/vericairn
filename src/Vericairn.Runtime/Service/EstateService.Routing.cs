@@ -313,18 +313,28 @@ public sealed partial class EstateService
             }
 
             string id = assignment.Envelope.Id;
-            question = step.Review is FlowPosition.PendingReview review
+            // From 0.9.4 (PROC-19) a decision step its role decides is asked as a decision among its paths, recorded with goal decide.
+            string? paths = step.Review is null && step.Step?.Step is { Decides: true, Transition: { } transition }
+                ? string.Join("; ", transition.Paths.Select(p => $"{p.Name}, to {p.Leads}"))
+                : null;
+            question = paths is not null
+                ? $"Will you decide {key} {title}, a step of goal {goalTitle}, among its paths ({paths})? It is assigned to you as its {route.Role} (assignment {id})."
+                : step.Review is FlowPosition.PendingReview review
                 ? $"Will you review {review.What} at {review.Hash}, of step {step.Step!.Name} of goal {goalTitle}, before it is handed on? It is assigned to you as its {route.Role} (assignment {id}), a{(review.Requirement.Independence == "independent" ? "n" : string.Empty)} {review.Requirement.Independence} review."
                 : route.State == "reserved"
                 ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {id})."
                 : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {id}).";
             string from = step.Step is null ? $"vericairn work brief {key}" : $"assignment {id}'s brief, which pins the step's inputs, with vericairn work brief {EstateModel.BodyString(step.Order, "key") ?? step.Order.Id}";
-            recommendation = step.Review is FlowPosition.PendingReview reviewing
+            recommendation = paths is not null
+                ? $"Decide it from assignment {id}'s brief, and record the path with its reasons and evidence: vericairn goal decide {goal.Id} --step {key} --path <path> --reason <why> --evidence <record> --by {route.Principal}. Choosing a path performs nothing reserved; goal step then takes the steps it leads to."
+                : step.Review is FlowPosition.PendingReview reviewing
                 ? $"Review it from assignment {id}'s brief: record a review of {reviewing.Subject.Type} {reviewing.Subject.Id} at {reviewing.Hash} with outcome pass, findings or fail. Findings send the step back to its author; fail takes its failure route."
                 : route.State == "reserved"
                 ? $"Carry it yourself, from {from}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
                 : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; {from} is everything it needs.";
-            consequence = step.Review is not null
+            consequence = paths is not null
+                ? $"{key} waits for your decision, and the steps after it wait with it; the goal's other steps go on."
+                : step.Review is not null
                 ? $"Step {step.Step!.Name} is not handed on until it is reviewed, and what depends on it waits; the goal's other steps go on."
                 : route.State == "reserved"
                 ? $"{key} waits until you act, and nothing reserved is done for you; the goal's other steps go on."

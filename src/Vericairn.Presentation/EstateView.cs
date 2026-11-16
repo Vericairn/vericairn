@@ -43,6 +43,9 @@ public sealed record FlowRunRow(string Goal, string Title, string Status, string
     /// <summary>From 0.9.4 (PROC-18), each step whose timing gates its start, with its due time; none when no step's does.</summary>
     public IReadOnlyList<DueRow> Due { get; init; } = [];
 
+    /// <summary>From 0.9.4 (PROC-19), each step's decision: who decided what and why, or that it waits on its decider; none when no step has one.</summary>
+    public IReadOnlyList<DecisionRow> Decisions { get; init; } = [];
+
     /// <summary>The run and its position, in words.</summary>
     public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}{(AsOf is null ? string.Empty : $"; as of {AsOf}, the newest record")}";
 }
@@ -161,6 +164,9 @@ public sealed class EstateView
     /// <summary>From 0.9.4 (PROC-18), every run's due times, run by run, shown before each step runs.</summary>
     public IReadOnlyList<DueRow> Due => Runs.SelectMany(r => r.Due).ToList();
 
+    /// <summary>From 0.9.4 (PROC-19), every run's decisions, run by run: who decided what and why, or that a step waits on its decider.</summary>
+    public IReadOnlyList<DecisionRow> Decisions => Runs.SelectMany(r => r.Decisions).ToList();
+
     /// <summary>
     /// When the stops were derived, in words: canonical status gives them as of the estate's newest record and leaves a reserved step's
     /// command to a live read; empty without runs.
@@ -226,6 +232,7 @@ public sealed class EstateView
                 Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"))
             {
                 Due = DueRow.From(e.TryGetProperty("due", out JsonElement due) ? due : default),
+                Decisions = DecisionRow.From(e.TryGetProperty("decisions", out JsonElement decisions) ? decisions : default),
             };
         });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));

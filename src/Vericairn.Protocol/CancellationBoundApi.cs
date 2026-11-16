@@ -489,6 +489,12 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<WriteOutcome> GoalCloseAsync(string goal, GoalCloseRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.GoalCloseAsync(goal, request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public WriteOutcome GoalDecide(string goal, GoalDecideRequest request) => inner.GoalDecideAsync(goal, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> GoalDecideAsync(string goal, GoalDecideRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.GoalDecideAsync(goal, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public IReadOnlyList<ProviderRow> Providers() => inner.ProvidersAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

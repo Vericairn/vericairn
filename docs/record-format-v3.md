@@ -466,6 +466,36 @@ closed run's steps that are neither done nor off read `unsettled` with their
 reasons, never `done`, and the goal may still be accepted. `goal close` and
 `goal accept --reason` write it ([operator guide](operator-guide.md#closing-a-run-094)).
 
+### Decisions of a run's steps (0.9.4)
+
+PROC-19 adds one optional field to `result` within format 3, and no record type.
+A result without `decision` behaves as before, and a flow's decision transition
+is template content of kind `flow` ([Templates](templates.md#decision-transitions-094)),
+not a record.
+
+| Record | Additive contract |
+| --- | --- |
+| `result` | Optional `decision: {paths, reasons, evidence}` records the decision of a run's decision step by the principal holding its assignment: `paths`, the path or paths of the step's transition it takes; `reasons`, never blank; and `evidence`, each `{type, id, hash}` of an exact record, possibly none. It is the step's item of kind decision, distinct from the estate's `decision` records, and it performs nothing reserved. |
+
+Validation refuses a `decision` on a result that is not completed; on a result
+whose attempt is not on an assignment of a decision step of a run's flow, or is
+on a review assignment; for a step whose transition its role does not decide in
+the run's configuration, a rule's decision being derived from the records and
+never recorded; naming a path the transition does not declare, a path twice, or
+several paths where the flow takes one or where one of them goes back, ends the
+run or hands it to another flow; by an agent where the decision is a person's,
+because the flow requires a person or the decision is one the operating-modes
+design never delegates; and evidence that is not an estate record at its
+recorded hash. An assignment of a decision step is refused where a rule decides
+it in the run, and an agent's where the decision is a person's. Which decision
+counts, its review before it takes effect, a deadline's default and a path back
+past its limit are derived when the run is read, never stored. A reader of
+format 3 that predates the field refuses a result that carries it as an unknown
+key, as any later format-3 field; a reader of it that cannot resolve the run's
+flow shows the result and reads the step undecided. `records describe result`
+includes this contract, and the generic record reader advances to
+`vericairn.records/readers/9`.
+
 ## Security reports (0.9.2)
 
 OPS-11 adds one optional product field and one observation kind within format 3, and no record type, and narrows who may change a

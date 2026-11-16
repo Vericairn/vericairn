@@ -90,8 +90,8 @@ public static partial class NextEligible
         foreach (FlowPosition.StepInstance instance in position.Steps)
         {
             // Required attention of a held step is routed to the sponsor as an ask, never to another contributor; from 0.9.4 (PROC-18) so is
-            // a missed deadline's, whatever the step's kind.
-            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind == "missed"))
+            // a missed deadline's, and from 0.9.4 (PROC-19) a decision's path back past its limit, whatever the step's kind.
+            if (position.Work is not null && instance.Attention is FlowPosition.Attention attention && (instance.Step.IsRouted || attention.Kind is "missed" or "loop"))
             {
                 steps.Add(new FlowStepRoute(instance, AttentionOf(model, current, status, instance.Step.Role, attention, machine)));
                 continue;
@@ -137,8 +137,12 @@ public static partial class NextEligible
 
             string role = instance.Step.Role;
             bool person = position.Flow.Role(role)?.Holder == "person";
-            Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => person && candidate.IsAgent
-                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, $"the flow marks the {role} role a person's, and an agent never holds it"] }
+            // From 0.9.4 (PROC-19) a decision the flow requires of a person, or one never delegated, is never routed to an agent.
+            string? personal = instance.Step.Decides && instance.Step.Transition is { PersonOnly: true } transition
+                ? $"step {instance.Step.Key}'s decision is a person's{(transition.Undelegable is string act ? $", an act never delegated ({act})" : ", as the flow requires")}, and an agent never decides it"
+                : null;
+            Route route = RouteOf(model, current, status, ledger, role, Routing.ReservedAction(role), assignments, asks, runs, machine, candidate => (person || personal is not null) && candidate.IsAgent
+                ? candidate with { Available = false, Reasons = [.. candidate.Reasons, personal ?? $"the flow marks the {role} role a person's, and an agent never holds it"] }
                 : candidate);
             steps.Add(new FlowStepRoute(instance, route));
         }

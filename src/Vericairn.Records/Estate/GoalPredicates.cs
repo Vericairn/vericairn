@@ -89,7 +89,14 @@ public static class GoalPredicates
         return Count(model, predicate, admit).Matches;
     }
 
-    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit)
+    /// <summary>
+    /// Evaluates a record predicate over the current records made at or before a time (from 0.9.4, PROC-19): a decision transition's rule
+    /// reads the records as they stood when its step was ready, so a record made later never changes a decision already taken. A state
+    /// the predicate names is read as status derives it now.
+    /// </summary>
+    internal static Verdict EvaluatePredicate(EstateModel model, JsonElement predicate, DateTimeOffset asOf) => Count(model, predicate, null, asOf).Verdict;
+
+    private static (Verdict Verdict, IReadOnlyList<RecordEnvelope> Matches) Count(EstateModel model, JsonElement predicate, Func<RecordEnvelope, bool>? admit, DateTimeOffset? asOf = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         string? type = Text(predicate, "type");
@@ -109,6 +116,7 @@ public static class GoalPredicates
             .Where(r => subjectIdentity is null || (r.Subject is not null && LivingDocuments.ProductIdentity(model, r.Subject.Id) == subjectIdentity))
             .Where(r => product is null || (type == "living-document" && LivingDocuments.NamesProduct(model, r, product)))
             .Where(r => fields.All(f => FieldString(r, f.Name) == f.Value))
+            .Where(r => asOf is null || r.AtTime <= asOf)
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
             .ToList();
 

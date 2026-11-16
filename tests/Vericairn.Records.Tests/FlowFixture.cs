@@ -15,7 +15,8 @@ namespace Vericairn.Records.Tests;
 /// </summary>
 public sealed class FlowFixture : IDisposable
 {
-    public FlowFixture(JsonObject? flow = null, JsonObject? options = null, string? until = null, JsonArray? tracks = null, bool roster = true, JsonArray? roles = null, bool run = true, Func<FlowFixture, JsonObject>? subject = null)
+    public FlowFixture(JsonObject? flow = null, JsonObject? options = null, string? until = null, JsonArray? tracks = null, bool roster = true, JsonArray? roles = null, bool run = true, Func<FlowFixture, JsonObject>? subject = null,
+        Func<FlowFixture, JsonArray>? rolesOf = null)
     {
         Policies = new PolicyFixture();
         Flow = Install(Estate, flow ?? Song());
@@ -35,7 +36,7 @@ public sealed class FlowFixture : IDisposable
 
         if (run)
         {
-            Goal = Add("goal", GoalBody(options, until, tracks, roles, subject: subject?.Invoke(this)));
+            Goal = Add("goal", GoalBody(options, until, tracks, roles ?? rolesOf?.Invoke(this), subject: subject?.Invoke(this)));
             Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: Goal.Reference);
         }
     }
@@ -75,6 +76,29 @@ public sealed class FlowFixture : IDisposable
             ["content"] = new JsonArray(new JsonObject { ["kind"] = "command", ["text"] = command, ["hash"] = Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(command)) }),
             ["flowStep"] = new JsonObject { ["goal"] = run.Goal.Id, ["key"] = "accept" },
         }, subject: run.Work.Reference);
+
+        // From 0.9.4 a second run's decision step is decided by the person its role reaches, recorded as the result of its assignment.
+        TemplateDefinition gate = Install(run.Estate, Gate());
+        RecordEnvelope order = run.Add("work-order", new JsonObject
+        {
+            ["key"] = "SONG-2", ["kind"] = "ordinary", ["title"] = "Decide the song", ["intent"] = "Decide what runs next.", ["scope"] = new JsonArray("path:song/"),
+            ["exitQuestion"] = "Is it decided?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("the decision"),
+        });
+        JsonObject decided = run.GoalBody(flow: gate, subject: new JsonObject { ["recording"] = new JsonObject { ["type"] = "work-order", ["id"] = order.Id } },
+            roles: new JsonArray(Role("writer", run.Estate.BuilderId), Role("approver", run.Estate.OperatorId)));
+        decided["plan"]!["workOrders"] = new JsonArray(order.Id);
+        RecordEnvelope second = run.Add("goal", decided);
+        run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated for the test." }, subject: second.Reference);
+        RecordEnvelope draft = run.Add("assignment", AssignmentBody("draft", run.Estate.BuilderId), subject: order.Reference);
+        RecordEnvelope drafted = run.Result(draft, "completed", ("lyrics", Hash('c'), null));
+        RecordEnvelope deciding = run.Add("assignment", AssignmentBody("gate", run.Estate.OperatorId), subject: order.Reference);
+        RecordEnvelope attempt = run.Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(run.Estate.Clock), ["workspace"] = "the run's decision", ["note"] = "Decide." }, subject: deciding.Reference);
+        run.Add("result", new JsonObject
+        {
+            ["outcome"] = "completed", ["summary"] = "Decided: ship.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+            ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "none",
+            ["decision"] = new JsonObject { ["paths"] = new JsonArray("ship"), ["reasons"] = "The lyrics are ready.", ["evidence"] = new JsonArray(PolicyFixture.Ref(drafted)) },
+        }, subject: attempt.Reference);
 
         // From 0.9.4 the sponsor closes the run with a reason for each step it has not settled, a clip's instance among them.
         RunClosings.Plan closing = RunClosings.Prepare(run.Estate.Load(), run.Goal, run.Estate.OperatorId, "The song is shelved.", [("shorts[intro]", "The intro has no clip.")], run.Estate.Clock);
@@ -139,6 +163,31 @@ public sealed class FlowFixture : IDisposable
             Step("accept", "decision", "decider", reserved: "accept-release", done: new JsonArray(Marker("ACCEPTED")), action: AcceptCommand),
             Step("publish", "operation", "decider", optional: "on", reserved: "publish", done: new JsonArray(Marker("PUBLISHED")), action: PublishCommand)),
     };
+
+    /// <summary>
+    /// A flow whose second step decides what runs next (from 0.9.4, PROC-19): draft the lyrics; the gate, decided by the approver role,
+    /// ships them (release) or drops them, which ends the run.
+    /// </summary>
+    public static JsonObject Gate()
+    {
+        JsonObject gate = Step("gate", "decision", "approver");
+        gate["transition"] = new JsonObject
+        {
+            ["paths"] = new JsonArray(new JsonObject { ["name"] = "ship", ["step"] = "release" }, new JsonObject { ["name"] = "drop", ["end"] = true }),
+            ["decider"] = "role",
+        };
+        JsonObject release = Step("release", "operation", "writer", done: new JsonArray(Marker("RELEASED")));
+        release["after"] = new JsonArray("gate");
+        return new JsonObject
+        {
+            ["format"] = "vericairn.template/1", ["kind"] = "flow", ["id"] = "example/gate", ["version"] = "1.0.0", ["purpose"] = "Draft, then decide what runs next.",
+            ["subject"] = new JsonObject { ["summary"] = "a recording", ["fields"] = new JsonArray(new JsonObject { ["name"] = "recording", ["type"] = "record", ["recordType"] = "work-order" }) },
+            ["roles"] = new JsonArray(
+                new JsonObject { ["id"] = "writer", ["holder"] = "either", ["brief"] = "Draft the material." },
+                new JsonObject { ["id"] = "approver", ["holder"] = "either", ["brief"] = "Decide what runs next." }),
+            ["steps"] = new JsonArray(Step("draft", "work", "writer", outputs: new JsonArray(FileItem("lyrics"))), gate, release),
+        };
+    }
 
     /// <summary>
     /// A flow of two steps: prepare, an operation the writer carries, done by its marker; then timed, taking the timing given, the
@@ -237,12 +286,16 @@ public sealed class FlowFixture : IDisposable
         Policies.Add(type, body, builder: builder, subject: subject, supersedes: supersedes);
 
     /// <summary>The operator's assignment of a step to a contributor, pinning the inputs given.</summary>
-    public RecordEnvelope Assign(string step, string contributor, string? instance = null, JsonArray? inputs = null)
+    public RecordEnvelope Assign(string step, string contributor, string? instance = null, JsonArray? inputs = null) =>
+        Add("assignment", AssignmentBody(step, contributor, instance, inputs), subject: Work.Reference);
+
+    /// <summary>The body of an assignment of a step to a contributor, pinning the inputs given.</summary>
+    public static JsonObject AssignmentBody(string step, string contributor, string? instance = null, JsonArray? inputs = null)
     {
         var named = new JsonObject { ["key"] = step };
         if (instance is not null) named["instance"] = instance;
         if (inputs is not null) named["inputs"] = inputs;
-        return Add("assignment", new JsonObject
+        return new JsonObject
         {
             ["contributor"] = contributor, ["step"] = named,
             ["brief"] = new JsonObject
@@ -251,7 +304,7 @@ public sealed class FlowFixture : IDisposable
                 ["workspace"] = new JsonArray("song repository, a work branch"), ["limits"] = new JsonArray(), ["expectedOutputs"] = new JsonArray("the step's outputs"),
                 ["reviewCriteria"] = new JsonArray("the outputs exist"), ["recovery"] = "Carry it again.",
             },
-        }, subject: Work.Reference);
+        };
     }
 
     /// <summary>The contributor's attempt and completed result on an assignment, naming outputs by name and hash.</summary>
@@ -278,6 +331,26 @@ public sealed class FlowFixture : IDisposable
         };
         if (provenance is not null) body["provenance"] = provenance;
         return Add("result", body, builder: builder, subject: attempt.Reference);
+    }
+
+    /// <summary>
+    /// From 0.9.4 (PROC-19), the decider's attempt and its completed result recording a decision on an assignment of a decision step: the
+    /// paths taken, the reasons and the evidence by hash, by the assignment's contributor.
+    /// </summary>
+    public RecordEnvelope Decide(RecordEnvelope assignment, string[] paths, string reasons, params RecordEnvelope[] evidence)
+    {
+        bool builder = EstateModel.BodyString(assignment, "contributor") == Estate.BuilderId;
+        RecordEnvelope attempt = Add("attempt", new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(Estate.Clock), ["workspace"] = "the run's decision", ["note"] = "Decide." }, builder: builder, subject: assignment.Reference);
+        return Add("result", new JsonObject
+        {
+            ["outcome"] = "completed", ["summary"] = "Decided.", ["outputs"] = new JsonArray(), ["evidence"] = new JsonArray(), ["checks"] = new JsonArray(),
+            ["limitations"] = new JsonArray(), ["unresolvedEffects"] = new JsonArray(), ["nextStep"] = "none",
+            ["decision"] = new JsonObject
+            {
+                ["paths"] = new JsonArray(paths.Select(p => (JsonNode)p).ToArray()), ["reasons"] = reasons,
+                ["evidence"] = new JsonArray(evidence.Select(e => (JsonNode)PolicyFixture.Ref(e)).ToArray()),
+            },
+        }, builder: builder, subject: attempt.Reference);
     }
 
     /// <summary>The operator's review of a result.</summary>
