@@ -107,10 +107,10 @@ public sealed partial class ToolRegistry
             });
         yield return Write("prompt_save", "Add, revise or retire a shared prompt under the operator's authority or an explicit manage-prompts grant.",
             Arguments(("definition", "Complete saved-prompt body."), ("expected", "Expected prior hash for a revision.")), ["definition"],
-            async (service, a, token) => Outcome(await service.PromptSaveAsync(new(by, Body(a, "definition"), OptionalArg(a, "expected")), token).ConfigureAwait(false)), ["definition"]);
+            async (service, a, token) => Outcome(await service.PromptSaveAsync(new(by, Body(a, "definition"), OptionalArg(a, "expected")), token).ConfigureAwait(false)), ["definition"]) with { Destructive = true };
         yield return Write("prompt_preference", "Change this principal's favorite or hidden choice, or disable estate-wide when the operator acts. Choices are reversible and retain history.",
             Arguments(("body", "PromptPreferenceRequest fields, without by; disabled is an operator-only change.")), ["body"],
-            async (service, a, token) => Outcome(await service.PromptPreferenceAsync(PromptRequest<PromptPreferenceRequest>(a, by), token).ConfigureAwait(false)), ["body"]);
+            async (service, a, token) => Outcome(await service.PromptPreferenceAsync(PromptRequest<PromptPreferenceRequest>(a, by), token).ConfigureAwait(false)), ["body"]) with { Destructive = true };
         yield return Write("prompt_copy", "Copy a reviewed built-in into the estate with its exact origin; requires shared prompt writing authority.",
             Arguments(("body", "PromptCopyRequest fields: prompt, expected and new key; without by.")), ["body"],
             async (service, a, token) => Outcome(await service.PromptCopyAsync(PromptRequest<PromptCopyRequest>(a, by), token).ConfigureAwait(false)), ["body"]);

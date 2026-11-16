@@ -5,8 +5,9 @@ require 'tmpdir'
 require_relative 'check-workflow-actions'
 
 pin = 'actions/checkout@' + 'a' * 40
+ids = ' owner=44036562 repository=197814629'
 Dir.mktmpdir('workflow-actions') do |directory|
-  File.write(File.join(directory, 'actions.allow'), "# Approved exact revisions\n#{pin}\n")
+  File.write(File.join(directory, 'actions.allow'), "# Approved exact revisions\n#{pin}#{ids} # v1.0.0\n")
   path = File.join(directory, 'test.yaml')
   cases = {
     'block step' => ["jobs:\n  test:\n    steps:\n      - uses: #{pin}\n", true],
@@ -37,13 +38,58 @@ Dir.mktmpdir('workflow-actions') do |directory|
   end
   File.write(path, "jobs: {test: {uses: '#{pin}'}}")
   ['other/action', 'actions-lookalike/checkout', 'NuGet/other', 'NuGet/login/other'].each do |action|
-    File.write(File.join(directory, 'actions.allow'), "#{pin}\n#{action}@#{'a' * 40}\n")
+    File.write(File.join(directory, 'actions.allow'), "#{pin}#{ids}\n#{action}@#{'a' * 40} owner=1 repository=2\n")
     raise "Unpermitted owner passed: #{action}" if WorkflowActions.check(directory).empty?
   end
-  File.write(File.join(directory, 'actions.allow'), "#{pin}\ngithub/codeql-action/init@#{'a' * 40}\nNuGet/login@#{'b' * 40}\n")
+  File.write(File.join(directory, 'actions.allow'), "#{pin}#{ids}\ngithub/codeql-action/init@#{'a' * 40} owner=9919 repository=3\nNuGet/login@#{'b' * 40} owner=968310 repository=4\n")
   raise 'Permitted owners failed' unless WorkflowActions.check(directory).empty?
-  File.write(File.join(directory, 'actions.allow'), "actions/checkout@v5\n")
+  File.write(File.join(directory, 'actions.allow'), "actions/checkout@v5#{ids}\n")
   raise 'Unpinned allow-list entry passed' if WorkflowActions.check(directory).empty?
+
+  # CI-08: every entry records its owner's and repository's ids, positive integers, the same for every entry of a repository.
+  {
+    'ids missing' => "#{pin}\n",
+    'repository id missing' => "#{pin} owner=44036562\n",
+    'ids in the wrong order' => "#{pin} repository=197814629 owner=44036562\n",
+    'id zero' => "#{pin} owner=0 repository=197814629\n",
+    'id not a number' => "#{pin} owner=actions repository=197814629\n",
+    'ids only in a comment' => "#{pin} # owner=44036562 repository=197814629\n",
+    'trailing text' => "#{pin}#{ids} extra\n",
+    'another revision with other repository id' => "#{pin}#{ids}\nactions/checkout@#{'c' * 40} owner=44036562 repository=5\n",
+    'another action with other owner id' => "#{pin}#{ids}\nactions/cache@#{'c' * 40} owner=6 repository=7\n",
+  }.each do |name, list|
+    File.write(File.join(directory, 'actions.allow'), list)
+    raise "#{name}: passed" if WorkflowActions.check(directory).empty?
+    puts "PASS #{name}"
+  end
+  File.write(File.join(directory, 'actions.allow'), "#{pin}#{ids}\nactions/checkout@#{'c' * 40}#{ids}\nactions/cache@#{'d' * 40} owner=44036562 repository=8\n")
+  raise 'Consistent ids failed' unless WorkflowActions.check(directory).empty?
+
+  # The live check compares the recorded ids with the repository GitHub serves under the name, then finds the pinned commit there.
+  File.write(File.join(directory, 'actions.allow'), "#{pin}#{ids}\n")
+  served = { 'full_name' => 'actions/checkout', 'id' => 197814629, 'owner' => { 'id' => 44036562 } }
+  identity_cases = {
+    'served as recorded' => [served, { 'sha' => 'a' * 40 }, true],
+    're-created under the name' => [served.merge('id' => 900), { 'sha' => 'a' * 40 }, false],
+    'owner replaced' => [served.merge('owner' => { 'id' => 901 }), { 'sha' => 'a' * 40 }, false],
+    'renamed or transferred' => [nil, { 'sha' => 'a' * 40 }, false],
+    'served under another name' => [served.merge('full_name' => 'other/checkout'), { 'sha' => 'a' * 40 }, false],
+    'commit absent' => [served, nil, false],
+  }
+  identity_cases.each do |name, (repository, commit, passes)|
+    asked = []
+    fetch = lambda do |api|
+      asked << api
+      api.include?('/commits/') ? commit : repository
+    end
+    errors = WorkflowActions.check_identities(directory, fetch)
+    raise "#{name}: expected #{passes ? 'pass' : 'failure'}, got #{errors.inspect}" unless errors.empty? == passes
+    raise "#{name}: asked #{asked.inspect}" unless asked.first == 'repos/actions/checkout'
+    puts "PASS identity #{name}"
+  end
+  File.write(File.join(directory, 'actions.allow'), "#{pin}\n")
+  raise 'Identity check without ids passed' if WorkflowActions.check_identities(directory, ->(_) { raise 'no fetch expected' }).empty?
+
   File.delete(File.join(directory, 'actions.allow'))
   raise 'Missing allow-list passed' if WorkflowActions.check(directory).empty?
 end

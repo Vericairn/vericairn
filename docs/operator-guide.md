@@ -584,7 +584,7 @@ earlier releases before each ([the software release and upgrade flows](#the-soft
 
 A release of a software product is recorded as intent before effect, through a release provider: a module that builds a release on a destination, observes the run and the draft, and names the operator's manual publication without ever running it. 0.9.3 carries one, the GitHub Releases provider (`github-releases`), which dispatches a GitHub Actions workflow and observes it through the GitHub CLI logged in as you on the runtime's machine; Vericairn never sees or stores the token, and never publishes. `vericairn release providers` lists the providers and adapters this build carries, each with the settings it declares, their defaults and the setting that names the destination.
 
-A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
+A release goes through the provider its request names (`--provider`) or the one its product declares, and is refused when neither does. A product declares how its releases are made in the optional `release` object of its product record: the destination (the provider and the settings the product fixes, for GitHub at least `repository`), the checksum asset, and the artifacts a complete release carries, each a name with `{version}` and optionally `{platform}`, a role (distributable, bill of materials, notices, documentation or other) and its platforms. Without declared artifacts, a generic rule reads the draft: a platform identifier in an asset's name gives its platform, and a draft is complete when its checksum file names every other asset. From 0.9.4 (FIX-140) a draft is complete only when it also attaches every file its checksum file names; once its run has succeeded, a draft that leaves one out is observed as a known failure naming each missing file, no candidate is recorded, and `release submit --check` names those files until the retry gives a reconciliation. `software.md` has the record's shape. Published releases before 0.4.2 refuse a product record that declares a release profile, so an estate records one only after every clone that writes to it runs 0.4.2 or later.
 
 ```sh
 vericairn release providers
@@ -699,7 +699,7 @@ vericairn release list
 
 The published revision is refused without the operator's acceptance of the candidate it supersedes. An uncertain identity first needs observation and reconciliation; a retry is available after known failure or cancellation with `--reconciliation`. `--cancel` records reconciliation that an intent was never dispatched or an uncertain effect did not occur; an active provider call refuses cancellation. The runtime does all of this behind `POST /v1/releases/submit` and `observe`, so the command line and Workbench's release workspace (section 13) do the same thing and refuse the same things.
 
-For Vericairn itself, publishing the GitHub release triggers the separate NuGet Trusted Publishing workflow, including for a published prerelease. It retrieves exactly the package assets the operator publishes, verifies them against that release's own `SHA256SUMS`, and uploads without rebuilding, using short-lived credentials. It does not compare with the estate's accepted candidate or require its acceptance record. Publish the exact accepted draft to preserve that binding. The packages are `dotnet-vc`, the `Vericairn` SDK front door and the `Vericairn.*` libraries. A retry uses `--skip-duplicate`; it cannot replace a package version already present or verify that existing copy's bytes. `install.md` covers both package and archive installation. FIX-13 checks every workflow's action references
+For Vericairn itself, publishing the GitHub release triggers the separate NuGet Trusted Publishing workflow, including for a published prerelease. From 0.9.4 (CI-08) its publication job, and the MCP Registry workflow's, waits in the protected GitHub environment `release` until you approve it: open each run from the repository's Actions page and choose Review deployments, then Approve and deploy. You create that environment once in the repository's settings with yourself as its required reviewer, and bind nuget.org's Trusted Publishing policy for `nuget.yml` to it. An approval lets that one run push the published release's verified packages, or list its `dotnet-vc` manifest; it covers no other run or release and records nothing in the estate. Rejecting it, or letting it expire, publishes nothing. It retrieves exactly the package assets the operator publishes, verifies them against that release's own `SHA256SUMS`, and uploads without rebuilding, using short-lived credentials. It does not compare with the estate's accepted candidate or require its acceptance record. Publish the exact accepted draft to preserve that binding. The packages are `dotnet-vc`, the `Vericairn` SDK front door and the `Vericairn.*` libraries. A retry uses `--skip-duplicate`; it cannot replace a package version already present or verify that existing copy's bytes. `install.md` covers both package and archive installation. FIX-13 checks every workflow's action references
 against the repository's full-SHA allow-list. The NuGet pull-request job builds and verifies packages and
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
@@ -1281,7 +1281,8 @@ Earlier sets and their checksums remain unchanged.
 ### Preparing a set with the build tooling (0.9.2)
 
 From 0.9.2 (DOCS-11) the build tooling prepares a set in the steps a release's builder took by hand. Each step writes only
-the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`. Running a step again changes nothing,
+the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`, and from 0.9.4 `point-root` the
+repository's root `llms.txt`. Running a step again changes nothing,
 and a step refuses rather than overwrite what a person wrote or what a frozen set holds. The version comes first: set
 `VersionPrefix` in `Directory.Build.props` to the release's version, declare any new document in
 `docs/releases/documents.json`, commit, and build the tooling in Release at that commit. The tooling refuses build sources
@@ -1291,8 +1292,10 @@ that differ from its commit, as `generate` always has, and a set whose directory
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.3 --documents docs/releases/documents.json --overview overview.md
 vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.3 --section security.md --expected-hash sha256:<hex>
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- llms docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- freeze docs/releases/0.9.3
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- point-root docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- index docs/releases/0.9.3 --paragraph paragraph.md
 ```
 
@@ -1312,14 +1315,20 @@ dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool
   generated, such as `.DS_Store`, and a manifest of another version. It then adds every file's `sha256:` to
   `frozen-sha256.json` under the version, in path order, leaving every earlier entry as it was. Freezing a frozen set
   confirms it. A frozen set whose files differ is refused with each difference: a correction goes into the next set.
+- From 0.9.4 (DOCS-38), `llms` writes the set's `llms.txt` and `llms-full.txt` from its documents when the set declares
+  them, as every set from 0.9.4 does in `docs/releases/documents.json`: `llms.txt` links each document by its title,
+  relative to the set, and `llms-full.txt` holds every document in one file. Run it after the notes and the approved
+  section are in place and before `compare` and `freeze`: `freeze` refuses a set whose llms files are missing or differ
+  from what its documents render. Once the set is frozen, `point-root` points the repository's root `llms.txt` at it,
+  unless the root already points at a later version.
 - `index` adds the set's paragraph to `docs/releases/README.md`, newest first under "Documentation sets", byte for byte from
   a file that links the set as `[<version> set](<version>/README.md)`. It describes only a frozen set, and it refuses a set
   the index already describes in other words, since the index's living-document pass revises that paragraph.
 
 The overview, the approved section and the paragraph are a person's text; the commands only place them. `prepare` runs the
 steps in order for a version, stopping at the first refusal. It runs `assemble`, then `docs notes` when the set has no notes,
-`insert` with `--security`, `compare`, `freeze`, and `index` with `--index-paragraph`. For a frozen set it only confirms the
-freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
+`insert` with `--security`, from 0.9.4 `llms`, `compare`, `freeze`, from 0.9.4 `point-root`, and `index` with
+`--index-paragraph`. For a frozen set it only confirms the freeze, points the root at it and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
 `freeze` reports it from `docs check`, or differs from the build, as `compare` reports it; 2 means a step refused.
 
 ```sh

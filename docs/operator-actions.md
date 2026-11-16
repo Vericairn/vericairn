@@ -462,6 +462,9 @@ the release: it verifies the release's `dotnet-vc` package against `SHA256SUMS`,
 package's embedded `.mcp/server.json`, waits until nuget.org serves that version, and publishes
 the manifest with a pinned `mcp-publisher`, signing in with the repository's GitHub OIDC identity.
 No personal token is involved. Publishing the release is the operator's act, and the listing follows it.
+From 0.9.4 (CI-08) the publication job waits in the protected environment `release` until the operator
+approves the run on its page (Review deployments, then Approve and deploy); the approval covers that
+run's listing of that release only, and a dispatched run asks for it again.
 
 For a release published before the workflow existed, or one whose run did not finish, the operator
 dispatches the workflow with that release's id; it lists only a published, immutable release:

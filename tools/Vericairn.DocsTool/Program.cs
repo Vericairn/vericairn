@@ -78,7 +78,19 @@ index.Options.Add(paragraphOption);
 index.SetAction(parseResult => ReferenceSet.IndexParagraph(parseResult.GetValue(indexDirectory)!, parseResult.GetValue(paragraphOption)!, parseResult.GetValue(jsonOption)));
 root.Subcommands.Add(index);
 
-var prepare = new Command("prepare", "Prepare a version's set in one command: assemble, render the notes when the set has none, insert the approved section, compare with this build, freeze and index.");
+var llms = new Command("llms", "Write a set's llms.txt and llms-full.txt from its documents when it declares them; refuse a frozen set.");
+var llmsDirectory = new Argument<string>("directory") { Description = "The documentation set." };
+llms.Arguments.Add(llmsDirectory);
+llms.SetAction(parseResult => ReferenceSet.Llms(parseResult.GetValue(llmsDirectory)!, parseResult.GetValue(jsonOption)));
+root.Subcommands.Add(llms);
+
+var pointRoot = new Command("point-root", "Point the repository's root llms.txt at a frozen set that declares its llms files, unless it points at a later version.");
+var pointDirectory = new Argument<string>("directory") { Description = "The frozen documentation set, under docs/releases." };
+pointRoot.Arguments.Add(pointDirectory);
+pointRoot.SetAction(parseResult => ReferenceSet.PointRoot(parseResult.GetValue(pointDirectory)!, parseResult.GetValue(jsonOption)));
+root.Subcommands.Add(pointRoot);
+
+var prepare = new Command("prepare", "Prepare a version's set in one command: assemble, render the notes when the set has none, insert the approved section, write its llms files, compare with this build, freeze, point the root llms.txt at it and index.");
 var prepareOut = new Option<string>("--out") { Description = "Directory of the documentation set, named for this build's version.", Required = true };
 var prepareDocuments = new Option<string>("--documents") { Description = "The product's declaration of the documents every set holds.", Required = true };
 var estateOption = new Option<string?>("--estate") { Description = "The estate whose records the notes render; needed while the set has no notes." };
@@ -102,5 +114,9 @@ prepare.SetAction(parseResult => ReferenceSet.Prepare(parseResult.GetValue(prepa
     parseResult.GetValue(fromOption), parseResult.GetValue(sinceOption), parseResult.GetValue(overviewOption), parseResult.GetValue(securityOption), parseResult.GetValue(securityHashOption),
     parseResult.GetValue(prepareParagraph), parseResult.GetValue(guidesOption), parseResult.GetValue(keepOption)));
 root.Subcommands.Add(prepare);
+
+var mcpTools = new Command("mcp-tools", "Print this build's MCP tool definitions for the release notes: each tool's behavior hints and definition SHA-256, and the set's SHA-256 that initialize carries; with --json, the definitions themselves.");
+mcpTools.SetAction(parseResult => McpTools.Print(parseResult.GetValue(jsonOption)));
+root.Subcommands.Add(mcpTools);
 
 return root.Parse(args).Invoke();

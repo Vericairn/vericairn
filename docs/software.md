@@ -377,7 +377,9 @@ release 0.4.2, the first published release to read it; an estate records it only
 
 A product that declares no artifacts is read by the generic rule: a platform identifier in an asset's name
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
-archive is documentation, and a draft is complete when its checksum file names every other asset.
+archive is documentation, and a draft is complete when its checksum file names every other asset. From
+0.9.4 (FIX-140), with or without declared artifacts, a draft is complete only when it also attaches every file
+its checksum file names: a reader can download each listed file from the release itself.
 
 Before submitting, 0.9.3 offers the whole admission gate without an effect:
 
@@ -461,7 +463,13 @@ The release as intent, then observed effect:
    build), read through the provider and held to the hash the checksum file names. A draft whose set
    states none, as the sets of 0.5.2 and earlier do, gets the formats of the Vericairn that observes it,
    and the candidate's evidence and the command's answer say so, for a superseding revision to correct.
-   When the run failed, the operation becomes `known-failure`. `--cancel <reason>` settles an intent that
+   When the run failed, the operation becomes `known-failure`. From 0.9.4 (FIX-140), so does a run that
+   succeeded with a draft whose checksum file names a file the draft does not attach: the observation names
+   each missing file, records no candidate, and `release submit --check` names them in its `release.identity`
+   objection until a retry gives a reconciliation. While the run is in progress, or no run is identified, such
+   a draft waits and the missing files are printed. The provider reports every name its checksum file lists
+   (`ReleaseObservation.ChecksumNames`); one written before 0.9.4 reports none, and membership is then not
+   judged. `--cancel <reason>` settles an intent that
    was never dispatched, an uncertain outcome reconciled as having had no effect, or a known failure.
 3. The operator accepts the exact candidate (`vericairn records new acceptance --by <operator id> --subject release:<id>:<hash> --body <file>`,
    whose body states `statement`, `basis` and `self`) and publishes by hand with the command the CLI printed
@@ -514,6 +522,10 @@ The product's CLI test suite checks every file of each frozen set against
 sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
 editable until frozen and indexed. The reference generator also refuses a destination inside an indexed set.
 `docs notes` still relies on the test guard: run it only against a set that has not been frozen.
+From 0.9.4 (DOCS-38) each set also holds `llms.txt`, a machine-readable index linking each of its documents by title,
+and `llms-full.txt`, every document in one file; the repository's root `llms.txt` points at the current set's, and the
+MCP server offers the release's index as a resource ([MCP](mcp.md#resources-084)). The frozen-set test holds every set
+that declares them to what its documents render.
 From 0.9.2 (DOCS-11) the build tooling assembles, freezes and indexes a set itself: `vericairn-docs assemble`, `insert`,
 `freeze`, `index` and `prepare`, which refuse to change a frozen set
 ([operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092)). The guard requires every set the release
@@ -732,8 +744,11 @@ readable reports outside frozen directories and packages the exact report invent
 `--artifacts dist`, checks the payload observations and archive bytes. ZIP entries are stored in ordinal order with
 fixed metadata. The report's checksum table describes the payload before the report archive, final `SHA256SUMS`
 and release notes are added; it has no checksum cycle and claims no integrity acceptance. The release workflow
-then includes the report archive in its final checksums and retained CI artifact. Its draft-release attachment list
-is a separate publication boundary.
+then includes the report archive in its final checksums and retained CI artifact. From 0.9.4 (FIX-140) it also
+attaches the archive to the draft release beside the other archives, so every file `SHA256SUMS` names can be
+downloaded from the release; releases up to 0.9.3 listed it without attaching it. Once the draft exists, the
+workflow compares the draft's asset list with `SHA256SUMS` and fails the run, naming each listed file the draft
+does not attach, and the candidate's observation refuses such a draft as well.
 
 CI and the release verification matrix run the build-tool fixtures on Linux, macOS and Windows. The fixtures check
 complete-byte comparison, retained provenance, exact membership, serial custody and frozen-set isolation. The
@@ -764,6 +779,30 @@ From 0.7.2, CI checks every workflow's external action and reusable-workflow ref
 actions and container references are refused; from 0.8.2 a reusable workflow beside the others in
 `.github/workflows` is allowed, since the same check covers it. This checks the repository's declared list,
 not the organization's live Actions settings.
+
+From 0.9.4 (CI-08), no package or listing is published without the operator's approval. `nuget.yml`'s and
+`mcp-registry.yml`'s publication jobs run in the GitHub environment `release`, which the operator creates in
+the repository's settings with themselves as its required reviewer before the first publication (GitHub
+creates an environment a job names without protection when none exists), and nuget.org's Trusted Publishing policy
+for `nuget.yml` names that environment, so nuget.org accepts the repository's identity token only from a job
+in it. Each run, whether the release's publication started it or a person dispatched it with a release id,
+waits at that job until the operator approves it on the run's page (Review deployments, then Approve and
+deploy); nothing else in the job runs before. Approving `nuget.yml`'s run lets that one run verify and push
+the published release's packages and symbols; approving `mcp-registry.yml`'s lets it list that release's
+`dotnet-vc` manifest. An approval covers that run only, never a later run or another release, and grants
+nothing in the estate: accepting and publishing the candidate stay separate acts. Publishing a release thus
+asks for two approvals, one per workflow, and a rejected or expired one publishes nothing; a later dispatch
+with the release id asks again. A stolen token or a changed workflow cannot publish alone. Later publishing
+jobs, such as Homebrew and winget, run in the same environment: CI refuses a job that requests an identity
+token or reads a secret outside it.
+
+Each `actions.allow` entry also records its owner's and repository's GitHub ids (`owner=<id> repository=<id>`).
+Beside the offline pin check, CI asks GitHub for the repository under each action's name and fails when its
+ids differ from the recorded ones, when GitHub serves it only under another name, as after a rename or
+transfer, or when the pinned commit is not in it, so a repository deleted and re-created under the same
+name by another account is not trusted by name. CI also lints every workflow with actionlint 1.7.12 and
+ShellCheck 0.11.0, each installed by pinned version and checked against its release's SHA-256, and fails on
+any finding.
 
 From 0.8.2 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
 `release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no

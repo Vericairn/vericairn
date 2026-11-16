@@ -88,6 +88,82 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void EveryPublishingJobWaitsForTheOperatorInTheProtectedReleaseEnvironment()
+    {
+        // CI-08: two package compromises this month shipped through the projects' own trusted-publishing workflows, with valid
+        // provenance. The operator creates the environment release with themselves as required reviewer and binds nuget.org's
+        // Trusted Publishing policy to it; the workflows name it and hold no credential.
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        foreach (string file in new[] { "nuget.yml", "mcp-registry.yml" })
+        {
+            string publish = Block(Read(Path.Combine(workflows, file)), "publish:", 2);
+            Assert.Contains("\n    environment: release\n", publish, StringComparison.Ordinal);
+            Assert.Contains("      id-token: write\n", publish, StringComparison.Ordinal);
+        }
+
+        int gated = 0;
+        foreach (string file in WorkflowFiles())
+        {
+            string text = Read(file);
+            // One protected environment, named, never configured or bypassed from a workflow.
+            foreach (string line in text.Split('\n').Where(line => line.TrimStart().StartsWith("environment:", StringComparison.Ordinal)))
+                Assert.Equal("    environment: release", line);
+            foreach (string job in Jobs(text))
+            {
+                // A later publishing job, such as Homebrew's or winget's, requests an identity token or reads a secret.
+                bool publishes = job.Contains("id-token: write", StringComparison.Ordinal) || job.Contains("secrets.", StringComparison.Ordinal);
+                Assert.Equal(publishes, job.Contains("\n    environment: release\n", StringComparison.Ordinal));
+                if (publishes) gated++;
+            }
+        }
+        Assert.Equal(2, gated);
+    }
+
+    [Fact]
+    public void TheAllowListRecordsEachActionsOwnerAndRepositoryIdsAndCiChecksThemAtGitHub()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        string[] entries = Read(Path.Combine(workflows, "actions.allow")).Split('\n').Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray();
+        Assert.NotEmpty(entries);
+        foreach (string entry in entries)
+            Assert.Matches(@"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40} owner=[1-9][0-9]* repository=[1-9][0-9]* # v[0-9.]+$", entry);
+        Assert.Contains("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 owner=44036562 repository=197814629 # v7.0.1", entries);
+        Assert.Contains("NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 owner=968310 repository=1037624552 # v1.2.0", entries);
+
+        string policy = Block(Read(Path.Combine(workflows, "ci.yml")), "workflow-policy:", 2);
+        string identities = Block(policy, "- name: Check each allowed action's owner and repository ids and its pinned commit at GitHub", 6);
+        Assert.Contains("GH_TOKEN: ${{ github.token }}\n", identities, StringComparison.Ordinal);
+        Assert.Contains("run: ruby .github/scripts/check-workflow-actions.rb --identities\n", identities, StringComparison.Ordinal);
+        string checker = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "check-workflow-actions.rb"));
+        Assert.Contains("repository['id'] != entry[:repository_id] || repository.dig('owner', 'id') != entry[:owner_id]", checker, StringComparison.Ordinal);
+        Assert.Contains("repos/#{entry[:owner]}/#{entry[:repository]}/commits/#{entry[:commit]}", checker, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", policy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APinnedWorkflowLinterRunsInCiAndFailsOnItsFindings()
+    {
+        string policy = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), "workflow-policy:", 2);
+        const string installName = "- name: Install the pinned workflow linter";
+        const string lintName = "- name: Lint every workflow";
+        string install = Block(policy, installName, 6);
+        Assert.Contains("set -eu\n", install, StringComparison.Ordinal);
+        Assert.Contains("\"https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz\"\n", install, StringComparison.Ordinal);
+        Assert.Contains("echo \"8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz\" | sha256sum -c -\n", install, StringComparison.Ordinal);
+        Assert.Contains("\"https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz\"\n", install, StringComparison.Ordinal);
+        Assert.Contains("echo \"b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  shellcheck.tar.gz\" | sha256sum -c -\n", install, StringComparison.Ordinal);
+        string lint = Block(policy, lintName, 6);
+        Assert.Contains("run: '\"$RUNNER_TEMP/lint/actionlint\" -shellcheck \"$RUNNER_TEMP/lint/shellcheck\" -pyflakes= .github/workflows/*.yml'\n", lint, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", lint, StringComparison.Ordinal);
+        Assert.DoesNotContain("||", lint, StringComparison.Ordinal);
+        Assert.True(policy.IndexOf(installName, StringComparison.Ordinal) < policy.IndexOf(lintName, StringComparison.Ordinal));
+        // Every intended ShellCheck exception is disabled on its own line beside the comment that says why.
+        foreach (string file in WorkflowFiles())
+            foreach (string line in Read(file).Split('\n').Where(line => line.Contains("shellcheck disable", StringComparison.Ordinal)))
+                Assert.Equal("          # shellcheck disable=SC2016", line);
+    }
+
+    [Fact]
     public void ThePackagingPathVerifiesThePackagesAndNugetRunsOnlyForPublication()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
@@ -112,7 +188,8 @@ public class ContinuousIntegrationTests
         Assert.Contains("dotnet restore --locked-mode", package, StringComparison.Ordinal);
         Assert.Contains("dotnet pack --no-restore --configuration Release --output dist", package, StringComparison.Ordinal);
         Assert.Contains(verifier + " dist", package, StringComparison.Ordinal);
-        Assert.True(package.IndexOf("sha256sum * > SHA256SUMS", StringComparison.Ordinal) < package.IndexOf(verifier, StringComparison.Ordinal));
+        int sums = package.IndexOf("sha256sum -- * > SHA256SUMS", StringComparison.Ordinal);
+        Assert.True(sums > 0 && sums < package.IndexOf(verifier, StringComparison.Ordinal));
         foreach (string forbidden in new[] { "NuGet/login", "nuget push", "id-token", "gh release" })
             Assert.DoesNotContain(forbidden, package, StringComparison.Ordinal);
     }
@@ -388,10 +465,16 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void DependabotGroupsMonthlyActionUpdatesAndLeavesApprovalToTheWorkflowPolicy()
+    public void DependabotProposesActionAndNuGetUpdatesMonthlyAfterACooldownAndLeavesApprovalToTheWorkflowPolicy()
     {
+        // CI-09: a compromised version is usually found within days, so nothing is proposed until it is 7 days old.
+        // Dependabot does not apply the cooldown to security updates, which stay unblocked.
         string github = Path.Combine(RepositoryRoot(), ".github");
-        Assert.Equal("version: 2\nupdates:\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: monthly\n    groups:\n      github-actions:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n", Read(Path.Combine(github, "dependabot.yml")));
+        Assert.Equal("version: 2\nupdates:\n"
+            + "  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: monthly\n    cooldown:\n      default-days: 7\n"
+            + "    groups:\n      github-actions:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n"
+            + "  - package-ecosystem: nuget\n    directory: /\n    schedule:\n      interval: monthly\n    cooldown:\n      default-days: 7\n"
+            + "    groups:\n      nuget:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n", Read(Path.Combine(github, "dependabot.yml")));
         string policy = Read(Path.Combine(github, "scripts", "check-workflow-actions.rb"));
         Assert.Contains("!OWNER.match?(action)", policy, StringComparison.Ordinal);
         Assert.Contains("!allowed.include?(action)", policy, StringComparison.Ordinal);
@@ -444,6 +527,30 @@ public class ContinuousIntegrationTests
         Assert.Contains("GH_TOKEN: ${{ github.token }}", Block(draft, "- name: Create the draft release", 6), StringComparison.Ordinal);
         Assert.Single(release.Split('\n'), line => line.Contains("github.token", StringComparison.Ordinal));
         Assert.DoesNotContain("github.token", Read(Path.Combine(workflows, "package.yml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheDraftAttachesEveryFileSha256SumsNamesAndFailsWhenOneIsMissing()
+    {
+        // FIX-140: 0.9.3's SHA256SUMS named vericairn-0.9.3-companions.zip, which the draft did not attach.
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        string step = Block(Block(Read(Path.Combine(workflows, "release.yml")), "draft:", 2), "- name: Create the draft release", 6);
+        Assert.Contains(" \"dist/vericairn-$VERSION-companions.zip\" ", step.Replace('\n', ' '), StringComparison.Ordinal);
+        Assert.Contains("dist/*.nupkg dist/*.snupkg dist/SHA256SUMS\n", step, StringComparison.Ordinal);
+        int create = step.IndexOf("gh release create ", StringComparison.Ordinal);
+        int compare = step.IndexOf("missing=$(comm -23 listed.txt attached.txt)", StringComparison.Ordinal);
+        Assert.True(create > 0 && compare > create, "The membership check reads the draft once it exists.");
+        Assert.Contains("export LC_ALL=C\n", step, StringComparison.Ordinal);
+        Assert.Contains("cut -c 67- dist/SHA256SUMS | sort -u > listed.txt\n", step, StringComparison.Ordinal);
+        Assert.Contains("gh release view \"v$VERSION\" --json assets -q '.assets[].name' | sort -u > attached.txt\n", step, StringComparison.Ordinal);
+        Assert.Contains("if [ -n \"$missing\" ]; then\n", step, StringComparison.Ordinal);
+        Assert.Contains("printf '%s\\n' \"$missing\"\n            exit 1\n", step, StringComparison.Ordinal);
+        // The package job writes the archive into dist before SHA256SUMS lists it, and the notes describe it.
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        int reports = package.IndexOf("- name: Retain and verify readable build reports", StringComparison.Ordinal);
+        int sums = package.IndexOf("(cd dist && sha256sum -- * > SHA256SUMS)", StringComparison.Ordinal);
+        Assert.True(reports > 0 && sums > reports);
+        Assert.Contains("Release evidence: vericairn-$VERSION-companions.zip holds", package, StringComparison.Ordinal);
     }
 
     [Fact]

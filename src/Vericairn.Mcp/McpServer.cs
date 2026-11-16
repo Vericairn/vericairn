@@ -17,17 +17,27 @@ namespace Vericairn.Mcp;
 /// </summary>
 public sealed class McpServer
 {
+    /// <summary>
+    /// From 0.9.4 (MCP-07): the key under which initialize's <c>_meta</c> carries the build's tool definitions, as an object with their
+    /// <c>count</c> and <c>hash</c> (<see cref="ToolRegistry.DefinitionsHash"/>).
+    /// </summary>
+    public const string ToolDefinitionsMeta = "vericairn/toolDefinitions";
+
     /// <summary>Protocol revisions this server speaks; the first is the one it proposes.</summary>
     public static readonly ImmutableArray<string> SupportedProtocolVersions = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
     private readonly ToolRegistry tools;
     private readonly string version;
+    private readonly JsonObject toolDefinitions;
 
     /// <summary>A server over a tool registry, reporting the given Vericairn version.</summary>
     public McpServer(ToolRegistry tools, string version)
     {
         this.tools = tools ?? throw new ArgumentNullException(nameof(tools));
         this.version = version ?? "unknown";
+        // The build's definitions and their hash are computed once per process, here, before any input is read, so initialize
+        // answers without canonicalizing every tool while later requests wait.
+        toolDefinitions = new JsonObject { ["count"] = ToolRegistry.DefinitionsCount, ["hash"] = ToolRegistry.DefinitionsHash };
     }
 
     /// <summary>The protocol revisions this server negotiates; over Streamable HTTP, which begins at 2025-03-26, the later ones only.</summary>
@@ -111,7 +121,8 @@ public sealed class McpServer
 
     /// <summary>
     /// Serves asynchronously while continuing to read cancellation notifications and pings during slow tool calls. Each request
-    /// has its own cancellation source; stopping observation never retries a tool or claims its effect was undone.
+    /// has its own cancellation source; stopping observation never retries a tool or claims its effect was undone. From 0.9.4
+    /// initialize is answered before the next line is read, so its reply always precedes those of the requests sent after it.
     /// </summary>
     public async Task RunAsync(TextReader input, TextWriter output, TextWriter? log = null, CancellationToken cancellationToken = default)
     {
@@ -210,8 +221,17 @@ public sealed class McpServer
                     continue;
                 }
 
+                Task response = RespondAsync(id.DeepClone(), method, request["params"], key, source);
+                if (method == "initialize")
+                {
+                    // MCP's lifecycle has the client wait for initialize's result, so it is answered before any later line is read:
+                    // a request sent with it is never served, or answered, ahead of it.
+                    await response.ConfigureAwait(false);
+                    continue;
+                }
+
                 pending.RemoveAll(task => task.IsCompletedSuccessfully);
-                pending.Add(RespondAsync(id.DeepClone(), method, request["params"], key, source));
+                pending.Add(response);
             }
             inputCompleted = true;
         }
@@ -305,6 +325,9 @@ public sealed class McpServer
                     },
                     ["serverInfo"] = new JsonObject { ["name"] = "vericairn", ["version"] = version },
                     ["instructions"] = Instructions,
+                    // From 0.9.4 (MCP-07): the build's tool definitions by count and hash, as its release notes state them, so a client
+                    // can tell whether the tool set changed since it last connected.
+                    ["_meta"] = new JsonObject { [ToolDefinitionsMeta] = toolDefinitions.DeepClone() },
                 });
             case "ping":
                 return Result(id, new JsonObject());
@@ -320,13 +343,17 @@ public sealed class McpServer
                 return Result(id, await tools.PromptGetAsync(selectedPrompt, parameters["arguments"] as JsonObject, cancellationToken).ConfigureAwait(false));
             case "resources/list":
                 if (parameters?["cursor"] is not null) return Error(id, -32602, "Invalid params: this listing has no continuation cursor.");
-                return Result(id, await tools.ResourcesListAsync(cancellationToken).ConfigureAwait(false));
+                JsonObject listed = await tools.ResourcesListAsync(cancellationToken).ConfigureAwait(false);
+                // From 0.9.4 (DOCS-38): the documentation index of this release, the same for every estate and connection.
+                listed["resources"]!.AsArray().Add(DocumentationIndex.Listed(version));
+                return Result(id, listed);
             case "resources/templates/list":
                 if (parameters?["cursor"] is not null) return Error(id, -32602, "Invalid params: this listing has no continuation cursor.");
                 return Result(id, ToolRegistry.ResourceTemplates());
             case "resources/read":
                 if (parameters?["uri"] is not JsonValue resourceUri || !resourceUri.TryGetValue(out string? selectedUri))
                     return Error(id, -32602, "Invalid params: resource uri is required.");
+                if (selectedUri == DocumentationIndex.Uri) return Result(id, DocumentationIndex.Read(version));
                 return Result(id, await tools.ResourceReadAsync(selectedUri, cancellationToken).ConfigureAwait(false));
             case "resources/subscribe":
             case "resources/unsubscribe":
@@ -339,6 +366,9 @@ public sealed class McpServer
                     watch.Unsubscribe(uri);
                     return Result(id, new JsonObject());
                 }
+
+                if (uri == DocumentationIndex.Uri)
+                    return Error(id, -32602, "Invalid params: the documentation index changes only with the release serving it; it is not subscribable.");
 
                 // Only what the session may read: the resource is read once, through its matching read, and its changes are then
                 // heard from the event journal with that read's audience check, never by reading it again.

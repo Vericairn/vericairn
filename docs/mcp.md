@@ -98,6 +98,11 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 
 `initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
 
+From 0.9.4 the `initialize` result's `_meta` also carries `vericairn/toolDefinitions`, the count and
+SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)),
+and over standard input and output the server answers `initialize` before it reads the next line, so a client that
+sends requests with it still gets `initialize`'s reply first.
+
 Initialization declares `prompts: { listChanged: false }` and `tools: { listChanged: false }`, and
 `resources: { subscribe: true, listChanged: true }` (0.9.2) when the estate's runtime is running and keeps the
 event journal, or `resources: { subscribe: false, listChanged: false }` on the embedded runtime, which keeps
@@ -156,6 +161,14 @@ into the measured MCP selection, and `--max-bytes` implies that selection.
 Briefs include the communication observation's freshness time. Independent reads
 can therefore have different hashes even when the underlying records have not
 changed; each hash identifies the exact bytes of that particular response.
+
+From 0.9.4 (DOCS-38), `resources/list` also lists `vericairn://docs/llms.txt`, the documentation index of
+the Vericairn release serving the connection, in [llms.txt](https://llmstxt.org/)'s form: a release links its
+own frozen documentation set's `llms.txt` and `llms-full.txt` at the release's tag on GitHub, and a development
+build, which has no set of its own, links the repository's root `llms.txt`, which points at the current set.
+It is the same for every estate and connection, reads nothing from the estate, and carries the same `_meta` as
+the goal and asks resources. It changes only with the release, so it is not subscribable. A user's agent reads
+it to find the guides of the release it talks to.
 
 The MCP adapter uses the API's additive `GET /v1/resources` and
 `POST /v1/resources/read` operations. Both are reads, including the POST; they
@@ -312,6 +325,98 @@ sections; `record_get` and other original read routes retain complete records.
 Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_progress`, `work_result`, `work_amend`, `document_review` (a review of an estate document by its path, refused where the declaration's `clearedBy` excludes the acting principal). A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type. No tool proposes, activates, pauses, resumes, stops, funds, evaluates or accepts a goal: a worker reads its goal and reports through its attempts and results, an evaluator who did none of the work evaluates it, and its sponsor, or the principal the sponsor delegated an ordinary goal's acceptance to, or an operator for a goal an agent sponsors, accepts it, through the command line or the API, whose rules refuse an agent that tries to activate a goal or accept one it sponsors or worked on. A test calls every tool a worker sees with arguments that name a goal and ask for its activation and acceptance, and holds that none changes the goal. No tool answers an ask either: an ask is answered by a decision of the principal it is put to, which no tool records, and reading what waits answers nothing; the same test holds that calling every tool a worker sees records no decision and leaves an ask waiting. No tool launches, stops or settles an agent run either: the worker (`vericairn worker`, [software.md](software.md#coding-agents-the-worker-and-its-launchers)) starts a coding agent with this server configured for the agent's principal, and records the run's cap, usage and stop itself, while the agent reports through `work_attempt` and `work_result`.
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
+
+## Tool annotations and definitions (0.9.4)
+
+From 0.9.4 (MCP-07), every tool `tools/list` describes carries `annotations` with `readOnlyHint`,
+`destructiveHint` and `idempotentHint`, as the tool behaves. A read is read-only, destroys nothing
+and can be repeated with no further effect. A write is never read-only. Its `destructiveHint` is
+true when it supersedes or withdraws a rule or entry in force, so that what held before no longer
+holds: a policy's revision or retirement, an exception's revocation, a writing entry's removal, a
+shared prompt's revision or retirement (`prompt_save`), an estate-wide prompt disable
+(`prompt_preference`). Every other write only adds records, and no write deletes one. Its
+`idempotentHint` is true only where the runtime refuses a repeat of the same call, because the
+expected hash it names is no longer current (`policy_revise`, `policy_retire`,
+`policy_revoke_exception`, `writing_exception_remove`) or the key it declares is taken
+(`policy_declare`); every other write records again when repeated. A client can let reads run
+without asking and ask before writes. The hints describe; the runtime still judges every call, and
+the tools a connection sees are unchanged.
+
+Each release publishes its tool definitions' SHA-256 so a client can tell whether the tool set
+changed between releases. The set is every tool the build defines, whichever of them a connection
+sees, ordered by name, each as `tools/list` describes it over standard input and output (name,
+description, input schema and annotations, without the network session's `_meta` on its writes).
+Its hash is the SHA-256 of that array in [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)
+canonical JSON, written `sha256:<hex>`. `initialize` carries it in its result's `_meta` as
+`vericairn/toolDefinitions`, an object with the tools' `count` and the `hash`; the draft release's
+notes state the same hash and list every tool's hints with the SHA-256 of its own definition in
+the same canonical form. A client that keeps the hash it last saw knows, at its next
+`initialize`, whether any description, schema or annotation changed.
+
+Every definition has an entry below: its hints, the first twelve hexadecimal digits of its
+definition's SHA-256 and the release that last changed it. A test fails when a definition changes,
+its description included, without its entry here, and when a tool has no entry or an entry names
+no tool, so every change reaches this guide with the release that makes it.
+
+| Tool | Read-only | Destructive | Idempotent | Definition | Changed in |
+|---|---|---|---|---|---|
+| `asks_list` | yes | no | yes | `464e60ca1356` | 0.9.4 |
+| `communication_get` | yes | no | yes | `0824dc69cdea` | 0.9.4 |
+| `context_prepare` | yes | no | yes | `f60641ca5be8` | 0.9.4 |
+| `context_read` | yes | no | yes | `20a0bbd3ac9d` | 0.9.4 |
+| `decision_get` | yes | no | yes | `9a63f45763bb` | 0.9.4 |
+| `decisions_list` | yes | no | yes | `ee7daf22f452` | 0.9.4 |
+| `devices_list` | yes | no | yes | `8dfcc0263487` | 0.9.4 |
+| `docs_companions` | yes | no | yes | `ba483c9c14c4` | 0.9.4 |
+| `docs_compare` | yes | no | yes | `7ccbe2d43871` | 0.9.4 |
+| `docs_render` | yes | no | yes | `680ee8c54853` | 0.9.4 |
+| `docs_sources` | yes | no | yes | `4a6e8171b576` | 0.9.4 |
+| `document_review` | no | no | no | `c874d48e053f` | 0.9.4 |
+| `document_sections` | yes | no | yes | `ccea07013c01` | 0.9.4 |
+| `documents_due` | yes | no | yes | `ed7755a5c11d` | 0.9.4 |
+| `estate_check` | yes | no | yes | `c7e76e889378` | 0.9.4 |
+| `estate_health` | yes | no | yes | `ecdd7d982030` | 0.9.4 |
+| `estate_progress` | yes | no | yes | `106472a820e2` | 0.9.4 |
+| `estate_status` | yes | no | yes | `64854ad7ef78` | 0.9.4 |
+| `events_read` | yes | no | yes | `be3f7a1e467c` | 0.9.4 |
+| `goal_get` | yes | no | yes | `ae07f1748a4f` | 0.9.4 |
+| `goal_progress` | yes | no | yes | `25cc15685d14` | 0.9.4 |
+| `policies_list` | yes | no | yes | `d7db25dc8221` | 0.9.4 |
+| `policy_access` | yes | no | yes | `acb3f0697d0f` | 0.9.4 |
+| `policy_declare` | no | no | yes | `b8c6cface47a` | 0.9.4 |
+| `policy_evaluate` | yes | no | yes | `ae776055a09a` | 0.9.4 |
+| `policy_except` | no | no | no | `101a7465422c` | 0.9.4 |
+| `policy_kinds` | yes | no | yes | `45a07ee53487` | 0.9.4 |
+| `policy_retire` | no | yes | yes | `50ad9146fe92` | 0.9.4 |
+| `policy_revise` | no | yes | yes | `b06c4f742aa3` | 0.9.4 |
+| `policy_revoke_exception` | no | yes | yes | `c76bef22a678` | 0.9.4 |
+| `policy_show` | yes | no | yes | `120fca75adbf` | 0.9.4 |
+| `prompt_copy` | no | no | no | `0b0604379dc6` | 0.9.4 |
+| `prompt_preference` | no | yes | no | `9e9dcdc27272` | 0.9.4 |
+| `prompt_save` | no | yes | no | `fc95dcc3e8e6` | 0.9.4 |
+| `prompt_use` | no | no | no | `de3b2c7461ef` | 0.9.4 |
+| `prompts_list` | yes | no | yes | `1602ce797fb3` | 0.9.4 |
+| `record_get` | yes | no | yes | `a336aa849602` | 0.9.4 |
+| `records_list` | yes | no | yes | `8f30b630145c` | 0.9.4 |
+| `release_basis_get` | yes | no | yes | `c21bea8eb171` | 0.9.4 |
+| `release_submit_check` | yes | no | yes | `c9015291b2f3` | 0.9.4 |
+| `releases_list` | yes | no | yes | `cf11de0972ce` | 0.9.4 |
+| `requests_list` | yes | no | yes | `5a5961b09f81` | 0.9.4 |
+| `search` | yes | no | yes | `f82346a80ca3` | 0.9.4 |
+| `section_brief` | yes | no | yes | `91ded4ebb196` | 0.9.4 |
+| `template_render` | yes | no | yes | `a25328284342` | 0.9.4 |
+| `work_amend` | no | no | no | `96deacbc6d2f` | 0.9.4 |
+| `work_attempt` | no | no | no | `974da5261edd` | 0.9.4 |
+| `work_brief` | yes | no | yes | `22f10ba7b351` | 0.9.4 |
+| `work_observe` | yes | no | yes | `37410c7257ed` | 0.9.4 |
+| `work_progress` | no | no | no | `974a3906901d` | 0.9.4 |
+| `work_progress_get` | yes | no | yes | `0d11d23679e0` | 0.9.4 |
+| `work_result` | no | no | no | `d81870d77e1d` | 0.9.4 |
+| `work_review` | no | no | no | `f65e17f98fc8` | 0.9.4 |
+| `writing_exception_add` | no | no | no | `916b41adde32` | 0.9.4 |
+| `writing_exception_remove` | no | yes | yes | `dc5199b6f0bb` | 0.9.4 |
+| `writing_exception_show` | yes | no | yes | `fa01cab219cf` | 0.9.4 |
+| `writing_exceptions_list` | yes | no | yes | `ae159aff5559` | 0.9.4 |
 
 ## Readable companions (0.8.0)
 

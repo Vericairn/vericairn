@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -25,6 +26,12 @@ internal static partial class Docs
 
     /// <summary>The manifest key of the window a set's notes cover: <c>{from, to}</c>, the records dated after from and up to to.</summary>
     private const string NotesWindow = "notes";
+
+    /// <summary>From 0.9.4 (DOCS-38): a set's machine-readable index, each of its documents by title, in llms.txt's form.</summary>
+    public const string LlmsIndex = "llms.txt";
+
+    /// <summary>From 0.9.4 (DOCS-38): every document of a set in one file, in its index's order.</summary>
+    public const string LlmsFull = "llms-full.txt";
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
@@ -242,6 +249,22 @@ internal static partial class Docs
         if (haveManifest)
         {
             string version = Str(manifest, "version") ?? string.Empty;
+            // From 0.9.4 (DOCS-38): a set that declares its llms.txt and llms-full.txt holds them as its documents render them now.
+            if (required.Contains(LlmsIndex) || required.Contains(LlmsFull))
+            {
+                List<string> documents = LlmsDocuments(Strings(manifest, "documents"));
+                if (documents.All(d => File.Exists(Path.Combine(directory, d))))
+                {
+                    (byte[] index, byte[] full) = Llms(directory, version, documents);
+                    foreach ((string name, byte[] expected) in new[] { (LlmsIndex, index), (LlmsFull, full) })
+                    {
+                        string path = Path.Combine(directory, name);
+                        if (File.Exists(path) && new FileInfo(path).Length > 0 && !File.ReadAllBytes(path).AsSpan().SequenceEqual(expected))
+                            findings.Add(new FindingDto("error", "docs.llms", name, "Differs from what the set's documents render; the build tooling's llms step writes it again before the set is frozen."));
+                    }
+                }
+            }
+
             Covered(directory, "cli-reference.md", Strings(manifest, "commands"), c => $"`vericairn {c}`", "docs.command", findings);
             Covered(directory, "api-reference.md", Strings(manifest, "operations"), o => $"`{o}`", "docs.operation", findings);
             Covered(directory, "record-reference.md", Strings(manifest, "recordTypes"), t => $"`{t}`", "docs.record-type", findings);
@@ -266,6 +289,58 @@ internal static partial class Docs
 
         int errors = findings.Count(f => f.Severity == "error");
         return context.ReportFindings(new FindingsResponse(errors == 0 ? $"{directory}: complete" : $"{directory}: incomplete", errors, 0, findings), json);
+    }
+
+    /// <summary>The documents a set's llms files cover: every document its manifest lists, in that order, but the two files themselves.</summary>
+    public static List<string> LlmsDocuments(IEnumerable<string> documents) => [.. documents.Where(d => d is not (LlmsIndex or LlmsFull))];
+
+    /// <summary>
+    /// From 0.9.4 (DOCS-38): a set's llms.txt and llms-full.txt, rendered from its documents in the given order. llms.txt names the
+    /// set and links each document by its title (its first level-one heading, or its path) with a link relative to the set, so it reads
+    /// the same in the repository and in the release's documentation archive. llms-full.txt holds each document's exact bytes after a
+    /// line naming its file; a document with the same bytes as an earlier one is named and not repeated.
+    /// </summary>
+    public static (byte[] Index, byte[] Full) Llms(string directory, string version, IReadOnlyList<string> documents)
+    {
+        var index = new StringBuilder();
+        index.Append("# Vericairn ").Append(version).Append("\n\n");
+        index.Append("> The documentation set of Vericairn ").Append(version).Append(", frozen with the release: its ").Append(documents.Count)
+            .Append(" guides, references and release notes, each linked below by its title.\n\n");
+        index.Append("Links are relative to this file, which is docs/releases/").Append(version).Append("/llms.txt in the repository at the release's tag v")
+            .Append(version).Append(", and the root of vericairn-").Append(version).Append("-docs.zip. llms-full.txt holds every document below in one file, in this order.\n\n");
+        index.Append("## Documents\n\n");
+        var full = new List<byte>();
+        full.AddRange(Encoding.UTF8.GetBytes($"# Vericairn {version}, every document in one file\n\n> The {documents.Count} documents llms.txt lists, in its order, each after a line naming its file; a document with the same bytes as an earlier one is named, not repeated.\n"));
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string document in documents)
+        {
+            byte[] bytes = File.ReadAllBytes(Path.Combine(directory, document));
+            index.Append("- [").Append(LinkText(Title(bytes) ?? document)).Append("](").Append(document).Append(")\n");
+            string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+            if (seen.TryGetValue(hash, out string? earlier))
+            {
+                full.AddRange(Encoding.UTF8.GetBytes($"\n<!-- File: {document}, the same bytes as {earlier} -->\n"));
+                continue;
+            }
+
+            seen[hash] = document;
+            full.AddRange(Encoding.UTF8.GetBytes($"\n<!-- File: {document} -->\n\n"));
+            full.AddRange(bytes);
+            if (bytes.Length == 0 || bytes[^1] != (byte)'\n') full.Add((byte)'\n');
+        }
+
+        index.Append("\n## Optional\n\n- [Every document in one file](").Append(LlmsFull).Append(")\n");
+        return (Encoding.UTF8.GetBytes(index.ToString()), full.ToArray());
+
+        static string? Title(byte[] bytes)
+        {
+            using var reader = new StringReader(new UTF8Encoding(false).GetString(bytes).TrimStart('\uFEFF'));
+            while (reader.ReadLine() is string line)
+                if (line.StartsWith("# ", StringComparison.Ordinal) && line[2..].Trim().Length > 0) return line[2..].Trim();
+            return null;
+        }
+
+        static string LinkText(string title) => title.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal).Replace("]", "\\]", StringComparison.Ordinal);
     }
 
     private static void Covered(string directory, string file, List<string> expected, Func<string, string> heading, string code, List<FindingDto> findings)

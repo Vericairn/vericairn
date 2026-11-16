@@ -65,10 +65,34 @@ jobs:
           persist-credentials: false
       - name: Check the workflow action allow-list and full commit pins
         run: ruby .github/scripts/check-workflow-actions.rb
+      - name: Check each allowed action's owner and repository ids and its pinned commit at GitHub
+        # CI-08: the ids actions.allow records must be those of the repository GitHub serves under the action's name, and the
+        # pinned commit must be in it, so a repository re-created, renamed or transferred under that name fails here.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ruby .github/scripts/check-workflow-actions.rb --identities
       - name: Test workflow policy and package verification
         run: |
           ruby .github/scripts/test-workflow-actions.rb
           python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Install the pinned workflow linter
+        timeout-minutes: 10
+        # CI-08: actionlint 1.7.12 and ShellCheck 0.11.0, each checked against the SHA-256 its release publishes, so the lint never
+        # depends on whichever ShellCheck the runner image carries.
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/lint"
+          cd "$RUNNER_TEMP/lint"
+          curl -fsSL -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+          curl -fsSL -o shellcheck.tar.gz "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz"
+          echo "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6  shellcheck.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          tar -xzf shellcheck.tar.gz --strip-components=1 shellcheck-v0.11.0/shellcheck
+      - name: Lint every workflow
+        # Any finding fails the job: expressions, contexts, job and step keys, permissions, environments, runner labels, and
+        # every run script through the pinned ShellCheck. Its Python integration is off, since no pinned pyflakes is installed.
+        run: '"$RUNNER_TEMP/lint/actionlint" -shellcheck "$RUNNER_TEMP/lint/shellcheck" -pyflakes= .github/workflows/*.yml'
 
   # Remote's heads build only where their platform's workload is installed, so they are in src/Vericairn.Mobile.slnx, not the
   # solution build-test builds. The workload set is pinned so CI builds with the SDKs the heads were built with. These are
@@ -228,7 +252,9 @@ jobs:
         if: runner.os == 'Linux'
         env:
           VERICAIRN_EXPECT_SECRET_SERVICE: "1"
+        # The inner script's command substitution belongs to the inner shell, hence its single quotes.
         run: |
+          # shellcheck disable=SC2016
           dbus-run-session -- bash -c '
             set -eu
             printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null

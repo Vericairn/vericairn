@@ -162,6 +162,23 @@ public sealed class ReleaseProfile
         return assets.Where(a => a.Hash is null).Select(a => a.Name).ToList();
     }
 
+    /// <summary>
+    /// From 0.9.4: every file the release's checksum file names that the release does not attach, in ordinal order. Empty when it
+    /// attaches all of them, and when the provider reported no checksum names. The checksum file itself is never among them.
+    /// </summary>
+    public static IReadOnlyList<string> Unattached(ReleaseObservation release, string checksums)
+    {
+        ArgumentNullException.ThrowIfNull(release);
+        ArgumentException.ThrowIfNullOrWhiteSpace(checksums);
+        if (release.ChecksumNames is not { } names)
+        {
+            return [];
+        }
+
+        HashSet<string> attached = release.Assets.Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
+        return names.Where(name => name != checksums && !attached.Contains(name)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>The settings an operation runs with: the provider's defaults, then the product's declared settings for the same provider, then the request's own.</summary>
     public IReadOnlyDictionary<string, string> Settings(ProviderDescriptor descriptor, string provider, IReadOnlyDictionary<string, string>? requested)
     {

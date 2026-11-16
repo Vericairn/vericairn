@@ -16,8 +16,8 @@ class CompanionWorkflowTests < Minitest::Test
       FileUtils.mkdir_p(workflows)
       FileUtils.cp(File.expand_path('../.github/scripts/check-workflow-actions.rb', __dir__), File.join(root, '.github/scripts'))
       commit = 'a' * 40
-      action = "example/action@#{commit}"
-      File.binwrite(File.join(workflows, 'actions.allow'), "#{action}\n")
+      action = "actions/example@#{commit}"
+      File.binwrite(File.join(workflows, 'actions.allow'), "#{action} owner=1 repository=2\n")
       File.binwrite(File.join(workflows, 'ci.yml'), "jobs: {build: {uses: '#{action}'}}\n")
       adapter = File.expand_path('../tools/Vericairn.DocsTool/workflow-inputs.rb', __dir__)
       forward, error, status = Open3.capture3('ruby', adapter, root.tr('\\', '/'), commit, binmode: true)
@@ -40,8 +40,8 @@ class CompanionWorkflowTests < Minitest::Test
       FileUtils.mkdir_p(workflows)
       FileUtils.cp(File.expand_path('../.github/scripts/check-workflow-actions.rb', __dir__), File.join(root, '.github/scripts'))
       commit = 'a' * 40
-      action = "example/action@#{commit}"
-      File.write(File.join(workflows, 'actions.allow'), "#{action} # fixture\n")
+      action = "actions/example@#{commit}"
+      File.write(File.join(workflows, 'actions.allow'), "#{action} owner=1 repository=2 # fixture\n")
       File.write(File.join(workflows, 'ci.yml'), <<~YAML)
         jobs:
           build:
@@ -61,7 +61,7 @@ class CompanionWorkflowTests < Minitest::Test
       document.fetch('sources').each do |source|
         assert_equal "sha256:#{Digest::SHA256.file(File.join(root, source.fetch('path'))).hexdigest}", source.fetch('hash')
       end
-      File.write(File.join(workflows, 'ci.yml'), "jobs: {build: {uses: example/action@main}}\n")
+      File.write(File.join(workflows, 'ci.yml'), "jobs: {build: {uses: actions/example@main}}\n")
       output, _error, status = Open3.capture3('ruby', File.expand_path('../tools/Vericairn.DocsTool/workflow-inputs.rb', __dir__), root, commit)
       refute status.success?
       assert_empty output
