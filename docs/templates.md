@@ -756,11 +756,16 @@ is followed by a decision step that decides from its outputs.
   no rule does. A recorded decision that does not hold counts for nothing, and
   validation reports it, and one reading the records as of another time than
   its round's start counts for nothing. No later record, a revision or a record
-  dated earlier, changes a decision that holds, and validation reports a record
-  its rules count that it leaves out. A predicate over a derived state, a work
-  order's status, an ask's answer or a living document's clearance, reads that
-  state as it is now, not as it stood then, so a state that changed since can
-  change whether a recorded decision holds. A rule naming an input that an
+  dated earlier, changes a decision that holds. Two checks are made only when a
+  decision is written, and the write boundary refuses one that fails them: it
+  names every record its rules count as of its time
+  (`observation.flow-decision-read`), and its rules hold with each derived state
+  they name, a work order's status, an ask's answer or a living document's
+  clearance, read as it is then, the round's start or later
+  (`observation.flow-decision-state`). Once recorded, validation evaluates its
+  rules without those states, so a later change of a state never invalidates a
+  recorded decision or blocks an unrelated write; such a record already in the
+  estate is reported only as information. A rule naming an input that an
   earlier step's output carries is not evaluated again: only the run's position
   binds it.
 - A role's principal decides from the step's assignment, which goal step routes
@@ -774,9 +779,18 @@ is followed by a decision step that decides from its outputs.
 - Each round takes one kind of decider: under `rule` only a rule's decision;
   under `role` only a principal's, or the default a deadline takes; under
   `rule-then-role` the rule's where a rule held when the round began, and the
-  role's otherwise. A decision of the other kind counts for nothing in the
-  round, whenever it is dated, and validation reports a principal's decision
-  under an assignment made in a round its rule decided.
+  role's otherwise. Under `rule-then-role` the round's kind is on record, never
+  read from the records as they are now: `goal step` records the rule's
+  decision when a rule held, or, when none did, a `flow-decision` observation
+  with the rule `none`, no path and the records the rules read, as of the
+  round's start, evaluated again as a rule's decision is. Until one is on
+  record the round is pending and no principal's decision counts, nor one
+  recorded before it; `goal decide` reaching such a round records that no rule
+  held first, in the same stored batch as the decision, signed by the
+  principal holding the step's assignment. A decision of the
+  other kind counts for nothing in the round, whenever it is dated, and
+  validation reports a principal's decision with no record that no rule held
+  before it, or under an assignment made in a round its rule decided.
 - In each round the first decision that stands is final: a further decision
   of the round counts for nothing, and validation reports it, so neither the
   API nor a synced record changes it. A new round begins only by the flow's own

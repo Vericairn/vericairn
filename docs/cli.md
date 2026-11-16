@@ -467,7 +467,9 @@ gains that step's `decision` (`state`, `decider`, `paths`, `decidedBy`, `by`, `b
 `since`, `review`, `taken` and `rule`), and status's `runs` gain `decisions`, each named. A rule's decision, or the default a missed
 deadline takes, routes as `rule`: `goal step` records it, signed by the acting principal, as an observation of kind `flow-decision`
 naming the path, the rule that matched and the records it read by hash, answers with the outcome `decided` and the record as
-`decision`, and the next `goal step` takes the path. A step its role decides routes as any step does, to an agent or, assigned and
+`decision`, and the next `goal step` takes the path. Under `rule-then-role` a round in which no rule held routes as `rule` too:
+`goal step` records that (the rule `none`, no path), and the next `goal step` routes the step to its role; `goal decide`, reaching a
+round whose kind is not on record, stores that observation first in the same batch as the decision. A step its role decides routes as any step does, to an agent or, assigned and
 asked, to a person, and `goal step` never routes one that only a person decides to an agent. `goal decide <goal> --by <id> --step <step> --path <name> --reason <text>` records the decision of the
 principal holding the step's assignment as the result of that assignment, signed by its own device: `--path` repeats for several
 paths at once where the flow allows, and `--evidence <id or type:id>`, repeatable, pins each record it rests on at its current

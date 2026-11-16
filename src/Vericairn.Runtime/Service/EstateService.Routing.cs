@@ -427,7 +427,8 @@ public sealed partial class EstateService
     /// <summary>
     /// Records a rule's decision, or a missed deadline's default, as the run derives it (from 0.9.4, PROC-19; design/flow.md § 5): a
     /// flow-decision observation of the goal's exact revision naming the step, the path, the rule that matched and each record it read by id
-    /// and hash, signed by who takes the step. The position reads it from then on, its rules evaluated again only over the records it
+    /// and hash, signed by who takes the step; or, under a rule then the role, the round's kind when no rule held, after which the role
+    /// decides. The position reads it from then on, its rules evaluated again only over the records it
     /// names, so no later record changes it; nothing is dispatched.
     /// </summary>
     private GoalStepResponse RuleStep(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
@@ -441,6 +442,12 @@ public sealed partial class EstateService
         }
 
         FlowPosition.StepDecision decision = instance.Decision!;
+        if (decision.Rule == "none")
+        {
+            return new GoalStepResponse(goal.Id, "decided", $"{step.Key}'s round is its role's: no rule held as the records stood at {RecordParser.FormatTimestamp(decision.At ?? decision.Since)}, recorded in observation {written.Written!.Id}; goal step routes the step to its role next. Nothing was dispatched.",
+                true, step.Key, step.Route.State, null) { Decision = written.Written };
+        }
+
         return new GoalStepResponse(goal.Id, "decided", $"{step.Key} is decided by {(decision.Decider == "deadline" ? "its deadline's default" : decision.Rule == "default" ? "its rule's default" : "its rule " + decision.Rule)}: path {string.Join(", ", decision.Paths)}, recorded in observation {written.Written!.Id}; goal step takes the path next. Nothing was dispatched.",
             true, step.Key, step.Route.State, null) { Decision = written.Written };
     }

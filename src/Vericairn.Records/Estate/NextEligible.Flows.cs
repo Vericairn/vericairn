@@ -104,8 +104,10 @@ public static partial class NextEligible
             {
                 IReadOnlyList<string> fence = status == "active" ? [] : status == "closed" ? ["The goal's run is closed: nothing of it is dispatched again."] : [$"The goal is {status}: nothing of it is dispatched until it is active."];
                 string by = ruling.Decider == "deadline" ? "its deadline's default" : ruling.Rule == "default" ? "its rule's default" : $"its rule {ruling.Rule}";
-                steps.Add(new FlowStepRoute(instance, new Route(instance.Step.Role, null, new Routing.Source(null, "the run's own rule, recorded by who takes the step"), [], "rule", null, null, null, null, null, fence, [],
-                    $"a decision by {by}: path {string.Join(", ", ruling.Paths)}, as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}; goal step records it, signed by who takes the step, and no contributor carries it")));
+                string what = ruling.Rule == "none"
+                    ? $"the round's kind: no rule held as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}, so its role decides; goal step records that, signed by who takes the step, and then routes the step to its role"
+                    : $"a decision by {by}: path {string.Join(", ", ruling.Paths)}, as the records stood at {RecordParser.FormatTimestamp(ruling.At ?? ruling.Since)}; goal step records it, signed by who takes the step, and no contributor carries it";
+                steps.Add(new FlowStepRoute(instance, new Route(instance.Step.Role, null, new Routing.Source(null, "the run's own rule, recorded by who takes the step"), [], "rule", null, null, null, null, null, fence, [], what)));
                 continue;
             }
 

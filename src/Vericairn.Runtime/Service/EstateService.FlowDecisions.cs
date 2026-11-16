@@ -52,31 +52,53 @@ public sealed partial class EstateService
             }
 
             // The decider's open attempt is answered by the decision; otherwise an attempt and the decision are stored together, both
-            // signed by the decider's own device and announced before the first presence prompt.
+            // signed by the decider's own device and announced before the first presence prompt. Under a rule then the role, a round whose
+            // kind is not on record yet is recorded first, in the same batch: no rule held when it began, so its role decides.
             RecordEnvelope assignment = plan.Assignment!;
-            if (plan.Attempt is RecordEnvelope open)
+            if (plan.Attempt is RecordEnvelope open && plan.Kind is null)
             {
                 return WriteLocked(new RecordDraft("result", request.By, JsonSerializer.SerializeToElement(plan.ResultBody()), new RecordReference(open.Type, open.Id, open.ComputedHash)), model);
             }
 
-            var attempting = new RecordDraft("attempt", request.By, JsonSerializer.SerializeToElement(plan.AttemptBody(now)), new RecordReference(assignment.Type, assignment.Id, assignment.ComputedHash));
-            using IDisposable counted = presence.Action("goal decide " + current.Id, SignsWithPresence(model, request.By)
-                ? [DescribeRecord(attempting, model), new("result", "the decision of step " + plan.Step, "records the decision of a run's step")]
-                : null);
-            (AuthoredRecord? attempt, string? refusal) = AuthorLocked(attempting, model);
-            if (attempt is null)
+            RecordDraft? kinding = plan.Kind is null ? null : new RecordDraft("observation", request.By, JsonSerializer.SerializeToElement(plan.Kind), new RecordReference(current.Type, current.Id, current.ComputedHash));
+            RecordDraft? attempting = plan.Attempt is null
+                ? new RecordDraft("attempt", request.By, JsonSerializer.SerializeToElement(plan.AttemptBody(now)), new RecordReference(assignment.Type, assignment.Id, assignment.ComputedHash))
+                : null;
+            List<PresenceSignature> announced = [];
+            if (kinding is not null)
             {
-                return Refuse(refusal!);
+                announced.Add(DescribeRecord(kinding, model));
             }
 
-            var deciding = new RecordDraft("result", request.By, JsonSerializer.SerializeToElement(plan.ResultBody()), new RecordReference("attempt", attempt.Envelope.Id, attempt.Envelope.ComputedHash));
-            (AuthoredRecord? result, refusal) = AuthorLocked(deciding, model);
+            if (attempting is not null)
+            {
+                announced.Add(DescribeRecord(attempting, model));
+            }
+
+            announced.Add(new("result", "the decision of step " + plan.Step, "records the decision of a run's step"));
+            using IDisposable counted = presence.Action("goal decide " + current.Id, SignsWithPresence(model, request.By) ? announced : null);
+            var authored = new List<AuthoredRecord>();
+            foreach (RecordDraft draft in new[] { kinding, attempting }.OfType<RecordDraft>())
+            {
+                (AuthoredRecord? record, string? reason) = AuthorLocked(draft, model);
+                if (record is null)
+                {
+                    return Refuse(reason!);
+                }
+
+                authored.Add(record);
+            }
+
+            RecordEnvelope answered = attempting is null ? plan.Attempt! : authored[^1].Envelope;
+            var deciding = new RecordDraft("result", request.By, JsonSerializer.SerializeToElement(plan.ResultBody()), new RecordReference("attempt", answered.Id, answered.ComputedHash));
+            (AuthoredRecord? result, string? refusal) = AuthorLocked(deciding, model);
             if (result is null)
             {
                 return Refuse(refusal!);
             }
 
-            (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked([attempt, result], $"Record the decision of step {plan.Step} of goal {current.Id}.", null);
+            authored.Add(result);
+            (IReadOnlyList<RecordWritten> written, Problem? problem) = StoreTogetherLocked(authored, $"Record the decision of step {plan.Step} of goal {current.Id}.", null);
             RecordWritten? decided = written.FirstOrDefault(w => w.Id == result.Envelope.Id);
             return problem is null ? WriteOutcome.Success(decided!) : new WriteOutcome(written.Count == 0 ? null : written[^1], problem);
         }

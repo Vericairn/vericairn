@@ -98,6 +98,119 @@ public class FlowDecisionRoutingTests
         }
     }
 
+    [Fact]
+    public void UnderARuleThenTheRoleGoalStepRecordsTheRoundsKindAndGoalDecideRecordsItWithTheDecision()
+    {
+        // Review round 4, finding 1: the round's kind is on record before a principal decides it: goal step records that no rule held,
+        // and goal decide, reaching a round whose kind is not on record, stores it first in the same batch as the decision.
+        using (var run = new RunEstate(recordFormat: 3))
+        {
+            string op = run.Estate.OperatorId;
+            string goal = FlowStepRoutingTests.Run(run, RuleThenRole(), body => Configured(body, op));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            GoalStepResponse kind = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            Assert.True(kind.Ok, kind.Message);
+            Assert.Equal(("decided", "gate"), (kind.Outcome, kind.Step));
+            Assert.Contains("round is its role's: no rule held", kind.Message, StringComparison.Ordinal);
+            Assert.Equal("none", run.Estate.Load().ById[kind.Decision!.Id].Body.GetProperty("facts").GetProperty("rule").GetString());
+            GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            Assert.Equal(("ask", "gate", "person"), (asked.Outcome, asked.Step, asked.Route));
+            WriteOutcome decided = run.Service.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["ship"], "No rule settled it; ship."));
+            Assert.True(decided.Ok, decided.Problem?.Message);
+            Assert.Equal("done", Step(run, goal, "gate").GetProperty("state").GetString());
+            Assert.Equal(0, run.Service.Check().Errors);
+        }
+
+        using (var run = new RunEstate(recordFormat: 3))
+        {
+            string op = run.Estate.OperatorId;
+            string goal = FlowStepRoutingTests.Run(run, RuleThenRole(), body => Configured(body, op));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            RecordEnvelope order = run.Estate.Load().Current("work-order").Single(w => EstateModel.BodyString(w, "key") == "SONG-1");
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("assignment", op, JsonSerializer.SerializeToElement(FlowFixture.AssignmentBody("gate", op)), Subject: $"work-order:{order.Id}:{order.ComputedHash}")));
+            Assert.DoesNotContain(run.Estate.Load().Current("observation"), o => EstateModel.BodyString(o, "kind") == FlowDecisions.ObservationKind);
+            WriteOutcome decided = run.Service.GoalDecide(goal, new GoalDecideRequest(op, "gate", ["ship"], "No rule settled it; ship."));
+            Assert.True(decided.Ok, decided.Problem?.Message);
+            EstateModel model = run.Estate.Load();
+            RecordEnvelope recorded = Assert.Single(model.Current("observation"), o => EstateModel.BodyString(o, "kind") == FlowDecisions.ObservationKind);
+            Assert.Equal(("none", op), (recorded.Body.GetProperty("facts").GetProperty("rule").GetString(), recorded.By));
+            Assert.Equal(recorded.AtTime, model.ById[decided.Written!.Id].AtTime);
+            Assert.Equal("done", Step(run, goal, "gate").GetProperty("state").GetString());
+            Assert.Equal(0, run.Service.Check().Errors);
+        }
+    }
+
+    [Fact]
+    public void ALaterChangeOfAStateARuleReadNeverBlocksAnUnrelatedWrite()
+    {
+        // Review round 4, finding 2: a rule over a derived state is checked when its decision is written; a later change of the state is
+        // an ordinary write the boundary accepts, and the decision stays in effect. A new decision whose state does not hold is refused.
+        using (var run = new RunEstate(recordFormat: 3))
+        {
+            string op = run.Estate.OperatorId;
+            RecordWritten ship = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, Marker("SHIP"))));
+            string goal = FlowStepRoutingTests.Run(run, Planned(), body => Configured(body, op, "rule"));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            GoalStepResponse ruled = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            Assert.Equal(("decided", "gate"), (ruled.Outcome, ruled.Step));
+            Assert.Contains("its rule 1: path ship", ruled.Message, StringComparison.Ordinal);
+
+            WriteOutcome started = run.Service.NewRecord(new NewRecordRequest("work-status", op, RunEstate.Json("""{"status":"active","note":"Started."}"""), Subject: "work-order:" + ship.Id));
+            Assert.True(started.Ok, started.Problem?.Message);
+            JsonElement gate = Step(run, goal, "gate");
+            Assert.Equal(("done", "ship"), (gate.GetProperty("state").GetString(), gate.GetProperty("decision").GetProperty("paths")[0].GetString()));
+            Assert.Equal(0, run.Service.Check().Errors);
+        }
+
+        using (var run = new RunEstate(recordFormat: 3))
+        {
+            string op = run.Estate.OperatorId;
+            RecordWritten ship = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, Marker("SHIP"))));
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-status", op, RunEstate.Json("""{"status":"active","note":"Started."}"""), Subject: "work-order:" + ship.Id)));
+            string goal = FlowStepRoutingTests.Run(run, Planned(), body => Configured(body, op, "rule"));
+            FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+            EstateModel model = run.Estate.Load();
+            FlowPosition.StepInstance pending = FlowPosition.Derive(model, model.ById[goal], DateTimeOffset.UtcNow).Steps.Single(s => s.Step.Key == "gate");
+            Assert.Equal("default", pending.Decision!.Rule);
+            JsonObject claimed = FlowDecisions.RuleBody(pending with { Decision = pending.Decision with { Paths = ["ship"], Rule = "1" } });
+            WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("observation", op, JsonSerializer.SerializeToElement(claimed), Subject: $"goal:{goal}:{model.ById[goal].ComputedHash}"));
+            Assert.False(refused.Ok);
+            Assert.Contains(refused.Problem!.Findings, f => f.Code == FlowDecisions.StateCode);
+        }
+    }
+
+    /// <summary>The gate flow decided by its role, which a venture may give a rule then the role: approved ships, else the role decides.</summary>
+    private static JsonObject RuleThenRole()
+    {
+        JsonObject flow = Gate();
+        JsonObject transition = flow["steps"]![1]!["transition"]!.AsObject();
+        transition["configurable"] = new JsonArray("rule", "rule-then-role");
+        transition["rules"] = new JsonArray(new JsonObject { ["path"] = "ship", ["when"] = new JsonArray(FlowFixture.Marker("APPROVED")) });
+        transition["default"] = "drop";
+        return flow;
+    }
+
+    /// <summary>The gate flow whose rule ships while the work order SHIP is planned, a derived state.</summary>
+    private static JsonObject Planned()
+    {
+        JsonObject flow = RuleThenRole();
+        flow["steps"]![1]!["transition"]!["rules"]![0]!["when"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SHIP" }, ["state"] = "planned" });
+        return flow;
+    }
+
+    /// <summary>The run's roles, the operator writing and approving, and its gate's decider.</summary>
+    private static void Configured(JsonObject body, string op, string decider = "rule-then-role")
+    {
+        Roles(body, op, op);
+        body["plan"]!["flow"]!["options"] = new JsonObject { ["decider.gate"] = decider };
+    }
+
+    private static JsonElement Marker(string key) => JsonSerializer.SerializeToElement(new JsonObject
+    {
+        ["key"] = key, ["kind"] = "ordinary", ["title"] = "Marker " + key, ["intent"] = "Stand in for an act's record.", ["scope"] = new JsonArray("marker"),
+        ["exitQuestion"] = "Recorded?", ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("marker"),
+    });
+
     /// <summary>The gate flow, its release a work step goal step dispatches once the gate's decision takes its path.</summary>
     private static JsonObject Gate()
     {

@@ -659,7 +659,7 @@ public static partial class FlowPosition
                     }
 
                     Returning = true;
-                    int prior = effective.Count(d => d.At < decision.At && d.Paths.Contains(back.Name, StringComparer.Ordinal));
+                    int prior = standing.Count(d => d.At < decision.At && d.Paths.Contains(back.Name, StringComparer.Ordinal) && FlowDecisions.TookEffect(model, goal, flow, step, d));
                     if (discounted is null || (back.Limit is int limit && prior >= limit && !Answered(decision.Record)))
                     {
                         continue;
@@ -1430,7 +1430,15 @@ public static partial class FlowPosition
             bool held = false;
             foreach (FlowDecisions.Recorded decision in standing)
             {
+                // A decision recorded before this round began is of an earlier round, or of none, and makes no return in this one.
                 if (decision.At < start)
+                {
+                    this.Discounted.Add(decision.Record.Id);
+                    continue;
+                }
+
+                // A round's kind under a rule then the role, that no rule held, is no decision: it lets the role decide the round.
+                if (decision.Rule == "none")
                 {
                     continue;
                 }
@@ -1454,11 +1462,12 @@ public static partial class FlowPosition
                         continue;
                     }
 
-                    // A round its rule takes takes no principal's decision.
-                    if (RuleRound())
+                    // Only a round its role takes takes a principal's decision: not one its rule takes, nor, under a rule then the role, one
+                    // whose kind is not on record yet.
+                    if (!RoleRound() || (Kind() is { } kind && kind.At > decision.At))
                     {
                         this.Discounted.Add(decision.Record.Id);
-                        notes.Add($"result {decision.Record.Id} by {Routing.NameOf(model, decision.By)} counts for nothing: a rule held when this round began at {Time(start)}, so the round is its rule's");
+                        notes.Add($"result {decision.Record.Id} by {Routing.NameOf(model, decision.By)} counts for nothing: {(RuleRound() ? $"a rule held when this round began at {Time(start)}, so the round is its rule's" : RoleRound() ? $"it was recorded before observation {Kind()!.Record.Id} recorded that no rule held when this round began, and no principal decided the round before then" : $"no record says yet whether a rule held when this round began at {Time(start)}, and until goal step, or goal decide with the decision, records that none did, no principal decides it")}");
                         continue;
                     }
 
@@ -1578,9 +1587,10 @@ public static partial class FlowPosition
                 }
 
                 // A rule decides at once, read as the records stood when the round began; until goal step records it, it shows pending.
-                if ((decider == "rule" ? RuleDecision(transition, decider, bindings, start, true) : Matched()) is StepDecision ruling)
+                // Under a rule then the role, so does the round's kind until it is on record: the rule's path, or that no rule held.
+                if ((decider == "rule" || (decider == "rule-then-role" && Kind() is null) ? Matched() : null) is StepDecision ruling)
                 {
-                    return Ruled(basis, ruling with { Since = start }, transition, notes);
+                    return Ruled(basis with { Rerun = ruling.Rule == "none" && holder is not null && holder.AtTime < round }, ruling with { Since = start }, transition, notes);
                 }
 
                 return Pending(step, transition, basis, holder, round, notes, Waiting(held ? "held" : "pending"));
@@ -1622,23 +1632,33 @@ public static partial class FlowPosition
             DateTimeOffset doneAt = new[] { current.At, passed?.AtTime }.Max() ?? current.At;
             return basis with { State = "done", Reasons = [said, .. notes], DoneAt = doneAt, Due = null, Decision = shown };
 
-            // Under a rule then the role, the rule that held when the round began, read once a round; null when none held, or another decider.
+            // What a rule, or under a rule then the role the round's kind, would record as the records stood when the round began, read once
+            // a round: shown until it is on record, never deciding the round itself.
             StepDecision? Matched()
             {
                 if (!matched.TryGetValue(start, out StepDecision? found))
                 {
-                    found = decider == "rule-then-role" ? RuleDecision(transition, decider, bindings, start, false) : null;
+                    found = RuleDecision(transition, decider, bindings, start);
                     matched[start] = found;
                 }
 
                 return found;
             }
 
-            // A round a rule takes: every round under a rule, and under a rule then the role one in which a rule held when it began.
-            bool RuleRound() => decider == "rule" || Matched() is not null;
+            // Under a rule then the role, the round's kind as recorded: the first rule's decision, or record that no rule held, reading the
+            // records as they stood when this round began. Never read again from the records now.
+            FlowDecisions.Recorded? Kind() => decider == "rule-then-role"
+                ? standing.FirstOrDefault(d => d.Ruled && d.Rule is not ("deadline" or "default") && EstateModel.BodyString(d.Record, "asOf") == RecordParser.FormatTimestamp(start))
+                : null;
+
+            // A round a rule takes: every round under a rule, and under a rule then the role one whose kind on record is a rule's decision.
+            bool RuleRound() => decider == "rule" || Kind() is { Rule: not "none" };
+
+            // A round the role takes: every round under the role, and under a rule then the role one whose kind on record is that no rule held.
+            bool RoleRound() => decider == "role" || Kind() is { Rule: "none" };
 
             // A deadline passed before now in a round the role takes.
-            bool Missed() => deadline is DateTimeOffset passedAt && passedAt < at && !RuleRound();
+            bool Missed() => deadline is DateTimeOffset passedAt && passedAt < at && RoleRound();
 
             // Why a rule's decision, or a deadline's default, counts for nothing in this round; null when it holds here.
             string? Discounted(FlowDecisions.Recorded decision)
@@ -1646,9 +1666,9 @@ public static partial class FlowPosition
                 string stated = EstateModel.BodyString(decision.Record, "asOf") ?? "no time";
                 if (decision.Rule == "deadline")
                 {
-                    if (RuleRound())
+                    if (!RoleRound())
                     {
-                        return $"a rule held when this round began at {Time(start)}, so the round is its rule's";
+                        return RuleRound() ? $"a rule held when this round began at {Time(start)}, so the round is its rule's" : $"no record says yet whether a rule held when this round began at {Time(start)}";
                     }
 
                     if (deadline is not DateTimeOffset passedAt || !Missed())
@@ -1674,7 +1694,9 @@ public static partial class FlowPosition
                     return $"it reads the records as they stood at {stated}, not when this round began at {Time(start)}";
                 }
 
-                return decider == "rule-then-role" && Matched() is null ? $"no rule held when this round began at {Time(start)}, so the step's role decides it" : null;
+                return decider == "rule-then-role" && Kind() is { } kind && kind.Record.Id != decision.Record.Id
+                    ? kind.Rule == "none" ? $"observation {kind.Record.Id} records that no rule held when this round began at {Time(start)}, so the step's role decides it" : $"observation {kind.Record.Id} recorded this round's decision first"
+                    : null;
             }
         }
 
@@ -1691,7 +1713,9 @@ public static partial class FlowPosition
         private static StepInstance Ruled(StepInstance basis, StepDecision decision, FlowTransition transition, List<string> notes) => basis with
         {
             State = "next", Stop = null, Principal = null,
-            Reasons = [$"{(decision.Decider == "deadline" ? "its deadline takes" : "its rule takes")} path {string.Join(", ", decision.Paths)} ({transition.Path(decision.Paths[0])?.Leads ?? "?"}), as the records stood at {Time(decision.At ?? decision.Since)}: goal step records that decision, signed by who takes the step, and the path is taken once it is recorded", Paths(transition), .. notes],
+            Reasons = [decision.Rule == "none"
+                ? $"no rule holds as the records stood at {Time(decision.At ?? decision.Since)}, so its role decides this round once that is on record: goal step records it, signed by who takes the step, and then routes the step to its role, or the principal holding its assignment records it with its decision"
+                : $"{(decision.Decider == "deadline" ? "its deadline takes" : "its rule takes")} path {string.Join(", ", decision.Paths)} ({transition.Path(decision.Paths[0])?.Leads ?? "?"}), as the records stood at {Time(decision.At ?? decision.Since)}: goal step records that decision, signed by who takes the step, and the path is taken once it is recorded", Paths(transition), .. notes],
             Decision = decision,
         };
 
@@ -1732,11 +1756,16 @@ public static partial class FlowPosition
 
         /// <summary>
         /// A rule's decision (from 0.9.4, PROC-19), reading the records as they stood at a time: the first rule whose predicates all hold
-        /// takes its path; when none does, the default path, or null where the role decides then. The records each rule read are named, and
-        /// the rule that matched.
+        /// takes its path; when none does, under a rule the default path, and under a rule then the role the round's kind that no rule held,
+        /// so the role decides. The records each rule read are named, and the rule that matched. Null where the role alone decides.
         /// </summary>
-        private StepDecision? RuleDecision(FlowTransition transition, string decider, IReadOnlyDictionary<string, string> bindings, DateTimeOffset asOf, bool always)
+        private StepDecision? RuleDecision(FlowTransition transition, string decider, IReadOnlyDictionary<string, string> bindings, DateTimeOffset asOf)
         {
+            if (decider == "role")
+            {
+                return null;
+            }
+
             var read = new List<RecordReference>();
             var unmet = new List<string>();
             for (int index = 0; index < transition.Rules.Count; index++)
@@ -1754,9 +1783,9 @@ public static partial class FlowPosition
                 unmet.Add($"rule {number} is {first.Value}: {first.Reason}");
             }
 
-            return always
+            return decider == "rule"
                 ? new StepDecision("pending", decider, [transition.Default!], "default", null, null, $"no rule holds as the records stood at {Time(asOf)}, so it takes its default path ({string.Join("; ", unmet)})", Distinct(read), asOf) { Rule = "default" }
-                : null;
+                : new StepDecision("pending", decider, [], "rule", null, null, $"no rule holds as the records stood at {Time(asOf)}, so its role decides this round ({string.Join("; ", unmet)})", Distinct(read), asOf) { Rule = "none" };
 
             static List<RecordReference> Distinct(List<RecordReference> references) => references.DistinctBy(r => r.Id).ToList();
         }
@@ -3227,6 +3256,10 @@ public static partial class FlowPosition
             {
                 text.Append(": ").Append(decision.Reasons);
             }
+        }
+        else if (decision.Rule == "none")
+        {
+            text.Append("; the round's kind").Append(decision.Record is RecordEnvelope kind ? $" (observation {kind.Id})" : string.Empty).Append(": ").Append(decision.Reasons);
         }
 
         if (decision.Evidence.Count > 0)

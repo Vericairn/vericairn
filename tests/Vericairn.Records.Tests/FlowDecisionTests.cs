@@ -164,7 +164,12 @@ public class FlowDecisionTests
 
         using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false)))
         {
+            // No rule holds: goal step records that first, and the role decides the round.
             Draft(run);
+            FlowPosition.StepInstance kind = run.Step("gate");
+            Assert.Equal(("next", "pending", "none", 0), (kind.State, kind.Decision!.State, kind.Decision.Rule, kind.Decision.Paths.Count));
+            RecordRule(run);
+            AssertNoErrors(run);
             FlowPosition.StepInstance gate = run.Step("gate");
             Assert.Equal(("stopped", "person", "pending"), (gate.State, gate.Stop, gate.Decision!.State));
             Decide(run, run.Assign("gate", run.Estate.OperatorId), ["ship"], "No rule settled it; ship.");
@@ -640,7 +645,7 @@ public class FlowDecisionTests
         // round's start counts for nothing.
         JsonObject omitting = FlowDecisions.RuleBody(again with { Decision = again.Decision with { Paths = ["rework"], Rule = "2", Evidence = again.Decision.Evidence.Where(e => GoalPredicates.FieldString(run.Estate.Load().ById[e.Id], "key") != "APPROVED").ToList() } });
         RecordEnvelope omitted = run.Add("observation", omitting, builder: true, subject: run.Goal.Reference);
-        Assert.Contains(Errors(run.Estate.Load(), omitted), f => f.Code == "observation.flow-decision" && f.Message.Contains("does not name it among the records it read", StringComparison.Ordinal));
+        Assert.Contains(Findings(run.Estate.Load(), omitted), f => f.Code == FlowDecisions.ReadCode && f.Message.Contains("does not name it among the records it read", StringComparison.Ordinal));
         run.Estate.SetClock(again.Decision.Since.AddHours(1));
         RecordEnvelope later = run.Add("observation", FlowDecisions.RuleBody(again with { Decision = again.Decision with { At = again.Decision.Since.AddMinutes(30) } }), builder: true, subject: run.Goal.Reference);
         Assert.Contains(run.Step("gate").Reasons, r => r.Contains($"observation {later.Id}", StringComparison.Ordinal) && r.Contains("not when this round began", StringComparison.Ordinal));
@@ -656,6 +661,7 @@ public class FlowDecisionTests
         LocalEngineering(run);
         DateTimeOffset start = run.Estate.Clock;
         Draft(run);
+        RecordRule(run);
         FlowPosition.StepInstance pending = run.Step("gate");
         Assert.Equal(("stopped", "person"), (pending.State, pending.Stop));
         RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
@@ -684,8 +690,9 @@ public class FlowDecisionTests
         RecordEnvelope dropped = Decide(run, run.Assign("gate", run.Estate.OperatorId), ["drop"], "Drop it anyway.");
         FlowPosition.StepInstance gate = run.Step("gate");
         Assert.Equal(("next", "rule", "pending"), (gate.State, gate.Decision!.Decider, gate.Decision.State));
-        Assert.Contains(gate.Reasons, r => r.Contains($"result {dropped.Id}", StringComparison.Ordinal) && r.Contains("the round is its rule's", StringComparison.Ordinal));
+        Assert.Contains(gate.Reasons, r => r.Contains($"result {dropped.Id}", StringComparison.Ordinal) && r.Contains("no record says yet whether a rule held", StringComparison.Ordinal));
         RecordRule(run);
+        Assert.Contains(run.Step("gate").Reasons, r => r.Contains($"result {dropped.Id}", StringComparison.Ordinal) && r.Contains("the round is its rule's", StringComparison.Ordinal));
         Assert.Contains(Errors(run.Estate.Load(), dropped), f => f.Code == "result.decision" && f.Message.Contains("a round its rule decides takes no principal's decision", StringComparison.Ordinal));
         Assert.Equal(("done", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Paths[0]));
         Assert.Equal("next", run.Step("release").State);
@@ -806,6 +813,131 @@ public class FlowDecisionTests
         Assert.Equal(("done", "off"), (run.Step("gate").State, run.Step("release").State));
         Assert.NotEqual("off", run.Step("publish").State);
         Assert.False(run.Position().Complete);
+    }
+
+    [Fact]
+    public void ARoundsKindIsReadFromTheRecordsAndNeverFromTheRecordsNow()
+    {
+        // Review round 4, finding 1: under a rule then the role, the round's kind is what is on record, the rule's decision or that no
+        // rule held, reading the records as they stood when the round began; never the records as they are now.
+        using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false)))
+        {
+            RecordEnvelope approved = run.Marked("APPROVED");
+            RecordEnvelope drafted = Draft(run);
+            FlowPosition.StepInstance pending = run.Step("gate");
+            Assert.Equal(("next", "1"), (pending.State, pending.Decision!.Rule));
+
+            // That no rule held, recorded while one did, is refused when its rules are evaluated again, and decides nothing.
+            RecordEnvelope none = run.Add("observation", FlowDecisions.RuleBody(pending with { Decision = pending.Decision with { Paths = [], Rule = "none" } }), subject: run.Goal.Reference);
+            Assert.Contains(Errors(run.Estate.Load(), none), f => f.Code == "observation.flow-decision" && f.Message.Contains("rule 1 holds over the records it names", StringComparison.Ordinal));
+            RecordRule(run);
+            Assert.Equal(("done", "rule", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Decider, run.Step("gate").Decision!.Paths[0]));
+
+            // An unchanged revision of the marker, made after the rule's decision, leaves no record of it current as of the round's start;
+            // the round's kind stays the rule's decision.
+            run.Estate.SetClock(drafted.AtTime.AddMinutes(10));
+            run.Add("work-order", PolicyFixture.Body(approved), supersedes: approved.Id);
+            FlowPosition.StepInstance gate = run.Step("gate");
+            Assert.Equal(("done", "rule", "ship"), (gate.State, gate.Decision!.Decider, gate.Decision.Paths[0]));
+            Assert.Equal("next", run.Step("release").State);
+        }
+
+        using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false)))
+        {
+            RecordEnvelope drafted = Draft(run);
+            RecordRule(run);
+            Decide(run, run.Assign("gate", run.Estate.OperatorId), ["ship"], "Ship it.");
+            AssertNoErrors(run);
+            Assert.Equal(("done", "person"), (run.Step("gate").State, run.Step("gate").Decision!.Decider));
+
+            // A marker dated before the round's start, made after the person decided, never takes the round from its role.
+            run.Estate.SetClock(drafted.AtTime.AddMinutes(-5));
+            run.Marked("APPROVED");
+            run.Estate.SetClock(drafted.AtTime.AddHours(1));
+            FlowPosition.StepInstance gate = run.Step("gate");
+            Assert.Equal(("done", "person", "ship"), (gate.State, gate.Decision!.Decider, gate.Decision.Paths[0]));
+            Assert.Equal("next", run.Step("release").State);
+        }
+    }
+
+    [Fact]
+    public void GoalDecideRecordsTheRoundsKindWithItsDecisionAndADecisionBeforeItCountsForNothing()
+    {
+        // Review round 4, finding 1: until the round's kind is on record, the round is pending and a person's decision counts for
+        // nothing; goal decide records that no rule held first, in the same batch as the decision.
+        using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false)))
+        {
+            Draft(run);
+            RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+            RecordEnvelope early = Decide(run, assignment, ["ship"], "Ship it.");
+            Assert.Contains(Errors(run.Estate.Load(), early), f => f.Code == "result.decision" && f.Message.Contains("no record says that no rule held", StringComparison.Ordinal));
+            FlowPosition.StepInstance gate = run.Step("gate");
+            Assert.Equal(("next", "none"), (gate.State, gate.Decision!.Rule));
+            Assert.Contains(gate.Reasons, r => r.Contains($"result {early.Id}", StringComparison.Ordinal) && r.Contains("no record says yet whether a rule held", StringComparison.Ordinal));
+
+            // Recorded after it, the round's kind lets the role decide, and the decision made before it still counts for nothing.
+            RecordRule(run);
+            Assert.NotEqual("done", run.Step("gate").State);
+        }
+
+        // The agent holding the step's assignment, which takes no other step of the run, records it with its decision.
+        using (var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: true)))
+        {
+            Draft(run);
+            RecordEnvelope assignment = run.Assign("gate", run.Estate.BuilderId);
+            FlowDecisions.Plan plan = FlowDecisions.Prepare(run.Estate.Load(), run.Goal, run.Estate.BuilderId, "gate", ["ship"], "Ship it.", [], run.Estate.Clock);
+            Assert.Empty(plan.Refusals);
+            Assert.Equal(("none", 0), (plan.Kind!["facts"]!["rule"]!.GetValue<string>(), plan.Kind["facts"]!["paths"]!.AsArray().Count));
+            run.Add("observation", plan.Kind, builder: true, subject: run.Goal.Reference);
+            Decide(run, assignment, ["ship"], "Ship it.");
+            AssertNoErrors(run);
+            Assert.Equal(("done", "agent", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Decider, run.Step("gate").Decision!.Paths[0]));
+        }
+    }
+
+    [Fact]
+    public void ALaterChangeOfADerivedStateNeverInvalidatesARecordedDecision()
+    {
+        // Review round 4, finding 2: a rule over a derived state is checked when its decision is written, the state read then; a later
+        // change of the state never invalidates the recorded decision, which stays in effect.
+        JsonObject flow = Gate(transition => transition["rules"]![0]!["when"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["fields"] = new JsonObject { ["key"] = "SHIP" }, ["state"] = "planned" }));
+        using var run = new FlowFixture(flow, options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        RecordEnvelope ship = run.Marked("SHIP");
+        Draft(run);
+        Assert.Equal(("next", "1"), (run.Step("gate").State, run.Step("gate").Decision!.Rule));
+        RecordEnvelope ruled = RecordRule(run);
+        AssertNoErrors(run);
+        run.Marked("RELEASED");
+        Assert.Equal(("done", "done"), (run.Step("gate").State, run.Step("release").State));
+
+        // The work order the rule read as planned becomes active: no error, the decision stands, and release stays done.
+        run.Estate.Add("work-status", run.Estate.OperatorId, """{"status":"active","note":"Started."}""", ship.Reference, signer: run.Policies.OperatorSigner);
+        AssertNoErrors(run);
+        Assert.Contains(Findings(run.Estate.Load(), ruled), f => f.Code == FlowDecisions.StateCode && f.Severity == Severity.Info);
+        Assert.Equal(("done", "ship", "done"), (run.Step("gate").State, run.Step("gate").Decision!.Paths[0], run.Step("release").State));
+    }
+
+    [Fact]
+    public void ADecisionRecordedBeforeItsRoundBeganMakesNoReturn()
+    {
+        // Review round 4, finding 3: the gate decides rework while it still waits on art; once art is done, the round begins after that
+        // decision, which makes no return, and draft is not reopened.
+        JsonObject flow = Gate(configurable: false);
+        JsonObject art = Operation("art", "ART", "draft");
+        flow["steps"]!.AsArray().Insert(1, art);
+        StepOf(flow, "gate")["after"] = new JsonArray("draft", "art");
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        RecordEnvelope drafted = Draft(run);
+        Assert.Equal("blocked", run.Step("gate").State);
+        run.Estate.SetClock(drafted.AtTime.AddMinutes(1));
+        Decide(run, run.Assign("gate", run.Estate.OperatorId), ["rework"], "Rework, before the art is in.");
+        run.Estate.SetClock(drafted.AtTime.AddMinutes(2));
+        run.Marked("ART");
+        Assert.Equal("done", run.Step("draft").State);
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("stopped", "person", "pending"), (gate.State, gate.Stop, gate.Decision!.State));
     }
 
     public static TheoryData<string, string> Refusals => new()
@@ -1016,6 +1148,9 @@ public class FlowDecisionTests
 
     private static void AssertNoErrors(FlowFixture run) =>
         Assert.Empty(run.Estate.Load().Findings.Where(f => f.Severity == Severity.Error).Select(f => f.ToString()));
+
+    private static List<Finding> Findings(EstateModel model, RecordEnvelope record) =>
+        model.Findings.Where(f => f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal)).ToList();
 
     private static List<Finding> Errors(EstateModel model, RecordEnvelope record) =>
         model.Findings.Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal)).ToList();
