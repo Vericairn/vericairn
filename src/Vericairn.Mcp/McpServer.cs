@@ -28,12 +28,16 @@ public sealed class McpServer
 
     private readonly ToolRegistry tools;
     private readonly string version;
+    private readonly JsonObject toolDefinitions;
 
     /// <summary>A server over a tool registry, reporting the given Vericairn version.</summary>
     public McpServer(ToolRegistry tools, string version)
     {
         this.tools = tools ?? throw new ArgumentNullException(nameof(tools));
         this.version = version ?? "unknown";
+        // The build's definitions and their hash are computed once per process, here, before any input is read, so initialize
+        // answers without canonicalizing every tool while later requests wait.
+        toolDefinitions = new JsonObject { ["count"] = ToolRegistry.DefinitionsCount, ["hash"] = ToolRegistry.DefinitionsHash };
     }
 
     /// <summary>The protocol revisions this server negotiates; over Streamable HTTP, which begins at 2025-03-26, the later ones only.</summary>
@@ -117,7 +121,8 @@ public sealed class McpServer
 
     /// <summary>
     /// Serves asynchronously while continuing to read cancellation notifications and pings during slow tool calls. Each request
-    /// has its own cancellation source; stopping observation never retries a tool or claims its effect was undone.
+    /// has its own cancellation source; stopping observation never retries a tool or claims its effect was undone. From 0.9.4
+    /// initialize is answered before the next line is read, so its reply always precedes those of the requests sent after it.
     /// </summary>
     public async Task RunAsync(TextReader input, TextWriter output, TextWriter? log = null, CancellationToken cancellationToken = default)
     {
@@ -216,8 +221,17 @@ public sealed class McpServer
                     continue;
                 }
 
+                Task response = RespondAsync(id.DeepClone(), method, request["params"], key, source);
+                if (method == "initialize")
+                {
+                    // MCP's lifecycle has the client wait for initialize's result, so it is answered before any later line is read:
+                    // a request sent with it is never served, or answered, ahead of it.
+                    await response.ConfigureAwait(false);
+                    continue;
+                }
+
                 pending.RemoveAll(task => task.IsCompletedSuccessfully);
-                pending.Add(RespondAsync(id.DeepClone(), method, request["params"], key, source));
+                pending.Add(response);
             }
             inputCompleted = true;
         }
@@ -313,10 +327,7 @@ public sealed class McpServer
                     ["instructions"] = Instructions,
                     // From 0.9.4 (MCP-07): the build's tool definitions by count and hash, as its release notes state them, so a client
                     // can tell whether the tool set changed since it last connected.
-                    ["_meta"] = new JsonObject
-                    {
-                        [ToolDefinitionsMeta] = new JsonObject { ["count"] = ToolRegistry.Definitions().Count, ["hash"] = ToolRegistry.DefinitionsHash },
-                    },
+                    ["_meta"] = new JsonObject { [ToolDefinitionsMeta] = toolDefinitions.DeepClone() },
                 });
             case "ping":
                 return Result(id, new JsonObject());

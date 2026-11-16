@@ -99,7 +99,9 @@ do not enter the JSON-RPC output stream. Keep that option when configuring a cli
 `initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field describes the server), `notifications/initialized`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` and `prompts/get`, and from 0.9.2, when the estate's runtime keeps an event journal, `resources/subscribe` and `resources/unsubscribe` with the server's `notifications/resources/updated` and `notifications/resources/list_changed` ([Subscriptions and notifications](#subscriptions-and-notifications-092)). Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Sampling is not implemented. Over standard input and output the server speaks this subset; from 0.9.2 the daemon also serves it over Streamable HTTP at `/mcp`, to agents' and services' devices on other machines, as [Network MCP](#network-mcp-over-streamable-http-092) describes. A client must support this subset; the server supplies no fallback for an unsupported method or transport.
 
 From 0.9.4 the `initialize` result's `_meta` also carries `vericairn/toolDefinitions`, the count and
-SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)).
+SHA-256 of the build's tool definitions ([Tool annotations and definitions](#tool-annotations-and-definitions-094)),
+and over standard input and output the server answers `initialize` before it reads the next line, so a client that
+sends requests with it still gets `initialize`'s reply first.
 
 Initialization declares `prompts: { listChanged: false }` and `tools: { listChanged: false }`, and
 `resources: { subscribe: true, listChanged: true }` (0.9.2) when the estate's runtime is running and keeps the

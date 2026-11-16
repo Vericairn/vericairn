@@ -34,6 +34,9 @@ public sealed partial class ToolRegistry
     /// </summary>
     public static string DefinitionsHash => Published.Value.Hash;
 
+    // How many definitions the build publishes, without copying them.
+    internal static int DefinitionsCount => Published.Value.Definitions.Count;
+
     /// <summary>
     /// The SHA-256 of one tool's definition, as tools/list describes it (<see cref="ToolDefinition.Describe"/>) and
     /// <see cref="Definitions"/> lists it, in the same canonical form, as sha256:&lt;hex&gt;.
