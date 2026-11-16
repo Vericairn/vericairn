@@ -268,6 +268,13 @@ jobs:
         env:
           VERICAIRN_COST_TESTS: "1"
         run: dotnet artifacts/bin/Vericairn.Records.Tests/release/Vericairn.Records.Tests.dll --filter-class Vericairn.Records.Tests.HistoryCostTests --show-live-output on
+      - name: Measure status at 10,000 records
+        if: matrix.share == 1
+        # FIX-136's cost test, on each platform beside the suites: opening the runtime and reading status on a generated estate of
+        # 10,000 records within the bound its profile gave, each phase's time written to this step's log.
+        env:
+          VERICAIRN_COST_TESTS: "1"
+        run: dotnet artifacts/bin/Vericairn.Runtime.Tests/release/Vericairn.Runtime.Tests.dll --filter-class Vericairn.Runtime.Tests.StatusCostTests --show-live-output on
       - name: Smoke the CLI
         if: matrix.share == 1
         run: dotnet run --no-build --configuration Release --project src/Vericairn.Cli -- records describe

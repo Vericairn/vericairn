@@ -241,9 +241,13 @@ public sealed class EstateSession : IDisposable
         }
     }
 
+    /// <summary>How many times this session has loaded and judged the estate (<see cref="Load"/>): a deterministic count for cost tests.</summary>
+    internal long Loads { get; private set; }
+
     /// <summary>Loads and validates the estate. Repository-synced: refreshes the live cache unless opened read-only.</summary>
     public EstateModel Load()
     {
+        Loads++;
         if (readOnly) return Read();
         if (Profile == "repository-synced")
         {
@@ -284,6 +288,7 @@ public sealed class EstateSession : IDisposable
         ArgumentNullException.ThrowIfNull(record);
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
+        Writes++;
         if (Profile == "repository-synced")
         {
             RecordAuthor.Write(Root, record);
@@ -302,6 +307,12 @@ public sealed class EstateSession : IDisposable
         return record.RelativePath;
     }
 
+    /// <summary>
+    /// How many times this session has begun to store or remove a record since it opened: while it is unchanged, nothing this session did
+    /// has made a model it loaded out of date.
+    /// </summary>
+    internal long Writes { get; private set; }
+
     /// <summary>Told the id of each record this session stores, once it is stored: what the event journal calls written here (0.9.2).</summary>
     internal Action<string>? Written { get; set; }
 
@@ -311,6 +322,7 @@ public sealed class EstateSession : IDisposable
         ArgumentNullException.ThrowIfNull(record);
         if (readOnly) throw new InvalidOperationException("This session is read-only.");
         using WorkingTreeLock.Hold hold = HoldWriteLock();
+        Writes++;
         if (Profile == "repository-synced")
         {
             string full = Path.Combine(Root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));

@@ -96,8 +96,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
             service.JudgeInterruptedBatches();
-            service.runDispatch.RecoverSettlements();
-            service.ReconcileRunAttention();
+            // One judgment of the estate serves both startup passes unless the first stores a settlement (FIX-136).
+            service.runDispatch.ReconcileSettledAttention(service.runDispatch.RecoverSettlements());
             return service;
         }
         // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.

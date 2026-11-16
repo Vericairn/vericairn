@@ -49,6 +49,8 @@ public sealed class LostSupervisorSettlementTests
         {
             Write(lost, live.Supervisor, live.Harness, live.Heartbeat, tokens: 1200);
             string? message = Act(run, lost, path);
+            // A startup that stores no settlement judges the estate once for both of its passes (FIX-136).
+            if (path == "startup") Assert.Equal(1, run.Service.Session.Loads);
             Assert.True(run.Row(lost.Run).Status == "dispatched", live.Case);
             Assert.Equal(2, Revisions(run, lost.Run));
             if (message is not null)
