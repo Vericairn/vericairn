@@ -475,7 +475,9 @@ hash. It refuses, at once and before anything is written, a step that is not a d
 waiting on its decider or decided by its rule, a principal not holding its current assignment, an agent where the decision is a
 person's, a path the transition does not offer or several where it takes one, a path that would turn off a step an estate policy
 requires or a required reserved step (`flow.decision-protected`, naming the step), blank reasons and unknown evidence. The first
-decision of a round that stands is final. Choosing a path dispatches nothing and performs
+decision of a round that stands is final, and each round takes one kind of decider: a recorded rule decision counts only where
+its rules, evaluated again over the records it names, hold as it says, and a deadline's default only once the deadline passed
+([Templates](templates.md#decision-transitions-094)). Choosing a path dispatches nothing and performs
 nothing reserved: `goal step` takes the steps it makes eligible, and a reserved one still waits on the operator. A path back past
 its limit and a missed deadline under the `attention` rule route as `attention`, and `goal step` asks the sponsor once.
 

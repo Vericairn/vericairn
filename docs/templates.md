@@ -748,10 +748,21 @@ is followed by a decision step that decides from its outputs.
   its path, until `goal step` records it, signed by who takes the step: an
   observation of kind `flow-decision` naming the step, the path, the rule that
   matched and each record the rule read by id and hash
-  ([record format 3](record-format-v3.md#decisions-of-a-runs-steps-094)). From
-  then the position reads the recorded decision and never evaluates the rule
-  again, so no later record, a revision, a record dated earlier or a changed
-  state, changes it.
+  ([record format 3](record-format-v3.md#decisions-of-a-runs-steps-094)). The
+  position and validation evaluate its rules again as of the time it names,
+  over only the records it names, each at its hash, with the same as-of
+  evaluation: the rule it names must hold and no earlier rule may, since the
+  first that holds wins, and its default holds only under `rule` and only when
+  no rule does. A recorded decision that does not hold counts for nothing, and
+  validation reports it, and one reading the records as of another time than
+  its round's start counts for nothing. No later record, a revision or a record
+  dated earlier, changes a decision that holds, and validation reports a record
+  its rules count that it leaves out. A predicate over a derived state, a work
+  order's status, an ask's answer or a living document's clearance, reads that
+  state as it is now, not as it stood then, so a state that changed since can
+  change whether a recorded decision holds. A rule naming an input that an
+  earlier step's output carries is not evaluated again: only the run's position
+  binds it.
 - A role's principal decides from the step's assignment, which goal step routes
   to it as any step's: an agent is routed, a person is assigned and asked. The
   decision is the step's item of kind decision, the result of that assignment,
@@ -760,6 +771,12 @@ is followed by a decision step that decides from its outputs.
   `goal_decide` tool record it ([CLI](cli.md#runs-of-a-flow-092)). Only the
   step's current assignment decides: a displaced one's decision counts for
   nothing. It is distinct from the estate's decision records.
+- Each round takes one kind of decider: under `rule` only a rule's decision;
+  under `role` only a principal's, or the default a deadline takes; under
+  `rule-then-role` the rule's where a rule held when the round began, and the
+  role's otherwise. A decision of the other kind counts for nothing in the
+  round, whenever it is dated, and validation reports a principal's decision
+  under an assignment made in a round its rule decided.
 - In each round the first decision that stands is final: a further decision
   of the round counts for nothing, and validation reports it, so neither the
   API nor a synced record changes it. A new round begins only by the flow's own
@@ -767,13 +784,25 @@ is followed by a decision step that decides from its outputs.
   waits on done again. A decision a review sent back never stood, and its
   decider decides again in the same round.
 - `review` is the review an agent's decision takes before it takes effect, as an
-  item's review is; findings send it back to its decider. A person's decision
-  takes effect when recorded.
+  item's review is: by a principal the run names for the review's role, or with
+  no role named a reviewer or operator, or one an assignment of the step's
+  review carries, who meets its independence, and never by any other reviewer;
+  findings send it back to its decider. A person's decision takes effect when
+  recorded.
 - `deadline` is what the step's timing deadline does when it passes before a
   decision: `default` takes the default path, which `goal step` records as a
   rule's decision is recorded, and no decision recorded after the deadline
   counts; `attention`, the default, asks the sponsor, and a decision recorded
-  after the deadline takes effect only once the sponsor answers.
+  after the deadline takes effect only once the sponsor answers, whatever path
+  it takes, a path back or a hold included. The contract refuses `default` on a
+  decision only a person makes, one with `person`, one `undelegable` or one in a
+  role the flow marks `person`: nothing records a person's decision but the
+  person, so its deadline only raises attention. A deadline's default counts
+  only when it is recorded at or after the deadline the position derives,
+  naming it, and no later than the clock that reads it; one dated before it, or
+  naming another, counts for nothing, so no default replaces a decision of the
+  role that stood by the deadline, and validation reports one recorded after a
+  decision of the step's current assignment that it names a deadline after.
 
 A taken path makes the steps it leads to eligible and turns the other paths'
 steps off, the steps of a branch a path not taken enters whatever the branch's
@@ -788,7 +817,12 @@ Choosing a path performs nothing reserved: a reserved step a path leads to
 still stops for the operator, with its exact command when it is next. No
 decision turns off a step an estate policy requires or a required reserved
 step: `goal decide` refuses such a path (`flow.decision-protected`), validation
-reports a recorded one (`result.decision-protected`), and the step stays on.
+reports a recorded one (`result.decision-protected`, or
+`observation.flow-decision-protected` for a rule's decision or a deadline's
+default), and the step stays on. Nothing refuses a rule's decision or a
+deadline's default when `goal step` records it, so the contract refuses a
+transition whose rule's path, or default a rule or a deadline may take, would
+turn off a required reserved step.
 Community takes the chosen path when `goal step` is called; the carrier that
 takes paths unattended in Standard and Pro is `GOAL-10` (0.9.6). A venture
 chooses the decider, where the flow allows, by the option `decider.<step>` in

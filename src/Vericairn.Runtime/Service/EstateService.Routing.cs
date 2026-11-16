@@ -427,7 +427,8 @@ public sealed partial class EstateService
     /// <summary>
     /// Records a rule's decision, or a missed deadline's default, as the run derives it (from 0.9.4, PROC-19; design/flow.md § 5): a
     /// flow-decision observation of the goal's exact revision naming the step, the path, the rule that matched and each record it read by id
-    /// and hash, signed by who takes the step. The position reads it from then on and never evaluates the rule again; nothing is dispatched.
+    /// and hash, signed by who takes the step. The position reads it from then on, its rules evaluated again only over the records it
+    /// names, so no later record changes it; nothing is dispatched.
     /// </summary>
     private GoalStepResponse RuleStep(EstateModel model, RecordEnvelope goal, Taken step, GoalStepRequest request)
     {

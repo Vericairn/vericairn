@@ -492,16 +492,33 @@ after an earlier decision of the same assignment that still stands in its round,
 not sent back by a review and not a hold that took effect; and evidence that is
 not an estate record at its recorded hash. It reports a decision whose paths
 would turn off a step an estate policy requires or a required reserved step
-(`result.decision-protected`); such a step stays on. Validation refuses a
-`flow-decision` observation whose goal is not a run, whose author does not take
-the run's steps, whose step's transition a rule does not decide in the run's
-configuration or that takes no default at a deadline, whose path is not the one
-its rule names, whose read records are not estate records at their hashes, whose
-`asOf` is later than it is recorded, or for a round whose rule decision is
-already recorded. An assignment of a decision step is refused where a rule
-decides it in the run, and an agent's where the decision is a person's. Which
-decision counts, its review before it takes effect and a path back past its
-limit are derived when the run is read, never stored. A reader of
+(`result.decision-protected`); such a step stays on. Under `rule-then-role` it
+also refuses a decision under an assignment made after a round began and before
+that round's rule decision was recorded, since a round in which a rule held is
+the rule's. Validation refuses a `flow-decision` observation whose goal is not a
+run, whose author does not take the run's steps, whose step's transition a rule
+does not decide in the run's configuration, whose `default` is recorded where a
+rule alone does not decide (under `rule-then-role` the role decides when no rule
+holds), whose `deadline` is recorded where a rule decides, the transition takes
+no default at a deadline, the run's timing sets no deadline or the decision is a
+person's, whose path is not the one its rule names, whose read records are not
+estate records at their hashes, whose `asOf` is later than it is recorded, or
+for a round whose rule decision is already recorded. Its rules are evaluated
+again as of `asOf` over only the records it read, each at its hash, with the
+as-of evaluation the position uses: validation refuses one whose rule does not
+hold there or after an earlier rule that holds, and a `default` when any rule
+holds, and it reports each record its rules count as of `asOf` that `read` leaves
+out. A predicate over a derived state reads that state as it is now. It reports a
+deadline's default naming a deadline by which a decision of the step's current
+assignment stood, and a rule's decision or deadline's default whose path would
+turn off a step an estate policy requires (`observation.flow-decision-protected`);
+such a step stays on. Whether a deadline had passed, and when a round began, are
+the run's position's to derive: it counts a deadline's default only when it is
+recorded at or after the deadline it derives and names it, and a rule's decision
+only when its `asOf` is its round's start. An assignment of a decision step is
+refused where a rule decides it in the run, and an agent's where the decision is
+a person's. Which decision counts, its review before it takes effect and a path
+back past its limit are derived when the run is read, never stored. A reader of
 format 3 that predates the field refuses a result that carries it as an unknown
 key, as any later format-3 field; a reader of it that cannot resolve the run's
 flow shows the result and reads the step undecided. `records describe result`

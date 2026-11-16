@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Templates;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Tests;
 
@@ -540,7 +541,7 @@ public class FlowDecisionTests
     public void ADecisionNeverTurnsOffARequiredReservedStepOrOneAPolicyRequires()
     {
         // Review finding 11: goal decide refuses such a path, naming the step; validation reports a recorded one; the step stays on.
-        using (var run = new FlowFixture(Gate(requiredPublish: true), rolesOf: f => Approvers(f, agent: false)))
+        using (var run = new FlowFixture(Gate(configurable: false, requiredPublish: true), rolesOf: f => Approvers(f, agent: false)))
         {
             AssertNoErrors(run);
             Draft(run);
@@ -578,6 +579,233 @@ public class FlowDecisionTests
         RecordEnvelope decided = Decide(run, run.Assign("gate", run.Estate.BuilderId), ["ship"], "An agent's choice.");
         Assert.Contains(Errors(run.Estate.Load(), decided), f => f.Code == "result.decision" && f.Message.Contains("marks the approver role a person's", StringComparison.Ordinal));
         Assert.NotEqual("done", run.Step("gate").State);
+    }
+
+    [Fact]
+    public void AnAgentsEarlyDeadlineDefaultOnALegalCommitmentCountsForNothing()
+    {
+        // Review round 3, reproduction 1: a decision never delegated is a person's, so no deadline takes its default; the contract
+        // refuses deadline: default on it, and an agent's deadline observation, recorded before any deadline passed, counts for nothing.
+        JsonObject refused = Gate(transition => { transition["undelegable"] = "legal-commitment"; transition["deadline"] = "default"; }, configurable: false);
+        Assert.Contains(TemplateDefinition.Validate(FlowFixture.Element(refused)), f => f.Severity == Severity.Error && f.Code == "flow.transition" && f.Message.Contains("never takes its default path at a deadline", StringComparison.Ordinal));
+
+        JsonObject flow = Gate(transition => { transition["undelegable"] = "legal-commitment"; transition["deadline"] = "attention"; transition["default"] = "drop"; }, configurable: false);
+        StepOf(flow, "gate")["when"] = new JsonObject { ["instant"] = true, ["deadline"] = "PT2H" };
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        LocalEngineering(run);
+        run.Estate.SetClock(Friday.AddSeconds(-1));
+        Draft(run);
+        run.Estate.SetClock(Friday.AddMinutes(20));
+        FlowPosition.StepInstance waiting = run.Step("gate");
+        RecordEnvelope early = run.Add("observation", FlowDecisions.RuleBody(waiting with { Decision = waiting.Decision! with { Paths = ["drop"], Rule = "deadline", At = Friday.AddMinutes(20), Reasons = "The deadline passed." } }),
+            builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), early), f => f.Code == "observation.flow-decision" && f.Message.Contains("a deadline never takes its default", StringComparison.Ordinal));
+        FlowPosition.StepInstance gate = Gate(run, Friday.AddMinutes(30));
+        Assert.Equal(("stopped", "person", "pending"), (gate.State, gate.Stop, gate.Decision!.State));
+        Assert.Equal("blocked", Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddMinutes(30)).Steps, s => s.Step.Key == "release").State);
+
+        // Past the deadline it still counts for nothing: the deadline raises attention, and the person decides.
+        FlowPosition.StepInstance missed = Gate(run, Friday.AddHours(3));
+        Assert.Equal(("stopped", "attention", "missed"), (missed.State, missed.Stop, missed.Attention!.Kind));
+    }
+
+    [Fact]
+    public void ARuleDecisionWhoseRuleDidNotHoldCountsForNothing()
+    {
+        // Review round 3, reproduction 2: rule 1 recorded when no rule held is refused and ignored: the rule is evaluated again as of the
+        // time the observation names, over the records it names, and the first that holds wins.
+        using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: true));
+        LocalEngineering(run);
+        Draft(run);
+        FlowPosition.StepInstance pending = run.Step("gate");
+        Assert.Equal(("next", "default"), (pending.State, pending.Decision!.Rule));
+        RecordEnvelope claimed = run.Add("observation", FlowDecisions.RuleBody(pending with { Decision = pending.Decision with { Paths = ["ship"], Rule = "1" } }), builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), claimed), f => f.Code == "observation.flow-decision" && f.Message.Contains("rule 1 does not hold when its rules are evaluated again", StringComparison.Ordinal));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("next", "pending", "default"), (gate.State, gate.Decision!.State, gate.Decision.Rule));
+        Assert.Equal("blocked", run.Step("release").State);
+
+        // A later rule claimed while an earlier one held is refused too: the first rule that holds decides.
+        run.Marked("APPROVED");
+        run.Marked("REWORK");
+        Draft(run);
+        FlowPosition.StepInstance again = run.Step("gate");
+        Assert.Equal("1", again.Decision!.Rule);
+        RecordEnvelope second = run.Add("observation", FlowDecisions.RuleBody(again with { Decision = again.Decision with { Paths = ["rework"], Rule = "2" } }), builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), second), f => f.Code == "observation.flow-decision" && f.Message.Contains("rule 1 holds over the records it names", StringComparison.Ordinal));
+        Assert.Equal(("next", "1"), (run.Step("gate").State, run.Step("gate").Decision!.Rule));
+
+        // Leaving a record out of those it read is reported, and a rule's decision reading the records as of another time than its
+        // round's start counts for nothing.
+        JsonObject omitting = FlowDecisions.RuleBody(again with { Decision = again.Decision with { Paths = ["rework"], Rule = "2", Evidence = again.Decision.Evidence.Where(e => GoalPredicates.FieldString(run.Estate.Load().ById[e.Id], "key") != "APPROVED").ToList() } });
+        RecordEnvelope omitted = run.Add("observation", omitting, builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), omitted), f => f.Code == "observation.flow-decision" && f.Message.Contains("does not name it among the records it read", StringComparison.Ordinal));
+        run.Estate.SetClock(again.Decision.Since.AddHours(1));
+        RecordEnvelope later = run.Add("observation", FlowDecisions.RuleBody(again with { Decision = again.Decision with { At = again.Decision.Since.AddMinutes(30) } }), builder: true, subject: run.Goal.Reference);
+        Assert.Contains(run.Step("gate").Reasons, r => r.Contains($"observation {later.Id}", StringComparison.Ordinal) && r.Contains("not when this round began", StringComparison.Ordinal));
+        RecordRule(run);
+        Assert.Equal(("done", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Paths[0]));
+    }
+
+    [Fact]
+    public void ARulesDefaultNeverOverridesAPersonUnderARuleThenTheRole()
+    {
+        // Review round 3, reproduction 2: under a rule then the role, no rule's default is taken; when no rule holds the role decides.
+        using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false));
+        LocalEngineering(run);
+        DateTimeOffset start = run.Estate.Clock;
+        Draft(run);
+        FlowPosition.StepInstance pending = run.Step("gate");
+        Assert.Equal(("stopped", "person"), (pending.State, pending.Stop));
+        RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+        run.Estate.SetClock(start.AddMinutes(10));
+        Decide(run, assignment, ["ship"], "Ship it.");
+
+        // An agent's default, dated before the person's decision, is refused and changes nothing.
+        run.Estate.SetClock(start.AddMinutes(5));
+        RecordEnvelope fallback = run.Add("observation", FlowDecisions.RuleBody(pending with { Decision = pending.Decision! with { Paths = ["drop"], Rule = "default", At = pending.Decision.Since } }), builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), fallback), f => f.Code == "observation.flow-decision" && f.Message.Contains("no rule's default is taken", StringComparison.Ordinal));
+        run.Estate.SetClock(start.AddMinutes(20));
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("done", "person", "ship"), (gate.State, gate.Decision!.Decider, gate.Decision.Paths[0]));
+        Assert.Equal("next", run.Step("release").State);
+    }
+
+    [Fact]
+    public void ARoundTakesOneKindOfDecider()
+    {
+        // Review round 3, finding 3: under a rule then the role, a round in which a rule held when it began is the rule's; a person's
+        // decision recorded in it counts for nothing, and validation reports it once the rule's decision is on record.
+        using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule-then-role" }, rolesOf: f => Approvers(f, agent: false));
+        run.Marked("APPROVED");
+        Draft(run);
+        Assert.Equal(("next", "rule"), (run.Step("gate").State, run.Step("gate").Decision!.Decider));
+        RecordEnvelope dropped = Decide(run, run.Assign("gate", run.Estate.OperatorId), ["drop"], "Drop it anyway.");
+        FlowPosition.StepInstance gate = run.Step("gate");
+        Assert.Equal(("next", "rule", "pending"), (gate.State, gate.Decision!.Decider, gate.Decision.State));
+        Assert.Contains(gate.Reasons, r => r.Contains($"result {dropped.Id}", StringComparison.Ordinal) && r.Contains("the round is its rule's", StringComparison.Ordinal));
+        RecordRule(run);
+        Assert.Contains(Errors(run.Estate.Load(), dropped), f => f.Code == "result.decision" && f.Message.Contains("a round its rule decides takes no principal's decision", StringComparison.Ordinal));
+        Assert.Equal(("done", "ship"), (run.Step("gate").State, run.Step("gate").Decision!.Paths[0]));
+        Assert.Equal("next", run.Step("release").State);
+    }
+
+    [Fact]
+    public void ABackdatedDeadlineDefaultNeverReplacesAPersonsDecision()
+    {
+        // Review round 3, reproduction 3: a deadline's default counts only when recorded at or after the deadline the position derives,
+        // so one dated before a person's ship, or before the deadline, never replaces it.
+        JsonObject flow = Gate(transition => transition["deadline"] = "default");
+        StepOf(flow, "gate")["when"] = new JsonObject { ["instant"] = true, ["deadline"] = "PT2H" };
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        AssertNoErrors(run);
+        LocalEngineering(run);
+        run.Estate.SetClock(Friday.AddSeconds(-1));
+        Draft(run);
+        FlowPosition.StepInstance pending = Gate(run, Friday.AddMinutes(5));
+        RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+        run.Estate.SetClock(Friday.AddMinutes(30));
+        Decide(run, assignment, ["ship"], "Ship it.");
+
+        run.Estate.SetClock(Friday.AddMinutes(10));
+        run.Add("observation", FlowDecisions.RuleBody(pending with { Decision = pending.Decision! with { Paths = ["drop"], Rule = "deadline", At = Friday.AddMinutes(10) } }), builder: true, subject: run.Goal.Reference);
+        FlowPosition.StepInstance gate = Gate(run, Friday.AddHours(3));
+        Assert.Equal(("done", "person", "ship"), (gate.State, gate.Decision!.Decider, gate.Decision.Paths[0]));
+        Assert.Equal("next", Assert.Single(FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddHours(3)).Steps, s => s.Step.Key == "release").State);
+
+        // One dated after the person's decision, naming a deadline the decision came before, validation reports as well.
+        run.Estate.SetClock(Friday.AddHours(1));
+        RecordEnvelope after = run.Add("observation", FlowDecisions.RuleBody(pending with { Decision = pending.Decision! with { Paths = ["drop"], Rule = "deadline", At = Friday.AddHours(1) } }), builder: true, subject: run.Goal.Reference);
+        Assert.Contains(Errors(run.Estate.Load(), after), f => f.Code == "observation.flow-decision" && f.Message.Contains("no default replaces the decision of the step's role", StringComparison.Ordinal));
+        Assert.Equal(("done", "ship"), (Gate(run, Friday.AddHours(3)).State, Gate(run, Friday.AddHours(3)).Decision!.Paths[0]));
+    }
+
+    [Fact]
+    public void ALatePathBackUnderAnAttentionDeadlineWaitsForTheSponsor()
+    {
+        // Review round 3, finding 4: a path back recorded after a deadline under its attention rule returns the run only once the sponsor
+        // answers, like any other path.
+        JsonObject flow = Gate(transition => transition["deadline"] = "attention");
+        StepOf(flow, "gate")["when"] = new JsonObject { ["instant"] = true, ["deadline"] = "PT2H" };
+        using var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: false));
+        run.Estate.SetClock(Friday.AddSeconds(-1));
+        Draft(run);
+        FlowPosition.StepInstance missed = Gate(run, Friday.AddHours(3));
+        RecordEnvelope assignment = run.Assign("gate", run.Estate.OperatorId);
+        run.Estate.SetClock(Friday.AddHours(3).AddMinutes(1));
+        Decide(run, assignment, ["rework"], "Late: rework the lyrics.");
+        FlowPosition.Position waiting = FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddHours(3).AddMinutes(10));
+        FlowPosition.StepInstance gate = waiting.Steps.Single(s => s.Step.Key == "gate");
+        Assert.Equal(("stopped", "attention", "attention"), (gate.State, gate.Stop, gate.Decision!.State));
+        Assert.Equal("done", waiting.Steps.Single(s => s.Step.Key == "draft").State);
+
+        Answer(run, missed.Attention!.Trigger, Friday.AddHours(3).AddMinutes(20));
+        FlowPosition.Position answered = FlowPosition.Derive(run.Estate.Load(), run.Goal, Friday.AddHours(4));
+        Assert.Equal(("next", true), (answered.Steps.Single(s => s.Step.Key == "draft").State, answered.Steps.Single(s => s.Step.Key == "draft").Rerun));
+        Assert.Equal("blocked", answered.Steps.Single(s => s.Step.Key == "gate").State);
+    }
+
+    [Fact]
+    public void ADecisionsReviewCountsOnlyFromAPrincipalTheRunNamesForTheReviewsRole()
+    {
+        // Review round 3, finding 5: one definition of took effect: an agent's path back, passed by a reviewer the run does not name for
+        // the review's role, neither takes effect nor returns the run.
+        JsonObject flow = Gate(transition => transition["review"] = new JsonObject { ["independence"] = "independent", ["role"] = "writer" }, configurable: false);
+        using (var run = new FlowFixture(flow, rolesOf: f => Approvers(f, agent: true)))
+        {
+            AssertNoErrors(run);
+            Draft(run);
+            RecordEnvelope rework = Decide(run, run.Assign("gate", run.Estate.BuilderId), ["rework"], "Rework the lyrics.");
+            run.Review(rework);
+            Assert.Equal("in-review", run.Step("gate").State);
+            Assert.Equal("done", run.Step("draft").State);
+        }
+
+        using (var run = new FlowFixture(flow, rolesOf: f => new JsonArray(FlowFixture.Role("writer", f.Estate.BuilderId, f.Estate.OperatorId), FlowFixture.Role("approver", f.Estate.BuilderId))))
+        {
+            Draft(run);
+            RecordEnvelope rework = Decide(run, run.Assign("gate", run.Estate.BuilderId), ["rework"], "Rework the lyrics.");
+            run.Review(rework);
+            Assert.Equal(("next", true), (run.Step("draft").State, run.Step("draft").Rerun));
+            Assert.Equal("blocked", run.Step("gate").State);
+        }
+    }
+
+    [Fact]
+    public void TheContractRefusesADeadlinesDefaultForAPersonsDecisionAndARulesPathAwayFromARequiredReservedStep()
+    {
+        // Review round 3, findings 2 and 6: no deadline takes the default of a decision only a person makes, and no path a rule or a
+        // deadline may take turns off a required reserved step.
+        foreach (Action<JsonObject> person in new Action<JsonObject>[] { f => StepOf(f, "gate")["transition"]!["person"] = true, f => f["roles"]![1]!["holder"] = "person" })
+        {
+            JsonObject flow = Gate(transition => transition["deadline"] = "default", configurable: false);
+            person(flow);
+            Assert.Contains(TemplateDefinition.Validate(FlowFixture.Element(flow)), f => f.Severity == Severity.Error && f.Code == "flow.transition" && f.Message.Contains("never takes its default path at a deadline", StringComparison.Ordinal));
+        }
+
+        JsonObject ruled = Gate(requiredPublish: true);
+        Assert.Contains(TemplateDefinition.Validate(FlowFixture.Element(ruled)), f => f.Severity == Severity.Error && f.Code == "flow.transition" && f.Message.Contains("would turn off step 'publish', a required reserved step", StringComparison.Ordinal));
+        JsonObject defaulted = Gate(transition => transition["deadline"] = "default", configurable: false, requiredPublish: true);
+        Assert.Contains(TemplateDefinition.Validate(FlowFixture.Element(defaulted)), f => f.Severity == Severity.Error && f.Message.Contains("would turn off step 'publish'", StringComparison.Ordinal));
+        Assert.DoesNotContain(TemplateDefinition.Validate(FlowFixture.Element(Gate(configurable: false, requiredPublish: true))), f => f.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public void ARulesDecisionThatWouldTurnOffAStepAPolicyRequiresIsReportedAndTheStepStaysOn()
+    {
+        // Review round 3, finding 6: a rule's end path never turns off a step an estate policy requires.
+        using var run = new FlowFixture(Gate(), options: new JsonObject { ["decider.gate"] = "rule" }, rolesOf: f => Approvers(f, agent: false));
+        JsonObject body = run.Policies.PolicyBody("gate-publish", duty: false);
+        body["rules"] = new JsonArray(new JsonObject { ["key"] = "publish", ["kind"] = FlowRuns.PolicyKind, ["version"] = 1, ["parameters"] = new JsonObject { ["flow"] = "example/gate", ["steps"] = new JsonArray("publish") } });
+        run.Policies.Policy(body);
+        Draft(run);
+        Assert.Equal(["drop"], run.Step("gate").Decision!.Paths);
+        RecordEnvelope ruled = RecordRule(run);
+        Assert.Contains(Errors(run.Estate.Load(), ruled), f => f.Code == "observation.flow-decision-protected" && f.Message.Contains("would turn off step publish", StringComparison.Ordinal));
+        Assert.Equal(("done", "off"), (run.Step("gate").State, run.Step("release").State));
+        Assert.NotEqual("off", run.Step("publish").State);
+        Assert.False(run.Position().Complete);
     }
 
     public static TheoryData<string, string> Refusals => new()
@@ -774,6 +1002,12 @@ public class FlowDecisionTests
         answer["answers"] = new JsonArray(ask.Id);
         run.Add("decision", answer);
     }
+
+    /// <summary>The builder agent granted local-engineering, so that it takes the run's steps and may record a rule's decision.</summary>
+    private static void LocalEngineering(FlowFixture run) => run.Add("authority", new JsonObject
+    {
+        ["grantee"] = run.Estate.BuilderId, ["scope"] = new JsonArray(Scopes.LocalEngineering), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(), ["basis"] = run.Policies.Decision.Id,
+    });
 
     private static RecordEnvelope Defaults(FlowFixture run, JsonObject options) => run.Add("template-defaults", new JsonObject
     {

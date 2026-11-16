@@ -220,7 +220,7 @@ public static partial class FlowContract
             {
                 if (declared[i].Key is string key)
                 {
-                    shapes.Add(TransitionShape(declared[i].Body.Element, key, i == 0 ? null : declared[i - 1].Key));
+                    shapes.Add(TransitionShape(declared[i].Body.Element, key, i == 0 ? null : declared[i - 1].Key, roles));
                 }
             }
 
@@ -237,10 +237,12 @@ public static partial class FlowContract
 
     /// <summary>
     /// One declared step of a flow's own content as the transitions' structure reads it (from 0.9.4, PROC-19): what it waits on by after,
-    /// or the step before it, and by its inputs and timing, and its transition.
+    /// or the step before it, and by its inputs and timing, its transition, whether it is required and the reserved act it is, and whether
+    /// the flow marks its role a person's.
     /// </summary>
-    internal static FlowTransition.StepShape TransitionShape(JsonElement step, string key, string? previous)
+    internal static FlowTransition.StepShape TransitionShape(JsonElement step, string key, string? previous, IReadOnlyDictionary<string, string> roles)
     {
+        ArgumentNullException.ThrowIfNull(roles);
         List<string> after = step.TryGetProperty("after", out JsonElement named) && named.ValueKind == JsonValueKind.Array
             ? TJson.Strings(step, "after").ToList()
             : previous is null ? [] : [previous];
@@ -250,7 +252,8 @@ public static partial class FlowContract
             also.Add(from);
         }
 
-        return new FlowTransition.StepShape(key, TJson.Text(step, "kind"), after, also, TJson.Text(step, "each"), FlowTransition.Read(TJson.Object(step, "transition"), key));
+        return new FlowTransition.StepShape(key, TJson.Text(step, "kind"), after, also, TJson.Text(step, "each"), FlowTransition.Read(TJson.Object(step, "transition"), key),
+            !TJson.Flag(step, "optional"), TJson.Text(step, "reserved"), TJson.Text(step, "role") is string role && roles.GetValueOrDefault(role) == "person");
     }
 
     /// <summary>From 0.9.4 (PROC-19), why a failure route or a branch never returns the run to a decision step that decides the run's path.</summary>

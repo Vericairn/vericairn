@@ -350,11 +350,89 @@ public sealed record FlowTransition(IReadOnlyList<FlowPath> Paths, string? Defau
             transition.Error("flow.transition", "deadline", "A deadline that takes the default path needs the transition's default.");
         }
 
+        if (deadline == "default" && personOnly)
+        {
+            transition.Error("flow.transition", "deadline", PersonDeadline);
+        }
+
         transition.NoOtherKeys();
     }
 
-    /// <summary>One step as the transitions' structure reads it: its key and kind, what it waits on by after and by its inputs and timing, and its transition.</summary>
-    internal sealed record StepShape(string Key, string? Kind, IReadOnlyList<string> After, IReadOnlyList<string> Also, string? Each, FlowTransition? Transition);
+    /// <summary>Why a deadline never takes the default path of a decision only a person makes: nothing records a person's decision but the person.</summary>
+    internal const string PersonDeadline = "A decision only a person makes, one the flow requires of a person, one the operating-modes design never delegates or one in a role the flow marks a person's, never takes its default path at a deadline: a deadline that passes before it raises attention (deadline: attention), and the person still decides.";
+
+    /// <summary>
+    /// One step as the transitions' structure reads it: its key and kind, what it waits on by after and by its inputs and timing, its
+    /// transition, whether it is required and the reserved act it is, and whether the flow marks its role a person's.
+    /// </summary>
+    internal sealed record StepShape(string Key, string? Kind, IReadOnlyList<string> After, IReadOnlyList<string> Also, string? Each, FlowTransition? Transition,
+        bool Required = true, string? Reserved = null, bool PersonRole = false);
+
+    /// <summary>
+    /// The steps a decision taking these paths would turn off (from 0.9.4, PROC-19): none for a path back, after which the step decides
+    /// again; for a path that ends the run, every other step that is not done, or, given no position, every step the deciding step does
+    /// not wait on; otherwise each step a path not taken leads to, each step of a branch a path not taken enters, and every later step that
+    /// waits only on steps turned off. In the flow's order.
+    /// </summary>
+    internal static List<string> TurnedOff(IReadOnlyList<StepShape> steps, IReadOnlyDictionary<string, IReadOnlyList<string>> branches, string deciding, IReadOnlyList<string> paths, Func<string, bool>? notDone)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(branches);
+        ArgumentNullException.ThrowIfNull(paths);
+        var index = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < steps.Count; i++)
+        {
+            index.TryAdd(steps[i].Key, i);
+        }
+
+        if (!index.TryGetValue(deciding, out int at) || steps[at].Transition is not FlowTransition transition)
+        {
+            return [];
+        }
+
+        int Index(string key) => index.TryGetValue(key, out int found) ? found : int.MaxValue;
+        List<FlowPath> taken = paths.Select(transition.Path).OfType<FlowPath>().ToList();
+        if (taken.Any(p => IsBack(p, Index, deciding)))
+        {
+            // A path back turns nothing off: the step decides again once the run comes back to it.
+            return [];
+        }
+
+        if (taken.Any(p => p.Ends))
+        {
+            return steps.Where(s => s.Key != deciding && (notDone is null ? !Waits(steps, index, deciding, s.Key) : notDone(s.Key))).Select(s => s.Key).ToList();
+        }
+
+        var off = new HashSet<string>(StringComparer.Ordinal);
+        foreach (FlowPath path in transition.Paths.Where(p => !taken.Contains(p)))
+        {
+            if (path.Step is string target && Index(target) > at && Index(target) != int.MaxValue && taken.All(t => t.Step != target))
+            {
+                off.Add(target);
+            }
+
+            if (path.Branch is string branch && taken.All(t => t.Branch != branch) && branches.TryGetValue(branch, out IReadOnlyList<string>? entered))
+            {
+                off.UnionWith(entered);
+            }
+        }
+
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (StepShape later in steps.Skip(at + 1).Where(s => !off.Contains(s.Key)))
+            {
+                List<string> waits = later.After.Concat(later.Also).Distinct(StringComparer.Ordinal).ToList();
+                if (waits.Count > 0 && waits.All(off.Contains))
+                {
+                    grew |= off.Add(later.Key);
+                }
+            }
+        }
+
+        return steps.Where(s => off.Contains(s.Key)).Select(s => s.Key).ToList();
+    }
 
     /// <summary>
     /// How every transition's paths relate to the flow's steps and branches: a path forward leads to a later step that waits on the
@@ -456,6 +534,28 @@ public sealed record FlowTransition(IReadOnlyList<FlowPath> Paths, string? Defau
                 if (!forward.Contains(waiting.Key, StringComparer.Ordinal) && waiting.Key != transition.Join)
                 {
                     found.Add((step.Key, $"Step '{waiting.Key}' waits on '{step.Key}', whose transition decides what runs after it, and is none of its paths' steps nor its join: name it as a path, or have it wait on a path's step."));
+                }
+            }
+
+            // A deadline never takes the default of a decision in a role the flow marks a person's.
+            if (transition.Deadline == "default" && step.PersonRole && !transition.PersonOnly)
+            {
+                found.Add((step.Key, $"Step '{step.Key}' is in a role the flow marks a person's. " + PersonDeadline));
+            }
+
+            // Nothing refuses a rule's decision, or a deadline's default, when it is recorded: a path one may take never turns off a
+            // required reserved step, which no decision turns off.
+            var ruled = transition.Rules.Select(r => r.Path).ToList();
+            if (transition.Default is string fallback && (transition.Deciders.Any(d => d != "role") || transition.Deadline == "default"))
+            {
+                ruled.Add(fallback);
+            }
+
+            foreach (string path in ruled.Distinct(StringComparer.Ordinal))
+            {
+                foreach (string off in TurnedOff(steps, branches, step.Key, [path], null).Where(k => index.TryGetValue(k, out int o) && steps[o] is { Required: true, Reserved: not null }))
+                {
+                    found.Add((step.Key, $"Path {path} of step '{step.Key}', which {(transition.Rules.Any(r => r.Path == path) ? "its rule" : "its default")} may take, would turn off step '{off}', a required reserved step ({steps[index[off]].Reserved}): no decision turns it off, and nothing refuses a rule's decision or a deadline's default when it is recorded, so no path one may take leads away from it."));
                 }
             }
 

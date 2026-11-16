@@ -248,6 +248,20 @@ public sealed class FlowDefinition
     /// <summary>The position of a step in the flow's order.</summary>
     public int IndexOf(string key) => Steps.Select((s, i) => (s, i)).FirstOrDefault(x => x.s.Key == key, (null!, -1)).Item2;
 
+    /// <summary>The steps as the transitions' structure reads them (from 0.9.4, PROC-19), in the flow's order.</summary>
+    internal IReadOnlyList<FlowTransition.StepShape> TransitionShapes => shapes ??= Shapes(Steps, Roles);
+
+    /// <summary>The branches' steps by branch name, as the transitions' structure reads them.</summary>
+    internal IReadOnlyDictionary<string, IReadOnlyList<string>> BranchSteps => branchSteps ??= Branches.GroupBy(b => b.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Steps, StringComparer.Ordinal);
+
+    private IReadOnlyList<FlowTransition.StepShape>? shapes;
+    private IReadOnlyDictionary<string, IReadOnlyList<string>>? branchSteps;
+
+    /// <summary>Steps as the transitions' structure reads them: what each waits on by after and by its inputs and timing, its transition, whether it is required, its reserved act and whether its role is a person's.</summary>
+    private static List<FlowTransition.StepShape> Shapes(IReadOnlyList<FlowStep> steps, IReadOnlyList<FlowRole> roles) =>
+        steps.Select(s => new FlowTransition.StepShape(s.Key, s.Kind, s.After, s.Inputs.Select(i => i.Step).Append(FlowTiming.WaitedOf(s.When)).OfType<string>().ToList(), s.Each, s.Transition,
+            s.Required, s.Reserved, roles.FirstOrDefault(r => r.Id == s.Role)?.Holder == "person")).ToList();
+
     /// <summary>Resolves an exact pin from the estate's catalogue, with every base it extends; refuses content that is unavailable, changed or invalid.</summary>
     public static FlowDefinition Resolve(EstateModel model, TemplatePin pin)
     {
@@ -518,8 +532,7 @@ public sealed class FlowDefinition
         }
 
         // From 0.9.4 (PROC-19) each decision transition's paths lead to steps and branches of the merged flow as their kind requires.
-        List<FlowTransition.StepShape> shapes = steps.Select(s => new FlowTransition.StepShape(s.Key, s.Kind, s.After,
-            s.Inputs.Select(i => i.Step).Append(FlowTiming.WaitedOf(s.When)).OfType<string>().ToList(), s.Each, s.Transition)).ToList();
+        List<FlowTransition.StepShape> shapes = Shapes(steps, roles);
         errors.AddRange(FlowTransition.Structure(shapes, branches.GroupBy(b => b.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Steps, StringComparer.Ordinal)).Select(e => "flow.transition: " + e.Message));
 
         if (errors.Count > 0)

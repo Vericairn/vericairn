@@ -17,9 +17,10 @@ namespace Vericairn.Records.Estate;
 /// its current assignment of the step, whose decision field names the path or paths taken, the reasons and the evidence by hash, signed by
 /// the decider's own device. A rule's decision, and the default a deadline takes, is recorded by the principal who takes the run's step, as
 /// the runtime evaluated it: an observation of kind flow-decision naming the path, the rule that matched and the records it read by id and
-/// hash; the position reads it and never evaluates the rule again. The first decision of a round that takes effect is final: a further one
-/// in the same round counts for nothing and validation reports it, and a new round starts only by the flow's own course, a path back, a
-/// hold or what the step waits on done again. A step's decision is distinct from the estate's decision records, which stay the operator's,
+/// hash; the position and validation evaluate its rules again only over the records it names, as of the time it names, so no later record
+/// changes it. Each round takes one kind of decider, a rule's or a role's. The first decision of a round that takes effect is final: a
+/// further one in the same round counts for nothing and validation reports it, and a new round starts only by the flow's own course, a
+/// path back, a hold or what the step waits on done again. A step's decision is distinct from the estate's decision records, which stay the operator's,
 /// and choosing a path performs nothing reserved and never turns off a step an estate policy requires or a required reserved step.
 /// </summary>
 public static partial class FlowDecisions
@@ -170,85 +171,14 @@ public static partial class FlowDecisions
     /// The steps a decision taking these paths would turn off (from 0.9.4, PROC-19): none for a path back, after which the step decides
     /// again; for a path that ends the run, every step that is not done, or, given no position, every step the deciding step does not wait
     /// on; otherwise each step a path not taken leads to, each step of a branch a path not taken enters, and every step that waits only on
-    /// steps turned off.
+    /// steps turned off. The flow's contract reads the same, so that no path a rule or a deadline may take turns off a required reserved step.
     /// </summary>
     public static IReadOnlyList<string> WouldTurnOff(FlowDefinition flow, FlowStep step, IReadOnlyList<string> paths, Func<string, bool>? notDone = null)
     {
         ArgumentNullException.ThrowIfNull(flow);
         ArgumentNullException.ThrowIfNull(step);
         ArgumentNullException.ThrowIfNull(paths);
-        if (step.Transition is not FlowTransition transition)
-        {
-            return [];
-        }
-
-        List<FlowPath> taken = paths.Select(transition.Path).OfType<FlowPath>().ToList();
-        if (taken.Any(p => FlowTransition.IsBack(p, flow.IndexOf, step.Key)))
-        {
-            // A path back turns nothing off: the step decides again once the run comes back to it.
-            return [];
-        }
-
-        if (taken.Any(p => p.Ends))
-        {
-            HashSet<string> waited = Ancestors(flow, step.Key);
-            return flow.Steps.Where(s => s.Key != step.Key && (notDone is null ? !waited.Contains(s.Key) : notDone(s.Key))).Select(s => s.Key).ToList();
-        }
-
-        var off = new HashSet<string>(StringComparer.Ordinal);
-        int at = flow.IndexOf(step.Key);
-        foreach (FlowPath path in transition.Paths.Where(p => !taken.Contains(p)))
-        {
-            if (path.Step is string target && flow.IndexOf(target) > at && taken.All(t => t.Step != target))
-            {
-                off.Add(target);
-            }
-
-            if (path.Branch is string branch && taken.All(t => t.Branch != branch) && flow.Branches.FirstOrDefault(b => b.Name == branch) is FlowBranch entered)
-            {
-                off.UnionWith(entered.Steps);
-            }
-        }
-
-        bool grew = true;
-        while (grew)
-        {
-            grew = false;
-            foreach (FlowStep later in flow.Steps.Skip(at + 1).Where(s => !off.Contains(s.Key)))
-            {
-                List<string> waits = later.After.Concat(later.Inputs.Select(i => i.Step).OfType<string>()).Distinct(StringComparer.Ordinal).ToList();
-                if (waits.Count > 0 && waits.All(off.Contains))
-                {
-                    grew |= off.Add(later.Key);
-                }
-            }
-        }
-
-        return flow.Steps.Where(s => off.Contains(s.Key)).Select(s => s.Key).ToList();
-    }
-
-    /// <summary>The steps a step waits on, directly or through the steps they wait on, by after, inputs or timing.</summary>
-    internal static HashSet<string> Ancestors(FlowDefinition flow, string key)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<string>([key]);
-        while (pending.Count > 0)
-        {
-            if (flow.Step(pending.Pop()) is not FlowStep step)
-            {
-                continue;
-            }
-
-            foreach (string waited in step.After.Concat(step.Inputs.Select(i => i.Step).OfType<string>()).Append(FlowTiming.WaitedOf(step.When)).OfType<string>())
-            {
-                if (seen.Add(waited))
-                {
-                    pending.Push(waited);
-                }
-            }
-        }
-
-        return seen;
+        return FlowTransition.TurnedOff(flow.TransitionShapes, flow.BranchSteps, step.Key, paths, notDone);
     }
 
     /// <summary>
@@ -306,9 +236,10 @@ public static partial class FlowDecisions
     /// <summary>
     /// The decisions of a step that stand, oldest first, one at most per round of each assignment: a principal's decision a review sent back
     /// before the next was recorded never stands, a decision recorded while an earlier one of the same assignment stood counts for nothing,
-    /// and a hold that took effect opens a new round; and the first rule decision recorded for each round, by the time it read the records.
+    /// and a hold that took effect opens a new round; and every rule decision, and deadline's default, on record. Which of them counts in
+    /// its round is the position's to judge: the first of the kind the round takes, a rule's or a role's, that holds there.
     /// </summary>
-    public static List<Recorded> Standing(EstateModel model, FlowDefinition flow, FlowStep step, IReadOnlyList<Recorded> principals, IReadOnlyList<Recorded> rules)
+    internal static List<Recorded> Standing(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, IReadOnlyList<Recorded> principals, IReadOnlyList<Recorded> rules)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(principals);
@@ -316,14 +247,14 @@ public static partial class FlowDecisions
         var kept = new List<Recorded>();
         foreach (IGrouping<string, Recorded> held in principals.GroupBy(d => model.Chain(d.Assignment!)[0], StringComparer.Ordinal))
         {
-            Recorded? open = Open(model, flow, step, held.ToList(), null, kept);
+            Recorded? open = Open(model, goal, flow, step, held.ToList(), null, kept);
             if (open is not null)
             {
                 kept.Add(open);
             }
         }
 
-        kept.AddRange(rules.GroupBy(r => EstateModel.BodyString(r.Record, "asOf") ?? r.Record.At, StringComparer.Ordinal).Select(g => g.First()));
+        kept.AddRange(rules);
         return kept.OrderBy(d => d.Record.At, StringComparer.Ordinal).ThenBy(d => d.Record.Id, StringComparer.Ordinal).ToList();
     }
 
@@ -331,18 +262,18 @@ public static partial class FlowDecisions
     /// Walks one assignment's decisions, oldest first, as of a record when one is given: each hold that took effect is kept, and the decision
     /// still standing at the end is returned, the one a further decision recorded then would conflict with; null when none stands.
     /// </summary>
-    private static Recorded? Open(EstateModel model, FlowDefinition flow, FlowStep step, List<Recorded> decisions, RecordEnvelope? before, List<Recorded>? holds)
+    private static Recorded? Open(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, List<Recorded> decisions, RecordEnvelope? before, List<Recorded>? holds)
     {
         Recorded? current = null;
         foreach (Recorded decision in decisions)
         {
             if (current is not null)
             {
-                if (SentBack(model, current, decision.Record))
+                if (Judge(model, goal, flow, step, current, decision.Record).SentBack is not null)
                 {
                     current = null;
                 }
-                else if (IsHold(step, current) && TookEffect(model, flow, step, current, decision.Record))
+                else if (IsHold(step, current) && TookEffect(model, goal, flow, step, current, decision.Record))
                 {
                     holds?.Add(current);
                     current = null;
@@ -356,7 +287,7 @@ public static partial class FlowDecisions
             current = decision;
         }
 
-        if (current is not null && (SentBack(model, current, before) || (before is not null && IsHold(step, current) && TookEffect(model, flow, step, current, before))))
+        if (current is not null && (Judge(model, goal, flow, step, current, before).SentBack is not null || (before is not null && IsHold(step, current) && TookEffect(model, goal, flow, step, current, before))))
         {
             return null;
         }
@@ -368,38 +299,42 @@ public static partial class FlowDecisions
     private static bool IsHold(FlowStep step, Recorded decision) =>
         decision.Paths.Select(p => step.Transition?.Path(p)).Any(p => p?.Step == step.Key);
 
-    /// <summary>True when a review of a principal's decision found what to change in it or failed it, recorded before a record when one is given.</summary>
-    private static bool SentBack(EstateModel model, Recorded decision, RecordEnvelope? before) =>
-        !decision.Ruled && Reviews(model, decision, before).LastOrDefault() is RecordEnvelope latest && EstateModel.BodyString(latest, "outcome") is "findings" or "fail";
+    /// <summary>
+    /// True when a decision took effect, as of a record when one is given (from 0.9.4, PROC-19): a rule's, a person's, and an agent's that
+    /// takes no review or whose latest admitted review of its exact hash passes. One definition with the position's: the review is admitted
+    /// as the position admits it (<see cref="FlowPosition.DecisionReview"/>), by a principal the run names for the review's role, never by
+    /// any reviewer but its decider.
+    /// </summary>
+    internal static bool TookEffect(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, Recorded decision, RecordEnvelope? before = null) =>
+        Judge(model, goal, flow, step, decision, before).TookEffect;
 
     /// <summary>
-    /// True when a decision took effect, as of a record when one is given: a rule's, a person's, and an agent's that takes no review or whose
-    /// latest review of its exact hash, by a principal other than its decider who meets the review's independence, passes.
+    /// How an agent's decision stands under its transition's review, as of a record when one is given: whether it took effect, the latest
+    /// admitted review of its exact hash when it passes, and the latest when it found what to change or failed, which sent it back. A rule's
+    /// and a person's decision take effect as recorded, and one whose transition takes no review.
     /// </summary>
-    public static bool TookEffect(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision, RecordEnvelope? before = null)
+    internal static (bool TookEffect, RecordEnvelope? Passed, RecordEnvelope? SentBack) Judge(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, Recorded decision, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
         ArgumentNullException.ThrowIfNull(flow);
         ArgumentNullException.ThrowIfNull(step);
         ArgumentNullException.ThrowIfNull(decision);
         if (decision.Ruled || GoalRules.IsPerson(model, decision.By) || step.Transition?.Review is not { Independence: not "none" } required)
         {
-            return true;
+            return (true, null, null);
         }
 
-        RecordEnvelope? latest = Reviews(model, decision, before).LastOrDefault(r => required.Independence switch
-        {
-            "person" => GoalRules.IsPerson(model, r.By),
-            "other-harness" => FlowRuns.Harness(model, r.By) is string harness && !string.Equals(harness, FlowRuns.Harness(model, decision.By), StringComparison.OrdinalIgnoreCase),
-            _ => true,
-        });
-        return latest is not null && EstateModel.BodyString(latest, "outcome") == "pass";
+        RecordEnvelope? latest = FlowPosition.DecisionReview(model, goal, flow, required, decision.Record, decision.By, ReviewAssignments(model, goal, step), before);
+        string? outcome = latest is null ? null : EstateModel.BodyString(latest, "outcome");
+        return (outcome == "pass", outcome == "pass" ? latest : null, outcome is "findings" or "fail" ? latest : null);
     }
 
-    /// <summary>The reviews of a principal's decision at its exact hash by a principal other than its decider, oldest first, before a record when one is given.</summary>
-    private static List<RecordEnvelope> Reviews(EstateModel model, Recorded decision, RecordEnvelope? before) =>
-        model.About(decision.Record.Id, "review").Where(r => model.IsCurrent(r) && r.Subject?.Hash == decision.Record.ComputedHash && r.By != decision.By && (before is null || GoalRules.Before(r, before)))
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+    /// <summary>The assignments of a run's step's review before hand-off, which name the principals who review its decision.</summary>
+    private static List<RecordEnvelope> ReviewAssignments(EstateModel model, RecordEnvelope goal, FlowStep step) =>
+        FlowRuns.Work(model, model.Latest(goal)) is RecordEnvelope work
+            ? Routing.Assignments(model, work).Where(a => FlowRuns.StepOf(a) is { Review: true } named && named.Key == step.Key && named.Instance is null).ToList()
+            : [];
 
     /// <summary>
     /// Validates a result's decision field (record format 3): the paths, the reasons and the evidence, each an exact record by hash; and,
@@ -492,9 +427,24 @@ public static partial class FlowDecisions
         // The first decision of a round that stands is final: a further one counts for nothing.
         List<Recorded> earlier = PrincipalDecisions(context.Model, flow, step, assignments)
             .Where(d => context.Model.Chain(context.Model.Latest(d.Assignment!)).Contains(assignment!.Id) && GoalRules.Before(d.Record, context.Record) && d.Record.Id != context.Record.Id).ToList();
-        if (Open(context.Model, flow, step, earlier, context.Record, null) is Recorded standing)
+        if (Open(context.Model, run, flow, step, earlier, context.Record, null) is Recorded standing)
         {
             context.Error("result.decision", $"Step {step.Key}'s decision in this round is result {standing.Record.Id}, path {string.Join(", ", standing.Paths)}, which stands and is final: a further decision counts for nothing until the run's own course opens a new round, a path back, a hold or what the step waits on done again.");
+        }
+
+        // One decider kind a round: where a rule matched when the round began, the round is the rule's, and no principal decides it. An
+        // assignment made after a round began and before its rule's decision was recorded is of that round, whatever the times the
+        // decision and the rule's state.
+        if (decider == "rule-then-role")
+        {
+            RecordEnvelope root = context.Model.ById.GetValueOrDefault(context.Model.Chain(assignment!)[0]) ?? assignment!;
+            foreach (Recorded ruled in RuleDecisions(context.Model, run, step.Key).Where(r => r.Rule is not ("default" or "deadline") && r.Record.Id != context.Record.Id))
+            {
+                if (AsOf(ruled.Record) is DateTimeOffset began && began <= root.AtTime && root.AtTime <= ruled.At && Refusals(context.Model, run, flow, step, decider, ruled).Count == 0)
+                {
+                    context.Error("result.decision", $"Step {step.Key}'s round from {RecordParser.FormatTimestamp(began)} is its rule's: rule {ruled.Rule} held as the records stood then, and observation {ruled.Record.Id} records its path {string.Join(", ", ruled.Paths)}. Assignment {root.Id} was made in that round, and a round its rule decides takes no principal's decision, whenever it is dated.");
+                }
+            }
         }
 
         // A decision never turns off a step an estate policy requires or a required reserved step.
@@ -508,9 +458,12 @@ public static partial class FlowDecisions
 
     /// <summary>
     /// Validates a flow-decision observation (record format 3), a rule's decision or a deadline's default as the runtime evaluated it: its
-    /// goal is a run, its author takes the run's steps, its step's transition is decided by a rule in the run's configuration, or takes its
-    /// default at a deadline, the path is the one the rule names, each record it read exists at its hash, and no other rule decision was
-    /// recorded for the same round.
+    /// goal is a run and each record it read exists at its hash, and every refusal the position also reads (<see cref="Refusals"/>): its
+    /// author takes the run's steps, its kind is one its step's transition takes in the run's configuration, its path is the one its rule
+    /// names, and its rules, evaluated again as of its time over the records it names, hold as it says. Validation also reports a record its
+    /// rules read that it leaves out, a second rule decision for the same round, and a deadline's default where a decision stood by the
+    /// deadline it names. Whether a deadline had passed, and when a round began, the run's position derives; it ignores a decision that does
+    /// not hold there.
     /// </summary>
     internal static void ValidateObservation(ValidationContext context, BodyReader? facts, string? asOf)
     {
@@ -521,7 +474,7 @@ public static partial class FlowDecisions
         }
 
         string? key = facts.Text("step", true, 100, Patterns.Slug, "a step key");
-        IReadOnlyList<string> paths = facts.StringArray("paths", true, allowEmpty: false, maxItemLength: 60, itemPattern: Patterns.Slug, patternHint: "a path name") ?? [];
+        facts.StringArray("paths", true, allowEmpty: false, maxItemLength: 60, itemPattern: Patterns.Slug, patternHint: "a path name");
         string? rule = facts.Text("rule", true, 20, RulePattern(), "a rule's number from 1, default or deadline");
         IReadOnlyList<string> read = facts.StringArray("read", true, allowEmpty: true, maxItemLength: 300) ?? [];
         foreach (string entry in read)
@@ -543,56 +496,255 @@ public static partial class FlowDecisions
             return;
         }
 
-        if (!Routing.MayTakeStep(context.Model, goal, context.Record.By, context.Record.AtTime, context.Record))
+        if (FlowRuns.Resolve(context.Model, goal).Flow is not FlowDefinition flow || key is null || rule is null || Of(context.Record) is not Recorded decision)
         {
-            context.Error("observation.flow-decision", $"{Routing.NameOf(context.Model, context.Record.By)} does not take steps of goal {goal.Id}, so does not record its rule's decision: an operator, the goal's sponsor when a person, or a principal holding local-engineering does.");
-        }
+            if (!Routing.MayTakeStep(context.Model, goal, context.Record.By, context.Record.AtTime, context.Record))
+            {
+                context.Error("observation.flow-decision", NotTaker(context.Model, goal, context.Record.By));
+            }
 
-        if (FlowRuns.Resolve(context.Model, goal).Flow is not FlowDefinition flow || key is null || rule is null)
-        {
             return;
         }
 
-        if (flow.Step(key) is not { Transition: FlowTransition transition } step)
+        if (flow.Step(key) is not { Transition: FlowTransition } step)
         {
             context.Error("observation.flow-decision", $"Flow {flow.Pin.Id} has no decision step '{key}'.");
             return;
         }
 
         string decider = FlowRuns.Configure(context.Model, goal, flow, context.Record).Decider(step);
+        foreach (string refusal in Refusals(context.Model, goal, flow, step, decider, decision))
+        {
+            context.Error("observation.flow-decision", refusal);
+        }
+
+        // A rule's decision, or a deadline's default, never turns off a step an estate policy requires: the step stays on, and validation
+        // reports the decision. A required reserved step no path a rule or a deadline may take turns off, which the flow's contract holds.
+        IReadOnlyDictionary<string, string> kept = Protected(context.Model, flow, FlowRuns.Product(context.Model, goal, flow), context.Record);
+        foreach (string off in WouldTurnOff(flow, step, decision.Paths).Where(kept.ContainsKey))
+        {
+            context.Error("observation.flow-decision-protected", $"Step {key}'s {(rule == "deadline" ? "deadline's default" : "rule's decision")} takes {string.Join(", ", decision.Paths)}, which would turn off step {off}: {kept[off]}, and a decision never turns it off; it stays on.");
+        }
+
+        if (asOf is null || !RecordParser.IsTimestamp(asOf))
+        {
+            return;
+        }
+
+        // Its rules read every record they count as of then: one left out could make a rule hold, or keep an earlier one from holding.
+        foreach (RecordEnvelope omitted in Omitted(context.Model, flow, step, decision))
+        {
+            facts.Error("observation.flow-decision", "read", $"Its rules count {omitted.Type} {omitted.Id}, recorded at {omitted.At}, among the records as they stood at {asOf}, and it does not name it among the records it read.");
+        }
+
+        // A round's rule decision is final: a later one is for a round that began after the earlier decision was recorded.
+        DateTimeOffset began = Parse(asOf);
+        IReadOnlyList<string> chain = context.Model.Chain(context.Model.Latest(goal));
+        if (rule != "deadline" && context.Model.Current("observation").FirstOrDefault(o => o.Id != context.Record.Id && GoalRules.Before(o, context.Record) && EstateModel.BodyString(o, "kind") == ObservationKind
+            && o.Subject is not null && chain.Contains(o.Subject.Id) && TJson.Text(TJson.Object(o.Body, "facts"), "step") == key && o.AtTime >= began
+            && TJson.Text(TJson.Object(o.Body, "facts"), "rule") != "deadline") is RecordEnvelope earlier)
+        {
+            context.Error("observation.flow-decision", $"Step {key}'s rule decision for the round from {asOf} is already recorded in observation {earlier.Id}, and it is final.");
+        }
+
+        // A deadline takes its default only when no decision stands by it: a principal's decision of the round, under the step's current
+        // assignment and recorded by the deadline this observation names, is the round's, and no default replaces it.
+        if (rule == "deadline" && FlowRuns.Work(context.Model, context.Model.Latest(goal)) is RecordEnvelope order)
+        {
+            FlowRuns.StepRef named = new(step.Key, null);
+            List<RecordEnvelope> assignments = Routing.Assignments(context.Model, order, named).Where(a => GoalRules.Before(a, context.Record)).ToList();
+            RecordEnvelope? holding = assignments.OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+            List<Recorded> held = holding is null ? [] : PrincipalDecisions(context.Model, flow, step, assignments)
+                .Where(d => context.Model.Chain(context.Model.Latest(d.Assignment!)).Contains(holding.Id) && d.At <= began).ToList();
+            if (holding is not null && Open(context.Model, goal, flow, step, held, context.Record, null) is Recorded stood && !IsHold(step, stood)
+                && !stood.Paths.Select(step.Transition!.Path).OfType<FlowPath>().Any(p => FlowTransition.IsBack(p, flow.IndexOf, step.Key)))
+            {
+                context.Error("observation.flow-decision", $"Step {key}'s decision by {Routing.NameOf(context.Model, stood.By)} in result {stood.Record.Id}, path {string.Join(", ", stood.Paths)}, stood by {asOf}, the deadline this observation names: a deadline takes its default only when no decision stands by it, and no default replaces the decision of the step's role.");
+            }
+        }
+    }
+
+    /// <summary>Why a principal does not record a run's rule decision: it does not take the run's steps.</summary>
+    private static string NotTaker(EstateModel model, RecordEnvelope goal, string by) =>
+        $"{Routing.NameOf(model, by)} does not take steps of goal {goal.Id}, so does not record its rule's decision: an operator, the goal's sponsor when a person, or a principal holding local-engineering does.";
+
+    /// <summary>
+    /// Why a flow-decision observation never counts, whatever the run's position (from 0.9.4, PROC-19), as the records alone show; the
+    /// position reads the same, and validation reports each. Its author takes the run's steps. Its kind is one its step's transition takes
+    /// in the run's configuration: a rule's number under a rule or a rule then the role; a rule's default under a rule alone, since under a
+    /// rule then the role the role decides when no rule holds; a deadline's default only where a role decides, the transition takes its
+    /// default at a deadline, the run's timing for the step sets a deadline, and no person alone decides, since nothing records a person's
+    /// decision but the person. Its path is the one its rule names. It names no later time than it was recorded. And its rules, evaluated
+    /// again as of that time over only the records it names at their hashes, with the as-of evaluation the position uses, hold as it says:
+    /// its rule holds and no earlier rule does, since the first that holds wins, or for its default, none holds. A predicate over a derived
+    /// state reads that state as it is now. Empty when it may count.
+    /// </summary>
+    internal static List<string> Refusals(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowStep step, string decider, Recorded decision)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(decision);
+        var refusals = new List<string>();
+        if (!Routing.MayTakeStep(model, goal, decision.By, decision.At, decision.Record))
+        {
+            refusals.Add(NotTaker(model, goal, decision.By));
+        }
+
+        if (step.Transition is not FlowTransition transition || decision.Rule is not string rule)
+        {
+            refusals.Add($"Step {step.Key} declares no decision transition.");
+            return refusals;
+        }
+
+        bool person = PersonDecides(flow, step);
         string? expected = rule switch
         {
-            "default" => decider != "role" ? transition.Default : null,
-            "deadline" => transition.Deadline == "default" && decider != "rule" ? transition.Default : null,
+            "default" => decider == "rule" ? transition.Default : null,
+            "deadline" => decider != "rule" && transition.Deadline == "default" && !person ? transition.Default : null,
             _ => decider != "role" && int.TryParse(rule, NumberStyles.None, CultureInfo.InvariantCulture, out int number) && number >= 1 && number <= transition.Rules.Count ? transition.Rules[number - 1].Path : null,
         };
         if (expected is null)
         {
-            context.Error("observation.flow-decision", rule == "deadline"
-                ? $"Step {key}'s transition takes no default at a deadline in this run, or a rule decides it."
-                : $"Step {key}'s transition is not decided by a rule in this run, or has no rule {rule}.");
+            refusals.Add(rule switch
+            {
+                "deadline" when person && decider != "rule" => $"Step {step.Key}'s decision is a person's{(transition.Undelegable is string act ? $", an act the operating-modes design never delegates ({act})" : transition.PersonOnly ? ", as the flow requires" : $", since the flow marks the {step.Role} role a person's")}: a deadline never takes its default, it only raises attention, and the person still decides.",
+                "deadline" => $"Step {step.Key}'s transition takes no default at a deadline in this run, or a rule decides it.",
+                "default" when decider == "rule-then-role" => $"Step {step.Key}'s transition is decided by a rule then its role in this run: when no rule holds the role decides, and no rule's default is taken.",
+                "default" => $"Step {step.Key}'s transition is not decided by a rule alone in this run, so it takes no rule's default.",
+                _ => $"Step {step.Key}'s transition is not decided by a rule in this run, or has no rule {rule}.",
+            });
         }
-        else if (paths.Count != 1 || paths[0] != expected)
+        else if (decision.Paths.Count != 1 || decision.Paths[0] != expected)
         {
-            context.Error("observation.flow-decision", $"Step {key}'s {(rule is "default" or "deadline" ? "default" : "rule " + rule)} takes path {expected}, not {string.Join(", ", paths)}.");
+            refusals.Add($"Step {step.Key}'s {(rule is "default" or "deadline" ? "default" : "rule " + rule)} takes path {expected}, not {string.Join(", ", decision.Paths)}.");
         }
 
-        // A round's rule decision is final: a later one is for a round that began after the earlier decision was recorded.
-        IReadOnlyList<string> chain = context.Model.Chain(context.Model.Latest(goal));
-        if (asOf is not null && RecordParser.IsTimestamp(asOf))
+        if (rule == "deadline" && expected is not null && FlowRuns.Configure(model, goal, flow, decision.Record).Timing(step).Deadline is null)
         {
-            DateTimeOffset began = DateTimeOffset.Parse(asOf, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
-            if (began > context.Record.AtTime)
+            refusals.Add($"Step {step.Key}'s timing in this run sets no deadline, so no deadline takes its default.");
+        }
+
+        DateTimeOffset? asOf = AsOf(decision.Record);
+        if (asOf is null)
+        {
+            refusals.Add("A flow decision names the time it read the records as of, its asOf.");
+        }
+        else if (asOf > decision.At)
+        {
+            refusals.Add(rule == "deadline"
+                ? "A deadline's default is recorded once its deadline passed: its asOf, the deadline, is no later than it is recorded."
+                : "A rule's decision reads the records as they stood when its round began, which is no later than it is recorded.");
+        }
+
+        if (expected is not null && Unsound(model, flow, step, decision) is string unsound)
+        {
+            refusals.Add($"Step {step.Key}'s {(rule == "default" ? "default" : "rule " + rule)} does not hold when its rules are evaluated again: {unsound}.");
+        }
+
+        return refusals;
+    }
+
+    /// <summary>The time a flow-decision observation read the records as of, its asOf; null when it names none.</summary>
+    internal static DateTimeOffset? AsOf(RecordEnvelope record) =>
+        EstateModel.BodyString(record, "asOf") is string stated && RecordParser.IsTimestamp(stated) ? Parse(stated) : null;
+
+    private static DateTimeOffset Parse(string timestamp) => DateTimeOffset.Parse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+
+    /// <summary>
+    /// Why a recorded rule decision does not hold when its rules are evaluated again (from 0.9.4, PROC-19): as of the time it names, over
+    /// only the records it names at their hashes, its rule must hold and no earlier rule may, or for its default no rule may. A rule naming
+    /// an input an earlier step's output carries is not evaluated again: only the run's position binds it. Null when it holds.
+    /// </summary>
+    private static string? Unsound(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision)
+    {
+        if (Evaluated(model, flow, step, decision) is not { } evaluated)
+        {
+            return null;
+        }
+
+        int named = decision.Rule == "default" ? 0 : int.Parse(decision.Rule!, NumberStyles.None, CultureInfo.InvariantCulture);
+        List<RecordEnvelope> within = decision.Evidence.Where(r => r.Hash is not null && model.ById.TryGetValue(r.Id, out RecordEnvelope? found) && found.Type == r.Type && found.ComputedHash == r.Hash)
+            .Select(r => model.ById[r.Id]).ToList();
+        string stated = RecordParser.FormatTimestamp(evaluated.AsOf);
+        foreach ((int number, List<JsonElement> predicates) in evaluated.Rules)
+        {
+            List<GoalPredicates.Verdict> verdicts = predicates.Select(p => GoalPredicates.EvaluatePredicate(model, p, evaluated.AsOf, within)).ToList();
+            bool holds = verdicts.All(v => v.Value == "met");
+            string which = number.ToString(CultureInfo.InvariantCulture);
+            if (number != named && holds)
             {
-                context.Error("observation.flow-decision", "A rule's decision reads the records as they stood when its round began, which is no later than it is recorded.");
+                return $"rule {which} holds over the records it names as they stood at {stated}, and the first rule that holds decides{(named == 0 ? ", so no default is taken" : string.Empty)}";
             }
 
-            if (context.Model.Current("observation").FirstOrDefault(o => o.Id != context.Record.Id && GoalRules.Before(o, context.Record) && EstateModel.BodyString(o, "kind") == ObservationKind
-                && o.Subject is not null && chain.Contains(o.Subject.Id) && TJson.Text(TJson.Object(o.Body, "facts"), "step") == key && o.AtTime >= began) is RecordEnvelope earlier)
+            if (number == named && !holds)
             {
-                context.Error("observation.flow-decision", $"Step {key}'s rule decision for the round from {asOf} is already recorded in observation {earlier.Id}, and it is final.");
+                GoalPredicates.Verdict first = verdicts.First(v => v.Value != "met");
+                return $"rule {which} is {first.Value} over the records it names as they stood at {stated}: {first.Reason}";
             }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The records a recorded rule decision's rules count among as of its time that it does not name (from 0.9.4, PROC-19): current, made
+    /// by then and recorded before it, each a record one of its rules up to the one it names reads.
+    /// </summary>
+    private static List<RecordEnvelope> Omitted(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision)
+    {
+        if (Evaluated(model, flow, step, decision) is not { } evaluated)
+        {
+            return [];
+        }
+
+        var named = decision.Evidence.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        return evaluated.Rules.SelectMany(r => r.Predicates).SelectMany(p => GoalPredicates.Candidates(model, p, evaluated.AsOf))
+            .Where(r => !named.Contains(r.Id) && GoalRules.Before(r, decision.Record)).DistinctBy(r => r.Id)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// The rules a recorded rule decision is evaluated again by, each numbered from 1 with its predicates bound to the run's revision it is
+    /// about: up to the rule it names, or every rule for its default, without a rule that names a binding only the run's position gives;
+    /// and the time it read the records as of. Null for a deadline's default or a decision that names no rule of its step.
+    /// </summary>
+    private static (DateTimeOffset AsOf, List<(int Number, List<JsonElement> Predicates)> Rules)? Evaluated(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision)
+    {
+        if (step.Transition is not FlowTransition transition || decision.Rule is not string rule || rule == "deadline" || AsOf(decision.Record) is not DateTimeOffset asOf
+            || decision.Record.Subject is null || !model.ById.TryGetValue(decision.Record.Subject.Id, out RecordEnvelope? goal))
+        {
+            return null;
+        }
+
+        int last = rule == "default" ? transition.Rules.Count : int.TryParse(rule, NumberStyles.None, CultureInfo.InvariantCulture, out int number) && number <= transition.Rules.Count ? number : 0;
+        if (last == 0)
+        {
+            return null;
+        }
+
+        var bindings = new Dictionary<string, string>(FlowRuns.Bindings(model, goal, flow, null), StringComparer.Ordinal);
+        JsonElement subject = TJson.Object(FlowRuns.Plan(goal), "subject");
+        foreach (FlowInput input in step.Inputs.Where(i => i.From == "subject" && i.Field is not null))
+        {
+            if (TJson.Text(TJson.Object(subject, input.Field!), "id") is string id)
+            {
+                bindings["input." + input.Name + ".id"] = id;
+            }
+        }
+
+        var rules = new List<(int, List<JsonElement>)>();
+        for (int index = 0; index < last; index++)
+        {
+            List<JsonElement> bound = transition.Rules[index].When.Select(p => FlowRuns.Bind(p, bindings)).ToList();
+            if (bound.All(b => !b.GetRawText().Contains("{unbound ", StringComparison.Ordinal)))
+            {
+                rules.Add((index + 1, bound));
+            }
+        }
+
+        return (asOf, rules);
     }
 
     [GeneratedRegex(@"^([1-9][0-9]{0,3}|default|deadline)$")]
@@ -616,7 +768,7 @@ public static partial class FlowDecisions
                 ["step"] = instance.Step.Key,
                 ["paths"] = new JsonArray(decision.Paths.Select(p => (JsonNode)p).ToArray()),
                 ["rule"] = rule,
-                ["read"] = new JsonArray(decision.Evidence.Where(e => e.Hash is not null).Take(200).Select(e => (JsonNode)ReadText(e)).ToArray()),
+                ["read"] = new JsonArray(decision.Evidence.Where(e => e.Hash is not null).Select(e => (JsonNode)ReadText(e)).ToArray()),
             },
             ["limitations"] = new JsonArray("A decision only makes the steps its path leads to eligible; it performs nothing reserved, and the records read after the round began never change it."),
         };
