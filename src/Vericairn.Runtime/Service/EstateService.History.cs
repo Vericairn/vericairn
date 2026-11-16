@@ -410,7 +410,18 @@ public sealed partial class EstateService
         {
             RemoveObjects(closing);
             Problem refused = problem ?? new Problem("refused", "Nothing was written.", []);
-            return WriteOutcome.Fail(refused with { Message = $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written." });
+            // When the batch would make records fail that do not fail without it, other than its own, the act is refused for them, and the
+            // message says so rather than describe the batch's closing as what failed; otherwise it says what closing the act needs.
+            static string PathOf(string location) => location.Split('#')[0];
+            var failing = copy.Findings.Where(f => f.Severity == Severity.Error).Select(f => PathOf(f.Location)).ToHashSet(StringComparer.Ordinal);
+            bool elsewhere = refused.Findings.Any(f => f.Severity == "error" && PathOf(f.Location) is var path && path != closing.Record.RelativePath &&
+                path != record.RelativePath && !failing.Contains(path));
+            return WriteOutcome.Fail(refused with
+            {
+                Message = !elsewhere
+                    ? $"{refused.Message.TrimEnd()} {Needs(closes)} The act and its closing were judged together, and neither was written."
+                    : $"{refused.Message.TrimEnd()} The {Act(closes.Kind)} and its closing were judged together and would leave the records the findings name failing, so neither was written.",
+            });
         }
 
         var checkpoint = new TriggeredCheckpoint(ClosingTrigger, written[0], null);

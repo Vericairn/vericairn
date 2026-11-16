@@ -747,18 +747,22 @@ acts and no act follows yet:
 
 **Role closings (0.9.4).** From 0.9.4 (ID-14), a `role` closing closes a person: from it on,
 a record the person wrote, signed or unsigned, that the closing or a checkpoint it follows does
-not witness and no anchor lists counts for nothing (`history.after-closing`) when it is dated at
-or before the removal the closing precedes, whatever device signed it, so a former operator
-cannot write records dated into the time the role stood. That removal is the earliest revision
-of the person's line after the revisions closed that drops a role from the one named, written
-by the closing's author and signed by a device that signed the closing; until one follows, the
-closing refuses every record of the person it does not witness, and the check warns
-`history.closing-unfollowed`. A record dated after the removal reads the person's roles as the
-removal left them. What the person gave as operator before the closing, the principal and
-authority revisions it witnesses, keeps counting for anchoring, acknowledging a removal, rooting
-an adoption and the closings judged after it, as written, where the person held the role when
-writing it. A removal in an adopted estate that no role closing names is the warning
-`history.closing-missing`, and the runtime refuses to write one without its closing.
+not witness and no anchor lists counts for nothing (`history.after-closing`), whatever date it
+states and whatever device signed it, in every read: a decision, a grant, a revision of their own
+or another principal's line, an admission or a closing. Such a record never takes another
+person's role or voids another's closing: the role closings that act are read when every other
+closing is judged, those before them in checkpoint order included, though never against
+themselves. Until the removal follows, the check warns `history.closing-unfollowed`. What the
+person gave as operator before the closing, the principal and authority revisions and the
+closings it witnesses, keeps counting for anchoring, acknowledging a removal, rooting an
+adoption and the closings, as written, where the person held the role when writing it; so a
+closing keeps the force it had when it was signed when its author is later removed with their own
+role closing. A removal in an adopted estate that no role closing names is the warning
+`history.closing-missing`, and the runtime refuses to write one without its closing; such a
+removal, and only such a one, still withdraws its author's closings from these acts. Since a role
+closing is signed by the root operator or another standing operator, in an adopted estate a person
+holding `administer` but not the operator role no longer removes a role from a person's record:
+the closing is `history.closing-author` and the runtime refuses the batch.
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
@@ -910,8 +914,9 @@ operator's role again gives back the closings of those whose role or `administer
 operator's appointments or grants, and the operator's own earlier closings only when it is dated
 after the removal and before them. Either holds only until more such records are written, among
 them a removal on top of the role written again or forking the line below it. The root
-operator's own closings cannot be reopened this way, and role
-closings are planned. Removing an operator's role takes, for these acts, what that
+operator's own closings cannot be reopened this way, and from 0.9.4 a role closing ends it for
+everything the person writes after the closing ([above](#closings-and-authority-at-a-records-time-092)).
+Removing an operator's role without a role closing takes, for these acts, what that
 person appointed, granted and closed; those the person appointed keep the role in ordinary
 reads, and a removal they write still counts for these acts, until the root operator writes
 their appointments again or closes their devices, after which what they sign with a closed

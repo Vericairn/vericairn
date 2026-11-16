@@ -1479,12 +1479,15 @@ internal sealed partial class EstateTrust
     }
 
     /// <summary>
-    /// Whether a principal holds the operator role for the strongest acts, signing a device's or a grant's closing: the root operator
-    /// always; otherwise a person who stands now and whose line, as those acts read it against the closings given, gives the role at the
-    /// record's time (<see cref="ReadStrictly"/>), so a later revision taking it away withdraws the power for every checkpoint.
+    /// Whether a principal holds the operator role for the strongest acts, signing a closing or placing a record before a removal: the root
+    /// operator always; otherwise a person whose line, as those acts read it against the closings given, gives the role at the record's
+    /// time (<see cref="ReadStrictly"/>) and who stands now, so a later revision taking it away withdraws the power for every checkpoint;
+    /// or, from 0.9.4 (ID-14), who no longer stands but whose role closing among the closings given witnesses the record, which keeps the
+    /// force it had when it was signed (<see cref="Kept"/>), as it keeps what the person appointed and granted.
     /// </summary>
-    private bool StandingOperator(string principal, string at, IReadOnlyList<Closing> bound) =>
-        principal == RootOperator && RootOperator is not null || ReadStrictly(bound).Standing.Contains(principal) && StrictHead(principal, at, bound) is { Operator: true };
+    private bool StandingOperator(string principal, string at, IReadOnlyList<Closing> bound, RecordEnvelope? record = null) =>
+        principal == RootOperator && RootOperator is not null ||
+        (ReadStrictly(bound).Standing.Contains(principal) || record is not null && record.By == principal && Kept(record, bound)) && StrictHead(principal, at, bound) is { Operator: true };
 
     /// <summary>
     /// Whether a record's author is a person holding administer for the strongest acts: anchoring, acknowledging a removal, rooting an
@@ -1906,12 +1909,12 @@ internal sealed partial class EstateTrust
     private const string RoleMarker = "role-closing ";
 
     /// <summary>
-    /// Whether the strongest acts keep a principal or grant revision as its author wrote it although the author no longer stands (ID-14;
-    /// design/signed-history.md § 8): a role closing among the closings given closed the author's role and witnesses the revision. So
-    /// what a person gave as operator before their role was closed, the appointments and grants the closing witnesses, keeps counting
-    /// for anchoring, acknowledging removals, rooting an adoption and the closings judged after the role closing, provided the person held
-    /// the role when they wrote it, as those acts read the person's line; what they write afterwards, dated into the time the role stood,
-    /// the closing refuses.
+    /// Whether the strongest acts keep a principal or grant revision, or a closing or checkpoint, as its author wrote it although the author
+    /// no longer stands (ID-14; design/signed-history.md § 8): a role closing among the closings given closed the author's role and
+    /// witnesses the record. So what a person gave as operator before their role was closed, the appointments, grants and closings the
+    /// closing witnesses, keeps counting for anchoring, acknowledging removals, rooting an adoption and the closings, provided the person
+    /// held the role when they wrote it, as those acts read the person's line; whatever they write afterwards, at any date, the closing
+    /// refuses.
     /// </summary>
     private bool Kept(RecordEnvelope revision, IReadOnlyList<Closing> bound) =>
         bound.Any(c => c.Kind == "role" && c.Identity == revision.By && Witnesses(c, revision));
@@ -2250,7 +2253,7 @@ internal sealed partial class EstateTrust
         IReadOnlyList<string> carrying = History.Listings.GetValueOrDefault(loss.Id) ?? [];
         return listing.SelectMany(Descendants).Distinct(StringComparer.Ordinal).Any(id => !carrying.Contains(id) &&
             model.ById.TryGetValue(id, out RecordEnvelope? checkpoint) && string.CompareOrdinal(checkpoint.At, loss.At) <= 0 &&
-            carrying.All(c => Ancestry(c).Contains(id)) && StandingOperator(checkpoint.By, checkpoint.At, Acting));
+            carrying.All(c => Ancestry(c).Contains(id)) && StandingOperator(checkpoint.By, checkpoint.At, Acting, checkpoint));
 
         // A counting checkpoint and every counting checkpoint that follows it, through hashes that match.
         HashSet<string> Descendants(string checkpoint)

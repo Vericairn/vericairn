@@ -12,10 +12,10 @@ namespace Vericairn.Records.Tests;
 
 /// <summary>
 /// Role closings (ID-14; design/signed-history.md § 8): removing a role from a person's principal record writes a closing for that
-/// person, signed by the root operator or another standing operator. From it on, what the person writes dated into the time the role
-/// stood counts only when the closing or a checkpoint it follows witnesses it, whatever its date, and is history.after-closing
-/// otherwise; what the person gave as operator before the closing, the appointments and grants it witnesses, keeps counting for the
-/// strongest acts. Estates that have not adopted are unchanged.
+/// person, signed by the root operator or another standing operator. From it on, anything the person writes counts only when the closing
+/// or a checkpoint it follows witnesses it, whatever its date, and is history.after-closing otherwise, in every read and for every
+/// closing; what the person gave as operator before the closing, the appointments, grants and closings it witnesses, keeps counting for
+/// the strongest acts, whoever is removed later. Estates that have not adopted are unchanged.
 /// </summary>
 public sealed class RoleClosingTests
 {
@@ -97,7 +97,6 @@ public sealed class RoleClosingTests
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings.Where(x => x.Severity == Severity.Error)));
         Closing acting = Assert.Single(model.Trust.Closings);
         Assert.Equal(("role", e.P.Id, e.P.Id), (acting.Kind, acting.Target, acting.Identity));
-        Assert.Equal(removal.At, acting.Until);
         Assert.DoesNotContain(model.Findings, x => x.Code is "history.closing-unfollowed" or "history.closing-missing");
         Assert.True(model.Counts(before));
         Assert.False(model.HasRole(e.P.Id, Roles.Operator));
@@ -125,14 +124,19 @@ public sealed class RoleClosingTests
         Assert.True(model.Counts(model.ById[before.Id]));
         Assert.Contains(EstateStatus.HistoryProblems(model), x => x.Code == "history.after-closing" && x.Location.StartsWith(decision.ExpectedPath, StringComparison.Ordinal));
 
-        // A record of P's dated at the removal is refused too; one dated after it reads P's roles as the removal left them, and counts.
+        // Records of P's dated at the removal, after it and long after it are refused the same way: whatever its date.
         f.Estate.SetClock(removal.AtTime.AddSeconds(-1));
         RecordEnvelope atRemoval = f.Estate.Add("work-order", e.P.Id, HistoryFixture.Order("RCL-1", "At the removal"), signer: e.PSigner);
         RecordEnvelope later = f.Estate.Add("work-order", e.P.Id, HistoryFixture.Order("RCL-2", "After the removal"), signer: e.PSigner);
+        f.Estate.SetClock(removal.AtTime.AddDays(40));
+        RecordEnvelope muchLater = f.Estate.Add("decision", e.P.Id, Decision(e.P.Id, "Long after the removal"), signer: e.PSigner);
         model = f.Load();
         Assert.Equal(removal.At, atRemoval.At);
-        Assert.False(model.Counts(model.ById[atRemoval.Id]));
-        Assert.True(model.Counts(model.ById[later.Id]), string.Join('\n', model.Findings.Where(x => x.Location.StartsWith(later.ExpectedPath, StringComparison.Ordinal))));
+        foreach (RecordEnvelope refused in new[] { atRemoval, later, muchLater })
+        {
+            Assert.False(model.Counts(model.ById[refused.Id]));
+            AfterClosing(model, refused);
+        }
 
         // The root operator anchors one after reading it; it then counts, and the others stay refused.
         f.Checkpoint(anchored: [decision]);
@@ -202,41 +206,82 @@ public sealed class RoleClosingTests
     }
 
     [Fact]
-    public void AClosingWhoseRemovalHasNotFollowedRefusesEveryLaterRecordOfThePerson()
+    public void AClosingRefusesThePersonsLaterRecordsWhetherOrNotItsRemovalHasFollowed()
     {
         using var e = new Estate();
         HistoryFixture f = e.F;
         RecordEnvelope closing = f.Close("role", e.P.Id);
         RecordEnvelope after = f.Estate.Add("work-order", e.P.Id, HistoryFixture.Order("RCL-3", "After the closing, no removal yet"), signer: e.PSigner);
         EstateModel model = f.Load();
-        Closing acting = Assert.Single(model.Trust.Closings);
-        Assert.Null(acting.Until);
+        Assert.Single(model.Trust.Closings);
         Assert.False(model.Counts(after));
         Assert.Contains(model.Findings, x => x.Code == "history.closing-unfollowed" && x.Location.StartsWith(closing.ExpectedPath, StringComparison.Ordinal));
 
-        // The removal, by the same device that signed the closing, bounds it.
-        RecordEnvelope removal = f.Estate.Add("principal", f.Estate.OperatorId, Person("P", "reviewer"), supersedes: e.P.Id, signer: f.OperatorSigner);
+        // The removal follows it, and a record of P's after the removal is refused like the one before it.
+        f.Estate.Add("principal", f.Estate.OperatorId, Person("P", "reviewer"), supersedes: e.P.Id, signer: f.OperatorSigner);
         RecordEnvelope later = f.Estate.Add("work-order", e.P.Id, HistoryFixture.Order("RCL-4", "After the removal"), signer: e.PSigner);
         model = f.Load();
-        Assert.Equal(removal.At, Assert.Single(model.Trust.Closings).Until);
         Assert.DoesNotContain(model.Findings, x => x.Code == "history.closing-unfollowed");
         Assert.False(model.Counts(model.ById[after.Id]));
-        Assert.True(model.Counts(model.ById[later.Id]));
+        Assert.False(model.Counts(model.ById[later.Id]));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ARemovedPersonsRevisionNeitherTakesAnotherOperatorsRoleNorVoidsTheirClosing(bool backdated)
+    {
+        // O1, an operator the root operator appointed, closes a device. The root operator then closes and removes P's role; P's still
+        // admitted device signs a revision of O1's line taking the operator role away, dated after the removal or back into P's time as
+        // operator. In every read it counts for nothing: O1 keeps the role, and O1's earlier closing, judged before P's role closing in
+        // checkpoint order, still acts.
+        using var e = new Estate();
+        HistoryFixture f = e.F;
+        RecordEnvelope o1 = f.Estate.Add("principal", f.Estate.OperatorId, Person("O1", "operator"), signer: f.OperatorSigner);
+        (RecordEnvelope o1Device, _) = f.Admitted(o1.Id, "O1's device");
+        RecordEnvelope target = f.Device(f.Estate.OperatorId, "A device O1 closes");
+        RecordEnvelope o1Closing = f.Close("device", target.Id, o1.Id, f.Signer(o1Device));
+        RecordEnvelope before = f.Estate.Add("decision", e.P.Id, Decision(e.P.Id, "P's before the closing"), signer: e.PSigner);
+        (RecordEnvelope? closing, RecordEnvelope removal) = e.Remove();
+        f.Estate.SetClock(backdated ? before.AtTime.AddSeconds(-2) : removal.AtTime.AddMinutes(10));
+        RecordEnvelope taking = f.Estate.Add("principal", e.P.Id, Person("O1", "reviewer"), supersedes: o1.Id, signer: e.PSigner);
+
+        EstateModel model = f.Load();
+        Assert.False(model.Counts(model.ById[taking.Id]));
+        Assert.Contains(closing!.Id, AfterClosing(model, taking).Message, StringComparison.Ordinal);
+        Assert.True(model.HasRole(o1.Id, Roles.Operator));
+        Assert.Contains(model.Trust.Closings, c => c.Record.Id == o1Closing.Id);
+        Assert.DoesNotContain(model.Findings, x => x.Code == "history.closing-author" && x.Location.StartsWith(o1Closing.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(model.Trust.AnchorerAt(f.Estate.OperatorId, RecordParser.FormatTimestamp(f.Estate.Clock)));
     }
 
     [Fact]
-    public void ARevisionByAnyoneElseDoesNotEndTheClosing()
+    public void ARoleClosingAndTheAuthorsOtherClosingsKeepActingWhenTheAuthorIsRemovedWithTheirOwnRoleClosing()
     {
-        // A later revision of P's line written by Q, an operator, but not by the closing's author and its device: the closing still refuses
-        // P's records up to the removal it precedes, and while none follows, all of them.
+        // O1, appointed by the root operator, closes and removes P's role and closes a device. The root operator later closes and removes
+        // O1's role. O1's closings keep the force they had when signed: P's backdated record and the closed device's record stay refused.
         using var e = new Estate();
         HistoryFixture f = e.F;
-        f.Close("role", e.P.Id);
-        f.Estate.Add("principal", e.Q.Id, Person("P", "reviewer"), supersedes: e.P.Id, signer: e.QSigner);
-        RecordEnvelope after = f.Estate.Add("work-order", e.P.Id, HistoryFixture.Order("RCL-5", "After a removal by someone else"), signer: e.PSigner);
+        RecordEnvelope o1 = f.Estate.Add("principal", f.Estate.OperatorId, Person("O1", "operator"), signer: f.OperatorSigner);
+        (RecordEnvelope o1Device, _) = f.Admitted(o1.Id, "O1's device");
+        StoreSigner o1Signer = f.Signer(o1Device);
+        (RecordEnvelope closedDevice, RecordEnvelope closedAdmission) = f.Admitted(f.Estate.OperatorId, "A device O1 closes");
+        RecordEnvelope before = f.Estate.Add("decision", e.P.Id, Decision(e.P.Id, "P's before the closing"), signer: e.PSigner);
+        (RecordEnvelope? pClosing, _) = e.Remove(by: o1.Id, signer: o1Signer);
+        RecordEnvelope deviceClosing = f.Close("device", closedDevice.Id, o1.Id, o1Signer);
+        f.Revoke(closedDevice, closedAdmission, o1Signer, o1.Id);
+        RecordEnvelope o1RoleClosing = f.Close("role", o1.Id);
+        f.Estate.Add("principal", f.Estate.OperatorId, Person("O1", "reviewer"), supersedes: o1.Id, signer: f.OperatorSigner);
+
+        f.Estate.SetClock(before.AtTime.AddSeconds(-2));
+        RecordEnvelope backdated = f.Estate.Add("decision", e.P.Id, Decision(e.P.Id, "Backdated"), signer: e.PSigner);
+        RecordEnvelope byClosedDevice = f.Estate.Add("work-order", f.Estate.OperatorId, HistoryFixture.Order("RCL-7", "Signed by the closed device"), signer: f.Signer(closedDevice));
         EstateModel model = f.Load();
-        Assert.Null(Assert.Single(model.Trust.Closings).Until);
-        Assert.False(model.Counts(after));
+        Assert.False(model.HasRole(o1.Id, Roles.Operator));
+        Assert.Equal(new[] { pClosing!.Id, deviceClosing.Id, o1RoleClosing.Id }.Order(StringComparer.Ordinal), model.Trust.Closings.Select(c => c.Record.Id).Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(model.Findings, x => x.Code == "history.closing-author");
+        Assert.False(model.Counts(model.ById[backdated.Id]));
+        Assert.False(model.Counts(model.ById[byClosedDevice.Id]));
     }
 
     [Theory]
@@ -274,7 +319,6 @@ public sealed class RoleClosingTests
         EstateModel model = f.Load();
         Closing acting = Assert.Single(model.Trust.Closings);
         Assert.Equal(closing!.Id, acting.Record.Id);
-        Assert.Equal(removal.At, acting.Until);
         Assert.False(model.Counts(model.ById[backdated.Id]));
         Assert.True(model.Counts(model.ById[before.Id]));
         Assert.False(model.HasRole(e.P.Id, Roles.Operator));

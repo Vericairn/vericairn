@@ -342,9 +342,10 @@ read, a grant or principal revision counts for nothing when it is dated before t
 record below it in its line that counts; a record below that does not count is skipped, and a
 revision on top of one follows the line there. From 0.9.4 (ID-14), in an estate that has adopted checkpoints, removing a role from
 a person's principal record writes a role closing (`closes.kind` `role`) for that person in the same batch, signed by the root
-operator or another standing operator, and a removal without it is refused; from it on, what the person writes dated into the
-time the role stood counts only when the closing witnesses it (`history.after-closing` otherwise), and what they gave as
-operator before it keeps counting for the strongest acts. In an estate that has not adopted, close and revoke a person's
+operator or another standing operator, and a removal without it is refused, so a person holding `administer` but not the
+operator role no longer removes a person's role there; from it on, anything the person writes, whatever its date, counts only
+when the closing witnesses it (`history.after-closing` otherwise), and what they gave as operator before it, closings included,
+keeps counting for the strongest acts. In an estate that has not adopted, close and revoke a person's
 devices when removing their operator role or `administer` grant. Status and policy evaluation take their recorded time from the
 records that count.
 
