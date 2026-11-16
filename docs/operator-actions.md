@@ -399,9 +399,12 @@ No command of a later step appears before its step is next: publication's never 
 candidate is missing. Closing a request completes nothing by itself, except for a step whose record of your act is that close,
 such as a draft's deletion or an announcement; even then an agent's close citing your words completes nothing, and `goal step`
 asks you again. Only records you signed count: an agent's acceptance, publication observation or close is kept and shown as
-not counting. From 0.9.4, dismissing the request of an optional reserved step, such as an optional post an estate's extension
-adds, with `vericairn operator dismiss <request> --by <operator-id> --reason <text>` settles the step as skipped, with no
-revision of the goal; the request of a required step you dismiss stays closed, and the step waits for your act.
+not counting. From 0.9.4, dismissing the request of an optional reserved step done by your close of its request, such as an
+optional post an estate's extension adds, with `vericairn operator dismiss <request> --by <operator-id> --reason <text>` settles
+the step as skipped, with no revision of the goal; the request of a required step you dismiss stays closed, and the step waits
+for your act. Dismissing the request of any other step skips nothing. A step placed after a skipped one is asked only from the
+time that one was skipped, by your dismissal or by a goal revision that turned it off: a close of the later step's request you
+made while it waited counts for nothing, and `goal step` asks you again.
 
 Vericairn's own estate adds three such steps after publication in its first-party extension: the MCP Registry listing (below),
 whose request shows `gh run list -R Vericairn/vericairn --workflow mcp-registry.yml --event release --limit 1`, and the
