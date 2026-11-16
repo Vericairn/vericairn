@@ -93,6 +93,24 @@ public static class EstateStatus
             .SelectMany(attempt => model.About(attempt.Id, "result"))
             .DistinctBy(result => result.Id)];
 
+    /// <summary>
+    /// The acceptance of a work order's current revision that accepts its current result (from 0.9.4, FIX-141): the newest acceptance
+    /// of the work order's revisions, when it names the current revision, or one that differs from it only in placement, and was
+    /// recorded after the result, the form acceptances took before they named a result's exact hash. A result recorded after it, or any
+    /// result other than the work order's current one, the one operator close reads, still needs its own acceptance; null for those.
+    /// </summary>
+    internal static RecordEnvelope? RevisionAcceptance(EstateModel model, RecordEnvelope result)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(result);
+        if (WorkView.OrderOfResult(model, result) is not { } pinned) return null;
+        RecordEnvelope order = model.Latest(pinned);
+        IReadOnlyList<string> chain = model.Chain(order);
+        if (Newest(Results(model, chain).Where(model.IsCurrent))?.Id != result.Id) return null;
+        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")));
+        return direct is not null && WorkOrderRevisions.IsCurrentSubject(model, direct.Subject, order) && GoalRules.Before(result, direct) ? direct : null;
+    }
+
     /// <summary>The revision of a work order that stood when a record was recorded: its newest revision recorded no later.</summary>
     private static RecordEnvelope? StandingAt(EstateModel model, IReadOnlyList<string> chain, RecordEnvelope record) =>
         chain.Select(id => model.ById[id]).LastOrDefault(r => string.CompareOrdinal(r.At, record.At) <= 0);

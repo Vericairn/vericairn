@@ -196,7 +196,8 @@ vericairn operator close --all --by <operator-id>
 
 Without a selection, the command is read-only. It lists every current work order whose latest
 result is `completed`, has at least one current `pass` review of that exact result, and has no
-acceptance of that result. Each entry shows its key, work-order id and hash, exit question, result
+acceptance of that result; from 0.9.4, nor an acceptance of the work order's current revision
+recorded after it. Each entry shows its key, work-order id and hash, exit question, result
 id, hash, outcome and summary, and every passing review's id, hash, independence and summary.
 Both ordinary work and milestones can appear. A partial or blocked latest result, an old review
 of a superseded result, or a superseded passing review cannot qualify a step.
@@ -218,6 +219,16 @@ or one recorded before a change to the work order other than its placement reads
 revision)`, as an acceptance of an earlier work-order revision does. A work order an acceptance of
 its current revision accepts reads as it did, and a milestone is still accepted only by your
 acceptance of the milestone itself.
+
+From 0.9.4 (FIX-141), an acceptance of a work order's current revision, or of one that differs
+from it only in placement, recorded after the work order's current result accepts that result too:
+acceptances took that form before they named a result's exact hash. `operator close` no longer
+lists such a result, so `--all` never signs a second acceptance of work you already accepted, and
+status, the progress report, goal views, Workbench's result inbox and Remote read it as
+`accepted` rather than awaiting review. A result recorded after that acceptance, such as one from a
+later attempt, still needs its own acceptance and stays listed, and an acceptance of an earlier
+revision of the work order accepts no result. No record changes and nothing is signed again: work
+you accepted that way before 0.9.4 leaves the listing.
 
 To preserve a listing while inspecting it, save its JSON and supply it with the selection:
 
