@@ -151,6 +151,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             }
 
             using EstateService service = readOnly ? EstateService.OpenReadOnly(root) : upgrade ? EstateService.OpenForUpgrade(root) : EstateService.Open(root);
+            // The command line hosts this runtime in its own process: the embedded profile, one of the two a presence session opens on.
+            service.HostsEmbedded = true;
             UsingDaemon = false;
             return Showing(new CancellationBoundApi(service, CancellationToken), operation, readOnly || !presence);
         }

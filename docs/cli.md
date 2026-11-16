@@ -13,7 +13,9 @@ recipient and assignment presentation settings. Without either option, the
 ordinary complete selected-scope brief is unchanged. See [MCP resources](mcp.md#resources-084)
 for exact representations and hashes.
 
-Revision 29, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
+Revision 30, November 16, 2026. Add `goal decide`, which records the decision of a run's decision step by the principal holding its current assignment, `goal step`'s recording of a rule's decision (route `rule`, outcome `decided`), and the `decision:` and `Decision:` lines of `goal show` and `status`, in the development build.
+
+Revision 29, November 16, 2026. `doctor` reports whether presence sessions may open on this machine and why not, and `doctor --json` adds the `presence` probe, in the development build.
 
 Revision 28, November 15, 2026. Add `goal close`, and `--reason` and `--step-reason` on `goal accept`, which close a run of a flow that will never complete with a reason for each unsettled step, in the development build.
 
@@ -914,6 +916,13 @@ such as the version, the tool's version line, the estate's path, the default cus
 | `enclave` | `present` or `unavailable` on macOS, with the reason in `detail`; `not-applicable` elsewhere |
 | `search` | `present`, or `unavailable` with the reason |
 | `daemon` | `present` with its process, `missing` when commands run the embedded runtime, `not-applicable` outside an estate |
+| `presence` | From 0.9.4: on macOS, `present` with `sessions` when this release build's signed helper may open presence sessions on this macOS version, or `unavailable` with `per-signature` and the reason in `detail`; `not-applicable` elsewhere |
+
+From 0.9.4 (ID-16) the report adds a `presence` line on macOS, after `enclave`: whether a presence check may cover an operator
+action's announced list here and, when not, why (a development build, a macOS version this release has not qualified, or a helper
+that does not meet the release requirement), then the estate charter's `policies.presence`, whether device owners' settings are kept
+on this machine, and, in a release build, whether this process's .NET diagnostics channel is on. Every signature with a presence key
+asks its own check wherever sessions are off.
 
 ```sh
 vericairn --json doctor

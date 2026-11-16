@@ -16,13 +16,16 @@ This procedure is evidence for review, not release acceptance.
 ## What the automated tests cover
 
 The helper's tests run on macOS with keys without presence, so the session's checks need no prompt.
-They run every session of the shared vectors (`tests/fixtures/presence-sessions/vectors.json`, which the
-runtime's checks, `ID-16`, are to read too) against a test build of the helper: every check of the
-protocol, every refusal code, the dialog's text, the fingerprint, the ends a test can raise, the canonical
-parser against the runtime's serializer and the self-check's refusals. The test build adds a controlled clock and other test
-hooks; the release build is compiled without them. What follows is what no automated test can show: the
-dialog itself, context reuse, the process binding, the hardening, real locks and sleep, and the runtime's
-use of the helper.
+They run every session of the shared vectors (`tests/fixtures/presence-sessions/vectors.json`) against a
+test build of the helper: every check of the protocol, every refusal code, the dialog's text, the
+fingerprint, the ends a test can raise, the canonical parser against the runtime's serializer and the
+self-check's refusals. The test build adds a controlled clock and other test hooks; the release build is
+compiled without them. From 0.9.4 (ID-16) the runtime applies the same checks to the same vectors before it
+sends a record, its client drives the helper's test build through the process the runtime starts for it,
+and its sessions run against an in-process stand-in for the helper on every platform. What follows is
+what no automated test can show: the dialog itself, context reuse, the process binding, the hardening, the
+release requirement against a real Developer ID signature, real locks and sleep, and the runtime's use of
+the signed helper.
 
 ## Before you start
 

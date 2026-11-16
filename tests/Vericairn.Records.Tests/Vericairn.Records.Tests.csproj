@@ -16,6 +16,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <None Include="../../src/Vericairn.Records/Templates/Definitions/*.json" Link="PresentationTemplates/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../TestSupport/PresenceHelperStandIn.cs" Link="TestSupport/PresenceHelperStandIn.cs" />
     <None Include="../TestSupport/PublishedReleaseFixtures/*" Link="PublishedReleaseFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

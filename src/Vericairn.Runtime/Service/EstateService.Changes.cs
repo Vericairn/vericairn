@@ -45,7 +45,8 @@ public sealed partial class EstateService
     public ChangeResponse ChangesPush(ChangesPushRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using IDisposable counted = presence.Action("changes push", PresencePlan(request.By, () => PushPresence("branch " + request.Branch)));
+        using IDisposable counted = SessionAction("changes push", PresencePlan(request.By, () => PushPresence("branch " + request.Branch)),
+            ChangeSession("changes push", request.Product, request.Head, new("change-push", request.Branch, null, null, 3, [("push-head", 3, true)])));
         return ChangeEffect(request.Product, request.By, "change-push", request.Branch, request.Head, request.Reconciliation, claim =>
         {
             IPushAdapter adapter = Providers.PushAdapter ?? throw new ProviderRefusedException("No push adapter is registered.");
@@ -64,6 +65,8 @@ public sealed partial class EstateService
             claim.Body["scan"] = JsonSerializer.SerializeToNode(scan, ChangeJson);
             if (!scan.Passed(plan)) throw new ProviderRefusedException("The scan of exactly the push's commits did not pass.");
             RefuseHeldDisclosure(claim, adapter, directory, plan);
+            // The dispatch record precedes the push, which runs within its two-minute bound: the session must outlast it (ID-16).
+            PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
             adapter.Push(directory, remote, plan, scan);
@@ -99,7 +102,8 @@ public sealed partial class EstateService
     public ChangeResponse ChangesOpen(ChangesOpenRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using IDisposable counted = presence.Action("changes open", PresencePlan(request.By, () => OpenPresence("branch " + request.Branch)));
+        using IDisposable counted = SessionAction("changes open", PresencePlan(request.By, () => OpenPresence("branch " + request.Branch)),
+            ChangeSession("changes open", request.Product, request.Head, new("change-open", request.Branch, null, null, 3, [])));
         return ChangeEffect(request.Product, request.By, "change-open", request.Branch, request.Head, request.Reconciliation, claim =>
         {
             if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Length > 200 || request.Body is null || request.Body.Length > 20000)
@@ -110,6 +114,7 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("No successful scanned push is recorded for this repository, branch and exact head.");
             }
             claim.Body["target"]!["contentHash"] = ContentHash.Sha256(JsonSerializer.SerializeToUtf8Bytes(new { request.Title, request.Body }));
+            PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
             ChangeReceipt receipt = claim.Configuration.Provider.Open(claim.Configuration.Destination, request.Branch,
@@ -125,7 +130,8 @@ public sealed partial class EstateService
     public ChangeResponse ChangesMerge(ChangesMergeRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using IDisposable counted = presence.Action("changes merge", PresencePlan(request.By, () => MergePresence("pull request " + request.PullRequest)));
+        using IDisposable counted = SessionAction("changes merge", PresencePlan(request.By, () => MergePresence("pull request " + request.PullRequest)),
+            ChangeSession("changes merge", request.Product, request.Head, new("change-merge", null, request.PullRequest, null, 3, [("pull-request", 3, true), ("target-run", 3, true)])));
         return ChangeEffect(request.Product, request.By, "change-merge", request.PullRequest, request.Head, request.Reconciliation, claim =>
         {
             if (claim.Configuration.Required.Count == 0) throw new ProviderRefusedException("No required checks are declared on the product.");
@@ -174,6 +180,7 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("The pull request is already in the merge queue, enqueued outside this operation; nothing was requested.");
                 return EnqueueChange(claim, pull.Number);
             }
+            PresenceEffectAhead();
             DispatchChange(claim);
             claim.EffectMayHaveStarted = true;
             ChangeReceipt receipt = claim.Configuration.Provider.Merge(claim.Configuration.Destination, pull.Number, request.Head);
@@ -197,6 +204,7 @@ public sealed partial class EstateService
         string key = OperationKey(EstateServiceValues.Element(claim.Body));
         RevisePresence(claim.By, [OperationSignature("change-merge", "dispatched", key), .. ObservationPresence(key, "pull-request")],
             "the target branch requires its merge queue, so the change is enqueued and its place in the queue observed");
+        PresenceEffectAhead();
         DispatchChange(claim);
         claim.EffectMayHaveStarted = true;
         ChangeReceipt receipt = claim.Configuration.Provider.Enqueue(claim.Configuration.Destination, number, claim.Head);
@@ -360,12 +368,12 @@ public sealed partial class EstateService
     public ChangeResponse ChangesObserve(ChangesObserveRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        using IDisposable counted = presence.Action("changes observe", PresencePlan(request.By, () =>
+        using IDisposable counted = SessionAction("changes observe", PresencePlan(request.By, () =>
         {
             RecordEnvelope? named = Ulid.IsValid(request.Operation) && session.Load().ById.TryGetValue(request.Operation, out RecordEnvelope? found) ? session.Load().Latest(found) : null;
             return named is null || !ChangeOperationRulesForRuntime(named) ? [] : request.Cancel is null ? ObservePresence(named)
                 : [OperationSignature(EstateModel.BodyString(named, "action"), "canceled", OperationKey(named.Body))];
-        }));
+        }), Ulid.IsValid(request.Operation) && request.Cancel is null ? ObserveSession(request.Operation) : null);
         ChangeClaim? claim = null;
         try
         {

@@ -86,6 +86,7 @@ public sealed class DaemonHost : IAsyncDisposable
     internal const int ConcurrentConnections = 32;
 
     private static readonly object LoopbackMarker = new();
+    private static readonly object LocalSocketMarker = new();
     private static readonly object LocalNetworkMarker = new();
     private static readonly object CertificateMarker = new();
     private static readonly object TlsEstablishedMarker = new();
@@ -298,11 +299,11 @@ public sealed class DaemonHost : IAsyncDisposable
                 // Kestrel's named-pipe transport creates the pipe with CurrentUserOnly, its default, and no PipeSecurity: the pipe's
                 // access list allows only the owner of this process's token, the user that started the daemon (for an elevated
                 // process, the owner Windows gives it, by default the Administrators group). A Windows test reads that list.
-                kestrel.ListenNamedPipe(address);
+                kestrel.ListenNamedPipe(address, listen => listen.Use(MarkLocalSocket));
             }
             else
             {
-                kestrel.ListenUnixSocket(address);
+                kestrel.ListenUnixSocket(address, listen => listen.Use(MarkLocalSocket));
             }
 
             if (certificates is not null && loopback)
@@ -664,8 +665,28 @@ public sealed class DaemonHost : IAsyncDisposable
             return;
         }
 
+        // From 0.9.4 (ID-16) a request over the local socket or named pipe, and only one, is named the local-socket profile, on which a
+        // presence session may open; the profile is named positively, from the listener that accepted the connection.
+        if (OverLocalSocket(items))
+        {
+            using IDisposable profile = Service.ForLocalSocketRequest();
+            await next(context).ConfigureAwait(false);
+            return;
+        }
+
         await next(context).ConfigureAwait(false);
     }
+
+    /// <summary>Whether a connection was accepted by the daemon's local socket or named pipe listener, and by no other.</summary>
+    internal static bool OverLocalSocket(IDictionary<object, object?>? items) =>
+        items?.ContainsKey(LocalSocketMarker) == true && !items.ContainsKey(LoopbackMarker) && !items.ContainsKey(LocalNetworkMarker);
+
+    // The local socket's and named pipe's listener names each connection it accepts.
+    private static ConnectionDelegate MarkLocalSocket(ConnectionDelegate next) => connection =>
+    {
+        connection.Items[LocalSocketMarker] = true;
+        return next(connection);
+    };
 
     /// <summary>Completes any HTTP refusal before discarding its unread transport bytes, without parsing or binding them.</summary>
     internal static async Task CompleteRefusalAsync(HttpContext context, PipeReader body, TimeProvider? clock = null)
