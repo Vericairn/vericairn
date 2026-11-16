@@ -130,7 +130,7 @@ public class DocsSetPreparationTests
         {
             string docs = Path.Combine(root, "docs"), releases = Path.Combine(docs, "releases"), set = Path.Combine(releases, ReferenceSet.ReleaseVersion);
             Directory.CreateDirectory(releases);
-            string[] declared = ["README.md", "install.md", "cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md", "api.md", "release-notes.md"];
+            string[] declared = ["README.md", "install.md", "cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md", "api.md", "release-notes.md", "llms.txt", "llms-full.txt"];
             string declaration = Path.Combine(releases, "documents.json");
             File.WriteAllText(declaration, JsonSerializer.Serialize(declared));
             File.WriteAllText(Path.Combine(releases, "frozen-sha256.json"), Index);
@@ -306,6 +306,151 @@ public class DocsSetPreparationTests
     }
 
     [Fact]
+    public void TheLlmsFilesCoverEveryDeclaredDocumentAndTheRootPointsAtTheLatestFrozenSet()
+    {
+        // DOCS-38: a set that declares llms.txt and llms-full.txt holds them as its documents render them, written before it is
+        // frozen; the repository's root llms.txt then points at it, never back at an earlier version.
+        string root = CliHarness.TempDirectory("docs-llms");
+        try
+        {
+            string docs = Path.Combine(root, "docs"), releases = Path.Combine(docs, "releases"), set = Path.Combine(releases, "0.1.0");
+            Directory.CreateDirectory(Path.Combine(set, "frameworks"));
+            File.WriteAllText(Path.Combine(releases, "frozen-sha256.json"), Index);
+            string[] declared = ["README.md", "guide.md", "frameworks/a.md", "api.md", "api-v1.md", "llms.txt", "llms-full.txt"];
+            File.WriteAllText(Path.Combine(releases, "documents.json"), JsonSerializer.Serialize(declared));
+            File.WriteAllText(Path.Combine(set, "manifest.json"), $$"""{"format":"vericairn.docs/1","version":"0.1.0","documents":{{JsonSerializer.Serialize(declared)}}}""");
+            File.WriteAllText(Path.Combine(set, "README.md"), "# Vericairn 0.1.0\n\nThe overview.\n");
+            File.WriteAllText(Path.Combine(set, "guide.md"), "Preface without a heading.\n\n# The [operator's] guide\n");
+            File.WriteAllText(Path.Combine(set, "frameworks", "a.md"), "# Framework A");
+            File.WriteAllText(Path.Combine(set, "api.md"), "# API v1\n");
+            File.WriteAllText(Path.Combine(set, "api-v1.md"), "# API v1\n");
+
+            // Without them the set is incomplete and is not frozen.
+            (int code, string text) = Tool(() => ReferenceSet.Freeze(set, json: false));
+            Assert.Equal(1, code);
+            Assert.Contains("llms.txt", text, StringComparison.Ordinal);
+
+            (code, text) = Tool(() => ReferenceSet.Llms(set, json: false));
+            Assert.True(code == 0, text);
+            Assert.Contains("cover its 5 documents (written)", text, StringComparison.Ordinal);
+            Assert.Equal("""
+                # Vericairn 0.1.0
+
+                > The documentation set of Vericairn 0.1.0, frozen with the release: its 5 guides, references and release notes, each linked below by its title.
+
+                Links are relative to this file, which is docs/releases/0.1.0/llms.txt in the repository at the release's tag v0.1.0, and the root of vericairn-0.1.0-docs.zip. llms-full.txt holds every document below in one file, in this order.
+
+                ## Documents
+
+                - [Vericairn 0.1.0](README.md)
+                - [The \[operator's\] guide](guide.md)
+                - [Framework A](frameworks/a.md)
+                - [API v1](api.md)
+                - [API v1](api-v1.md)
+
+                ## Optional
+
+                - [Every document in one file](llms-full.txt)
+
+                """, File.ReadAllText(Path.Combine(set, "llms.txt")));
+            Assert.Equal("""
+                # Vericairn 0.1.0, every document in one file
+
+                > The 5 documents llms.txt lists, in its order, each after a line naming its file; a document with the same bytes as an earlier one is named, not repeated.
+
+                <!-- File: README.md -->
+
+                # Vericairn 0.1.0
+
+                The overview.
+
+                <!-- File: guide.md -->
+
+                Preface without a heading.
+
+                # The [operator's] guide
+
+                <!-- File: frameworks/a.md -->
+
+                # Framework A
+
+                <!-- File: api.md -->
+
+                # API v1
+
+                <!-- File: api-v1.md, the same bytes as api.md -->
+
+                """, File.ReadAllText(Path.Combine(set, "llms-full.txt")));
+            (code, text) = Tool(() => ReferenceSet.Llms(set, json: true));
+            Assert.True(code == 0, text);
+            Assert.False(JsonDocument.Parse(text).RootElement.GetProperty("written").GetBoolean());
+
+            // Not frozen yet, so the root is not pointed at it.
+            (code, text) = Tool(() => ReferenceSet.PointRoot(set, json: false));
+            Assert.Equal(2, code);
+            Assert.False(File.Exists(Path.Combine(root, "llms.txt")));
+
+            (code, text) = Tool(() => ReferenceSet.Freeze(set, json: false));
+            Assert.True(code == 0, text);
+            using (JsonDocument index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "frozen-sha256.json"))))
+            {
+                JsonElement frozen = index.RootElement.GetProperty("sets").GetProperty("0.1.0");
+                Assert.True(frozen.TryGetProperty("llms.txt", out _) && frozen.TryGetProperty("llms-full.txt", out _));
+            }
+
+            // A frozen set's llms files are never written again.
+            (code, text) = Tool(() => ReferenceSet.Llms(set, json: false));
+            Assert.Equal(2, code);
+            Assert.Contains("is frozen", text, StringComparison.Ordinal);
+
+            (code, text) = Tool(() => ReferenceSet.PointRoot(set, json: false));
+            Assert.True(code == 0, text);
+            string pointer = File.ReadAllText(Path.Combine(root, "llms.txt"));
+            Assert.StartsWith("# Vericairn\n\n> Vericairn's documentation, frozen with each release. The current set is 0.1.0's;", pointer, StringComparison.Ordinal);
+            Assert.Contains("- [Vericairn 0.1.0](docs/releases/0.1.0/llms.txt): the current set's index", pointer, StringComparison.Ordinal);
+            Assert.Contains("- [Vericairn 0.1.0, every document in one file](docs/releases/0.1.0/llms-full.txt)\n", pointer, StringComparison.Ordinal);
+            Assert.Contains("- [Every documentation set](docs/releases/README.md)", pointer, StringComparison.Ordinal);
+            (code, text) = Tool(() => ReferenceSet.PointRoot(set, json: true));
+            Assert.False(JsonDocument.Parse(text).RootElement.GetProperty("written").GetBoolean());
+
+            // A root that points at a later version is left as it is when an earlier line's set is prepared.
+            string later = pointer.Replace("0.1.0", "0.2.0", StringComparison.Ordinal);
+            File.WriteAllText(Path.Combine(root, "llms.txt"), later);
+            (code, text) = Tool(() => ReferenceSet.PointRoot(set, json: false));
+            Assert.True(code == 0, text);
+            Assert.Contains("points at the later 0.2.0", text, StringComparison.Ordinal);
+            Assert.Equal(later, File.ReadAllText(Path.Combine(root, "llms.txt")));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
+    [Fact]
+    public void ASetThatDeclaresNoLlmsFilesGetsNoneAndSetsOutsideDocsReleasesNoRootFile()
+    {
+        string root = CliHarness.TempDirectory("docs-no-llms");
+        try
+        {
+            string releases = Path.Combine(root, "releases"), set = Path.Combine(releases, "0.1.0");
+            Directory.CreateDirectory(set);
+            File.WriteAllText(Path.Combine(releases, "frozen-sha256.json"), Index);
+            File.WriteAllText(Path.Combine(releases, "documents.json"), """["README.md"]""");
+            File.WriteAllText(Path.Combine(set, "manifest.json"), """{"format":"vericairn.docs/1","version":"0.1.0","documents":["README.md"]}""");
+            File.WriteAllText(Path.Combine(set, "README.md"), "# Vericairn 0.1.0\n");
+            (int code, string text) = Tool(() => ReferenceSet.Llms(set, json: false));
+            Assert.True(code == 0, text);
+            Assert.Contains("declares no llms.txt; nothing written", text, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(set, "llms.txt")));
+            (code, text) = Tool(() => ReferenceSet.Freeze(set, json: false));
+            Assert.True(code == 0, text);
+            (code, text) = Tool(() => ReferenceSet.PointRoot(set, json: false));
+            Assert.True(code == 0, text);
+            Assert.Contains("not under docs/releases", text, StringComparison.Ordinal);
+            Assert.Empty(Directory.GetFiles(root, "llms.txt", SearchOption.AllDirectories));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
+    [Fact]
     public void IndexAddsAFrozenSetsParagraphNewestFirstAndNeverRewritesOne()
     {
         string root = CliHarness.TempDirectory("docs-index");
@@ -459,7 +604,7 @@ public class DocsSetPreparationTests
             string docs = Path.Combine(root, "docs"), releases = Path.Combine(docs, "releases"), set = Path.Combine(releases, version);
             Directory.CreateDirectory(Path.Combine(releases, "0.0.9"));
             File.WriteAllText(Path.Combine(releases, "0.0.9", "manifest.json"), """{"format":"vericairn.docs/1","version":"0.0.9","notes":{"from":"2026-08-01T00:00:00Z","to":"2026-09-01T00:30:00Z"}}""");
-            string[] declared = ["README.md", "install.md", "cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md", "api.md", "release-notes.md"];
+            string[] declared = ["README.md", "install.md", "cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md", "api.md", "release-notes.md", "llms.txt", "llms-full.txt"];
             string declaration = Path.Combine(releases, "documents.json");
             File.WriteAllText(declaration, JsonSerializer.Serialize(declared));
             File.WriteAllText(Path.Combine(releases, "frozen-sha256.json"), Index);
@@ -482,6 +627,11 @@ public class DocsSetPreparationTests
             string notes = File.ReadAllText(Path.Combine(set, "release-notes.md"));
             Assert.Contains("since the end of the notes of 0.0.9", notes, StringComparison.Ordinal);
             Assert.Contains("\n\n## Security\n\nOne correction.\n\n## What the release contains\n", notes, StringComparison.Ordinal);
+            // DOCS-38: the llms files are written after the approved section, so llms-full.txt holds the notes with it, and the
+            // repository's root llms.txt points at the frozen set.
+            Assert.Contains("- [Install " + version + "](install.md)\n", File.ReadAllText(Path.Combine(set, "llms.txt")), StringComparison.Ordinal);
+            Assert.Contains("<!-- File: release-notes.md -->\n\n" + notes, File.ReadAllText(Path.Combine(set, "llms-full.txt")), StringComparison.Ordinal);
+            Assert.Contains($"](docs/releases/{version}/llms.txt)", File.ReadAllText(Path.Combine(root, "llms.txt")), StringComparison.Ordinal);
             using (JsonDocument index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "frozen-sha256.json"))))
                 Assert.Equal(Snapshot(set).Keys.Order(StringComparer.Ordinal), index.RootElement.GetProperty("sets").GetProperty(version).EnumerateObject().Select(p => p.Name));
             Assert.Contains($"## Documentation sets\n\nThe [{version} set]({version}/README.md) is prepared for the next release.\n\nThe [0.0.9 set]", File.ReadAllText(Path.Combine(releases, "README.md")), StringComparison.Ordinal);

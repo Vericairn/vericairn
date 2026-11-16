@@ -522,6 +522,10 @@ The product's CLI test suite checks every file of each frozen set against
 sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
 editable until frozen and indexed. The reference generator also refuses a destination inside an indexed set.
 `docs notes` still relies on the test guard: run it only against a set that has not been frozen.
+From 0.9.4 (DOCS-38) each set also holds `llms.txt`, a machine-readable index linking each of its documents by title,
+and `llms-full.txt`, every document in one file; the repository's root `llms.txt` points at the current set's, and the
+MCP server offers the release's index as a resource ([MCP](mcp.md#resources-084)). The frozen-set test holds every set
+that declares them to what its documents render.
 From 0.9.2 (DOCS-11) the build tooling assembles, freezes and indexes a set itself: `vericairn-docs assemble`, `insert`,
 `freeze`, `index` and `prepare`, which refuse to change a frozen set
 ([operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092)). The guard requires every set the release

@@ -35,6 +35,68 @@ public partial class FrozenSetTests
     }
 
     [Fact]
+    public void EveryFrozenSetThatDeclaresItsLlmsFilesHoldsThemAsItsDocumentsRenderThem()
+    {
+        // DOCS-38: from 0.9.4 each set declares llms.txt and llms-full.txt; a frozen set's copies match its frozen documents.
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
+        Assert.NotNull(root);
+        string releases = Path.Combine(root, "docs", "releases");
+        using JsonDocument declaration = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "documents.json")));
+        string[] declared = [.. declaration.RootElement.EnumerateArray().Select(d => d.GetString()!)];
+        Assert.Contains("llms.txt", declared);
+        Assert.Contains("llms-full.txt", declared);
+        using JsonDocument index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "frozen-sha256.json")));
+        foreach (JsonProperty set in index.RootElement.GetProperty("sets").EnumerateObject())
+        {
+            string directory = Path.Combine(releases, set.Name);
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "manifest.json")));
+            List<string> documents = [.. manifest.RootElement.GetProperty("documents").EnumerateArray().Select(d => d.GetString()!)];
+            if (!documents.Contains("llms.txt")) continue;
+            Assert.True(set.Value.TryGetProperty("llms.txt", out _) && set.Value.TryGetProperty("llms-full.txt", out _), set.Name);
+            (byte[] llms, byte[] full) = Docs.Llms(directory, set.Name, Docs.LlmsDocuments(documents));
+            Assert.True(File.ReadAllBytes(Path.Combine(directory, "llms.txt")).AsSpan().SequenceEqual(llms), set.Name + "/llms.txt");
+            Assert.True(File.ReadAllBytes(Path.Combine(directory, "llms-full.txt")).AsSpan().SequenceEqual(full), set.Name + "/llms-full.txt");
+        }
+    }
+
+    [Fact]
+    public void TheSetCheckRefusesMissingAndStaleLlmsFiles()
+    {
+        string root = CliHarness.TempDirectory("frozen-llms");
+        try
+        {
+            string set = Path.Combine(root, "0.1.0");
+            Directory.CreateDirectory(set);
+            string[] declared = ["README.md", "guide.md", "llms.txt", "llms-full.txt"];
+            string declaration = Path.Combine(root, "documents.json");
+            File.WriteAllText(declaration, JsonSerializer.Serialize(declared));
+            File.WriteAllText(Path.Combine(set, "manifest.json"), $$"""{"format":"vericairn.docs/1","version":"0.1.0","documents":{{JsonSerializer.Serialize(declared)}}}""");
+            File.WriteAllText(Path.Combine(set, "README.md"), "# Vericairn 0.1.0\n");
+            File.WriteAllText(Path.Combine(set, "guide.md"), "# Guide\n");
+            string Check() { var output = new StringWriter(); Docs.Check(new CommandContext(output, output), set, declaration, json: false); return output.ToString(); }
+
+            Assert.Contains("llms.txt", Check(), StringComparison.Ordinal);
+            Assert.Contains("incomplete", Check(), StringComparison.Ordinal);
+            (byte[] llms, byte[] full) = Docs.Llms(set, "0.1.0", Docs.LlmsDocuments(declared));
+            File.WriteAllBytes(Path.Combine(set, "llms.txt"), llms);
+            File.WriteAllBytes(Path.Combine(set, "llms-full.txt"), full);
+            Assert.Contains("complete", Check(), StringComparison.Ordinal);
+            Assert.DoesNotContain("docs.llms", Check(), StringComparison.Ordinal);
+
+            // A document revised after its llms files were written leaves both stale.
+            File.WriteAllText(Path.Combine(set, "guide.md"), "# The revised guide\n");
+            string stale = Check();
+            Assert.Contains("incomplete", stale, StringComparison.Ordinal);
+            Assert.Equal(2, Regex.Count(stale, "docs\\.llms"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AFrozenSetCannotLeaveTheIndexWhileItsLinkOrDirectoryRemains()
     {
         string root = CliHarness.TempDirectory("frozen-witnesses");

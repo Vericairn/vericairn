@@ -160,6 +160,14 @@ Briefs include the communication observation's freshness time. Independent reads
 can therefore have different hashes even when the underlying records have not
 changed; each hash identifies the exact bytes of that particular response.
 
+From 0.9.4 (DOCS-38), `resources/list` also lists `vericairn://docs/llms.txt`, the documentation index of
+the Vericairn release serving the connection, in [llms.txt](https://llmstxt.org/)'s form: a release links its
+own frozen documentation set's `llms.txt` and `llms-full.txt` at the release's tag on GitHub, and a development
+build, which has no set of its own, links the repository's root `llms.txt`, which points at the current set.
+It is the same for every estate and connection, reads nothing from the estate, and carries the same `_meta` as
+the goal and asks resources. It changes only with the release, so it is not subscribable. A user's agent reads
+it to find the guides of the release it talks to.
+
 The MCP adapter uses the API's additive `GET /v1/resources` and
 `POST /v1/resources/read` operations. Both are reads, including the POST; they
 require no signing device, presence or write ledger. An older API implementation

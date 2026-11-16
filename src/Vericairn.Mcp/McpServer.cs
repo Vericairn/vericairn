@@ -332,13 +332,17 @@ public sealed class McpServer
                 return Result(id, await tools.PromptGetAsync(selectedPrompt, parameters["arguments"] as JsonObject, cancellationToken).ConfigureAwait(false));
             case "resources/list":
                 if (parameters?["cursor"] is not null) return Error(id, -32602, "Invalid params: this listing has no continuation cursor.");
-                return Result(id, await tools.ResourcesListAsync(cancellationToken).ConfigureAwait(false));
+                JsonObject listed = await tools.ResourcesListAsync(cancellationToken).ConfigureAwait(false);
+                // From 0.9.4 (DOCS-38): the documentation index of this release, the same for every estate and connection.
+                listed["resources"]!.AsArray().Add(DocumentationIndex.Listed(version));
+                return Result(id, listed);
             case "resources/templates/list":
                 if (parameters?["cursor"] is not null) return Error(id, -32602, "Invalid params: this listing has no continuation cursor.");
                 return Result(id, ToolRegistry.ResourceTemplates());
             case "resources/read":
                 if (parameters?["uri"] is not JsonValue resourceUri || !resourceUri.TryGetValue(out string? selectedUri))
                     return Error(id, -32602, "Invalid params: resource uri is required.");
+                if (selectedUri == DocumentationIndex.Uri) return Result(id, DocumentationIndex.Read(version));
                 return Result(id, await tools.ResourceReadAsync(selectedUri, cancellationToken).ConfigureAwait(false));
             case "resources/subscribe":
             case "resources/unsubscribe":
@@ -351,6 +355,9 @@ public sealed class McpServer
                     watch.Unsubscribe(uri);
                     return Result(id, new JsonObject());
                 }
+
+                if (uri == DocumentationIndex.Uri)
+                    return Error(id, -32602, "Invalid params: the documentation index changes only with the release serving it; it is not subscribable.");
 
                 // Only what the session may read: the resource is read once, through its matching read, and its changes are then
                 // heard from the event journal with that read's audience check, never by reading it again.

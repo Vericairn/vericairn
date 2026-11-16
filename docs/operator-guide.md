@@ -1281,7 +1281,8 @@ Earlier sets and their checksums remain unchanged.
 ### Preparing a set with the build tooling (0.9.2)
 
 From 0.9.2 (DOCS-11) the build tooling prepares a set in the steps a release's builder took by hand. Each step writes only
-the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`. Running a step again changes nothing,
+the set's directory, `docs/releases/frozen-sha256.json` or `docs/releases/README.md`, and from 0.9.4 `point-root` the
+repository's root `llms.txt`. Running a step again changes nothing,
 and a step refuses rather than overwrite what a person wrote or what a frozen set holds. The version comes first: set
 `VersionPrefix` in `Directory.Build.props` to the release's version, declare any new document in
 `docs/releases/documents.json`, commit, and build the tooling in Release at that commit. The tooling refuses build sources
@@ -1291,8 +1292,10 @@ that differ from its commit, as `generate` always has, and a set whose directory
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- assemble --out docs/releases/0.9.3 --documents docs/releases/documents.json --overview overview.md
 vericairn --estate <root> docs notes --from 0.9.2 --to 0.9.3 --out docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- insert docs/releases/0.9.3 --section security.md --expected-hash sha256:<hex>
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- llms docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- freeze docs/releases/0.9.3
+dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- point-root docs/releases/0.9.3
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- index docs/releases/0.9.3 --paragraph paragraph.md
 ```
 
@@ -1312,14 +1315,20 @@ dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool
   generated, such as `.DS_Store`, and a manifest of another version. It then adds every file's `sha256:` to
   `frozen-sha256.json` under the version, in path order, leaving every earlier entry as it was. Freezing a frozen set
   confirms it. A frozen set whose files differ is refused with each difference: a correction goes into the next set.
+- From 0.9.4 (DOCS-38), `llms` writes the set's `llms.txt` and `llms-full.txt` from its documents when the set declares
+  them, as every set from 0.9.4 does in `docs/releases/documents.json`: `llms.txt` links each document by its title,
+  relative to the set, and `llms-full.txt` holds every document in one file. Run it after the notes and the approved
+  section are in place and before `compare` and `freeze`: `freeze` refuses a set whose llms files are missing or differ
+  from what its documents render. Once the set is frozen, `point-root` points the repository's root `llms.txt` at it,
+  unless the root already points at a later version.
 - `index` adds the set's paragraph to `docs/releases/README.md`, newest first under "Documentation sets", byte for byte from
   a file that links the set as `[<version> set](<version>/README.md)`. It describes only a frozen set, and it refuses a set
   the index already describes in other words, since the index's living-document pass revises that paragraph.
 
 The overview, the approved section and the paragraph are a person's text; the commands only place them. `prepare` runs the
 steps in order for a version, stopping at the first refusal. It runs `assemble`, then `docs notes` when the set has no notes,
-`insert` with `--security`, `compare`, `freeze`, and `index` with `--index-paragraph`. For a frozen set it only confirms the
-freeze and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
+`insert` with `--security`, from 0.9.4 `llms`, `compare`, `freeze`, from 0.9.4 `point-root`, and `index` with
+`--index-paragraph`. For a frozen set it only confirms the freeze, points the root at it and adds the paragraph. With `--json` each step prints one JSON object. Exit code 1 means the set is incomplete, as
 `freeze` reports it from `docs check`, or differs from the build, as `compare` reports it; 2 means a step refused.
 
 ```sh
