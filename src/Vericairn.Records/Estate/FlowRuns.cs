@@ -110,7 +110,10 @@ public static class FlowRuns
     /// The product a run serves: the subject's product field when it binds one, else the product its work order is placed for or plans
     /// a release of. Null when it names none.
     /// </summary>
-    public static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow)
+    public static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow) => Product(model, goal, flow, null);
+
+    /// <summary>The product a run serves, with its work order read at its revision current before a record when one is given.</summary>
+    private static string? Product(EstateModel model, RecordEnvelope goal, FlowDefinition? flow, RecordEnvelope? before)
     {
         ArgumentNullException.ThrowIfNull(model);
         JsonElement subject = TJson.Object(Plan(goal), "subject");
@@ -124,8 +127,33 @@ public static class FlowRuns
         }
 
         RecordEnvelope? order = Work(model, goal);
+        if (order is not null && before is not null)
+        {
+            order = model.Chain(order).Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>().LastOrDefault(r => GoalRules.Before(r, before)) ?? order;
+        }
+
         string? product = order is null ? null : TJson.Text(TJson.Object(order.Body, "placement"), "product") ?? TJson.Text(TJson.Object(order.Body, "releasePlan"), "product");
         return product is null ? null : LivingDocuments.ProductIdentity(model, product);
+    }
+
+    /// <summary>
+    /// The record a run's configuration is resolved at (from 0.9.4, FIX-146): the first activation of the goal revision that counts, so a
+    /// running run keeps the configuration it was activated with; for a revision never activated, the revision that superseded it, when
+    /// one did before <paramref name="before"/>; otherwise <paramref name="before"/>, null for the records as they stand. A revision needs
+    /// a fresh activation, so the configuration changes under a run only by a goal revision its sponsor signs and activates.
+    /// </summary>
+    internal static RecordEnvelope? ResolvedAt(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        if (GoalRules.Statuses(model, goal, before).FirstOrDefault(s => EstateModel.BodyString(s, "status") == "active") is RecordEnvelope activation)
+        {
+            return activation;
+        }
+
+        return model.SupersededBy.TryGetValue(goal.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && (before is null || GoalRules.Before(successor, before))
+            ? successor
+            : before;
     }
 
     /// <summary>
@@ -187,7 +215,9 @@ public static class FlowRuns
     /// A run's configuration from the records, before a record when one is given: each option from the flow's default, the estate's,
     /// the flow's domain's and the run's product's template-defaults for the exact flow pin, then the goal's plan, the narrowest
     /// winning; and the steps that are off: turned off by an extension, configured off, after the run's until step, or optional and
-    /// fed by a step that is off.
+    /// fed by a step that is off. From 0.9.4 (FIX-146) the template-defaults and the run's product are read as they stood when the goal
+    /// revision was activated (<see cref="ResolvedAt"/>), so a running run keeps its configuration: a template-defaults record written
+    /// later applies to new runs and to the run's next revision, which its sponsor signs and activates, and never to the running one.
     /// </summary>
     public static Configuration Configure(EstateModel model, RecordEnvelope goal, FlowDefinition flow, RecordEnvelope? before = null)
     {
@@ -196,7 +226,8 @@ public static class FlowRuns
         ArgumentNullException.ThrowIfNull(flow);
         JsonElement plan = Plan(goal);
         var values = flow.Options.ToDictionary(o => o.Key, o => new Setting(o.Key, TJson.Text(o.Value, "default")!, "the flow's default", null), StringComparer.Ordinal);
-        string? product = Product(model, goal, flow);
+        RecordEnvelope? resolved = ResolvedAt(model, goal, before);
+        string? product = Product(model, goal, flow, resolved);
         string? domain = TJson.Text(flow.Definition.Content, "domain");
         foreach ((string kind, string? target) in new[] { ("estate", (string?)null), ("domain", domain), ("product", product) })
         {
@@ -205,7 +236,7 @@ public static class FlowRuns
                 continue;
             }
 
-            RecordEnvelope? defaults = model.OfType("template-defaults").Where(r => CurrentBefore(model, r, before)).Where(r =>
+            RecordEnvelope? defaults = model.OfType("template-defaults").Where(r => CurrentBefore(model, r, resolved)).Where(r =>
                 TJson.Text(TJson.Object(r.Body, "template"), "id") == flow.Pin.Id && TJson.Text(TJson.Object(r.Body, "template"), "version") == flow.Pin.Version
                 && TJson.Text(TJson.Object(r.Body, "template"), "hash") == flow.Pin.Hash && TJson.Text(TJson.Object(r.Body, "scope"), "kind") == kind
                 && (target is null || ScopeTarget(model, kind, TJson.Text(TJson.Object(r.Body, "scope"), "target")) == target))

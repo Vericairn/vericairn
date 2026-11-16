@@ -622,7 +622,9 @@ public static partial class FlowPosition
             bool vacuous = complete && FlowContract.Untimed(step.Kind, step.Outputs.Count, step.Done) && Dependencies(step, item).Any(w => w.State is not ("done" or "off"));
             complete &= !vacuous;
             bool doneMet = done.All(d => d.Verdict.Value == "met");
+            // From 0.9.4 (FIX-146) the reviews and verifications that satisfy its items count too: it is done only once the last of them is.
             DateTimeOffset? doneAt = complete ? new[] { step.Reserved is null ? result : null, review }.Concat(outputs.Select(o => o.Carrier)).Concat(done.SelectMany(d => GoalPredicates.Matching(model, d.Predicate, admit)))
+                .Concat(items.Where(i => i.Satisfied).SelectMany(i => i.Evidence.Prepend(i.Review)))
                 .OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max() : null;
             List<Input> inputs = Inputs(step, item, holder, complete && holder is null ? doneAt : null);
             List<AttemptState> attempts = AttemptsOf(assignments);
@@ -635,7 +637,20 @@ public static partial class FlowPosition
             Return? reopened = complete && !stale ? Reopened(step, item, doneAt) : null;
             if (complete && !stale && reopened is null)
             {
-                return Shaped(new StepInstance(step, item, "done", [Completed(step, result, review, done)], Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
+                // From 0.9.4 (FIX-146) an optional item a goal revision of the run's current shape turned off settles its step as a step
+                // turned off settles the steps after it: the step counts as done no earlier than that revision, unless the item was
+                // satisfied before it, so no step after it reads asked from an earlier result that lacked the item.
+                RecordEnvelope? judged = step.Reserved is not null ? (result is not null && IsReservedAct(model, result) ? result : null) : result;
+                IReadOnlySet<string> authors = FlowRuns.Authors(model, assignments);
+                RecordEnvelope? stepReview = step.Kind == "review" ? review : null;
+                List<string> reasons = [Completed(step, result, review, done)];
+                if (ItemsTurnedOff(step, output => Judge(step, output, judged, done, assignments, reviews, authors, stepReview, on: true)) is { } settled && doneAt is DateTimeOffset finished && settled.At > finished)
+                {
+                    doneAt = settled.At;
+                    reasons.Add(settled.Why);
+                }
+
+                return Shaped(new StepInstance(step, item, "done", reasons, Who(holder), holder, result, review, outputs, items, inputs, done, doneAt));
             }
 
             // From 0.9.4 (FIX-142): an optional reserved step whose request for this ask the operator dismissed settles as skipped, with no
@@ -1368,11 +1383,11 @@ public static partial class FlowPosition
         /// exact hash and is of its kind; unproven while the record that produced it does not show the declared provenance; unverified
         /// while a named check does not pass at its exact hash; and its review, the step's when it declares none, recorded at that hash
         /// by a principal of the reviewer role with the declared independence: in review until one passes, stale when only an earlier
-        /// version passed, satisfied once one passes.
+        /// version passed, satisfied once one passes. With <paramref name="on"/>, an item configured off is judged as it would be on.
         /// </summary>
-        private ItemState Judge(FlowStep step, FlowOutput output, RecordEnvelope? result, List<Check> done, List<RecordEnvelope> assignments, List<RecordEnvelope> reviews, IReadOnlySet<string> authors, RecordEnvelope? stepReview)
+        private ItemState Judge(FlowStep step, FlowOutput output, RecordEnvelope? result, List<Check> done, List<RecordEnvelope> assignments, List<RecordEnvelope> reviews, IReadOnlySet<string> authors, RecordEnvelope? stepReview, bool on = false)
         {
-            if (configuration.ItemsOff.TryGetValue(step.Key + "." + output.Name, out string? off))
+            if (!on && configuration.ItemsOff.TryGetValue(step.Key + "." + output.Name, out string? off))
             {
                 return new ItemState(output, "off", [off], null, null, null, []);
             }
@@ -1773,7 +1788,9 @@ public static partial class FlowPosition
         /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
         /// From 0.9.4 (FIX-142) a revision that only turns optional steps or optional items off asks nothing again either: what it leaves
         /// in the run keeps its command, so the operator's closes already recorded keep answering the same asks. A step that waited on a
-        /// step such a revision turns off is asked only from that revision (FIX-144, <see cref="TurnedOff"/>).
+        /// step such a revision turns off is asked only from that revision (FIX-144, <see cref="TurnedOff"/>), and one that waited on a
+        /// step whose item such a revision turns off likewise (FIX-146, <see cref="ItemsTurnedOff"/>). From 0.9.4 (FIX-146) a revision
+        /// that changes until asks each step anew, and the configurations compared are those resolved at each revision's activation.
         /// </summary>
         private DateTimeOffset ShapedAt() => Shape()[0].AtTime;
 
@@ -1803,21 +1820,14 @@ public static partial class FlowPosition
         /// </summary>
         private DateTimeOffset? TurnedOff(FlowStep step, string? item)
         {
-            IReadOnlyList<RecordEnvelope> revisions = Shape();
-            int first = revisions.Count - 1;
-            while (first > 0 && ConfigurationOf(revisions[first - 1]).Off.ContainsKey(step.Key))
-            {
-                first--;
-            }
-
-            if (first == 0)
+            if (OffSince(c => c.Off.ContainsKey(step.Key)) is not RecordEnvelope revision)
             {
                 return null;
             }
 
             // Before that revision the step was part of the run: derived as it would be in it, it was done, or skipped, at a time the
             // records give, or it held the steps after it until the revision.
-            DateTimeOffset turned = revisions[first].AtTime;
+            DateTimeOffset turned = revision.AtTime;
             StepInstance running = Running(step, item);
             DateTimeOffset? settled = running.State switch
             {
@@ -1826,6 +1836,58 @@ public static partial class FlowPosition
                 _ => null,
             };
             return settled is DateTimeOffset earlier && earlier < turned ? earlier : turned;
+        }
+
+        /// <summary>
+        /// The goal revision of the run's current shape since which every revision's configuration holds a condition, such as a step or an
+        /// item off, when an earlier revision of the shape did not; null when every revision since the run took its shape holds it.
+        /// </summary>
+        private RecordEnvelope? OffSince(Func<FlowRuns.Configuration, bool> off)
+        {
+            IReadOnlyList<RecordEnvelope> revisions = Shape();
+            int first = revisions.Count - 1;
+            while (first > 0 && off(ConfigurationOf(revisions[first - 1])))
+            {
+                first--;
+            }
+
+            return first == 0 ? null : revisions[first];
+        }
+
+        /// <summary>
+        /// From 0.9.4 (FIX-146): when a step done now settled for the steps after it, given that a goal revision of the run's current shape
+        /// turned one of its optional items off, as a step turned off settles them (<see cref="TurnedOff"/>): for each such item, the
+        /// revision since which every revision turns it off, or, when the item was satisfied before that revision, that earlier time, the
+        /// latest of them with why; null when no revision of the shape turned an item of the step off. <paramref name="judge"/> judges an
+        /// item as it would be with the item on.
+        /// </summary>
+        private (DateTimeOffset At, string Why)? ItemsTurnedOff(FlowStep step, Func<FlowOutput, ItemState> judge)
+        {
+            (DateTimeOffset At, string Why)? latest = null;
+            foreach (FlowOutput output in step.Outputs.Where(o => !o.Required && configuration.ItemsOff.ContainsKey(step.Key + "." + o.Name)))
+            {
+                string key = step.Key + "." + output.Name;
+                if (OffSince(c => c.ItemsOff.ContainsKey(key)) is not RecordEnvelope revision)
+                {
+                    continue;
+                }
+
+                // Before that revision the item was part of the step: satisfied at a time the records give, it settled the step then; else
+                // the step was not done until the revision turned the item off.
+                ItemState on = judge(output);
+                DateTimeOffset? satisfied = on.Satisfied
+                    ? new[] { on.Value?.Carrier, on.Review }.Concat(on.Evidence).OfType<RecordEnvelope>().Select(r => (DateTimeOffset?)r.AtTime).Max()
+                    : null;
+                (DateTimeOffset At, string Why) settled = satisfied is DateTimeOffset earlier && earlier < revision.AtTime
+                    ? (earlier, $"its optional item {output.Name}, which goal revision {revision.Id} turned off, was satisfied at {Time(earlier)}")
+                    : (revision.AtTime, $"it counts as done from {Time(revision.AtTime)}, when goal revision {revision.Id} turned its optional item {output.Name} off, so the steps after it are asked from then");
+                if (latest is null || settled.At > latest.Value.At)
+                {
+                    latest = settled;
+                }
+            }
+
+            return latest;
         }
 
         /// <summary>The run's configuration under a goal revision of its current shape: the current one's, or the earlier revision's own.</summary>
@@ -1846,21 +1908,18 @@ public static partial class FlowPosition
         }
 
         /// <summary>
-        /// True when an earlier goal revision gives the run the asks the current one does: the same flow pin and subject, and options that
-        /// are the same in effect but for optional steps or items the current revision turns off.
+        /// True when an earlier goal revision gives the run the asks the current one does: the same flow pin and subject, the same until
+        /// step, and a configuration that is the same in effect but for optional steps or items the current revision turns off. From
+        /// 0.9.4 (FIX-146) a revision that changes until asks every step again, and each revision's configuration is compared as it was
+        /// resolved at its activation, so template defaults a revision takes in are compared even when the goal's own options are unchanged.
         /// </summary>
         private bool SameAsks(RecordEnvelope earlier)
         {
             JsonElement now = FlowRuns.Plan(goal);
             JsonElement then = FlowRuns.Plan(earlier);
-            if (Member(now, "pin") != Member(then, "pin") || Member(now, "subject") != Member(then, "subject"))
+            if (Member(now, "pin") != Member(then, "pin") || Member(now, "subject") != Member(then, "subject") || TJson.Text(now, "until") != TJson.Text(then, "until"))
             {
                 return false;
-            }
-
-            if (Member(now, "options") == Member(then, "options"))
-            {
-                return true;
             }
 
             FlowRuns.Configuration before = ConfigurationOf(earlier);

@@ -491,12 +491,19 @@ every template.
   the close is that operator's own authentic `operator-request-close` with
   outcome `done`, pinning a revision of the request with the same step and
   command, made no earlier than the goal revision that gave the run its current
-  flow pin, subject and options and every step the step waits on done, and no
-  later than the time the run is read. Anything else leaves `{request}` unbound.
+  flow pin, subject and options, every step the step waits on done, and, from
+  0.9.4 (FIX-144), every optional step it waits on skipped, by the operator's
+  dismissal, by a revision that turned it off or with the skipped step that
+  feeds it, and no later than the time the run is read. Anything else leaves
+  `{request}` unbound.
   A revision that changes the pin, subject or options, such as a corrective
   version, asks the step again; one that changes only the budget, objective or
   other fields does not, and from 0.9.4 (FIX-142) neither does one whose options
-  only turn optional steps or optional items off. From 0.9.4 the addressed
+  only turn optional steps or optional items off. From 0.9.4 (FIX-146) a
+  revision that changes `until` asks every step again, the configurations
+  compared are those resolved when each revision was activated, and a step
+  whose optional item a revision turns off counts as done from that revision
+  unless the item was satisfied before it. From 0.9.4 the addressed
   operator's own close of that request with outcome `dismissed` settles an
   optional reserved step as skipped, `off` with the dismissal as its reason,
   without a revision of the goal; a required step, or one an estate policy
@@ -629,7 +636,12 @@ turns one off or removes a reserved marking; a `template-defaults` record or goa
 that turns off a step or item an active estate policy requires, by a
 [`vericairn.estate/flow-steps`](policies.md#required-flow-steps-092) rule, is
 refused, as is a run whose wider configuration leaves one off or whose `until`
-ends it before one. `docs new` and `docs adopt` refuse a flow, and a living
+ends it before one. From 0.9.4 (FIX-146) a run keeps the configuration resolved
+when its current goal revision was activated, the run's product read as its
+work order stood then: `template-defaults` recorded later apply to new runs and
+to the run's next revision, which its sponsor signs and activates, as later
+defaults never rewrite a document instance, so nothing but a revision changes
+a running run's steps. `docs new` and `docs adopt` refuse a flow, and a living
 document never pins one.
 
 ### The software pack's flows (0.9.2)
