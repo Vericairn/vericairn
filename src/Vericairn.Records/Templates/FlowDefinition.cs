@@ -136,6 +136,29 @@ public sealed record FlowStep(string Key, string Title, string Kind, string Role
     IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn,
     FlowFailure? Failure = null, FlowTransition? Transition = null)
 {
+    /// <summary>
+    /// The constructor of 0.9.3, without a transition, kept so the package stays compatible (PROC-19 added <see cref="Transition"/>).
+    /// </summary>
+    public FlowStep(string Key, string Title, string Kind, string Role, bool Required, bool DefaultOn, string? Reserved, IReadOnlyList<string> After,
+        IReadOnlyList<JsonElement> Requires, IReadOnlyList<JsonElement> Done, string? Action, string Recovery, IReadOnlyList<FlowTrap> Traps,
+        IReadOnlyList<FlowInput> Inputs, IReadOnlyList<FlowOutput> Outputs, FlowReview? Review, string? Each, JsonElement When, JsonElement Element, TemplatePin DeclaredIn,
+        FlowFailure? Failure)
+        : this(Key, Title, Kind, Role, Required, DefaultOn, Reserved, After, Requires, Done, Action, Recovery, Traps, Inputs, Outputs, Review, Each, When, Element,
+            DeclaredIn, Failure, null)
+    {
+    }
+
+    /// <summary>The deconstruction of 0.9.3, without the transition, kept so the package stays compatible.</summary>
+    public void Deconstruct(out string Key, out string Title, out string Kind, out string Role, out bool Required, out bool DefaultOn, out string? Reserved,
+        out IReadOnlyList<string> After, out IReadOnlyList<JsonElement> Requires, out IReadOnlyList<JsonElement> Done, out string? Action, out string Recovery,
+        out IReadOnlyList<FlowTrap> Traps, out IReadOnlyList<FlowInput> Inputs, out IReadOnlyList<FlowOutput> Outputs, out FlowReview? Review, out string? Each,
+        out JsonElement When, out JsonElement Element, out TemplatePin DeclaredIn, out FlowFailure? Failure)
+    {
+        (Key, Title, Kind, Role, Required, DefaultOn, Reserved, After, Requires, Done, Action, Recovery, Traps, Inputs, Outputs, Review, Each, When, Element,
+            DeclaredIn, Failure) = (this.Key, this.Title, this.Kind, this.Role, this.Required, this.DefaultOn, this.Reserved, this.After, this.Requires, this.Done,
+            this.Action, this.Recovery, this.Traps, this.Inputs, this.Outputs, this.Review, this.Each, this.When, this.Element, this.DeclaredIn, this.Failure);
+    }
+
     /// <summary>The failure route it takes: the one it declares, or a stop.</summary>
     public FlowFailure FailureRoute => Failure ?? FlowFailure.Stop;
 
