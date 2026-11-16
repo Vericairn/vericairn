@@ -20,6 +20,9 @@ permissions:
 jobs:
   publish:
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    # CI-08: the job waits in the protected environment release until the operator, its required reviewer, approves this run
+    # on the run's page, so no listing is published without the operator's approval.
+    environment: release
     permissions:
       contents: read
       id-token: write
@@ -95,7 +98,7 @@ jobs:
         # The registry checks the published NuGet package, and nuget.org indexes a push after some minutes.
         run: |
           set -eu
-          for attempt in $(seq 1 56); do
+          for _ in $(seq 1 56); do
             if curl -fsS "https://api.nuget.org/v3-flatcontainer/dotnet-vc/index.json" | python3 -c 'import json,os,sys; sys.exit(0 if os.environ["PACKAGE_VERSION"] in json.load(sys.stdin)["versions"] else 1)'; then
               echo "nuget.org serves dotnet-vc $PACKAGE_VERSION"; exit 0
             fi

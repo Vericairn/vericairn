@@ -695,8 +695,12 @@ Software implementation digests bind source bytes; first-party record readers us
 explicit versioned implementation identities and golden-byte fixtures.
 
 The serialized build's companion archive is retained by CI and covered by its final
-checksums. The draft-release attachment list does not establish it as a permanent
-release asset. SBOM, checksum and workflow reports explain retained inputs; they
+checksums. From 0.9.4 (FIX-140) it is also attached to the release, so every file
+`SHA256SUMS` names can be downloaded from the release; releases up to 0.9.3 list it
+without attaching it, and their archive exists only in the retained CI artifact, which
+GitHub keeps for 90 days. A release provider written before 0.9.4 reports no checksum
+names, and the observation then cannot refuse a draft that leaves a listed file out.
+SBOM, checksum and workflow reports explain retained inputs; they
 prove neither vulnerability absence nor rights, platform qualification, signatures,
 release acceptance or publication authority. See [retained companions](software.md#retained-build-companions).
 

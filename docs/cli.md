@@ -583,7 +583,16 @@ overwrite a person's text or a frozen set.
 | `insert <set> --section <file>` | Inserts the approved section byte for byte before `## What the release contains` in `release-notes.md`. `--before` and `--document` name another anchor line or document; `--expected-hash <sha256:hex>` refuses other bytes. |
 | `freeze <set>` | Checks the set as `docs check` does, then adds every file's SHA-256 to `frozen-sha256.json` under its version. `--documents <file>` names the declaration, `documents.json` beside the sets by default. |
 | `index <set> --paragraph <file>` | Adds a frozen set's paragraph, which links `[<version> set](<version>/README.md)`, to the release index, newest first. |
-| `prepare --out <set> --documents <file>` | Runs `assemble`, `docs notes` when the set has none (`--estate`, `--from`, `--since`), `insert` (`--security`, `--security-hash`), `compare`, `freeze` and `index` (`--index-paragraph`), stopping at the first refusal. |
+| `llms <set>` (0.9.4) | Writes the set's `llms.txt` and `llms-full.txt` from its documents, in its manifest's order, when the set declares them; a set that declares neither gets none. Refuses a frozen set. |
+| `point-root <set>` (0.9.4) | Points the repository's root `llms.txt` at a frozen set under `docs/releases` that declares its llms files, unless the root already points at a later version. |
+| `prepare --out <set> --documents <file>` | Runs `assemble`, `docs notes` when the set has none (`--estate`, `--from`, `--since`), `insert` (`--security`, `--security-hash`), from 0.9.4 `llms`, then `compare`, `freeze`, from 0.9.4 `point-root`, and `index` (`--index-paragraph`), stopping at the first refusal. |
+
+From 0.9.4 (DOCS-38) every set declares `llms.txt` and `llms-full.txt` in `docs/releases/documents.json`. `llms.txt`
+names the set and links each document by its title, relative to the set, so it reads the same in the repository and in
+the release's documentation archive; `llms-full.txt` holds every document's bytes after a line naming its file, a document
+with the same bytes as an earlier one named once. `vericairn docs check` refuses a set that declares them and lacks
+either or holds one that differs from what its documents render (`docs.llms`). `point-root` writes the one file outside
+the sets, the repository's root `llms.txt`.
 
 `--json` prints one JSON object per step. Exit 0 means the step is done or was already done, 1 that the set is incomplete
 (`freeze`) or differs from the build (`compare` within `prepare`), and 2 a refusal. See the [operator's guide](operator-guide.md#preparing-a-set-with-the-build-tooling-092).

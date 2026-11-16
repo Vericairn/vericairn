@@ -99,9 +99,10 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
     /// <summary>
     /// Completes a run; on success a draft release appears with its assets and a checksum file. Without names, the assets are
     /// Vericairn's own (the command line and Workbench per platform, the bill of materials, the notices); with names, exactly those,
-    /// and an asset the contents name has those bytes, their size and their hash, and can be read.
+    /// and an asset the contents name has those bytes, their size and their hash, and can be read. The checksum file names every
+    /// hashed asset and, as 0.9.3's named its companions archive, each unattached name, which the draft does not attach.
     /// </summary>
-    public void CompleteRun(string repository, string runId, bool success, string version, IReadOnlyList<string>? names = null, string checksums = "SHA256SUMS", IReadOnlyDictionary<string, byte[]>? contents = null)
+    public void CompleteRun(string repository, string runId, bool success, string version, IReadOnlyList<string>? names = null, string checksums = "SHA256SUMS", IReadOnlyDictionary<string, byte[]>? contents = null, IReadOnlyList<string>? unattached = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
@@ -140,7 +141,7 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
             }
 
             assets.Add(new ReleaseAsset(checksums, 300, null));
-            releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(Now()));
+            releases[repository + "#" + tag] = Draft(repository, tag, run.HeadSha, assets, unattached);
             return;
         }
 
@@ -156,8 +157,14 @@ internal sealed class FakeReleaseProvider : IReleaseProvider
         assets.Add(new ReleaseAsset($"vericairn-{version}-sbom.cdx.json", 500, "sha256:" + new string('a', 64)));
         assets.Add(new ReleaseAsset($"vericairn-{version}-THIRD-PARTY-NOTICES.md", 400, "sha256:" + new string('b', 64)));
         assets.Add(new ReleaseAsset(checksums, 300, null));
-        releases[repository + "#" + tag] = new ReleaseObservation(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", run.HeadSha, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(Now()));
+        releases[repository + "#" + tag] = Draft(repository, tag, run.HeadSha, assets, unattached);
     }
+
+    private ReleaseObservation Draft(string repository, string tag, string commit, List<ReleaseAsset> assets, IReadOnlyList<string>? unattached) =>
+        new(tag, true, $"https://github.com/{repository}/releases/tag/{tag}", commit, null, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(Now()))
+        {
+            ChecksumNames = [.. assets.Where(a => a.Hash is not null).Select(a => a.Name), .. unattached ?? []],
+        };
 
     /// <summary>What the operator's manual step does at GitHub: the draft becomes public.</summary>
     public void Publish(string repository, string tag)

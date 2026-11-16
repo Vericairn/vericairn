@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
+using Vericairn.Mcp;
 using Vericairn.Records.Signing;
 
 namespace Vericairn.Cli.Tests;
@@ -103,6 +104,35 @@ public class McpPackageTests
             Assert.False(replies[1]["result"]!["isError"]!.GetValue<bool>());
             Assert.Contains("acting as " + principal, error, StringComparison.Ordinal);
             Assert.Contains(estate, error, StringComparison.Ordinal);
+        }
+        finally { CliHarness.Delete(scratch); }
+    }
+
+    [Fact]
+    public async Task TheUnpackedServerAnswersInitializeBeforeTheRequestsSentWithIt()
+    {
+        // The command line as built, not packed: a client that pipes initialize, its notification and a tool call together gets
+        // initialize's reply first (MCP-07: on Linux the tool call's came first once initialize reported the definitions' hash).
+        string scratch = CliHarness.TempDirectory("mcp-unpacked");
+        try
+        {
+            string estate = Path.Combine(scratch, "estate");
+            string principal = CliHarness.Ok("--estate", estate, "--json", "estate", "init", "--name", "MCP unpacked estate",
+                "--slug", "mcp-unpacked", "--purpose", "Exercise the built server.", "--operator-name", "Operator",
+                "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string cli = Path.Combine(RepositoryRoot(), "artifacts", "bin", "Vericairn.Cli", BuildConfiguration.ToLowerInvariant(), "vericairn.dll");
+            Assert.True(File.Exists(cli), "The built command line is at " + cli + ".");
+            const string input = """
+                {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"unpacked-test","version":"1"}}}
+                {"jsonrpc":"2.0","method":"notifications/initialized"}
+                {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"estate_health","arguments":{}}}
+                """;
+            (int exit, string output, string error) = await Run(Start(scratch, cli, "--estate", estate, "--as", principal, "mcp", "serve"), input + "\n");
+            Assert.True(exit == 0, output + error);
+            JsonNode[] replies = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)!).ToArray();
+            Assert.Equal([1, 2], replies.Select(reply => reply["id"]!.GetValue<int>()));
+            Assert.Equal(ToolRegistry.DefinitionsHash, replies[0]["result"]!["_meta"]![McpServer.ToolDefinitionsMeta]!["hash"]!.GetValue<string>());
+            Assert.False(replies[1]["result"]!["isError"]!.GetValue<bool>());
         }
         finally { CliHarness.Delete(scratch); }
     }

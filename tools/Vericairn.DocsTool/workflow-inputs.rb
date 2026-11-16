@@ -35,7 +35,8 @@ directory = File.join(root, '.github/workflows')
 errors = WorkflowActions.check(directory)
 abort errors.join("\n") unless errors.empty?
 allow_path = '.github/workflows/actions.allow'
-allowed = File.readlines(File.join(root, allow_path)).map { |line| value = line.split('#', 2).first.to_s.strip; value unless value.empty? }.compact
+# From CI-08 an entry records its owner and repository ids after the action; the report lists the actions at their commits.
+allowed = File.readlines(File.join(root, allow_path)).map { |line| line.split('#', 2).first.to_s.strip.split(/\s+/).first }.compact
 paths = [parser, allow_path] + Dir.glob(File.join(directory, '*.{yml,yaml}')).map { |p| ".github/workflows/#{File.basename(p)}" }
 sources = paths.sort.map do |path|
   full = File.join(root, path)

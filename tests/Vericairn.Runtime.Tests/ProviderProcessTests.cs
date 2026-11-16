@@ -131,6 +131,33 @@ public sealed class ProviderProcessTests
         Assert.Equal(2, calls);
     }
 
+    [Fact]
+    public void GitHubReportsEveryNameTheChecksumFileListsSoAnUnattachedOneIsSeen()
+    {
+        // FIX-140: 0.9.3's SHA256SUMS listed its companions archive, which the release did not attach.
+        const string view = """{"tagName":"v1.0.0","isDraft":true,"url":"https://github.com/Example/widget/releases/tag/v1.0.0","targetCommitish":"main","publishedAt":null,"assets":[{"name":"widget-1.0.0-linux-x64.zip","size":10},{"name":"SHA256SUMS","size":200}]}""";
+        string sums = new string('a', 64) + "  widget-1.0.0-linux-x64.zip\n" + new string('b', 64) + " *widget-1.0.0-companions.zip\n" + new string('b', 64) + "  widget-1.0.0-companions.zip\n";
+        bool readable = true;
+        var provider = new GitHubReleaseProvider(info =>
+        {
+            Assert.Equal("release", info.ArgumentList[0]);
+            if (info.ArgumentList[1] == "view") return new(ProcessOutcome.Exited, true, 0, view, string.Empty);
+            Assert.Equal(["release", "download", "v1.0.0", "-R", "Example/widget", "-p", "SHA256SUMS", "-D"], info.ArgumentList.Take(8));
+            if (!readable) return new(ProcessOutcome.Exited, true, 1, string.Empty, "HTTP 404");
+            File.WriteAllText(Path.Combine(info.ArgumentList[8], "SHA256SUMS"), sums);
+            return Success();
+        });
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["checksums"] = "SHA256SUMS" };
+        ReleaseObservation release = provider.ObserveRelease("Example/widget", "v1.0.0", settings)!;
+        Assert.Equal(["widget-1.0.0-linux-x64.zip", "widget-1.0.0-companions.zip"], release.ChecksumNames);
+        Assert.Equal(["widget-1.0.0-companions.zip"], Vericairn.Runtime.Release.ReleaseProfile.Unattached(release, "SHA256SUMS"));
+        Assert.Equal("sha256:" + new string('a', 64), release.Assets.Single(a => a.Name == "widget-1.0.0-linux-x64.zip").Hash);
+
+        // A checksum file that cannot be read reports no names, never an empty list that would read as complete.
+        readable = false;
+        Assert.Null(provider.ObserveRelease("Example/widget", "v1.0.0", settings)!.ChecksumNames);
+    }
+
     private static ProcessResult Success() => new(ProcessOutcome.Exited, true, 0, string.Empty, string.Empty);
     private static ProcessResult Failure(string outcome, bool started) => new(Enum.Parse<ProcessOutcome>(outcome), started, null, "partial output", "partial error");
     private static DispatchRequest Request() => new("Example/widget", new Dictionary<string, string>(), new Dictionary<string, string> { ["version"] = "1.0.0" });

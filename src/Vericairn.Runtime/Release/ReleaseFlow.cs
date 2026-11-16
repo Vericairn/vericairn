@@ -209,7 +209,11 @@ public static class ReleaseFlow
         return body;
     }
 
-    /// <summary>The revision after the run and the release were observed: success only when the run succeeded and the draft is complete by the product's profile.</summary>
+    /// <summary>
+    /// The revision after the run and the release were observed: success only when the run succeeded and the draft is complete by the
+    /// product's profile. From 0.9.4 a draft is complete only when it attaches every file its checksum file names: once the run has
+    /// succeeded, a draft that does not is a known failure naming each missing file, and no candidate follows.
+    /// </summary>
     public static JsonObject AfterObservation(JsonElement previous, RunObservation? run, ReleaseObservation? release, string version, ReleaseProfile profile, string checksums)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -218,7 +222,13 @@ public static class ReleaseFlow
             return Observed(previous, "known-failure", $"Run {run.RunId} completed with conclusion {run.Conclusion ?? "none"}; no release was produced.", run.Url, run.RunId);
         }
 
-        if (release is not null && profile.Missing(release, version, checksums).Count == 0 && (run is null || (run.Status == "completed" && run.Conclusion == "success")))
+        IReadOnlyList<string> unattached = release is null ? [] : ReleaseProfile.Unattached(release, checksums);
+        if (release is not null && unattached.Count > 0 && run is { Status: "completed", Conclusion: "success" })
+        {
+            return Observed(previous, "known-failure", $"Run {run.RunId} succeeded, but draft release {release.Tag} does not attach {Unattached(unattached, checksums)}. No candidate was recorded: a release attaches every file its checksum file names.", release.Url, run.RunId);
+        }
+
+        if (release is not null && unattached.Count == 0 && profile.Missing(release, version, checksums).Count == 0 && (run is null || (run.Status == "completed" && run.Conclusion == "success")))
         {
             string complete = profile.DeclaresArtifacts ? "every declared artifact named in its checksum file" : $"every asset named in {checksums}";
             return Observed(previous, "observed-success", $"Draft release {release.Tag} observed with {release.Assets.Count} assets and {complete}{(run is null ? string.Empty : $"; run {run.RunId} succeeded")}.", release.Url, run?.RunId);
@@ -307,6 +317,27 @@ public static class ReleaseFlow
         body["publishedAt"] = release.PublishedAt;
         body["url"] = release.Url ?? string.Empty;
         return body;
+    }
+
+    /// <summary>
+    /// The files a draft's checksum file names that the draft does not attach, each by name, as observation summaries and refusals
+    /// state them: "the file a that SHA256SUMS names" or "the 2 files a, b that SHA256SUMS names". A listing past 3,000 characters
+    /// names the rest by count, so the summary stays within the operation record's limit.
+    /// </summary>
+    internal static string Unattached(IReadOnlyList<string> names, string checksums)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        var shown = new List<string>();
+        int length = 0;
+        foreach (string name in names)
+        {
+            if (length + name.Length > 3000 && shown.Count > 0) break;
+            shown.Add(name);
+            length += name.Length + 2;
+        }
+
+        string listing = string.Join(", ", shown) + (shown.Count < names.Count ? $" and {names.Count - shown.Count} more" : string.Empty);
+        return names.Count == 1 ? $"the file {listing} that {checksums} names" : $"the {names.Count} files {listing} that {checksums} names";
     }
 
     private static JsonObject Observed(JsonElement previous, string status, string summary, string? url, string? reference)

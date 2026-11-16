@@ -47,7 +47,10 @@ internal static partial class ReferenceSet
 
     // What the build tooling writes into a set; a maintained guide of the same name is never copied over it.
     private static HashSet<string> GeneratedMembers =>
-        [.. Readers.Select(r => r.Name + ".md"), "reference-index.md", ReferenceInventoryFiles.Name, "manifest.json"];
+        [.. Readers.Select(r => r.Name + ".md"), "reference-index.md", ReferenceInventoryFiles.Name, "manifest.json", Docs.LlmsIndex, Docs.LlmsFull];
+
+    /// <summary>From 0.9.4 (DOCS-38): the file at the repository's root that points at the current set's llms files.</summary>
+    public const string RootIndex = "llms.txt";
 
     /// <summary>
     /// Assembles a set from the declared documents: the references and manifest generated from this build (unless the set keeps
@@ -163,6 +166,108 @@ internal static partial class ReferenceSet
         {
             return Commands.Fail(exception.Message);
         }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (DOCS-38): writes the set's llms.txt and llms-full.txt from its documents, in its manifest's order, when the set
+    /// declares them; a set that declares neither, as every set before 0.9.4, is left as it is. Refuses a frozen set; writing the same
+    /// bytes again changes nothing. Run after the notes and the approved section are in place, before the set is compared and frozen.
+    /// </summary>
+    public static int Llms(string directory, bool json)
+    {
+        try
+        {
+            SetPaths set = Locate(directory);
+            RefuseIndexed(set);
+            using JsonDocument manifest = JsonDocument.Parse(ReadBytes(set.Set, "manifest.json"));
+            List<string> declared = Strings(manifest.RootElement, "documents");
+            bool written = false;
+            if (declared.Contains(Docs.LlmsIndex) || declared.Contains(Docs.LlmsFull))
+            {
+                List<string> documents = Docs.LlmsDocuments(declared);
+                string[] missing = [.. documents.Where(d => !File.Exists(Path.Combine(set.Set, d)))];
+                if (missing.Length > 0)
+                    throw new InvalidOperationException($"The set's llms files cover every document it declares, and it lacks {string.Join(", ", missing)}; write them first.");
+                (byte[] index, byte[] full) = Docs.Llms(set.Set, set.Version, documents);
+                written = WriteIfChanged(set.Set, Docs.LlmsIndex, index) | WriteIfChanged(set.Set, Docs.LlmsFull, full);
+                if (json) Console.Out.WriteLine(JsonSerializer.Serialize(new { step = "llms", version = set.Version, documents = documents.Count, written }));
+                else Console.Out.WriteLine($"{set.Version}: {Docs.LlmsIndex} and {Docs.LlmsFull} cover its {documents.Count} documents ({(written ? "written" : "unchanged")})");
+            }
+            else if (json) Console.Out.WriteLine(JsonSerializer.Serialize(new { step = "llms", version = set.Version, documents = 0, written }));
+            else Console.Out.WriteLine($"{set.Version}: declares no {Docs.LlmsIndex}; nothing written");
+            return Commands.Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            return Commands.Fail(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// From 0.9.4 (DOCS-38): points the repository's root llms.txt at a frozen set that declares its llms files, unless the root
+    /// already points at a later version, as it does when an earlier line's set is prepared. The root is the directory holding
+    /// docs/releases; sets kept anywhere else have no root file. Writing the same bytes again changes nothing.
+    /// </summary>
+    public static int PointRoot(string directory, bool json)
+    {
+        try
+        {
+            SetPaths set = Locate(directory);
+            string releases = set.Releases, docs = Path.GetDirectoryName(releases) ?? string.Empty;
+            if (Path.GetFileName(releases) != "releases" || Path.GetFileName(docs) != "docs" || Path.GetDirectoryName(docs) is not { } root)
+                return Report("not under docs/releases, so no root file is written", written: false);
+            if (ReadIndex(set)["sets"]![set.Version] is null) throw new InvalidOperationException($"{set.Version} is not frozen; the root points only at a frozen set.");
+            using (JsonDocument manifest = JsonDocument.Parse(ReadBytes(set.Set, "manifest.json")))
+                if (!Strings(manifest.RootElement, "documents").Contains(Docs.LlmsIndex))
+                    return Report($"declares no {Docs.LlmsIndex}, so the root is left as it is", written: false);
+            string path = Path.Combine(root, RootIndex);
+            if (File.Exists(path))
+            {
+                RefuseLink(path);
+                Match current = RootTarget().Match(File.ReadAllText(path));
+                if (current.Success && Newer(current.Groups["version"].Value, set.Version))
+                    return Report($"the root points at the later {current.Groups["version"].Value}; left as it is", written: false);
+            }
+
+            byte[] bytes = Encoding.UTF8.GetBytes(
+                "# Vericairn\n\n" +
+                $"> Vericairn's documentation, frozen with each release. The current set is {set.Version}'s; the maintained guides in docs/ change between releases, and each set keeps the guides of its release.\n\n" +
+                "Links are relative to this file, at the root of the repository.\n\n" +
+                "## Documentation\n\n" +
+                $"- [Vericairn {set.Version}](docs/releases/{set.Version}/llms.txt): the current set's index, each guide and reference by title\n" +
+                $"- [Vericairn {set.Version}, every document in one file](docs/releases/{set.Version}/llms-full.txt)\n" +
+                "- [Every documentation set](docs/releases/README.md): each release's set, newest first\n");
+            bool written = !File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes);
+            if (written) WriteShared(path, bytes);
+            return Report($"the root {RootIndex} points at it{(written ? string.Empty : "; unchanged")}", written);
+
+            int Report(string what, bool written)
+            {
+                if (json) Console.Out.WriteLine(JsonSerializer.Serialize(new { step = "root", version = set.Version, written }));
+                else Console.Out.WriteLine($"{set.Version}: {what}");
+                return Commands.Clean;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            return Commands.Fail(exception.Message);
+        }
+    }
+
+    // Whether one set version is later than another: by its numbers, then a release after its prereleases.
+    private static bool Newer(string version, string than)
+    {
+        static (Version Numbers, bool Release, string Pre) Parse(string v)
+        {
+            string[] parts = v.Split('-', 2);
+            return (Version.TryParse(parts[0], out Version? numbers) ? numbers : new Version(0, 0), parts.Length == 1, parts.Length == 2 ? parts[1] : string.Empty);
+        }
+
+        var (a, b) = (Parse(version), Parse(than));
+        int numbers = a.Numbers.CompareTo(b.Numbers);
+        if (numbers != 0) return numbers > 0;
+        if (a.Release != b.Release) return a.Release;
+        return string.CompareOrdinal(a.Pre, b.Pre) > 0;
     }
 
     /// <summary>
@@ -322,12 +427,16 @@ internal static partial class ReferenceSet
                 if (code != Commands.Clean) return code;
             }
 
+            code = Llms(set.Set, json);
+            if (code != Commands.Clean) return code;
             code = CompareWithBuild(set.Set, json);
             if (code != Commands.Clean) return code;
             code = Freeze(set.Set, json, declaration);
             if (code != Commands.Clean) return code;
         }
 
+        int pointed = PointRoot(set.Set, json);
+        if (pointed != Commands.Clean) return pointed;
         return paragraph is null ? Commands.Clean : IndexParagraph(set.Set, paragraph, json);
     }
 
@@ -517,4 +626,7 @@ internal static partial class ReferenceSet
 
     [GeneratedRegex(@"^#{1,6} \S")]
     private static partial Regex HeadingLine();
+
+    [GeneratedRegex(@"\]\(docs/releases/(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)/llms\.txt\)")]
+    private static partial Regex RootTarget();
 }
