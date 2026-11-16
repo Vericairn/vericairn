@@ -262,8 +262,12 @@ public sealed class EstateSession : IDisposable
         }
         EstateModel model = EstateLoader.Load(Root, files.Files, parseCache, objects: ObjectReader);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        Judged?.Invoke(model);
         return model;
     }
+
+    /// <summary>Told each model <see cref="Load"/> judges, once it is judged: what cost tests count the passes over (FIX-136).</summary>
+    internal Action<EstateModel>? Judged { get; set; }
 
     /// <summary>
     /// The working tree's write lock (FIX-99), held by this session's writes; null for a read-only session. A runtime holds it from

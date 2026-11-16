@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Vericairn.Records.Model;
 
@@ -164,7 +165,19 @@ public sealed class EstateModel
     public bool IsCurrent(RecordEnvelope record) => record is not null && !notCounting.Contains(record.Id) && !SupersededBy.ContainsKey(record.Id);
 
     /// <summary>All records of a type.</summary>
-    public IEnumerable<RecordEnvelope> OfType(string type) => recordsByType[type];
+    public IEnumerable<RecordEnvelope> OfType(string type)
+    {
+        Interlocked.Increment(ref typeReads.GetOrAdd(type, static _ => new StrongBox<long>()).Value);
+        return recordsByType[type];
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, StrongBox<long>> typeReads = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How many times each record type has been read whole from this model (<see cref="OfType"/>, <see cref="Current"/>): a
+    /// deterministic count of the whole-estate passes a judgment and the views derived from it make, for cost tests (FIX-136).
+    /// </summary>
+    internal IReadOnlyDictionary<string, long> TypeReads => typeReads.ToDictionary(t => t.Key, t => Interlocked.Read(ref t.Value.Value), StringComparer.Ordinal);
 
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
@@ -208,7 +221,16 @@ public sealed class EstateModel
     /// of deriving every document again.
     /// </summary>
     internal IReadOnlyList<LivingDocuments.State> LivingDocumentStates(Func<EstateModel, IReadOnlyList<LivingDocuments.State>> derive) =>
-        LazyInitializer.EnsureInitialized(ref livingDocuments, () => derive(this));
+        LazyInitializer.EnsureInitialized(ref livingDocuments, () =>
+        {
+            Interlocked.Increment(ref livingDocumentDerivations);
+            return derive(this);
+        });
+
+    private long livingDocumentDerivations;
+
+    /// <summary>How many times every living document's state has been derived for this model: a deterministic count for cost tests.</summary>
+    internal long LivingDocumentDerivations => Interlocked.Read(ref livingDocumentDerivations);
 
     /// <summary>
     /// The acceptance that marks when acceptances began to name a result's exact hash (<see cref="EstateStatus.ResultAcceptancesBegan"/>),
