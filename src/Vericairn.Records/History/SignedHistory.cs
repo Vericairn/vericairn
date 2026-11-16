@@ -686,9 +686,10 @@ public static class SignedHistory
 
     /// <summary>
     /// For the adoption check (ID-14): the records that count by a person, other than the root operator, whose principal record as it reads
-    /// now no longer gives a role it gave at the record's time, each with the roles removed since, sorted by id. A removal before adoption
-    /// has no role closing, so the person could still write records dated into the time the role stood; adoption keeps for each record it
-    /// witnesses the reading it has at adoption, and from then on a removal is written after the person's role closing.
+    /// now no longer gives the operator role it gave at the record's time, each with the roles removed since, sorted by id. A removal of
+    /// the operator role before adoption has no role closing, so the person could still write records dated into the time the role stood;
+    /// adoption keeps for each record it witnesses the reading it has at adoption, and from then on such a removal is written after the
+    /// person's role closing. Another role removed writes no closing at any time and is read at each record's time, so it is not listed.
     /// </summary>
     internal static IReadOnlyList<(RecordEnvelope Record, string Roles)> ByRemovedRoles(EstateModel model)
     {
@@ -702,7 +703,7 @@ public static class SignedHistory
                 now[record.By] = held = authority.Current(record.By) is { } current ? AuthorityReplay.Roles(current) : null;
             if (held is null || authority.At(record.By, record.At) is not { } then || EstateModel.BodyString(then, "kind") != "human") continue;
             List<string> lost = [.. AuthorityReplay.Roles(then).Where(r => !held.Contains(r, StringComparer.Ordinal)).Order(StringComparer.Ordinal)];
-            if (lost.Count > 0) removed.Add((record, string.Join(", ", lost)));
+            if (lost.Contains(Types.Roles.Operator, StringComparer.Ordinal)) removed.Add((record, string.Join(", ", lost)));
         }
 
         return removed;

@@ -269,7 +269,8 @@ internal sealed partial class EstateTrust
                 record.Signatures.Any(s => model.ById.TryGetValue(s.Device, out RecordEnvelope? device) && device.Type == "device" && IdentityOf(device) == identity) ? null
                 : "A key is closed only by its own device, for that device's principal.",
             // A role is closed by one who may remove it (ID-14): the root operator or another operator, the role still standing, and never
-            // the root operator's own role, which no revision takes away.
+            // the root operator's own role, which no revision takes away. Only the operator role has a closing (decision 01M7JSJSHTTX86F10007GDQ238).
+            "role" when !ClosingActs.GivesOperatorRole(target.Body) => $"A role closing closes a person's operator role, and principal revision {target.Id} gives none: removing any other role writes no closing, since that role is read at each record's time.",
             "role" => identity == RootOperator ? "The root operator's role is never closed: no revision takes the root operator's place."
                 : record.By != identity && StandingOperator(record.By, record.At, bound, record) ? null
                 : "A role is closed only by the root operator or another operator, the role still standing, never by the person whose role it closes.",

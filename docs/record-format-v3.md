@@ -755,9 +755,12 @@ acts and no act follows yet:
 | `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
 | `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision naming another grantee, dropping a scope, reserving another action, adding a condition, adding or shortening an expiry, or changing a policy scope's bounds | An operator, who may revise the grant |
-| `role` (0.9.4) | The principal revision of a person whose role is removed; the closing closes it and every revision of its line dated at or before it | A revision of that person's record dropping a role or describing another kind of principal; never for the root operator, nor for an agent's or a service's record | The root operator or another operator, the role still standing, never the person |
+| `role` (0.9.4) | The principal revision that gives a person the operator role; the closing closes it and every revision of its line dated at or before it | A revision of that person's record taking the operator role away, dropping it or describing another kind of principal; never for the root operator; removing any other role writes no closing | The root operator or another operator, the role still standing, never the person |
 
-**Role closings (0.9.4).** From 0.9.4 (ID-14), a `role` closing closes a person: from it on,
+**Role closings (0.9.4).** From 0.9.4 (ID-14), removing the operator role from a person writes a role
+closing; removing any other role writes none, and that role is read at each record's time, as
+before (decision `01M7JSJSHTTX86F10007GDQ238`). A `role` closing naming a revision that gives no
+operator role closes nothing (`history.closing-author`). A `role` closing closes a person: from it on,
 a record the person wrote, signed or unsigned, that the closing or a checkpoint it follows does
 not witness and no anchor lists counts for nothing (`history.after-closing`), whatever date it
 states and whatever device signed it, in every read: a decision, a grant, a revision of their own
@@ -769,12 +772,12 @@ person gave as operator before the closing, the principal and authority revision
 closings it witnesses, keeps counting for anchoring, acknowledging a removal, rooting an
 adoption and the closings, as written, where the person held the role when writing it; so a
 closing keeps the force it had when it was signed when its author is later removed with their own
-role closing. A removal in an adopted estate that no role closing names is the warning
-`history.closing-missing`, and the runtime refuses to write one without its closing; such a
+role closing. A removal of the operator role in an adopted estate that no role closing names is the
+warning `history.closing-missing`, and the runtime refuses to write one without its closing; such a
 removal, and only such a one, still withdraws its author's closings from these acts. Since a role
-closing is signed by the root operator or another standing operator, in an adopted estate a person
-holding `administer` but not the operator role no longer removes a role from a person's record:
-the closing is `history.closing-author` and the runtime refuses the batch.
+closing is signed by the root operator or another standing operator, and only an operator gives or
+takes the operator role, a person holding `administer` but not the operator role does not write
+one; removing another role from a person they admitted is written as before, with no closing.
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
@@ -962,8 +965,8 @@ for nothing, whoever signed it. It attaches to the nearest record below it in it
 counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
 revision on top of one that does not count is compared with, and follows, the line there, so
 its line has one current record in every read. The strongest acts, which consider only the
-revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's role in an
-estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
+revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's operator role
+in an estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
 refuses everything the person writes that it does not witness, whatever date it states. In an estate that has not adopted, and
 for a removal no role closing names, a former operator's records dated into the time the role stood read as it stood, apart from
 policy authority, which reads them only where signed history places them before the removal; close and revoke a person's devices

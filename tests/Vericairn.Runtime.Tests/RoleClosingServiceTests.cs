@@ -191,26 +191,66 @@ public sealed class RoleClosingServiceTests
     }
 
     [Fact]
-    public void TheAdoptionCheckListsRecordsByAPersonWhoseRoleWasRemovedBeforeAdoption()
+    public void TheAdoptionCheckListsRecordsByAPersonWhoseOperatorRoleWasRemovedBeforeAdoption()
     {
         using var f = new HistoryTriggerTests.Fixture(adopt: false);
         string op = f.Records.Estate.OperatorId;
-        WriteOutcome appointed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "reviewer", "contributor")));
+        WriteOutcome appointed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "operator", "contributor")));
         Assert.True(appointed.Ok, Describe(appointed));
         string p = appointed.Written!.Id;
-        string device = f.HeldDevice(p);
+        WriteOutcome reviewer = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("Q", "reviewer", "contributor")));
+        Assert.True(reviewer.Ok, Describe(reviewer));
+        string q = reviewer.Written!.Id;
+        string pDevice = f.HeldDevice(p), qDevice = f.HeldDevice(q);
         f.Records.Estate.SetClock(DateTimeOffset.UtcNow.AddSeconds(-1));
-        RecordEnvelope order = f.Records.Estate.Add("work-order", p, Vericairn.Records.Tests.HistoryFixture.Order("RCS-1", "Written while P was a contributor"),
-            signer: new StoreSigner(new FileKeyStore(VericairnHome.Path()), device));
-        // The removal is dated at the runtime's clock, in whole seconds: a later second than the work order.
-        Thread.Sleep(1100);
-        WriteOutcome removed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "reviewer"), Supersedes: p));
+        RecordEnvelope order = f.Records.Estate.Add("work-order", p, Vericairn.Records.Tests.HistoryFixture.Order("RCS-1", "Written while P was an operator"),
+            signer: new StoreSigner(new FileKeyStore(VericairnHome.Path()), pDevice));
+        RecordEnvelope other = f.Records.Estate.Add("work-order", q, Vericairn.Records.Tests.HistoryFixture.Order("RCS-2", "Written while Q was a reviewer"),
+            signer: new StoreSigner(new FileKeyStore(VericairnHome.Path()), qDevice));
+        // The removals are dated at the runtime's clock, in whole seconds: a later second than both work orders.
+        Thread.Sleep(2100);
+        WriteOutcome removed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "contributor"), Supersedes: p));
         Assert.True(removed.Ok, Describe(removed));
+        WriteOutcome lesser = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("Q", "contributor"), Supersedes: q));
+        Assert.True(lesser.Ok, Describe(lesser));
 
+        // Only the operator role's removal is listed: another role is read at each record's time and never has a closing.
         HistoryCheckpointResponse plan = f.Api.HistoryCheckpoint(new HistoryCheckpointRequest(null, Adopt: true, Check: true)).Checkpoint!;
         HistoryRecordItem listed = Assert.Single(plan.ByRemovedRoles, r => r.Id == order.Id);
-        Assert.Equal("roles removed since: contributor", listed.Note);
-        Assert.DoesNotContain(plan.ByRemovedRoles, r => r.Id == removed.Written!.Id);
+        Assert.Equal("roles removed since: operator", listed.Note);
+        Assert.DoesNotContain(plan.ByRemovedRoles, r => r.Id == other.Id || r.Id == removed.Written!.Id);
+    }
+
+    [Fact]
+    public void RemovingOnlyTheReviewerRoleFromAnOperatorWritesNoClosingAndTheirNextAppointmentIsWritten()
+    {
+        // The Reviewer's probe, through the runtime: the root operator removes only the reviewer role from P, who stays an operator. No
+        // closing is written; P's next decision, appointment and device closing are written and count.
+        using var f = new HistoryTriggerTests.Fixture();
+        string op = f.Records.Estate.OperatorId;
+        WriteOutcome appointed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "operator", "reviewer")));
+        Assert.True(appointed.Ok, Describe(appointed));
+        string p = appointed.Written!.Id;
+        f.HeldDevice(p);
+        Thread.Sleep(1100);
+
+        WriteOutcome removed = f.Api.NewRecord(new NewRecordRequest("principal", op, Person("P", "operator"), Supersedes: p));
+        Assert.True(removed.Ok, Describe(removed));
+        Assert.True(removed.Checkpoint is null || removed.Checkpoint.Trigger != "closing");
+        WriteOutcome decided = f.Api.NewRecord(new NewRecordRequest("decision", p, Decision(p, "After the reviewer role was removed")));
+        Assert.True(decided.Ok, Describe(decided));
+        WriteOutcome appointment = f.Api.NewRecord(new NewRecordRequest("principal", p, Person("Z", "operator")));
+        Assert.True(appointment.Ok, Describe(appointment));
+        WriteOutcome revoked = f.Api.DeviceRevoke(new RevokeRequest(f.BuilderDevice, p, "Revoked by P, still an operator."));
+        Assert.True(revoked.Ok, Describe(revoked));
+        Assert.Equal("closing", revoked.Checkpoint!.Trigger);
+
+        EstateModel model = f.Api.Session.Load();
+        Assert.DoesNotContain(model.Trust.Closings, c => c.Kind == "role");
+        Assert.Contains(model.Trust.Closings, c => c.Kind == "device" && c.Record.Id == revoked.Checkpoint.Written!.Id);
+        Assert.True(model.Counts(model.ById[appointment.Written!.Id]));
+        Assert.True(model.HasRole(appointment.Written.Id, Roles.Operator));
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.after-closing" or "history.closing-missing");
     }
 
     [Fact]

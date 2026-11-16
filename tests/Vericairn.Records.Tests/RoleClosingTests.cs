@@ -360,19 +360,70 @@ public sealed class RoleClosingTests
     }
 
     [Fact]
-    public void ClosingActsNameARoleRemovalOfAPersonOnly()
+    public void ClosingActsNameARemovalOfAPersonsOperatorRoleOnly()
     {
         using var e = new Estate();
         EstateModel model = e.F.Load();
         using var removes = System.Text.Json.JsonDocument.Parse(Person("P", "reviewer"));
         using var keeps = System.Text.Json.JsonDocument.Parse(Person("P", "operator", "reviewer", "builder"));
+        using var reviewerOnly = System.Text.Json.JsonDocument.Parse(Person("P", "operator"));
         using var agent = System.Text.Json.JsonDocument.Parse("""{"kind":"agent","name":"Test Builder","roles":[],"agent":{"vendor":"Example","product":"Example Agent"}}""");
         Assert.Equal(("role", e.P.Id), ClosingActs.For(model, "principal", removes.RootElement, null, e.P.Id));
         Assert.Null(ClosingActs.For(model, "principal", keeps.RootElement, null, e.P.Id));
+        // Removing only the reviewer role, the person staying an operator, is no act a closing precedes (decision 01M7JSJSHTTX86F10007GDQ238).
+        Assert.Null(ClosingActs.For(model, "principal", reviewerOnly.RootElement, null, e.P.Id));
         // An agent's record is no person's, and the root operator's role is never closed.
         Assert.Null(ClosingActs.For(model, "principal", agent.RootElement, null, e.F.Estate.BuilderId));
         Assert.Null(ClosingActs.For(model, "principal", removes.RootElement, null, e.F.Estate.OperatorId));
-        Assert.True(ClosingActs.RemovesRole(keeps.RootElement, removes.RootElement));
-        Assert.False(ClosingActs.RemovesRole(removes.RootElement, keeps.RootElement));
+        Assert.True(ClosingActs.RemovesOperatorRole(keeps.RootElement, removes.RootElement));
+        Assert.False(ClosingActs.RemovesOperatorRole(keeps.RootElement, reviewerOnly.RootElement));
+        Assert.False(ClosingActs.RemovesOperatorRole(removes.RootElement, keeps.RootElement));
+    }
+
+    [Fact]
+    public void RemovingOnlyTheReviewerRoleWritesNoClosingAndThePersonKeepsWritingAsAnOperator()
+    {
+        // The Reviewer's probe: the root operator removes only the reviewer role from P, who stays an operator. No closing is needed or
+        // missing, and P's later decision, appointment and device closing count.
+        using var e = new Estate();
+        HistoryFixture f = e.F;
+        RecordEnvelope removal = f.Estate.Add("principal", f.Estate.OperatorId, Person("P", "operator"), supersedes: e.P.Id, signer: f.OperatorSigner);
+        RecordEnvelope decision = f.Estate.Add("decision", e.P.Id, Decision(e.P.Id, "After the reviewer role was removed"), signer: e.PSigner);
+        RecordEnvelope appointment = f.Estate.Add("principal", e.P.Id, Person("Z", "operator"), signer: e.PSigner);
+        RecordEnvelope target = f.Device(f.Estate.OperatorId, "A device P closes");
+        RecordEnvelope closing = f.Close("device", target.Id, e.P.Id, e.PSigner);
+        EstateModel model = f.Load();
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.closing-missing" or "history.after-closing");
+        Assert.True(model.Counts(model.ById[removal.Id]));
+        Assert.True(model.Counts(model.ById[decision.Id]));
+        Assert.True(model.Counts(model.ById[appointment.Id]));
+        Assert.True(model.HasRole(appointment.Id, Roles.Operator));
+        Assert.Contains(model.Trust.Closings, c => c.Record.Id == closing.Id);
+        Assert.True(model.HasRole(e.P.Id, Roles.Operator));
+        Assert.False(model.HasRole(e.P.Id, Roles.Reviewer));
+    }
+
+    [Fact]
+    public void ARemovedReviewersLaterRecordIsReadWithoutTheRoleAtItsTime()
+    {
+        // A person who is only a reviewer loses that role, with no closing: a record they write afterwards counts, and the role read at its
+        // time no longer gives them the reviewer role, while one written before still has it; a role closing naming that person's
+        // revision, which gives no operator role, closes nothing.
+        using var e = new Estate();
+        HistoryFixture f = e.F;
+        RecordEnvelope r = f.Estate.Add("principal", f.Estate.OperatorId, Person("R", "reviewer", "contributor"), signer: f.OperatorSigner);
+        (RecordEnvelope rDevice, _) = f.Admitted(r.Id, "R's device");
+        RecordEnvelope before = f.Estate.Add("work-order", r.Id, HistoryFixture.Order("RCL-8", "While R reviewed"), signer: f.Signer(rDevice));
+        RecordEnvelope removal = f.Estate.Add("principal", f.Estate.OperatorId, Person("R", "contributor"), supersedes: r.Id, signer: f.OperatorSigner);
+        RecordEnvelope after = f.Estate.Add("work-order", r.Id, HistoryFixture.Order("RCL-9", "After the reviewer role was removed"), signer: f.Signer(rDevice));
+        RecordEnvelope handWritten = f.Close("role", r.Id);
+        EstateModel model = f.Load();
+        Assert.DoesNotContain(model.Findings, x => x.Code is "history.closing-missing" or "history.after-closing");
+        Assert.True(model.Counts(model.ById[after.Id]));
+        Assert.True(model.HasRoleAt(r.Id, Roles.Reviewer, model.ById[before.Id]));
+        Assert.False(model.HasRoleAt(r.Id, Roles.Reviewer, model.ById[after.Id]));
+        Assert.DoesNotContain(model.Trust.Closings, c => c.Record.Id == handWritten.Id);
+        Assert.Contains(model.Findings, x => x.Code == "history.closing-author" && x.Location.StartsWith(handWritten.ExpectedPath, StringComparison.Ordinal));
+        Assert.True(model.Counts(model.ById[removal.Id]));
     }
 }
