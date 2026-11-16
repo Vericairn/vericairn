@@ -64,7 +64,12 @@ public class StatusPassTests
         EstateModel model = estate.Load();
         IReadOnlyList<LivingDocuments.State> states = LivingDocuments.Derive(model);
         Assert.Same(states, LivingDocuments.Derive(model));
-        Assert.False(Assert.Single(states).Due);
+        LivingDocuments.State state = Assert.Single(states);
+        Assert.False(state.Due);
+        // Every reader is given the same states, so none can change what a later one reads.
+        Assert.True(((ICollection<LivingDocuments.Reason>)state.Reasons).IsReadOnly);
+        Assert.True(((ICollection<string>)state.Unavailable).IsReadOnly);
+        Assert.True(((ICollection<string>)state.Notes).IsReadOnly);
 
         // A changed manifest is read afresh, and another judgment of the estate derives its own states.
         model.Manifest = model.Manifest;

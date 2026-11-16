@@ -22,6 +22,7 @@ public sealed class EstateModel
     private Dictionary<string, CurrentUse>? currentWorkOrderKeys;
     private Dictionary<string, CurrentUse>? currentOperationIdentities;
     private IReadOnlyList<LivingDocuments.State>? livingDocuments;
+    private Lazy<RecordEnvelope?>? resultAcceptancesBegan;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -129,6 +130,7 @@ public sealed class EstateModel
         currentWorkOrderKeys = null;
         currentOperationIdentities = null;
         livingDocuments = null;
+        resultAcceptancesBegan = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
@@ -147,6 +149,7 @@ public sealed class EstateModel
         {
             manifest = value;
             livingDocuments = null;
+            resultAcceptancesBegan = null;
             // The record format the manifest states decides which admissions, and so which records, count.
             lock (trustGate)
             {
@@ -206,6 +209,13 @@ public sealed class EstateModel
     /// </summary>
     internal IReadOnlyList<LivingDocuments.State> LivingDocumentStates(Func<EstateModel, IReadOnlyList<LivingDocuments.State>> derive) =>
         LazyInitializer.EnsureInitialized(ref livingDocuments, () => derive(this));
+
+    /// <summary>
+    /// The acceptance that marks when acceptances began to name a result's exact hash (<see cref="EstateStatus.ResultAcceptancesBegan"/>),
+    /// found the first time it is asked once the model is loaded and kept with it, as the living documents' states are.
+    /// </summary>
+    internal RecordEnvelope? ResultAcceptancesBegan(Func<EstateModel, RecordEnvelope?> find) =>
+        LazyInitializer.EnsureInitialized(ref resultAcceptancesBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
 
     /// <summary>The first current record using a value, and whether one with another id uses it too.</summary>
     private readonly record struct CurrentUse(string First, bool Shared);

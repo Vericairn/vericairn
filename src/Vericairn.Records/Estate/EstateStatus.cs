@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
 
@@ -54,12 +55,13 @@ public static class EstateStatus
     /// revision) when an acceptance names an earlier revision or, for ordinary work, an earlier result or an earlier revision of a result,
     /// or was recorded before the work order changed. Otherwise its latest work-status gives the status, and without one it is planned.
     /// A work order's current result is the one operator close reads: the newest current result of an attempt on an assignment of any
-    /// of its revisions. A milestone is accepted only by an acceptance of the milestone itself, the operator's own judgment of it.
+    /// of its revisions. A milestone is accepted only by an acceptance of the milestone itself, the operator's own judgment of it. From
+    /// 0.9.4 (FIX-141) only current acceptances count: one superseded by another, which may name another subject, accepts nothing.
     /// </summary>
     private static (string Status, RecordEnvelope? Basis) Reading(EstateModel model, RecordEnvelope order)
     {
         IReadOnlyList<string> chain = model.Chain(order);
-        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")));
+        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")).Where(model.IsCurrent));
         if (direct is not null && WorkOrderRevisions.IsCurrentSubject(model, direct.Subject, order))
         {
             return ("accepted", direct);
@@ -69,14 +71,14 @@ public static class EstateStatus
         List<RecordEnvelope> results = EstateModel.BodyString(order, "kind") == "ordinary" ? Results(model, chain) : [];
         RecordEnvelope? current = Newest(results.Where(model.IsCurrent));
         RecordEnvelope? closing = current is null ? null
-            : Newest(model.About(current.Id, "acceptance").Where(a => a.Subject?.Hash == current.ComputedHash && StandingAt(model, chain, a) is { } standing
+            : Newest(model.About(current.Id, "acceptance").Where(a => model.IsCurrent(a) && a.Subject?.Hash == current.ComputedHash && StandingAt(model, chain, a) is { } standing
                 && WorkOrderRevisions.IsCurrentSubject(model, standing.Reference, order)));
         if (closing is not null)
         {
             return ("accepted", closing);
         }
 
-        RecordEnvelope? earlier = direct ?? Newest(results.SelectMany(r => model.About(r.Id, "acceptance")));
+        RecordEnvelope? earlier = direct ?? Newest(results.SelectMany(r => model.About(r.Id, "acceptance")).Where(model.IsCurrent));
         if (earlier is not null)
         {
             return ("accepted (earlier revision)", earlier);
@@ -94,10 +96,15 @@ public static class EstateStatus
             .DistinctBy(result => result.Id)];
 
     /// <summary>
-    /// The acceptance of a work order's current revision that accepts its current result (from 0.9.4, FIX-141): the newest acceptance
-    /// of the work order's revisions, when it names the current revision, or one that differs from it only in placement, and was
-    /// recorded after the result, the form acceptances took before they named a result's exact hash. A result recorded after it, or any
-    /// result other than the work order's current one, the one operator close reads, still needs its own acceptance; null for those.
+    /// The acceptance of a work order's current revision that accepts its current result (from 0.9.4, FIX-141), or null. Decision
+    /// 01M7ETM7BC7KE97EE8ETYJM1E6 makes "an acceptance of a work order's current revision, recorded before acceptances named a result's
+    /// exact hash, count as accepting that work order's current result", "when that result predates the acceptance"; "a result recorded
+    /// after the acceptance still needs its own acceptance". So it is the newest current acceptance of the work order's revisions when:
+    /// it names the current revision, or one that differs from it only in placement; the result is the work order's current result, the
+    /// one operator close reads, and was recorded before it; it was recorded before acceptances named a result's exact hash, which the
+    /// records date at the estate's first acceptance of a result by an operator (<see cref="ResultAcceptancesBegan"/>), so no acceptance
+    /// of a work order made after that, a milestone's among them, counts for its result; and the principal who gave it could, at its
+    /// time, have accepted that result directly, by the rule acceptances of results are judged by (<see cref="AcceptanceType"/>).
     /// </summary>
     internal static RecordEnvelope? RevisionAcceptance(EstateModel model, RecordEnvelope result)
     {
@@ -107,8 +114,25 @@ public static class EstateStatus
         RecordEnvelope order = model.Latest(pinned);
         IReadOnlyList<string> chain = model.Chain(order);
         if (Newest(Results(model, chain).Where(model.IsCurrent))?.Id != result.Id) return null;
-        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")));
-        return direct is not null && WorkOrderRevisions.IsCurrentSubject(model, direct.Subject, order) && GoalRules.Before(result, direct) ? direct : null;
+        RecordEnvelope? direct = Newest(chain.SelectMany(id => model.About(id, "acceptance")).Where(model.IsCurrent));
+        if (direct is null || !WorkOrderRevisions.IsCurrentSubject(model, direct.Subject, order) || !GoalRules.Before(result, direct)) return null;
+        if (ResultAcceptancesBegan(model) is { } began && !GoalRules.Before(direct, began)) return null;
+        return AcceptanceType.WorkAuthorityRefusal(model, direct.By, pinned, result: true, sameAuthor: result.By == direct.By, direct) is null ? direct : null;
+    }
+
+    /// <summary>
+    /// When acceptances began to name a result's exact hash, as the records give it: the estate's first acceptance of a result, by time
+    /// and identifier, whose author held the operator role at its place; null when an operator never accepted a result. From 0.8.4
+    /// operator close records the operator's acceptances so. An agent's acceptances of its own results, which began earlier in
+    /// Vericairn's own estate, do not mark it: the work-order acceptances decision 01M7ETM7BC7KE97EE8ETYJM1E6 names were given after
+    /// them. Read once for a judged estate.
+    /// </summary>
+    internal static RecordEnvelope? ResultAcceptancesBegan(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return model.ResultAcceptancesBegan(m => m.OfType("acceptance").Where(a => a.Subject?.Type == "result")
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+            .FirstOrDefault(a => m.HasRoleAt(a.By, Roles.Operator, a)));
     }
 
     /// <summary>The revision of a work order that stood when a record was recorded: its newest revision recorded no later.</summary>

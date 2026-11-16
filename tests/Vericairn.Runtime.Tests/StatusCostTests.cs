@@ -14,23 +14,23 @@ namespace Vericairn.Runtime.Tests;
 /// <summary>
 /// The cost of status at 10,000 generated records (FIX-136), measured as one <c>vericairn status</c> without a daemon measures it: the
 /// runtime opens, judging the estate once for both of its startup passes, and status judges it once more and derives every view from that
-/// judgment; before this change the opening judged it twice, and the test counts the judgments. The bound comes from the profile of
-/// status on a copy of the first-party estate (9,778 records) on an Apple silicon Mac mini: 11.5 seconds before this change and 7.0 after,
-/// about 7.2 at 10,000 records; with headroom for slower runners it is 10 seconds, where this generated estate, with less repository
-/// content to check, took 4.5 on the same machine (9.6 before). Windows has five times as long, as its file access made the first status
-/// read of the generated estate in <see cref="StatusPerformanceTests"/> about five times slower there. It generates and judges 10,000
-/// records several times, so it runs only when <c>VERICAIRN_COST_TESTS</c> is 1, as continuous integration's cost step sets it on each
-/// platform; the measured times are written to the test output.
+/// judgment; before this change the opening judged it twice, and the test counts the judgments. The bound is a ratio to a baseline
+/// measured in the same test, as the history cost tests bound theirs: reading and parsing the same records, which no judgment, check or
+/// view is part of. The profile of a copy of the first-party estate (9,778 records) put status at 11.5 seconds before this change and
+/// 7.0 after; on this generated estate status took about 28 times as long as reading and parsing its records before this change and
+/// about 11 times after, on an Apple silicon Mac mini, so it may take 20 times as long. It generates and judges 10,000 records several
+/// times, so it runs only when <c>VERICAIRN_COST_TESTS</c> is 1, as continuous integration's cost step sets it on each platform; the
+/// measured times are written to the test output.
 /// </summary>
 [Collection("status-performance")]
 public sealed class StatusCostTests(ITestOutputHelper output)
 {
     private const int Records = 10_000;
     private const string EnvironmentVariable = "VERICAIRN_COST_TESTS";
-    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(OperatingSystem.IsWindows() ? 50 : 10);
+    private const double Ratio = 20;
 
     [Fact]
-    public void StatusAtTenThousandRecordsAnswersWithinTheProfiledBoundWithUnchangedAnswers()
+    public void StatusAtTenThousandRecordsTakesAtMostTwentyTimesReadingItsRecordsWithUnchangedAnswers()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable(EnvironmentVariable) == "1", $"The 10,000-record status cost test runs when {EnvironmentVariable} is 1.");
         var generation = Stopwatch.StartNew();
@@ -39,6 +39,9 @@ public sealed class StatusCostTests(ITestOutputHelper output)
         using var estate = new GeneratedStatusEstate(815, goals: 20, operations: true, livingDocuments: true);
         output.WriteLine($"generated in {generation.Elapsed.TotalSeconds:F1} s");
 
+        // The baseline: the record files read and parsed afresh, without any judgment, measured before and after the reads under the
+        // same conditions, the faster counting.
+        TimeSpan baseline = Parse(estate.Root, "baseline before");
         (StatusResponse first, TimeSpan firstElapsed) = Read(estate.Root, "first");
         Assert.False(first.HasErrors, "The generated estate's status must validate and evaluate without errors.");
         int records = first.Json.GetProperty("records").GetInt32();
@@ -47,6 +50,8 @@ public sealed class StatusCostTests(ITestOutputHelper output)
 
         // A second read, by a runtime opened afresh, answers the same.
         (StatusResponse second, TimeSpan secondElapsed) = Read(estate.Root, "repeated");
+        TimeSpan after = Parse(estate.Root, "baseline after");
+        if (after < baseline) baseline = after;
         Assert.Equal(first.Json.GetRawText(), second.Json.GetRawText());
         Assert.Equal(first.Text, second.Text);
 
@@ -61,7 +66,18 @@ public sealed class StatusCostTests(ITestOutputHelper output)
         }
 
         TimeSpan fastest = firstElapsed < secondElapsed ? firstElapsed : secondElapsed;
-        Assert.True(fastest < Bound, $"Status at {records} records took {fastest.TotalSeconds:F1} s, beyond the profiled bound of {Bound.TotalSeconds:F0} s.");
+        output.WriteLine($"status against reading and parsing the records: {fastest.TotalMilliseconds / baseline.TotalMilliseconds:F2} times");
+        Assert.True(fastest <= Ratio * baseline, $"Status at {records} records took {fastest.TotalSeconds:F1} s, beyond {Ratio:F0} times the {baseline.TotalSeconds:F2} s of reading and parsing its records.");
+    }
+
+    private TimeSpan Parse(string root, string run)
+    {
+        var clock = Stopwatch.StartNew();
+        EstateModel model = EstateLoader.LoadIdentities(root, EstateLoader.EnumerateRecordFiles(root), null);
+        clock.Stop();
+        Assert.True(model.Records.Count >= Records);
+        output.WriteLine($"{run}: records read and parsed, {clock.Elapsed.TotalMilliseconds:F0} ms");
+        return clock.Elapsed;
     }
 
     private (StatusResponse Status, TimeSpan Elapsed) Read(string root, string run)

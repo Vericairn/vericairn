@@ -6,6 +6,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
@@ -13,8 +14,9 @@ namespace Vericairn.Runtime.Tests;
 /// <summary>
 /// Operator close on a copy of a real estate (FIX-141): VERICAIRN_ESTATE_COPY names an estate, which the test copies, without its Git
 /// directory and machine-local state, to a temporary directory and reads there; nothing is written to the estate named. Every work
-/// order whose newest acceptance names its current revision and was recorded after its current result is no longer listed, and its
-/// result reads accepted in status; every one whose current result was recorded after such an acceptance is still listed. Run on a
+/// order whose newest current acceptance names its current revision, was recorded after its current result and before an operator's
+/// first acceptance of a result, and was given by a principal who could accept that result is no longer listed, and its result reads
+/// accepted in status; every other one so accepted, such as one whose current result came after the acceptance, is still listed. Run on a
 /// copy of Vericairn's own estate, it shows the work orders the operator accepted in October before acceptances named a result's exact
 /// hash gone from the listing, and the one whose result came after that acceptance still there. Skipped unless the variable is set.
 /// </summary>
@@ -40,6 +42,7 @@ public sealed class OperatorCloseEstateCopyTests(ITestOutputHelper output)
 
             // The steps operator close listed before 0.9.4, read again: the latest completed result with a passing review of it and
             // no acceptance of it, whose work order's newest acceptance names its current revision.
+            RecordEnvelope? began = EstateStatus.ResultAcceptancesBegan(model);
             var accepted = new List<(string Key, RecordEnvelope Result)>();
             var later = new List<string>();
             foreach (RecordEnvelope order in model.Current("work-order"))
@@ -48,16 +51,20 @@ public sealed class OperatorCloseEstateCopyTests(ITestOutputHelper output)
                 RecordEnvelope? result = Newest(model.Current("result").Where(r => WorkView.OrderOfResult(model, r) is { } o && model.Latest(o).Id == order.Id));
                 if (result is null || EstateModel.BodyString(result, "outcome") != "completed" || model.OfType("acceptance").Any(a => a.Subject == result.Reference)
                     || !model.About(result.Id, "review").Any(r => model.IsCurrent(r) && r.Subject == result.Reference && EstateModel.BodyString(r, "outcome") == "pass")) continue;
-                RecordEnvelope? acceptance = Newest(chain.SelectMany(id => model.About(id, "acceptance")));
+                RecordEnvelope? acceptance = Newest(chain.SelectMany(id => model.About(id, "acceptance")).Where(model.IsCurrent));
                 if (acceptance is null || !WorkOrderRevisions.IsCurrentSubject(model, acceptance.Subject, order)) continue;
                 string key = EstateModel.BodyString(order, "key")!;
-                if (GoalRules.Before(result, acceptance)) accepted.Add((key, result));
+                // Recorded after the result, before acceptances named a result's exact hash, by a principal who could accept the result.
+                if (GoalRules.Before(result, acceptance) && (began is null || GoalRules.Before(acceptance, began))
+                    && AcceptanceType.WorkAuthorityRefusal(model, acceptance.By, WorkView.OrderOfResult(model, result)!, true, result.By == acceptance.By, acceptance) is null)
+                    accepted.Add((key, result));
                 else later.Add(key);
             }
 
+            output.WriteLine($"acceptances began to name results with {began?.Id ?? "none"} at {began?.At ?? "no time"}");
             output.WriteLine($"listed: {keys.Count}: {string.Join(' ', keys.Order(StringComparer.Ordinal))}");
             output.WriteLine($"accepted at the current revision after the current result, no longer listed: {accepted.Count}: {string.Join(' ', accepted.Select(a => a.Key).Order(StringComparer.Ordinal))}");
-            output.WriteLine($"current result recorded after the acceptance, still listed: {later.Count}: {string.Join(' ', later.Order(StringComparer.Ordinal))}");
+            output.WriteLine($"accepted at the current revision, still waiting (a later result, a later acceptance or one its author could not give the result): {later.Count}: {string.Join(' ', later.Order(StringComparer.Ordinal))}");
             Assert.NotEmpty(accepted);
             Assert.NotEmpty(later);
             Assert.All(accepted, a => Assert.DoesNotContain(a.Key, keys));
