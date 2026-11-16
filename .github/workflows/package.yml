@@ -313,6 +313,7 @@ jobs:
             echo "Workbench, the desktop, is vericairn-workbench-$VERSION-<platform>: unpack and run bin/vericairn-workbench beside the bin/vericairn it drives; an unsigned developer build with no bundle or installer, qualified only where the platform obligations say."
             echo
             echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
+            echo "Release evidence: vericairn-$VERSION-companions.zip holds the build's readable reports (checksums, components, workflow actions, documentation contents and the frozen index) with the exact inputs they were generated from. Every file SHA256SUMS names is attached to this release."
           } > dist/NOTES.md
       - name: Verify every package against SHA256SUMS
         # The same check nuget.yml runs before it pushes the published files.

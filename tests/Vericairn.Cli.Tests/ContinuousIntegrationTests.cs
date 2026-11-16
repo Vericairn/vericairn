@@ -453,6 +453,30 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void TheDraftAttachesEveryFileSha256SumsNamesAndFailsWhenOneIsMissing()
+    {
+        // FIX-140: 0.9.3's SHA256SUMS named vericairn-0.9.3-companions.zip, which the draft did not attach.
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        string step = Block(Block(Read(Path.Combine(workflows, "release.yml")), "draft:", 2), "- name: Create the draft release", 6);
+        Assert.Contains(" dist/vericairn-$VERSION-companions.zip ", step.Replace('\n', ' '), StringComparison.Ordinal);
+        Assert.Contains("dist/*.nupkg dist/*.snupkg dist/SHA256SUMS\n", step, StringComparison.Ordinal);
+        int create = step.IndexOf("gh release create ", StringComparison.Ordinal);
+        int compare = step.IndexOf("missing=$(comm -23 listed.txt attached.txt)", StringComparison.Ordinal);
+        Assert.True(create > 0 && compare > create, "The membership check reads the draft once it exists.");
+        Assert.Contains("export LC_ALL=C\n", step, StringComparison.Ordinal);
+        Assert.Contains("cut -c 67- dist/SHA256SUMS | sort -u > listed.txt\n", step, StringComparison.Ordinal);
+        Assert.Contains("gh release view \"v$VERSION\" --json assets -q '.assets[].name' | sort -u > attached.txt\n", step, StringComparison.Ordinal);
+        Assert.Contains("if [ -n \"$missing\" ]; then\n", step, StringComparison.Ordinal);
+        Assert.Contains("printf '%s\\n' \"$missing\"\n            exit 1\n", step, StringComparison.Ordinal);
+        // The package job writes the archive into dist before SHA256SUMS lists it, and the notes describe it.
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        int reports = package.IndexOf("- name: Retain and verify readable build reports", StringComparison.Ordinal);
+        int sums = package.IndexOf("(cd dist && sha256sum * > SHA256SUMS)", StringComparison.Ordinal);
+        Assert.True(reports > 0 && sums > reports);
+        Assert.Contains("Release evidence: vericairn-$VERSION-companions.zip holds", package, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NoWorkflowInterpolatesAnInputOrEventValueIntoAScript()
     {
         // 0.8.0's package job interpolated the dispatch input version unquoted into a bash step.

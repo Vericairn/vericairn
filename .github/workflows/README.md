@@ -100,7 +100,10 @@ run with the pinned, checksum-verified gitleaks release and
 the event's commit range and keeps findings redacted. It ignores pushes to the merge
 queue's temporary `gh-readonly-queue/` branches, whose commits the group's own run scans.
 
-`release.yml` alone creates the draft. `nuget.yml` runs on release publication or
+`release.yml` alone creates the draft. It attaches every file `SHA256SUMS` names, the
+companions archive of readable build reports included (FIX-140), and once the draft
+exists compares the draft's own asset list with the checksum list: a listed file the
+draft does not attach fails the run, naming each one. `nuget.yml` runs on release publication or
 manual dispatch; it downloads and verifies the published release's exact assets,
 then publishes those packages through Trusted Publishing. It never rebuilds them.
 Only its publication job can request an identity token, log in to NuGet or push.

@@ -46,7 +46,15 @@ public sealed record ReleaseAsset(string Name, long Bytes, string? Hash);
 /// <param name="PublishedAt">When it was published, once it is.</param>
 /// <param name="Assets">Assets with hashes.</param>
 /// <param name="At">When observed.</param>
-public sealed record ReleaseObservation(string Tag, bool Draft, string? Url, string? TargetCommit, string? PublishedAt, IReadOnlyList<ReleaseAsset> Assets, string At);
+public sealed record ReleaseObservation(string Tag, bool Draft, string? Url, string? TargetCommit, string? PublishedAt, IReadOnlyList<ReleaseAsset> Assets, string At)
+{
+    /// <summary>
+    /// From 0.9.4: every file name the release's checksum file lists, in its order, or null when the provider did not read the
+    /// checksum file, as one written before 0.9.4 does not. The observer refuses a draft whose checksum file names a file the draft
+    /// does not attach (<see cref="Vericairn.Runtime.Release.ReleaseProfile.Unattached"/>).
+    /// </summary>
+    public IReadOnlyList<string>? ChecksumNames { get; init; }
+}
 
 /// <summary>
 /// The release provider contract, version 1: a release is built by a dispatched build on a ref of a destination, observed as a
@@ -78,7 +86,11 @@ public interface IReleaseProvider
     /// <summary>Observes a run, or null when no such run exists.</summary>
     RunObservation? ObserveRun(string destination, string runId);
 
-    /// <summary>Observes a release by tag with the checksums its settings name, or null when none exists.</summary>
+    /// <summary>
+    /// Observes a release by tag with the checksums its settings name, or null when none exists. From 0.9.4 an implementation also
+    /// reports every name its checksum file lists (<see cref="ReleaseObservation.ChecksumNames"/>), so a listed file the release does
+    /// not attach is seen.
+    /// </summary>
     ReleaseObservation? ObserveRelease(string destination, string tag, IReadOnlyDictionary<string, string> settings);
 
     /// <summary>The operator's manual publication command for a tag; the provider never runs it.</summary>

@@ -377,7 +377,9 @@ release 0.4.2, the first published release to read it; an estate records it only
 
 A product that declares no artifacts is read by the generic rule: a platform identifier in an asset's name
 gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
-archive is documentation, and a draft is complete when its checksum file names every other asset.
+archive is documentation, and a draft is complete when its checksum file names every other asset. From
+0.9.4 (FIX-140), with or without declared artifacts, a draft is complete only when it also attaches every file
+its checksum file names: a reader can download each listed file from the release itself.
 
 Before submitting, 0.9.3 offers the whole admission gate without an effect:
 
@@ -461,7 +463,13 @@ The release as intent, then observed effect:
    build), read through the provider and held to the hash the checksum file names. A draft whose set
    states none, as the sets of 0.5.2 and earlier do, gets the formats of the Vericairn that observes it,
    and the candidate's evidence and the command's answer say so, for a superseding revision to correct.
-   When the run failed, the operation becomes `known-failure`. `--cancel <reason>` settles an intent that
+   When the run failed, the operation becomes `known-failure`. From 0.9.4 (FIX-140), so does a run that
+   succeeded with a draft whose checksum file names a file the draft does not attach: the observation names
+   each missing file, records no candidate, and `release submit --check` names them in its `release.identity`
+   objection until a retry gives a reconciliation. While the run is in progress, or no run is identified, such
+   a draft waits and the missing files are printed. The provider reports every name its checksum file lists
+   (`ReleaseObservation.ChecksumNames`); one written before 0.9.4 reports none, and membership is then not
+   judged. `--cancel <reason>` settles an intent that
    was never dispatched, an uncertain outcome reconciled as having had no effect, or a known failure.
 3. The operator accepts the exact candidate (`vericairn records new acceptance --by <operator id> --subject release:<id>:<hash> --body <file>`,
    whose body states `statement`, `basis` and `self`) and publishes by hand with the command the CLI printed
@@ -732,8 +740,11 @@ readable reports outside frozen directories and packages the exact report invent
 `--artifacts dist`, checks the payload observations and archive bytes. ZIP entries are stored in ordinal order with
 fixed metadata. The report's checksum table describes the payload before the report archive, final `SHA256SUMS`
 and release notes are added; it has no checksum cycle and claims no integrity acceptance. The release workflow
-then includes the report archive in its final checksums and retained CI artifact. Its draft-release attachment list
-is a separate publication boundary.
+then includes the report archive in its final checksums and retained CI artifact. From 0.9.4 (FIX-140) it also
+attaches the archive to the draft release beside the other archives, so every file `SHA256SUMS` names can be
+downloaded from the release; releases up to 0.9.3 listed it without attaching it. Once the draft exists, the
+workflow compares the draft's asset list with `SHA256SUMS` and fails the run, naming each listed file the draft
+does not attach, and the candidate's observation refuses such a draft as well.
 
 CI and the release verification matrix run the build-tool fixtures on Linux, macOS and Windows. The fixtures check
 complete-byte comparison, retained provenance, exact membership, serial custody and frozen-set isolation. The

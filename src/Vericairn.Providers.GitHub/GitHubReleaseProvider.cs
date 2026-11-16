@@ -151,15 +151,19 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
         using JsonDocument document = JsonDocument.Parse(output);
         JsonElement root = document.RootElement;
         var sums = new Dictionary<string, string>(StringComparer.Ordinal);
+        List<string>? names = null;
         if (ReadAsset(repository, tag, checksums) is byte[] listed)
         {
+            names = [];
             using var reader = new StreamReader(new MemoryStream(listed), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             while (reader.ReadLine() is string line)
             {
                 string[] parts = line.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 2 && parts[0].Length == 64)
                 {
-                    sums[parts[1].TrimStart('*', ' ')] = "sha256:" + parts[0].ToLowerInvariant();
+                    string name = parts[1].TrimStart('*', ' ');
+                    if (!sums.ContainsKey(name)) names.Add(name);
+                    sums[name] = "sha256:" + parts[0].ToLowerInvariant();
                 }
             }
         }
@@ -173,7 +177,10 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
 
         string? publishedAt = root.TryGetProperty("publishedAt", out JsonElement p) && p.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(p.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) ? RecordParser.FormatTimestamp(at) : null;
         string? target = root.TryGetProperty("targetCommitish", out JsonElement t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
-        return new ReleaseObservation(root.GetProperty("tagName").GetString() ?? tag, root.GetProperty("isDraft").GetBoolean(), root.GetProperty("url").GetString(), target, publishedAt, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+        return new ReleaseObservation(root.GetProperty("tagName").GetString() ?? tag, root.GetProperty("isDraft").GetBoolean(), root.GetProperty("url").GetString(), target, publishedAt, assets.OrderBy(a => a.Name, StringComparer.Ordinal).ToList(), RecordParser.FormatTimestamp(DateTimeOffset.UtcNow))
+        {
+            ChecksumNames = names,
+        };
     }
 
     /// <inheritdoc />

@@ -343,7 +343,11 @@ internal sealed partial class ReleaseCoordinationService(
                 "observed-success" => "This release was already observed as built; a corrective release is a new version.",
                 "not-started" => "The intent has no dispatch receipt; its effect is unknown. Observe and reconcile it before any retry.",
                 "dispatched" or "uncertain" => "The operation is unresolved; observe and reconcile it before any retry.",
-                "known-failure" or "canceled" when string.IsNullOrWhiteSpace(request.Reconciliation) => "Retry only with a reconciliation stating how the earlier attempt was settled under this identity.",
+                // The recorded observation says why the attempt failed, for example each file its draft's checksum file names and the
+                // draft does not attach (FIX-140), so the check names what the reconciliation settles.
+                "known-failure" or "canceled" when string.IsNullOrWhiteSpace(request.Reconciliation) => "Retry only with a reconciliation stating how the earlier attempt was settled under this identity."
+                    + (status == "known-failure" && current!.Body.TryGetProperty("observed", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
+                        && observed.TryGetProperty("summary", out JsonElement summary) && summary.ValueKind == JsonValueKind.String ? " The attempt was observed: " + summary.GetString() : string.Empty),
                 _ => null,
             };
             if (identityProblem is not null) first.Objections.Add(new("error", "release.identity", identity, identityProblem));
@@ -594,10 +598,13 @@ internal sealed partial class ReleaseCoordinationService(
                 }
                 catch (InvalidOperationException)
                 {
+                    IReadOnlyList<string> unattached = release is null ? [] : ReleaseProfile.Unattached(release, checksums);
                     string waiting = run is not null && run.Status != "completed"
                         ? $"run {run.RunId} is {run.Status.Replace('_', ' ')}"
                         : release is not null
-                            ? $"draft {tag} lacks checksums for {string.Join(", ", profile.Missing(release, request.Version, checksums))}"
+                            ? unattached.Count > 0
+                                ? $"draft {tag} does not attach {ReleaseFlow.Unattached(unattached, checksums)}"
+                                : $"draft {tag} lacks checksums for {string.Join(", ", profile.Missing(release, request.Version, checksums))}"
                             : run is null ? "no run is identified and no release is observed yet" : $"run {run.RunId} completed and no draft {tag} is observed yet";
                     string recordedNow = recovered is null ? "Nothing recorded" : "The missing receipt was recorded as uncertain";
                     return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({waiting}). {recordedNow}; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Operation: recovered, Pending: waiting, Run: run?.RunId, Url: run?.Url ?? release?.Url);
@@ -644,7 +651,8 @@ internal sealed partial class ReleaseCoordinationService(
                 string newStatus = revisionBody["status"]!.GetValue<string>();
                 if (newStatus != "observed-success")
                 {
-                    return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}. Retry with a reconciliation once the cause is settled.", false, revision.Written, Run: run?.RunId, Url: run?.Url);
+                    string observedSummary = revisionBody["observed"]?["summary"]?.GetValue<string>() is { } summary ? " " + summary : string.Empty;
+                    return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}.{observedSummary} Retry with a reconciliation once the cause is settled.", false, revision.Written, Run: run?.RunId, Url: run?.Url);
                 }
 
                 string? commit = run?.HeadSha ?? release?.TargetCommit;
@@ -658,7 +666,8 @@ internal sealed partial class ReleaseCoordinationService(
                     return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}; release {request.Version} is already recorded as {recorded.Status} ({recorded.Id}).", true, revision.Written, ReleaseId: recorded.Id, Run: run?.RunId, Url: release?.Url);
                 }
 
-                var evidence = new List<string> { $"Draft release {tag} observed at {release!.Url} with {release.Assets.Count} assets and checksums for every {(profile.DeclaresArtifacts ? "declared artifact" : "asset")}." };
+                string attachedEvidence = release!.ChecksumNames is null ? string.Empty : $", attaching every file {checksums} names";
+                var evidence = new List<string> { $"Draft release {tag} observed at {release.Url} with {release.Assets.Count} assets and checksums for every {(profile.DeclaresArtifacts ? "declared artifact" : "asset")}{attachedEvidence}." };
                 if (run is not null)
                 {
                     evidence.Insert(0, $"Release build run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");

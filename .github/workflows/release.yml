@@ -113,8 +113,12 @@ jobs:
         # Every asset is named once (a pattern that also matched the documentation archive once uploaded it twice and the upload was
         # refused). A draft of the same version left by an earlier failed run of this workflow is replaced, so the observed draft is
         # always the one this run built; a published release is never touched, and a corrective release is a new version.
+        # Every file SHA256SUMS names is attached, the companions archive included (FIX-140: 0.9.3's draft left it out): once the
+        # draft exists, its own asset list is compared with the checksum list, and a listed file it does not attach fails the run,
+        # naming each one, so no candidate is observed from that draft.
         run: |
           set -eu
+          export LC_ALL=C
           earlier=$(gh release view "v$VERSION" --json isDraft -q 'select(.isDraft) | "draft"' 2>/dev/null || true)
           if [ "$earlier" = "draft" ]; then
             echo "replacing the draft v$VERSION left by an earlier run of this workflow"
@@ -126,4 +130,15 @@ jobs:
             dist/vericairn-workbench-$VERSION-linux-x64.tar.gz dist/vericairn-workbench-$VERSION-linux-arm64.tar.gz dist/vericairn-workbench-$VERSION-osx-x64.tar.gz dist/vericairn-workbench-$VERSION-osx-arm64.tar.gz \
             dist/vericairn-workbench-$VERSION-win-x64.zip dist/vericairn-workbench-$VERSION-win-arm64.zip \
             dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip \
+            dist/vericairn-$VERSION-companions.zip \
             dist/*.nupkg dist/*.snupkg dist/SHA256SUMS
+          # sha256sum writes 64 hex digits, a space and a space or an asterisk before each name.
+          cut -c 67- dist/SHA256SUMS | sort -u > listed.txt
+          gh release view "v$VERSION" --json assets -q '.assets[].name' | sort -u > attached.txt
+          missing=$(comm -23 listed.txt attached.txt)
+          if [ -n "$missing" ]; then
+            echo "::error::The draft v$VERSION does not attach every file SHA256SUMS names; missing:"
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+          echo "The draft v$VERSION attaches all $(wc -l < listed.txt | tr -d ' ') files SHA256SUMS names."
