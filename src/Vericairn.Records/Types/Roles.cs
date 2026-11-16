@@ -63,6 +63,12 @@ public static class Scopes
     /// <summary>Add and remove exact spacing tokens within explicit typed bounds.</summary>
     public const string ManageWritingExceptions = "manage-writing-exceptions";
 
+    /// <summary>
+    /// From 0.9.4 (ID-07): record the assignments of unattended dispatch for the goals and standing agents a typed bound names, within its
+    /// daily cap, as a service principal holding no other authority, under a grant that expires within 30 days.
+    /// </summary>
+    public const string Dispatch = "dispatch";
+
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly ImmutableArray<string> Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions, ManagePrompts];
+    public static readonly ImmutableArray<string> Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions, ManagePrompts, Dispatch];
 }

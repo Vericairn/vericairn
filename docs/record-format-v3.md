@@ -95,6 +95,18 @@ explicitly bounded grant. Reserved actions remain reserved. Scope containment is
 selectors, `**`, and literal directory prefixes ending in `/**` prove containment; other unproved inclusion
 is refused. Generic engineering or administration authority does not substitute for these scopes.
 
+**The dispatch scope (0.9.4).** From 0.9.4 (ID-07), unattended dispatch is signed by a dispatcher: a `service` principal whose
+only role is `service` and that holds no other grant. Its `authority` record gives `dispatch` alone, is signed, states no
+`conditions`, expires no more than 30 days after it is made, and carries one bound, `{scope: "dispatch", goals, maxAssignmentsPerDay,
+reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
+`maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
+reassign a step another assignment still holds, with no result on it, as after a lapse. Another grant to a dispatcher, or a
+dispatch grant to a principal holding another, is `authority.dispatch`. A dispatcher's assignment is `assignment.dispatch` unless,
+at its time, the grant is in force, its work order is a step of a goal the bound names, its role is no reserved action, the day's
+cap is not passed, and a reassignment goes to a principal the goal's roster names for the role, never the dispatcher itself, the
+holder it replaces, a person or a role the roster gives a person; nothing else gives a dispatcher authority to assign. No field or
+type is added; an older reader reports the bound as errors and a dispatcher's assignment as `assignment.author`.
+
 Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot
 authorize earlier work. Expiry or a later supersession prevents subsequent delegated actions while preserving
 historical attribution. A policy reconciliation requires format 3, a signature and the same bounded authority;

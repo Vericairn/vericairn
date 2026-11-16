@@ -581,7 +581,8 @@
     "manage-estate-policies",
     "grant-policy-exceptions",
     "manage-writing-exceptions",
-    "manage-prompts"
+    "manage-prompts",
+    "dispatch"
   ],
   "Vericairn.Records.Types.SecurityReportRules.Dispositions": [
     "security",

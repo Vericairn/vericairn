@@ -15,7 +15,7 @@ internal static class PolicyAuthority
     internal static bool RequiresSignature(EstateModel model, RecordEnvelope record) => record.Type switch
     {
         "estate-policy" or "policy-exception" or "writing-exception" => true,
-        "authority" => IsPolicyGrant(model, record),
+        "authority" => IsPolicyGrant(model, record) || DispatchAuthority.IsDispatchGrant(model, record),
         "decision" => PolicyRecords.Property(record.Body, "policies").ValueKind != JsonValueKind.Undefined,
         "result" => PolicyRecords.Property(record.Body, "duties").ValueKind != JsonValueKind.Undefined,
         // A review is duty evidence by its subject: a result with duties. Its read list alone does not make it one (FIX-94).
@@ -165,6 +165,8 @@ internal static class PolicyAuthority
         PolicyRecords.Unique(body, bounds.Select(b => PolicyRecords.Text(b.Element, "scope")), "bounds");
         foreach (BodyReader bound in bounds)
         {
+            // The dispatch scope's bound is its own (ID-07; DispatchAuthority.ValidateGrant).
+            if (PolicyRecords.Text(bound.Element, "scope") == Scopes.Dispatch) continue;
             string? scope = bound.Enum("scope", true, ScopesWithBounds);
             string[] actions = scope switch
             {
