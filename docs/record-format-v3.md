@@ -101,8 +101,9 @@ only role is `service` and that holds no other grant. Its `authority` record giv
 reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
 `maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
 reassign a step another assignment still holds, with no result on it, as after a lapse. A dispatch grant is made only to a principal
-with no history before it: no grant of any scope and no assignment to it by another principal, dated before the grant, unless an
-earlier dispatch grant to it is valid, as a renewal; the principal's own records never count as such history. A grant of another
+with no history before it: no grant of any scope its author may write and no assignment to it by another principal who may assign,
+dated before the grant, unless an earlier dispatch grant to it is valid, as a renewal; the principal's own records, and records their
+authors had no authority to write, never count as such history. A grant of another
 scope to a principal holding a dispatch grant, or that held a valid one at or before it, during its term or after it expired, a
 dispatch grant to a principal holding another, and a dispatch grant with an earlier history are `authority.dispatch`. A dispatcher's
 assignment is `assignment.dispatch`, and counts for nothing, unless, at its time, a valid dispatch grant is in force, its work order

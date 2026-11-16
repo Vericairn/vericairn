@@ -103,6 +103,12 @@ public sealed class DispatchAuthorityTests
         public void Dispose() => F.Dispose();
     }
 
+    private static JsonObject WithoutBounds(JsonObject body)
+    {
+        body.Remove("bounds");
+        return body;
+    }
+
     private const string Attempt = """{"startedAt":"2026-10-13T12:00:00Z","workspace":"widget, branch work/w-1","note":"Build it."}""";
 
     private const string Result = """{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review it."}""";
@@ -399,6 +405,34 @@ public sealed class DispatchAuthorityTests
         Assert.False(model.Counts(attempt));
         Assert.Contains("no dispatch grant in force", Refused(model, later).Message, StringComparison.Ordinal);
         Assert.False(model.Counts(later));
+    }
+
+    [Theory]
+    [InlineData("assignment")]
+    [InlineData("grant")]
+    public void AnUnauthorizedRecordDatedBeforeTheGrantNeitherVoidsItNorFreesTheDispatcher(string variant)
+    {
+        // The Reviewer's probe: a fresh dispatcher holds a valid grant and its assignment to a roster agent counts. Afterwards the builder,
+        // an agent with no authority to assign or to grant, writes an assignment of a step to the dispatcher, or a repository-write grant
+        // to it, dated before the grant. That record is itself refused, so it is no history: the grant stays valid, the dispatcher's
+        // assignment keeps counting, and an attempt the dispatcher dates before the grant is still a dispatcher's work.
+        using var e = new Estate();
+        DateTimeOffset start = e.F.Estate.Clock;
+        e.F.Estate.SetClock(start.AddHours(1));
+        RecordEnvelope grant = e.Grant(e.GrantBody(bounds: new JsonArray(Estate.Bound([e.Goal.Id], cap: 20))));
+        RecordEnvelope assigned = e.Assign(e.Build, e.Spare.Id);
+        e.F.Estate.SetClock(start.AddMinutes(10));
+        RecordEnvelope backdated = variant == "assignment"
+            ? e.Assign(e.Review, e.Dispatcher.Id, e.F.BuilderSigner, e.F.Estate.BuilderId)
+            : e.F.Estate.Add("authority", e.F.Estate.BuilderId, WithoutBounds(e.GrantBody(scopes: [Scopes.RepositoryWrite])).ToJsonString(), signer: e.F.BuilderSigner);
+        RecordEnvelope ownAttempt = e.F.Estate.Add("attempt", e.Dispatcher.Id, Attempt, (variant == "assignment" ? backdated : assigned).Reference, signer: e.Signer);
+        EstateModel model = e.F.Load();
+        Refused(model, backdated, variant == "assignment" ? "assignment.author" : "authority.author");
+        Assert.Empty(Errors(model, grant));
+        Assert.Empty(Errors(model, assigned));
+        Assert.True(model.Counts(model.ById[assigned.Id]));
+        Refused(model, ownAttempt, "dispatch.work");
+        Assert.False(model.Counts(ownAttempt));
     }
 
     [Fact]

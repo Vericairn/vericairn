@@ -277,8 +277,10 @@ internal static class DispatchAuthority
     /// Judges a model's dispatch grants once for each set of counting records. A grant is valid in shape when it counts, its author may
     /// write it and its own validation, the history rule aside, finds no error. It is valid when it is also valid for history: in time
     /// order, ids breaking ties, an earlier dispatch grant to the same principal is valid, as a renewal, or no record that counts by its
-    /// signatures, written by another principal, is dated before it and names the principal: a grant of any scope, or an assignment to it.
-    /// The principal's own records are never such history, so nothing a dispatcher writes, at any date, voids its grant.
+    /// signatures and that its author was authorized to write, written by another principal, is dated before it and names the principal:
+    /// a grant of any scope its author may write, or an assignment to it by one who may assign (<see cref="HistoryBefore"/>). The
+    /// principal's own records are never such history, so nothing a dispatcher writes, at any date, voids its grant, and neither does a
+    /// record its author had no authority to write.
     /// </summary>
     private static Judgment Judge(EstateModel model)
     {
@@ -319,17 +321,29 @@ internal static class DispatchAuthority
     }
 
     /// <summary>
-    /// The earliest record that counts by its signatures, written by another principal and dated before a grant, that names the grant's
-    /// principal: an authority record granting it any scope, or an assignment to it; null when there is none.
+    /// The earliest authorized record, written by another principal and dated before a grant, that names the grant's principal, or null
+    /// when there is none: a grant of any scope that its author may write (<see cref="AuthorityReplay.Accepted"/>), or an assignment to it
+    /// by a principal who may assign at the assignment's time (<see cref="MayAssign"/>). A record its author had no authority to write,
+    /// such as an agent's assignment or grant to the dispatcher dated before its grant, is no history: it neither voids the grant nor
+    /// frees what the dispatcher dated before it.
     /// </summary>
     private static RecordEnvelope? HistoryBefore(EstateModel model, string principal, RecordEnvelope grant)
     {
         string line = model.Chain(grant)[0];
         return model.Records.Where(r => r.By != principal && r.Id != grant.Id && GoalRules.Before(r, grant) && model.Trust.Counts(r) &&
-                (r.Type == "authority" && EstateModel.BodyString(r, "grantee") == principal && model.Chain(r)[0] != line ||
-                 r.Type == "assignment" && EstateModel.BodyString(r, "contributor") == principal))
+                (r.Type == "authority" && EstateModel.BodyString(r, "grantee") == principal && model.Chain(r)[0] != line && model.Authority.Accepted.Contains(r.Id) ||
+                 r.Type == "assignment" && EstateModel.BodyString(r, "contributor") == principal && MayAssign(model, r)))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault();
     }
+
+    /// <summary>
+    /// Whether an assignment's author might assign at its time, as assignments read authorship: an operator, a principal holding the
+    /// local-engineering scope, or, for a step of a goal, one who decides for that goal. Roles and grants are read at the assignment's place.
+    /// </summary>
+    private static bool MayAssign(EstateModel model, RecordEnvelope assignment) =>
+        model.HasRoleAt(assignment.By, Roles.Operator, assignment) || model.HasScopeAt(assignment.By, Scopes.LocalEngineering, assignment) ||
+        assignment.Subject?.Id is { } subject && model.ById.TryGetValue(subject, out RecordEnvelope? order) && order.Type == "work-order" &&
+        Routing.DecidesForStep(model, assignment.By, order, assignment);
 
     /// <summary>
     /// Why an assignment a dispatcher records is outside its authority, or null when it is within it: no dispatch grant in force at its
