@@ -82,6 +82,33 @@ public sealed record StopRow(string Kind, string Name, string Title, string? Pri
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }
 
+/// <summary>
+/// A step's due time as every surface shows it (the estate's design/flow.md § 7; from 0.9.4, PROC-18): when it is due, why, its timing and
+/// zone, its deadline and a missed-time rule it took, read from the runtime's position or status and never derived here.
+/// </summary>
+public sealed record DueRow(string Name, string? At, string Reason, string Timing, string Zone, string? Deadline, string? Missed)
+{
+    /// <summary>The step and when it is due.</summary>
+    public string Heading => $"{Name}: due {At ?? "once the records give its time"}";
+
+    /// <summary>Why, its timing and zone, its deadline and a missed-time rule it took.</summary>
+    public string Detail => $"{Reason}. Timing: {Timing}, in {Zone}.{(Deadline is null ? string.Empty : $" Deadline {Deadline}.")}{(Missed is null ? string.Empty : $" Missed its deadline; its rule: {Missed}.")}";
+
+    /// <summary>The rows of due times as status gives them, each named, or a position's steps that carry one; none when the runtime gave none.</summary>
+    public static IReadOnlyList<DueRow> From(JsonElement items) =>
+        items.ValueKind != JsonValueKind.Array ? [] : items.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.Object).Select(i =>
+        {
+            JsonElement due = i.TryGetProperty("due", out JsonElement nested) && nested.ValueKind == JsonValueKind.Object ? nested : i;
+            string name = Str(i, "name") ?? (Str(i, "instance") is string instance ? $"{Str(i, "key")}[{instance}]" : Str(i, "key")) ?? "?";
+            return due.ValueKind == JsonValueKind.Object && due.TryGetProperty("reason", out _)
+                ? new DueRow(name, Str(due, "at"), Str(due, "reason") ?? string.Empty, Str(due, "timing") ?? "instant", Str(due, "zone") ?? "UTC", Str(due, "deadline"), Str(due, "missed"))
+                : null;
+        }).OfType<DueRow>().ToList();
+
+    private static string? Str(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+}
+
 /// <summary>One unit of a goal's budget with what its runs were charged.</summary>
 public sealed record SpendRow(string Unit, string Detail);
 
@@ -147,6 +174,9 @@ public sealed class GoalPresentation
     /// <summary>For a run, its stops in the order the flow reaches them; none for a goal that is not a run, or a run with none.</summary>
     public IReadOnlyList<StopRow> Stops { get; private set; } = [];
 
+    /// <summary>For a run, from 0.9.4 (PROC-18), each step whose timing gates its start with its due time, before it runs; none otherwise.</summary>
+    public IReadOnlyList<DueRow> Due { get; private set; } = [];
+
     /// <summary>Work orders proposed for the goal that wait for its sponsor's approval; none unless its plan says sponsor-approves.</summary>
     public IReadOnlyList<ProposedRow> Proposed { get; private set; } = [];
 
@@ -169,6 +199,7 @@ public sealed class GoalPresentation
             return new ConditionRow(Int(c, "index"), Str(c, "description") ?? "?", Str(c, "verdict") ?? "unknown", Str(c, "reason") ?? string.Empty, Str(evaluation, "verdict"), Str(evaluation, "reason"));
         }).ToList();
         view.Stops = StopRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("stops", out JsonElement stops) ? stops : default);
+        view.Due = DueRow.From(Obj(goal, "flow").ValueKind == JsonValueKind.Object && Obj(goal, "flow").TryGetProperty("steps", out JsonElement timed) ? timed : default);
         view.Proposed = Items(goal, "proposed").Select(p => new ProposedRow(Str(p, "key") ?? "?", Str(p, "title") ?? "?", Str(p, "id") ?? "?", Str(p, "byName") ?? Str(p, "by") ?? "?", Str(p, "approve"))).ToList();
         string? current = Str(Obj(goal, "evaluation"), "id");
         view.Evaluations = Items(goal, "evaluations").Select(e => new EvaluationRow(Str(e, "id") ?? "?", Str(e, "byName") ?? Str(e, "by") ?? "?", Str(e, "at") ?? "?", Str(e, "outcome") ?? "?", Str(e, "summary") ?? string.Empty, Str(e, "id") == current)).ToList();

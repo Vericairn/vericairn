@@ -40,6 +40,9 @@ public sealed record OperationRow(string Identity, string? Provider, string? Act
 /// </summary>
 public sealed record FlowRunRow(string Goal, string Title, string Status, string Flow, int Done, int Steps, IReadOnlyList<string> Next, IReadOnlyList<StopRow> Stops, string? AsOf = null)
 {
+    /// <summary>From 0.9.4 (PROC-18), each step whose timing gates its start, with its due time; none when no step's does.</summary>
+    public IReadOnlyList<DueRow> Due { get; init; } = [];
+
     /// <summary>The run and its position, in words.</summary>
     public string Heading => $"{Title}: {StateLanguage.Label("goal", Status)}; {Flow}, {Done.ToString(System.Globalization.CultureInfo.InvariantCulture)} of {Steps.ToString(System.Globalization.CultureInfo.InvariantCulture)} steps done; next: {(Next.Count == 0 ? "none" : string.Join(", ", Next))}{(AsOf is null ? string.Empty : $"; as of {AsOf}, the newest record")}";
 }
@@ -155,6 +158,9 @@ public sealed class EstateView
     /// <summary>Every run's stops, run by run, in the order each flow reaches them.</summary>
     public IReadOnlyList<StopRow> Stops => Runs.SelectMany(r => r.Stops).ToList();
 
+    /// <summary>From 0.9.4 (PROC-18), every run's due times, run by run, shown before each step runs.</summary>
+    public IReadOnlyList<DueRow> Due => Runs.SelectMany(r => r.Due).ToList();
+
     /// <summary>
     /// When the stops were derived, in words: canonical status gives them as of the estate's newest record and leaves a reserved step's
     /// command to a live read; empty without runs.
@@ -217,7 +223,10 @@ public sealed class EstateView
             JsonElement pin = e.TryGetProperty("pin", out JsonElement p) ? p : default;
             List<string> next = e.TryGetProperty("next", out JsonElement n) && n.ValueKind == JsonValueKind.Array ? n.EnumerateArray().Select(x => x.GetString() ?? "?").ToList() : [];
             return new FlowRunRow(Str(goal, "id") ?? "?", Str(goal, "title") ?? "?", Str(goal, "status") ?? "?", pin.ValueKind == JsonValueKind.Object ? $"flow {Str(pin, "id")} {Str(pin, "version")}" : "no flow",
-                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"));
+                Int(e, "done"), Int(e, "steps"), next, StopRow.From(e.TryGetProperty("stops", out JsonElement stops) ? stops : default), Str(e, "asOf"))
+            {
+                Due = DueRow.From(e.TryGetProperty("due", out JsonElement due) ? due : default),
+            };
         });
         view.Reconcile = Rows(document, "reconcile", e => new FindingRow("error", Str(e, "code") ?? string.Empty, Str(e, "location") ?? string.Empty, Str(e, "message") ?? string.Empty));
         view.Proposals = Rows(document, "proposals", e => new ProposalRow(Str(e, "goal") ?? "?", Str(e, "goalTitle") ?? "?", Str(e, "sponsor"), Str(e, "key") ?? "?", Str(e, "title") ?? "?", Str(e, "id") ?? string.Empty, Str(e, "by") ?? "?"));

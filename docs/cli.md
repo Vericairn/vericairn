@@ -399,8 +399,9 @@ actions](operator-actions.md#finishing-an-action-after-its-merge-092).
 one: its plan names the flow's exact pin, read from the templates the runtime offers, and gives exactly one `--work-order`.
 `--subject name=value` binds each field of the flow's subject by its kind: a record field by its id or `type:id`, a list field
 as comma-separated instance names, a text field as its text. `--flow-option name=value` sets the goal's own configuration, a
-flow option, `step.<key>=on|off` for an optional step or `item.<step>.<item>=on|off` for an optional item, and
-`--until <step>` names the step the run ends at. From 0.9.3 (FIX-127), `--subject` reads the subject of the flow resolved with
+flow option, `step.<key>=on|off` for an optional step or `item.<step>.<item>=on|off` for an optional item, and from 0.9.4
+(PROC-18) `zone=<IANA time zone>` or `when.<step>=<timing as JSON>`, such as `when.publish={"delay":{"after":"PT2H"}}`, for a
+step whose timing the flow does not fix ([Templates](templates.md#flows-092)); `--until <step>` names the step the run ends at. From 0.9.3 (FIX-127), `--subject` reads the subject of the flow resolved with
 every base it extends, the subject the goal's validation and `goal show` read, so a run of an extension, which declares no
 subject of its own, binds each field of its base's; before, it refused every field of an extension.
 
@@ -438,6 +439,14 @@ one person at a time: a fourth routes as
 `queued`, and `goal step` dispatches nothing for it. `operator list` delivers a run's request only while it carries the command
 the records give now, and lists each open request a run no longer waits on, `withdrawn` or `settled`, under `withdrawn` in its
 JSON. See [stops and their surfaces](operator-guide.md#stops-and-their-surfaces-092).
+
+From PROC-18 (0.9.4), a step whose timing contract gates its start shows its due time before it runs: `goal show` prints it as
+the step's `due:` line, when and why, its timing and zone, its deadline and a missed-time rule it took, and `status` as each
+run's `Due:` lines. With `--json`, `goal show`'s flow gains that step's `due` (`at`, `reason`, `timing`, `zone`, `deadline` and
+`missed`), and status's `runs` gain `due`, each named. `goal step` takes no step before it is due; a step that missed its deadline
+under its `attention` rule routes as `attention`, whatever its kind, and `goal step` asks the sponsor once. A reserved act at a
+time, other than under a `due` time, routes as `request` once what it waits on is done, ahead of its time. See
+[runs of a flow](operator-guide.md#runs-of-a-flow-092) and [Templates](templates.md#flows-092).
 
 From FIX-143 (0.9.4), `goal close <goal> --by <id> --reason <text>` closes a run of a flow that will never complete: each step
 it has not settled, neither done nor off, is recorded with a reason in a signed goal-status of `closed`, and none of them counts

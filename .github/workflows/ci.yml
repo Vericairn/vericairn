@@ -207,7 +207,9 @@ jobs:
         run: python tests/companion-build.py
       - name: Build the Secure Enclave helper
         # The helper is Swift and builds on macOS only. The Apple-silicon runners expose a Secure Enclave to it, so the store's
-        # test creates, signs with and removes a real enclave key there (one without presence, so nothing waits for a person).
+        # test creates, signs with and removes a real enclave key there (one without presence, so nothing waits for a person), and
+        # the presence session tests run the helper's sessions. VERICAIRN_EXPECT_ENCLAVE makes those tests fail rather than skip
+        # on a runner without the enclave.
         if: runner.os == 'macOS'
         run: |
           set -eu
@@ -215,6 +217,7 @@ jobs:
           swiftc -O -o artifacts/enclave/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
           artifacts/enclave/vericairn-enclave available || test $? -eq 3
           echo "VERICAIRN_ENCLAVE_HELPER=$PWD/artifacts/enclave/vericairn-enclave" >> "$GITHUB_ENV"
+          echo "VERICAIRN_EXPECT_ENCLAVE=1" >> "$GITHUB_ENV"
       - name: Install a secret service
         timeout-minutes: 10
         # Linux custody uses the secret service where one runs, and the runner has none: GNOME Keyring and secret-tool are

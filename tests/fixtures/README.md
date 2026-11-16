@@ -36,3 +36,11 @@ with fresh keys.
 release flow, the flow file the first-party estate keeps under its own `docs/templates`; it is never part of the software
 pack. Records tests install it byte for byte into a test estate, check that it pins the shipped release flow by hash and run
 its steps. A change to the shipped release flow changes that hash, so the copy and the estate's file are updated together.
+
+`presence-sessions/vectors.json` holds the shared vectors of the presence session protocol (ID-15,
+`vericairn.presence-session/1`): the design's fingerprint vector, canonical and non-canonical bytes, synthetic records and the
+sessions run over them, each with the answers the enclave helper gives at opening and to every record. `EnclaveSessionTests`
+runs every session against a test build of the helper on macOS, with a key without presence and a controlled clock, and holds
+the helper's canonical parser to the runtime's serializer on the same bytes; the runtime's checks of a list (ID-16) are to read
+the same file. Records are written as JSON objects and sent in the runtime's compact canonical form, so their hashes come from
+that serializer; a session that changes what the helper answers changes here and in the helper together.

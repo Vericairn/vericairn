@@ -1687,13 +1687,35 @@ it reruns under its recovery once what it waits on is done; `blocked` while an e
 naming every failing precondition, trap and due time; `in-review` while an item awaits its review, or a result awaits one
 before another attempt; `stopped` while a person holds its role or its assignment, it is a reserved act, or a watch passed
 its limit; `next` when an agent carries it; and `off` when the run's configuration, its `until` step or an unentered branch
-leaves it out, or, from 0.9.4, when the operator dismissed the request of an optional reserved step, which reads `off` as
-skipped ([stops](#stops-and-their-surfaces-092)); and, from 0.9.4, `unsettled` in a run its sponsor closed
+leaves it out, or, from 0.9.4, when it is skipped: the operator dismissed the request of an optional reserved step, which
+reads `off` as skipped ([stops](#stops-and-their-surfaces-092)), and an optional step that takes its input from a skipped step
+is skipped with it; and, from 0.9.4, `unsettled` in a run its sponsor closed
 ([closing a run](#closing-a-run-094)). From 0.9.4 (FIX-142) a step done by its done predicates alone, each a count of
 at most none, such as no living document due, counts only once every step it waits on is done: before then its predicates hold
 only because nothing is there yet to count, so it reads `blocked` and says so. The configuration is the flow's defaults, the estate's, the flow's domain's and the product's
 `template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
-source. The same records give the same position on every machine at the same time (due times and watches read the clock);
+source. From 0.9.4 (FIX-146) a run keeps the configuration resolved when its current revision was activated: `template-defaults`
+recorded later apply to new runs and to the run's next revision, which its sponsor signs and activates, and change none of a
+running run's steps; a revision that has not been activated reads them as they stand.
+
+From 0.9.4 (PROC-18) each step's timing contract decides when it may start: instantly, after a delay, at a time, on a
+schedule, within a window or on an event, as the flow declares it and a venture configures it through `template-defaults`
+at the estate, the product or the goal, the narrowest winning, a timing the flow fixes, such as an embargo, never changed
+([templates](templates.md#flows-092)). Its due time is computed from the records and the runtime's clock, never an author's
+claim, and shown before the step runs: `goal show`, the API's goal read and MCP `goal_get` give each such step's `due`, when
+and why, its timing and zone, its deadline and a missed-time rule it took; status gives each run's due times, and Workbench
+and Remote list them. A step not yet due reads `blocked` and says when it is due; one whose window is closed says when it
+next opens. A reserved act at a time, other than one under a `due` time as before 0.9.4, is armed once what it waits on is
+done: its request reaches the operator ahead of its time, and the operator's act recorded before then, such as arming a platform's scheduler, which is the act itself, counts
+only once the time comes and only while its author still holds the act then. A step that misses its deadline before it is
+taken takes its rule: `late` runs it late, `skip` skips an optional step from the deadline, and `attention`, the default,
+stops it with required attention of kind `missed`, an ask to the sponsor; once the ask is answered, it runs once, late. A
+reserved act that misses its deadline stays with its request to the operator, which says it is late. After downtime a step
+whose deadline passed while nothing took it runs once in the same way, never once per missed time. In Community a due step
+is taken by `goal step` or a script that calls it; the carrier (GOAL-10) takes timed steps unattended in Standard and Pro.
+Once DESIGN-45 is built, its destination states record a publication saved on a platform's scheduler or due locally.
+
+The same records give the same position on every machine at the same time (due times and watches read the clock);
 a machine that cannot resolve the flow shows the goal, says so, and takes none of its steps.
 
 `goal next` routes each ready work or review step by its role through the goal's roles, its roster or the estate's, exactly
@@ -1839,7 +1861,10 @@ required step, or an optional one an estate policy requires, is never skipped: i
 waits for the act's record. The dismissal of the request of a step done by any other record skips nothing. From 0.9.4 (FIX-144)
 a step after a skipped one, whether the operator dismissed its request or a goal revision turned it off, is asked only from
 then: a close of the later step's request made while it waited never counts, and one made after does. An optional step done or
-dismissed before a revision turns it off was settled then, so the steps after it keep the closes made since. A request recorded by a principal who does not take the
+dismissed before a revision turns it off was settled then, so the steps after it keep the closes made since. From 0.9.4
+(FIX-146) a step whose optional item a revision turns off counts as done from that revision, unless the item was satisfied
+before it, so the steps after it are asked only from then; a step counts as done only once the reviews and verifications its
+items take are recorded; and a revision that changes the run's `until` step asks every step again. A request recorded by a principal who does not take the
 run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
 command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
 status and attention show the checked command first and label that prose as not checked.
@@ -1847,7 +1872,8 @@ status and attention show the checked command first and label that prose as not 
 Every surface shows a run's stops the same way, from the records:
 
 - status: its text, read now, and the canonical JSON's `runs` when there are runs, each with its goal, flow, steps done,
-  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
+  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read, and
+  from 0.9.4 each timed step's due time (`due`);
 - `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
 - the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
 - Workbench's home, from canonical status with its as-of time, and its Goals workspace, read now;
@@ -1998,8 +2024,9 @@ announcement on GitHub Discussions and on the operator's X account as reserved `
 once the operator closes its request with the observed link, and the profile repository's documents after `docs-after`. A close
 counts only for the step's current ask: a request a principal who takes the run's steps put to the operator, with the command the
 records give the step now, closed after the step was asked and after the goal revision that last changed the run's flow pin,
-subject or options, so a corrective version's listing and announcement are asked again, while a revision that only grants more
-budget asks nothing again, nor, from 0.9.4, one that only turns optional steps or items off. The profile repository's documents
+subject or configuration, or from 0.9.4 its `until` step, so a corrective version's listing and announcement are asked again,
+while a revision that only grants more budget asks nothing again, nor, from 0.9.4, one that only turns optional steps or items
+off. The profile repository's documents
 count, as `docs-after` does, only once the documentation pass after publication is done. Its
 destinations are that estate's own, so it is never part of the software pack.
 
