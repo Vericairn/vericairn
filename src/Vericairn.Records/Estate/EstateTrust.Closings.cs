@@ -640,17 +640,18 @@ internal sealed partial class EstateTrust
     /// <summary>The finding for a record a closing refuses.</summary>
     private static Finding AfterClosing(RecordEnvelope record, Closing closing)
     {
-        string what = closing.Kind switch
-        {
-            "device" => $"Signed by device {closing.Identity}, which history checkpoint {closing.Record.Id} closed",
-            "role" => $"Written by {closing.Identity}, dated {record.At}, while principal revision {closing.Target} gave them the role that history checkpoint {closing.Record.Id} closed",
-            _ => $"Signed with the key of device revision {closing.Target}, which history checkpoint {closing.Record.Id} closed",
-        };
         string after = record.Type == "device"
             ? " A revision of a closed device, or one signed with a closed key, changes no key or name."
             : record.Type == "admission"
                 ? " It neither admits nor revokes, and counts for nothing until the root operator or a person holding administer anchors it after reading it."
                 : " It counts for nothing until the root operator or a person holding administer anchors it after reading it.";
+        // A role closing refuses everything its person writes that it does not witness, whatever roles they still hold (ID-14).
+        if (closing.Kind == "role")
+            return new Finding(Severity.Error, "history.after-closing", record.ExpectedPath + (record.Signatures.Count > 0 ? "#signatures" : string.Empty),
+                $"Written by {closing.Identity}, whose role history checkpoint {closing.Record.Id} closed, and that closing does not witness it: a role closing refuses everything its person writes unless the closing or a checkpoint it follows witnesses it, whatever date the record states and whatever roles the person still holds." + after);
+        string what = closing.Kind == "device"
+            ? $"Signed by device {closing.Identity}, which history checkpoint {closing.Record.Id} closed"
+            : $"Signed with the key of device revision {closing.Target}, which history checkpoint {closing.Record.Id} closed";
         return new Finding(Severity.Error, "history.after-closing", record.ExpectedPath + "#signatures",
             what + ", and that closing does not witness it: from a closing on, only what the closing or a checkpoint it follows lists counts, whatever date a record states." + after);
     }
@@ -731,7 +732,7 @@ internal sealed partial class EstateTrust
             {
                 "device" => $"This revocation of device {closes.Id} counts, and no closing names the device, so a record the device signs with an earlier date still counts.",
                 "key" => $"This rotation replaces the key of device revision {closes.Id}, and no closing names that key, so a record signed with it with an earlier date still counts.",
-                "role" => $"This revision removes a role that principal revision {closes.Id} gives, and no closing names that person's role, so a record the person writes with a date while that revision stood still counts.",
+                "role" => $"This revision removes a role that principal revision {closes.Id} gives, and no closing names that person's role, so a record the person writes with a date while that revision stood still counts, and, for anchoring, adoption and the closings, the closings and the appointments and grants the person wrote before the removal stop acting, those written on another copy included.",
                 _ => $"This revision narrows grant revision {closes.Id}, and no closing names the grant, so a record its grantee writes with a date while that revision was in force still counts.",
             };
             yield return new Finding(Severity.Warning, "history.closing-missing", act.ExpectedPath,

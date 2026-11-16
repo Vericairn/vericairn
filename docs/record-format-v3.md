@@ -771,12 +771,13 @@ Closings are judged in checkpoint order: every checkpoint after those it follows
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
 names, reach an adoption checkpoint by one who may anchor; when its signatures verify
 against the closings before it in that order; and when its author may perform the act. For a
-device or a grant that power reads as before signed history: the signer's operator role or
-`administer` grant stood at the closing's time and still stands, no trusted revision having
+device, a grant or a role that power reads as before signed history: the signer's operator role
+or `administer` grant stood at the closing's time and still stands, no trusted revision having
 since narrowed, revoked or removed it and no closing before this one having closed that
-grant's line, and a recovery device signs only for an operator. That power is read against
-the closings before this one, never against this closing itself, since its author chooses
-what it witnesses. Whether a checkpoint following no other may anchor is read against the
+grant's line, and a recovery device signs only for an operator; from 0.9.4 an operator whose
+role was since removed still holds that power for a closing their own role closing witnesses
+(below). That power is read against the closings before this one, and the role closings that
+act, never against this closing itself, since its author chooses what it witnesses. Whether a checkpoint following no other may anchor is read against the
 closings that act, and those act only when reached from such a checkpoint, so the two are
 settled together: from every such checkpoint that verifies, the closings reached are judged,
 each such checkpoint whose author may not anchor with those closings acting is dropped, and
@@ -874,7 +875,9 @@ at its record stage is judged again when it resumes. The strongest acts read mor
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) those acts read grant and
+withdraws those powers for every checkpoint, except that from 0.9.4 a role closing keeps, for
+the checkpoints and the principal and authority revisions it witnesses, the operator role its
+person held when writing them. From 0.9.2 (FIX-108) those acts read grant and
 principal revisions as follows. The revisions considered are those authentic by their
 signatures against the closings in force for the act, so none such a closing refuses, and not
 refused for their date against the nearest revision below them considered (below), with the
@@ -952,7 +955,7 @@ revision on top of one that does not count is compared with, and follows, the li
 its line has one current record in every read. The strongest acts, which consider only the
 revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's role in an
 estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
-refuses the person's records dated into the time the role stood that it does not witness. In an estate that has not adopted, and
+refuses everything the person writes that it does not witness, whatever date it states. In an estate that has not adopted, and
 for a removal no role closing names, a former operator's records dated into the time the role stood read as it stood, apart from
 policy authority, which reads them only where signed history places them before the removal; close and revoke a person's devices
 when removing their role there.
@@ -964,7 +967,8 @@ verifies against is the signer's claim of time, bounded by closings. Canonical s
 policy evaluation take their recorded time from the records that count.
 Roles and grants are read at the stated time as above, bounded by grant closings, while the
 strongest acts also need the role or grant to still stand, so a stated time carries none of those
-powers past a later removal or narrowing.
+powers past a later removal or narrowing; what a person's role closing witnesses keeps them, and
+what it does not witness counts for nothing.
 
 **Dates checkpoints question.** A signed record dated more than five minutes after the
 earliest-dated counting checkpoint that witnesses it, the checkpoint listing it or one that

@@ -115,6 +115,9 @@ public sealed class RoleClosingTests
             Finding finding = AfterClosing(model, refused);
             Assert.Contains(closing!.Id, finding.Message, StringComparison.Ordinal);
             Assert.Contains(e.P.Id, finding.Message, StringComparison.Ordinal);
+            // P keeps the reviewer role, so the refusal names the rule, not a role the closed revision gave.
+            Assert.Contains("a role closing refuses everything its person writes unless the closing", finding.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("gave them the role", finding.Message, StringComparison.Ordinal);
         }
 
         // Nothing it wrote takes effect: Q keeps the operator role, Z has none, and the grant gives nothing.
@@ -160,6 +163,7 @@ public sealed class RoleClosingTests
         Finding missing = Assert.Single(model.Findings, x => x.Code == "history.closing-missing");
         Assert.Equal(removal.ExpectedPath, missing.Location);
         Assert.Contains("role", missing.Message, StringComparison.Ordinal);
+        Assert.Contains("the closings and the appointments and grants the person wrote before the removal stop acting", missing.Message, StringComparison.Ordinal);
     }
 
     [Fact]
