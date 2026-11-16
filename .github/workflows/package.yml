@@ -294,7 +294,7 @@ jobs:
           RUN: ${{ github.run_id }}
         run: |
           set -eu
-          (cd dist && sha256sum * > SHA256SUMS)
+          (cd dist && sha256sum -- * > SHA256SUMS)
           cat dist/SHA256SUMS
           # The record formats this build reads and writes, as the documentation set's manifest states them from the build (the
           # comparison above refused a manifest that states others); the release observer reads the same manifest from the draft.

@@ -776,6 +776,30 @@ actions and container references are refused; from 0.8.2 a reusable workflow bes
 `.github/workflows` is allowed, since the same check covers it. This checks the repository's declared list,
 not the organization's live Actions settings.
 
+From 0.9.4 (CI-08), no package or listing is published without the operator's approval. `nuget.yml`'s and
+`mcp-registry.yml`'s publication jobs run in the GitHub environment `release`, which the operator creates in
+the repository's settings with themselves as its required reviewer before the first publication (GitHub
+creates an environment a job names without protection when none exists), and nuget.org's Trusted Publishing policy
+for `nuget.yml` names that environment, so nuget.org accepts the repository's identity token only from a job
+in it. Each run, whether the release's publication started it or a person dispatched it with a release id,
+waits at that job until the operator approves it on the run's page (Review deployments, then Approve and
+deploy); nothing else in the job runs before. Approving `nuget.yml`'s run lets that one run verify and push
+the published release's packages and symbols; approving `mcp-registry.yml`'s lets it list that release's
+`dotnet-vc` manifest. An approval covers that run only, never a later run or another release, and grants
+nothing in the estate: accepting and publishing the candidate stay separate acts. Publishing a release thus
+asks for two approvals, one per workflow, and a rejected or expired one publishes nothing; a later dispatch
+with the release id asks again. A stolen token or a changed workflow cannot publish alone. Later publishing
+jobs, such as Homebrew and winget, run in the same environment: CI refuses a job that requests an identity
+token or reads a secret outside it.
+
+Each `actions.allow` entry also records its owner's and repository's GitHub ids (`owner=<id> repository=<id>`).
+Beside the offline pin check, CI asks GitHub for the repository under each action's name and fails when its
+ids differ from the recorded ones, when GitHub serves it only under another name, as after a rename or
+transfer, or when the pinned commit is not in it, so a repository deleted and re-created under the same
+name by another account is not trusted by name. CI also lints every workflow with actionlint 1.7.12 and
+ShellCheck 0.11.0, each installed by pinned version and checked against its release's SHA-256, and fails on
+any finding.
+
 From 0.8.2 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
 `release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no
 release-only step can first fail during a release. It checks the version, restores locked, compares the

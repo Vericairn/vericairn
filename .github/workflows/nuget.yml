@@ -1,6 +1,7 @@
 name: nuget
 
-# A candidate may be withdrawn. Only the operator's publication releases its exact package assets.
+# A candidate may be withdrawn. Only the operator's publication releases its exact package assets, and only the operator's
+# approval in the protected release environment lets this run push them.
 # A person may also name a published, immutable release by its id, when its release event could not run this
 # workflow; that run pushes exactly the same verified assets, and a version nuget.org already holds is skipped.
 #
@@ -27,6 +28,10 @@ env:
 jobs:
   publish:
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    # CI-08: the job waits in the protected environment release until the operator, its required reviewer, approves this run
+    # on the run's page; nuget.org's trusted-publishing policy accepts this repository's identity token only from that
+    # environment, so neither a stolen token nor a changed workflow publishes a package without the operator's approval.
+    environment: release
     permissions:
       contents: read
       id-token: write

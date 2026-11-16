@@ -19,11 +19,26 @@ Dependabot update alone cannot pass the workflow policy. A NuGet update changes
 `packages.distributable.lock.json` files, so the package job's locked restore refuses
 the update until the builder regenerates them as the software guide describes.
 
+Each entry also records its owner's and repository's GitHub ids after the action, as
+`owner=<id> repository=<id>` (CI-08), read from `https://api.github.com/repos/<owner>/<repository>`
+when the entry is added. Every entry of one repository records the same ids. CI's
+`--identities` run asks GitHub for the repository under each action's name, with the
+workflow's read token, and fails when its ids differ, when GitHub serves it only under
+another name (a rename or transfer), or when the pinned commit is not in it, so a
+repository deleted and re-created under the same name by another account fails.
+
 CI runs `ruby .github/scripts/check-workflow-actions.rb` over every `.yml` and `.yaml`
 workflow, including release-only workflows. It uses Ruby's bundled YAML syntax-tree
 parser, so quoted keys, flow mappings and folded values are checked too; comments
 and script bodies are data. No gem installation is needed. Run its regression cases
 with `ruby .github/scripts/test-workflow-actions.rb`.
+
+The `workflow-policy` job then lints every workflow with actionlint 1.7.12, running
+ShellCheck 0.11.0 over each run script; both are downloaded by pinned version and checked
+against the SHA-256 their releases publish, and any finding fails the job. actionlint's
+pyflakes integration is off, since no pinned pyflakes is installed. Run the same lint with
+`actionlint -shellcheck <path to shellcheck 0.11.0> -pyflakes= .github/workflows/*.yml`.
+A ShellCheck finding that is intended is disabled on its own line with a comment saying why.
 
 `ci.yml` runs on pull requests, merge queue groups, main pushes and manual dispatch.
 Tests run in three shares on each of Linux, macOS and Windows. Its first job,
@@ -107,6 +122,12 @@ draft does not attach fails the run, naming each one. `nuget.yml` runs on releas
 manual dispatch; it downloads and verifies the published release's exact assets,
 then publishes those packages through Trusted Publishing. It never rebuilds them.
 Only its publication job can request an identity token, log in to NuGet or push.
+From 0.9.4 (CI-08) that job, and `mcp-registry.yml`'s, runs in the environment
+`release`, which the operator creates with themselves as required reviewer: each run
+waits there until the operator approves it on the run's page, and nuget.org's Trusted
+Publishing policy names that environment, so no token from another job publishes. The
+workflows name the environment only; no credential is stored in the repository. A job
+that requests an identity token or reads a secret must run in it.
 `mcp-registry.yml` also runs on release publication or manual dispatch naming a published,
 immutable release. It verifies that release's `dotnet-vc` package against `SHA256SUMS`,
 checks its embedded `.mcp/server.json` with the same verifier, waits until nuget.org
