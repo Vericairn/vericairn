@@ -39,6 +39,26 @@ public static class FlowRuns
     {
         /// <summary>The value of a flow option, or null when the flow has none by that name.</summary>
         public string? Value(string option) => Values.TryGetValue(option, out Setting? setting) ? setting.Value : null;
+
+        /// <summary>The run's time zone (from 0.9.4, PROC-18): the IANA name its configuration sets as zone, or UTC.</summary>
+        public string Zone => Value(FlowTiming.ZoneOption) ?? FlowTiming.Utc;
+
+        /// <summary>
+        /// A step's timing (from 0.9.4, PROC-18): the one its configuration sets as when.&lt;key&gt;, the narrowest winning, unless the flow
+        /// fixes it; otherwise the flow's own.
+        /// </summary>
+        public FlowTiming Timing(FlowStep step)
+        {
+            ArgumentNullException.ThrowIfNull(step);
+            FlowTiming declared = FlowTiming.Read(step.When);
+            if (declared.Fixed || !Values.TryGetValue(FlowTiming.WhenOption + step.Key, out Setting? setting))
+            {
+                return declared;
+            }
+
+            using JsonDocument configured = JsonDocument.Parse(setting.Value);
+            return FlowTiming.Read(configured.RootElement);
+        }
     }
 
     /// <summary>A goal's plan.flow, or undefined when its plan names no flow.</summary>
@@ -316,6 +336,11 @@ public static class FlowRuns
                 {
                     values[choice.Name] = new Setting(choice.Name, choice.Value.GetString()!, source, record);
                 }
+                else if (choice.Value.ValueKind == JsonValueKind.String && Timed(flow, choice.Name, choice.Value.GetString()!).Count == 0)
+                {
+                    // From 0.9.4 (PROC-18) a venture's time zone and a step's timing the flow does not fix, the narrowest winning.
+                    values[choice.Name] = new Setting(choice.Name, choice.Value.GetString()!, source, record);
+                }
             }
         }
     }
@@ -341,6 +366,13 @@ public static class FlowRuns
         foreach (JsonProperty choice in choices.EnumerateObject())
         {
             string? value = choice.Value.ValueKind == JsonValueKind.String ? choice.Value.GetString() : null;
+            if (!flow.Options.ContainsKey(choice.Name) && (choice.Name == FlowTiming.ZoneOption || choice.Name.StartsWith(FlowTiming.WhenOption, StringComparison.Ordinal)))
+            {
+                // From 0.9.4 (PROC-18): a venture's time zone, and a timing for a step whose timing the flow does not fix.
+                refusals.AddRange(value is null ? [("flow.option", $"'{choice.Name}' is configured by text.")] : Timed(flow, choice.Name, value));
+                continue;
+            }
+
             if (choice.Name.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))
             {
                 string[] parts = choice.Name[FlowContract.ItemOption.Length..].Split('.');
@@ -406,6 +438,49 @@ public static class FlowRuns
         }
 
         return refusals;
+    }
+
+    /// <summary>
+    /// Why a configuration's time zone or step timing is refused (from 0.9.4, PROC-18; design/flow.md § 7): zone names an IANA time zone
+    /// every machine reads alike; when.&lt;key&gt; names a step of the flow whose timing the flow does not fix, such as an embargo, with a
+    /// timing as JSON text that the step may take. Empty when it holds, and for any other option.
+    /// </summary>
+    internal static IReadOnlyList<(string Code, string Message)> Timed(FlowDefinition flow, string option, string value)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        if (option == FlowTiming.ZoneOption)
+        {
+            return FlowTiming.KnownZone(value) ? [] : [("flow.zone", $"'{value}' is not an IANA time zone, such as Europe/London or America/New_York, that every machine reads alike.")];
+        }
+
+        if (!option.StartsWith(FlowTiming.WhenOption, StringComparison.Ordinal))
+        {
+            return [("flow.option", $"'{option}' is not an option of flow {flow.Pin.Id}.")];
+        }
+
+        FlowStep? step = flow.Step(option[FlowTiming.WhenOption.Length..]);
+        if (step is null)
+        {
+            return [("flow.option", $"'{option}' names no step of flow {flow.Pin.Id}; a step's timing is configured as when.<step>.")];
+        }
+
+        if (FlowTiming.Read(step.When).Fixed)
+        {
+            return [("flow.timing-fixed", $"Step {step.Key}'s timing is fixed by flow {flow.Pin.Id}, as an embargo is: no configuration changes it.")];
+        }
+
+        IReadOnlyList<string> problems = FlowTiming.Configured(value, TimingShape(flow, step)).Problems;
+        return problems.Count == 0 ? [] : [("flow.when", $"The timing configured for step {step.Key} is refused: {string.Join(" ", problems)}")];
+    }
+
+    /// <summary>What checking a timing for one step of a resolved flow needs: the steps before it with their items, and its predicate check.</summary>
+    internal static FlowTiming.TimingShape TimingShape(FlowDefinition flow, FlowStep step)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        List<FlowStep> earlier = flow.Steps.TakeWhile(s => s.Key != step.Key).ToList();
+        return new FlowTiming.TimingShape(step.Kind, step.Required, step.Done.Count > 0,
+            key => earlier.FirstOrDefault(s => s.Key == key)?.Outputs.Select(o => o.Name).ToList(), FlowContract.PredicateCheck(flow, step));
     }
 
     /// <summary>

@@ -1687,7 +1687,26 @@ only because nothing is there yet to count, so it reads `blocked` and says so. T
 `template-defaults` for the exact flow pin, then the goal's options, the narrowest winning; the position names each value's
 source. From 0.9.4 (FIX-146) a run keeps the configuration resolved when its current revision was activated: `template-defaults`
 recorded later apply to new runs and to the run's next revision, which its sponsor signs and activates, and change none of a
-running run's steps; a revision that has not been activated reads them as they stand. The same records give the same position on every machine at the same time (due times and watches read the clock);
+running run's steps; a revision that has not been activated reads them as they stand.
+
+From 0.9.4 (PROC-18) each step's timing contract decides when it may start: instantly, after a delay, at a time, on a
+schedule, within a window or on an event, as the flow declares it and a venture configures it through `template-defaults`
+at the estate, the product or the goal, the narrowest winning, a timing the flow fixes, such as an embargo, never changed
+([templates](templates.md#flows-092)). Its due time is computed from the records and the runtime's clock, never an author's
+claim, and shown before the step runs: `goal show`, the API's goal read and MCP `goal_get` give each such step's `due`, when
+and why, its timing and zone, its deadline and a missed-time rule it took; status gives each run's due times, and Workbench
+and Remote list them. A step not yet due reads `blocked` and says when it is due; one whose window is closed says when it
+next opens. A reserved act at a time, other than one under a `due` time as before 0.9.4, is armed once what it waits on is
+done: its request reaches the operator ahead of its time, and the operator's act recorded before then, such as arming a platform's scheduler, which is the act itself, counts
+only once the time comes and only while its author still holds the act then. A step that misses its deadline before it is
+taken takes its rule: `late` runs it late, `skip` skips an optional step from the deadline, and `attention`, the default,
+stops it with required attention of kind `missed`, an ask to the sponsor; once the ask is answered, it runs once, late. A
+reserved act that misses its deadline stays with its request to the operator, which says it is late. After downtime a step
+whose deadline passed while nothing took it runs once in the same way, never once per missed time. In Community a due step
+is taken by `goal step` or a script that calls it; the carrier (GOAL-10) takes timed steps unattended in Standard and Pro.
+Once DESIGN-45 is built, its destination states record a publication saved on a platform's scheduler or due locally.
+
+The same records give the same position on every machine at the same time (due times and watches read the clock);
 a machine that cannot resolve the flow shows the goal, says so, and takes none of its steps.
 
 `goal next` routes each ready work or review step by its role through the goal's roles, its roster or the estate's, exactly
@@ -1844,7 +1863,8 @@ status and attention show the checked command first and label that prose as not 
 Every surface shows a run's stops the same way, from the records:
 
 - status: its text, read now, and the canonical JSON's `runs` when there are runs, each with its goal, flow, steps done,
-  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read;
+  next steps and `stops` as of the newest record (`asOf`), so the canonical document never depends on when it is read, and
+  from 0.9.4 each timed step's due time (`due`);
 - `goal show` and `goal next`: the position's `stops`, and for the reserved step that is next its `command`;
 - the API's and the SDK's goal, next and status reads, and the MCP `goal_get` and `estate_status` tools;
 - Workbench's home, from canonical status with its as-of time, and its Goals workspace, read now;

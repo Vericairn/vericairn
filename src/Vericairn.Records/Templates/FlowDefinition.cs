@@ -126,7 +126,7 @@ public sealed record FlowBranch(string Name, IReadOnlyList<JsonElement> When, IR
 /// <param name="Outputs">Its outputs, the hand-off contract.</param>
 /// <param name="Review">The review its items take before it closes, as declared, the default for items that declare none; null when the flow's review option decides for a work step.</param>
 /// <param name="Each">The subject list field it runs over, one instance per name; null for one instance.</param>
-/// <param name="When">Its timing, a due time or a watch; undefined without one.</param>
+/// <param name="When">Its timing contract (from 0.9.4, PROC-18, <see cref="FlowTiming"/>); undefined for an instant step.</param>
 /// <param name="Element">The step's declared content.</param>
 /// <param name="DeclaredIn">The flow version that declares it.</param>
 /// <param name="Failure">A work step's declared failure route; null when it declares none, and then a failure stops.</param>
@@ -489,7 +489,7 @@ public sealed class FlowDefinition
         // merged order an extension's steps take among its base's.
         HashSet<string> branched = branches.SelectMany(b => b.Steps).ToHashSet(StringComparer.Ordinal);
         List<FlowContract.ClosingShape> closing = steps.Select(s => new FlowContract.ClosingShape(s.Key, s.After,
-            s.Inputs.Select(i => i.Step).Append(TJson.Text(TJson.Object(s.When, "due"), "from")).OfType<string>().ToList(),
+            s.Inputs.Select(i => i.Step).Append(FlowTiming.WaitedOf(s.When)).OfType<string>().ToList(),
             !s.Required || branched.Contains(s.Key), FlowContract.Untimed(s.Kind, s.Outputs.Count, s.Done), FlowContract.ClosesByRequest(s.Reserved, s.Done))).ToList();
         foreach ((string reserved, string waited) in FlowContract.Unclosable(closing))
         {
@@ -559,7 +559,7 @@ public sealed class FlowDefinition
             yield return $"{where}: step '{step.Key}' runs over '{step.Each}', which is not a list field of the flow's subject.";
         }
 
-        if (TJson.Text(TJson.Object(step.When, "due"), "from") is string from && !earlier.Contains(from, StringComparer.Ordinal))
+        if (FlowTiming.WaitedOf(step.When) is string from && !earlier.Contains(from, StringComparer.Ordinal))
         {
             yield return $"{where}: step '{step.Key}' is due after '{from}', which is not a step before it.";
         }

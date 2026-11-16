@@ -227,6 +227,16 @@ public sealed partial class RemoteViewModel : Observable
     /// <summary>True while a run in the last observation has a stop to show.</summary>
     public bool HasStops => Stops.Count > 0;
 
+    /// <summary>
+    /// From 0.9.4 (PROC-18), the due times of the estate's runs from the last observation: each step whose timing gates its start, when it
+    /// is due and why, before it runs. Remote shows them; it starts nothing.
+    /// </summary>
+    public IReadOnlyList<DueRow> Due { get => due; private set { if (Set(ref due, value)) Raise(nameof(HasDue)); } }
+    private IReadOnlyList<DueRow> due = [];
+
+    /// <summary>True while a run in the last observation has a due time to show.</summary>
+    public bool HasDue => Due.Count > 0;
+
     /// <summary>When the stops shown were derived: as of the estate's newest record, from canonical status.</summary>
     public string StopsAsOf { get => stopsAsOf; private set => Set(ref stopsAsOf, value); }
     private string stopsAsOf = string.Empty;
@@ -385,6 +395,7 @@ public sealed partial class RemoteViewModel : Observable
         SelectedAssignment = Assignments.FirstOrDefault(a => a.Id == assignmentId);
         Products = observation?.Products ?? [];
         Stops = view?.Stops ?? [];
+        Due = view?.Due ?? [];
         StopsAsOf = view?.StopsAsOf ?? string.Empty;
         History = view?.History ?? string.Empty;
         Freshness = view is null ? "not observed yet" : estate!.Current ? $"current as of {view.AsOf}" : $"cached from {view.AsOf}; refresh before relying on it";

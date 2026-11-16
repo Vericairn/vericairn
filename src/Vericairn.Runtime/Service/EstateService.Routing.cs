@@ -433,6 +433,7 @@ public sealed partial class EstateService
             "failed" => $"Read the failure, then decide: take the step over yourself ({holder}), revise the goal for another route, which needs a fresh activation, or end the goal. Answering this ask records the decision; it carries nothing out.",
             "exhausted" => $"Read its attempts, then decide: take the step over yourself ({holder}), or revise the goal with more attempts per step, which needs a fresh activation; no further run of it starts on its own.",
             "consecutive-failures" => "Read the failed steps, then decide: answer this ask to let the run go on, revise the goal, or end it.",
+            "missed" => "Read why it was not taken by its deadline, then decide: answer this ask to have it run once, late, revise the goal for another timing, which needs a fresh activation, or end the goal.",
             _ => "End the goal as impossible, or revise it; answering this ask lets the run go on.",
         };
         var ask = new JsonObject

@@ -140,6 +140,38 @@ public sealed class FlowFixture : IDisposable
             Step("publish", "operation", "decider", optional: "on", reserved: "publish", done: new JsonArray(Marker("PUBLISHED")), action: PublishCommand)),
     };
 
+    /// <summary>
+    /// A flow of two steps: prepare, an operation the writer carries, done by its marker; then timed, taking the timing given, the
+    /// writer's operation done by its marker or, reserved, the operator's publication.
+    /// </summary>
+    public static JsonObject Timed(JsonObject? when, bool optional = false, bool reserved = false, JsonArray? prepareOutputs = null, JsonArray? prepareDone = null)
+    {
+        JsonObject timed = reserved
+            ? FlowFixture.Step("timed", "operation", "decider", optional: optional ? "on" : null, reserved: "publish", done: new JsonArray(FlowFixture.Marker("TIMED")), action: FlowFixture.PublishCommand)
+            : FlowFixture.Step("timed", "operation", "writer", optional: optional ? "on" : null, done: new JsonArray(FlowFixture.Marker("TIMED")));
+        if (when is not null)
+        {
+            timed["when"] = when;
+        }
+
+        return new JsonObject
+        {
+            ["format"] = "vericairn.template/1", ["kind"] = "flow", ["id"] = "example/timed", ["version"] = "1.0.0", ["purpose"] = "Prepare, then take a timed step.",
+            ["subject"] = new JsonObject
+            {
+                ["summary"] = "a recording",
+                ["fields"] = new JsonArray(
+                    new JsonObject { ["name"] = "recording", ["type"] = "record", ["recordType"] = "work-order" },
+                    new JsonObject { ["name"] = "tracks", ["type"] = "list" }),
+            },
+            ["roles"] = new JsonArray(
+                new JsonObject { ["id"] = "writer", ["holder"] = "either", ["brief"] = "Prepare and carry the steps." },
+                new JsonObject { ["id"] = "decider", ["holder"] = "person", ["brief"] = "Publish." }),
+            ["never"] = new JsonArray("never publish without the operator"),
+            ["steps"] = new JsonArray(FlowFixture.Step("prepare", "operation", "writer", done: prepareDone ?? new JsonArray(FlowFixture.Marker("PREPARED")), outputs: prepareOutputs), timed),
+        };
+    }
+
     /// <summary>The song's acceptance command, bound to the run's recording and goal when the step is next.</summary>
     public const string AcceptCommand = "example-provider accept --recording {subject.recording} --goal {goal}";
 
