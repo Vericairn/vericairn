@@ -131,6 +131,9 @@ public sealed partial class EstateService
         // Machine-local observations only: reading GitHub never happens under the gate, so attention never waits on the network.
         foreach (var security in SecurityNotices(model, principal))
             Add(security.Kind, security.Subject, security.Why, security.State, security.Next, security.Type, security.Id, security.Hash, security.At, security.Target, security.Basis);
+        // From 0.9.4 (ID-16): a refusal that ended a presence session here, kept in this runtime's memory (presence.outside-list).
+        foreach (var refusal in PresenceAttention(principal))
+            Add(refusal.Kind, refusal.Subject, refusal.Why, refusal.State, refusal.Next, refusal.Type, refusal.Id, refusal.Hash, refusal.At, refusal.Target, refusal.Basis);
         notices.AddRange(PolicyNotices(progress, principal));
         Dictionary<string, AttentionAcknowledgment> kept = ReadAcknowledgments(principal);
         // Several findings can concern the same kind and subject. Keep every reason in that notice.

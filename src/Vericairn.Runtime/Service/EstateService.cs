@@ -58,6 +58,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment), promptUse: promptUse, progressGoal: goal, searches: searches, principal: agent),
             PreparePrompt);
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
+        recordAccess.Sessions = PresenceSessions;
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
             AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary),
             SecurityReportObjections);

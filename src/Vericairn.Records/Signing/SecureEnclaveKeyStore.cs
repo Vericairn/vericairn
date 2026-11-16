@@ -16,13 +16,23 @@ public static class SecureEnclaveCustody
     /// <summary>The helper's file name, beside the command line.</summary>
     public const string HelperName = "vericairn-enclave";
 
-    /// <summary>Overrides where the helper is, for development builds and tests.</summary>
+    /// <summary>Overrides where the helper is, for development builds and tests; from 0.9.4 a release build ignores it (ID-16).</summary>
     public const string HelperVariable = "VERICAIRN_ENCLAVE_HELPER";
 
-    /// <summary>The helper's path: the override, else beside the running executable; null when absent.</summary>
-    public static string? HelperPath()
+    /// <summary>
+    /// The helper's path: in a development build the override, else beside the running executable; from 0.9.4 a release build always
+    /// uses the helper beside the running executable (design/presence-sessions.md § 11). Null when absent.
+    /// </summary>
+    public static string? HelperPath() => HelperPath(PresenceSessionBuild.Current);
+
+    /// <summary>The helper's path for a build: a release build ignores <see cref="HelperVariable"/>.</summary>
+    internal static string? HelperPath(PresenceSessionBuild build) => HelperPath(build, Environment.GetEnvironmentVariable(HelperVariable));
+
+    /// <summary>The helper's path for a build and what <see cref="HelperVariable"/> names: a release build ignores the variable.</summary>
+    internal static string? HelperPath(PresenceSessionBuild build, string? variable)
     {
-        string? configured = Environment.GetEnvironmentVariable(HelperVariable);
+        ArgumentNullException.ThrowIfNull(build);
+        string? configured = build.Release ? null : variable;
         string path = string.IsNullOrWhiteSpace(configured) ? Path.Combine(AppContext.BaseDirectory, HelperName) : configured;
         return File.Exists(path) ? path : null;
     }
@@ -115,6 +125,34 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// From 0.9.4 (ID-16) the helper's sign-record reads the record's canonical bytes on its standard input, checks they are in the
+    /// compact canonical form, hashes them itself and opens its prompt with "sign Vericairn record &lt;type&gt; &lt;short hash&gt;:", then
+    /// the reason (design/presence-sessions.md § 8); the digest-only sign stays for request signatures and pairing proofs.
+    /// </remarks>
+    public byte[] SignRecord(string deviceId, ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest, string? reason)
+    {
+        if (digest.Length != 32 || !System.Security.Cryptography.SHA256.HashData(content).AsSpan().SequenceEqual(digest))
+        {
+            throw new ArgumentException("The digest is the SHA-256 of the record's canonical bytes.", nameof(digest));
+        }
+
+        // The helper's own label begins the dialog's text, so the runtime's sentence follows it without its own "sign Vericairn".
+        string sentence = PresenceReason.Text(reason);
+        const string Repeated = "sign Vericairn ";
+        if (sentence.StartsWith(Repeated, StringComparison.Ordinal)) sentence = sentence[Repeated.Length..];
+        (int code, string output) = Run(helper, WithPerson, content.ToArray(), "sign-record", Blob(deviceId), sentence);
+        byte[] signature = code == 0 ? Convert.FromBase64String(output) : throw new InvalidOperationException(output);
+        return signature.Length == RecordSigning.SignatureBytes ? signature : throw new InvalidOperationException("The Secure Enclave returned a signature of an unexpected size.");
+    }
+
+    /// <summary>From 0.9.4: the helper this store runs.</summary>
+    internal string Helper => helper;
+
+    /// <summary>From 0.9.4: where the key held under an id is kept, the blob a presence session's helper is started with.</summary>
+    internal string BlobPath(string keyId) => Blob(keyId);
+
+    /// <inheritdoc />
     public void Remove(string deviceId)
     {
         string blob = Blob(deviceId);
@@ -146,9 +184,11 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         return Path.Combine(directory, deviceId + ".se");
     }
 
-    private static (int Code, string Output) Run(string helper, TimeSpan timeout, params string[] arguments)
+    private static (int Code, string Output) Run(string helper, TimeSpan timeout, params string[] arguments) => Run(helper, timeout, null, arguments);
+
+    private static (int Code, string Output) Run(string helper, TimeSpan timeout, byte[]? input, params string[] arguments)
     {
-        var start = new ProcessStartInfo(helper) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        var start = new ProcessStartInfo(helper) { RedirectStandardInput = input is not null, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (string argument in arguments)
         {
             start.ArgumentList.Add(argument);
@@ -157,6 +197,19 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
         using Process process = Process.Start(start) ?? throw new InvalidOperationException($"The {SecureEnclaveCustody.HelperName} helper did not start.");
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
+        if (input is not null)
+        {
+            try
+            {
+                process.StandardInput.BaseStream.Write(input);
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // A helper that refused its arguments exits without reading; its exit says why.
+            }
+        }
+
         if (!process.WaitForExit(timeout))
         {
             process.Kill(entireProcessTree: true);

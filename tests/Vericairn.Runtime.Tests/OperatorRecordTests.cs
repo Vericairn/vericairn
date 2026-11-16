@@ -455,6 +455,111 @@ public sealed class OperatorRecordTests
     }
 
     [Fact]
+    public void OneCheckCoversAWholeOperatorRecordThatFinishesWithinTheSessionsLimit()
+    {
+        // ID-16 (J132): the record by exact hash, then its branch's push, opening, observations and merge by kind, in one list.
+        using var f = new Fixture();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers);
+        HashSet<string> before = [.. f.Service.Session.Load().Records.Select(r => r.Id)];
+        long start = f.Service.PresencePrompts(new()).Cursor;
+
+        OperatorRecordResponse result = f.Service.OperatorRecord(f.Request, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Ok, result.Message);
+        PresenceHelperStandIn helper = Assert.Single(helpers);
+        Assert.Empty(custody.Reasons);
+        Assert.Equal(22, helper.SignedHashes.Count);
+        Assert.Equal(22, f.Service.Session.Load().Records.Count(r => !before.Contains(r.Id) && r.Signatures.Any(s => s.Device == f.Device)));
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(helper.Terms[0]);
+        Assert.Equal("operator record", terms.Action);
+        Assert.Equal(1, terms.ExactCount);
+        Assert.Equal("acceptance", terms.Entries[0].Type);
+        Assert.All(terms.Entries.Skip(1), e => Assert.Equal("operation", e.Type));
+        // The head is unknown at the announcement; the merge takes its pull request from the session's own opening.
+        Assert.DoesNotContain(terms.Entries, e => e.Fixed.ContainsKey("head"));
+        Assert.Contains(terms.Entries, e => e.Action == "change-merge" && e.PullRequestFrom is not null);
+        Assert.Equal("operator/" + result.Record!.Id, terms.Entries.First(e => e.Action == "change-push").Fixed["branch"]);
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        Assert.Equal("Signed 22 of 22 with one presence check.", notices[^1].Text);
+        Assert.DoesNotContain(notices, n => n.Kind == "revised");
+    }
+
+    [Theory]
+    [InlineData("open")]
+    [InlineData("merge")]
+    [InlineData("target")]
+    public void AResumedActionListsItsRecordedOperationsAsReferencesAndSignsItsRemainderUnderOneCheck(string step)
+    {
+        // ID-16 (§ 5): a resumed operator record lists the operations its earlier run recorded, which its records supersede and observe.
+        using var f = new Fixture();
+        var helpers = new List<PresenceHelperStandIn>();
+        RecordingCustody custody = Sessions(f, helpers);
+        f.Fail = step;
+        Assert.False(f.Run().Ok);
+        int first = helpers.Count;
+        Assert.Equal(1, first);
+        f.Fail = null;
+        f.Reopen();
+        custody = Sessions(f, helpers);
+
+        OperatorRecordResponse resumed = f.Run("The failed prerequisite is repaired and no unconfirmed effect is retried.");
+
+        Assert.True(resumed.Ok, resumed.Message + " " + resumed.NextStep);
+        Assert.Empty(custody.Reasons);
+        PresenceSessionRules terms = PresenceSessionRules.ReadTerms(helpers[first].Terms[0]);
+        // The record is stored: it is no exact entry of the resumed list, and the operation the first run stopped at is a reference.
+        Assert.Equal(0, terms.ExactCount);
+        EstateModel model = f.Service.Session.Load();
+        RecordEnvelope stopped = model.Current("operation").Single(o => EstateModel.BodyString(o, "action") == (step == "open" ? "change-open" : "change-merge"));
+        Assert.Contains(terms.References, r => model.Chain(stopped).Contains(r.Id));
+        Assert.Equal(0, f.Service.Validate().Errors);
+
+        static RecordingCustody Sessions(Fixture f, List<PresenceHelperStandIn> helpers)
+        {
+            var custody = new RecordingCustody(VericairnHome.Path());
+            f.Service.KeyStores = [custody];
+            f.Service.PresenceRequired = device => device == f.Device;
+            f.Service.HostsEmbedded = true;
+            f.Service.PresenceHost = StandInSessions.Host(helpers);
+            return custody;
+        }
+    }
+
+    [Fact]
+    public void ChecksStillRunningBeyondTheAnnouncedRepetitionsRenewWithTheRemainderAndOneMoreCheck()
+    {
+        // ID-16 (J133): with no wait, the list announces no repetition; the second observation of the checks renews.
+        using var f = new Fixture();
+        var custody = new RecordingCustody(VericairnHome.Path());
+        f.Service.KeyStores = [custody];
+        f.Service.PresenceRequired = device => device == f.Device;
+        var helpers = new List<PresenceHelperStandIn>();
+        f.Service.HostsEmbedded = true;
+        f.Service.PresenceHost = StandInSessions.Host(helpers);
+        int reads = 0;
+        f.Remote.Read = p => ++reads == 1 ? p with { Checks = [new(Required[0], Head, "queued", null)] } : p;
+        long start = f.Service.PresencePrompts(new()).Cursor;
+
+        OperatorRecordResponse result = f.Service.OperatorRecord(f.Request with { WaitSeconds = 1 }, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Ok, result.Message);
+        Assert.Equal(2, helpers.Count);
+        Assert.Empty(custody.Reasons);
+        Assert.Equal(25, helpers.Sum(h => h.SignedHashes.Count));
+        IReadOnlyList<PresenceNotice> notices = f.Service.PresencePrompts(new(start)).Notices;
+        PresenceNotice renewal = Assert.Single(notices, n => n.Kind == "revised" && n.Text.Contains("renews its presence session", StringComparison.Ordinal));
+        Assert.Contains("because the action needs a signature its list does not cover", renewal.Text, StringComparison.Ordinal);
+        Assert.Equal("Signed 25 of 25 with 2 presence checks.", notices[^1].Text);
+        // The renewal lists the action's recorded operations as references, which the rest supersede and observe.
+        Assert.NotEmpty(PresenceSessionRules.ReadTerms(helpers[1].Terms[0]).References);
+    }
+
+    [Fact]
     public void AChangedHeadBetweenWaitingAndMergeStopsAtMergeAdmission()
     {
         using var f = new Fixture();

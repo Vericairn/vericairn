@@ -30,6 +30,9 @@ internal sealed class EstateRecordAccess(
 {
     internal object Gate { get; } = gate;
 
+    /// <summary>From 0.9.4 (ID-16): the runtime's presence sessions, which an action's tally composes its list for.</summary>
+    internal PresenceSessionService? Sessions { get; set; }
+
     internal EstateSession Session { get; } = session;
 
     // These operations require the caller to hold Gate, just as the underlying record boundary does.

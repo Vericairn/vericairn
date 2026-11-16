@@ -284,15 +284,22 @@ public sealed partial class EstateService
 
     /// <summary>
     /// The shared signing boundary's signer (FIX-124): notes whether its signature failed, so the failure is told from the record's own
-    /// refusals, and for a key that needs its owner's presence names the prompt first and passes its reason to the key's custody.
+    /// refusals, and for a key that needs its owner's presence names the prompt first and passes its reason to the key's custody. From
+    /// 0.9.4 (ID-16) it is handed the record's canonical bytes: a signature an action's presence session covers is signed under that
+    /// session's one check, and every other is signed with its own, by custody that reads the record (the helper's sign-record).
     /// </summary>
-    private sealed class WatchedSigner(IRecordSigner inner, EstateService owner, RecordDraft draft, EstateModel model) : IRecordSigner
+    private sealed class WatchedSigner(IRecordSigner inner, EstateService owner, RecordDraft draft, EstateModel model) : IRecordContentSigner
     {
         public bool Failed { get; private set; }
 
         public string DeviceId => inner.DeviceId;
 
-        public RecordSignature Sign(ReadOnlySpan<byte> digest)
+        public RecordSignature Sign(ReadOnlySpan<byte> digest) => Signed(null, digest);
+
+        public RecordSignature SignRecord(ReadOnlySpan<byte> content, ReadOnlySpan<byte> digest) => Signed(content.ToArray(), digest);
+
+        // Only a record, whose bytes the boundary holds, joins a session; a digest alone, such as a trial signature, asks its own check.
+        private RecordSignature Signed(byte[]? content, ReadOnlySpan<byte> digest)
         {
             PresenceTally? own = null;
             bool counted = false;
@@ -300,14 +307,15 @@ public sealed partial class EstateService
             {
                 if (inner is StoreSigner held && owner.NeedsPresence(held, draft, model))
                 {
+                    if (content is not null && owner.SessionSignature(held, draft, model, content) is RecordSignature underSession) return underSession;
                     string reason = owner.presence.Prompt(DescribeRecord(draft, model), out own);
                     counted = true;
-                    RecordSignature signature = held.Sign(digest, reason);
+                    RecordSignature signature = content is null ? held.Sign(digest, reason) : held.SignRecord(content, digest, reason);
                     owner.presence.Signed(own);
                     return signature;
                 }
 
-                return inner.Sign(digest);
+                return content is not null && inner is IRecordContentSigner reader ? reader.SignRecord(content, digest) : inner.Sign(digest);
             }
             catch
             {

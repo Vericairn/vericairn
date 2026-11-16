@@ -29,13 +29,55 @@ internal sealed class PresenceCounter
     /// Opens an operator action's tally with the records it plans to sign with presence, in order; disposing it says how many it signed.
     /// Inside another action's tally it opens nothing: the outer action has counted its records.
     /// </summary>
-    internal IDisposable Action(string action, IEnumerable<PresenceSignature>? planned = null)
+    internal IDisposable Action(string action, IEnumerable<PresenceSignature>? planned = null) => Action(action, planned, null);
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): opens an action's tally as <see cref="Action(string, IEnumerable{PresenceSignature}?)"/> does, with what composes
+    /// its announced list for a presence session (design/presence-sessions.md § 5), which the shared signing boundary composes at the
+    /// action's first signature that needs presence. Inside another action's tally it opens nothing.
+    /// </summary>
+    internal IDisposable Action(string action, IEnumerable<PresenceSignature>? planned, PresenceSessionAction? session)
     {
         if (current.Value is not null) return Nothing.Instance;
-        var tally = new PresenceTally(action);
+        var tally = new PresenceTally(action) { Session = session };
         if (planned is not null) tally.Planned.AddRange(planned);
         current.Value = tally;
         return new Scope(this, tally);
+    }
+
+    /// <summary>The open action's tally on this flow, or null.</summary>
+    internal PresenceTally? Current => current.Value;
+
+    /// <summary>Called when an action's tally closes, before its last notice, so its presence session ends with it.</summary>
+    internal Action<PresenceTally>? Closing { get; set; }
+
+    /// <summary>
+    /// From 0.9.4 (ID-16): counts a signature made under the action's presence session and names it in a notice: "Signature k of up to n,
+    /// under the session's check", with what it signs and the record's short hash. No prompt is shown for it.
+    /// </summary>
+    internal void SessionSigned(PresenceTally tally, PresenceSignature actual, string shortHash, int total, bool upTo)
+    {
+        lock (tally)
+        {
+            if (!tally.Announced) tally.Announced = true;
+            int index = tally.Asked + 1;
+            tally.Asked = index;
+            tally.Signed++;
+            if (index > tally.Planned.Count) tally.Planned.Add(actual);
+            else tally.Planned[index - 1] = actual;
+            string count = string.Create(CultureInfo.InvariantCulture, $"Signature {index} of {(upTo ? "up to " : string.Empty)}{Math.Max(total, index)}, under the session's check");
+            Notices.Publish("prompt", tally.Action, Math.Max(total, tally.Planned.Count), tally.Signed, [actual], $"{count}: {actual.Describe()} ({shortHash})", index);
+        }
+    }
+
+    /// <summary>From 0.9.4 (ID-16): raises a notice of the action's presence session: its list, its check's fingerprint, or a renewal.</summary>
+    internal void SessionNotice(PresenceTally tally, string kind, int total, IReadOnlyList<PresenceSignature> signatures, string text)
+    {
+        lock (tally)
+        {
+            tally.Announced = true;
+            Notices.Publish(kind, tally.Action, total, tally.Signed, signatures, text);
+        }
     }
 
     /// <summary>
@@ -97,6 +139,7 @@ internal sealed class PresenceCounter
                 Notices.Publish("announced", tally.Action, tally.Planned.Count, tally.Signed, [.. tally.Planned], Announced(tally));
             }
 
+            if (tally.Session is { } session) session.Checks++;
             int index = tally.Asked + 1;
             if (index > tally.Planned.Count)
             {
@@ -142,6 +185,17 @@ internal sealed class PresenceCounter
             if (!tally.Announced || tally.Finished) return;
             tally.Finished = true;
             int count = tally.Planned.Count;
+            // From 0.9.4 (ID-16) an action that used a presence session says how many checks its signatures took.
+            if (tally.Session is { SessionChecks: > 0 } session)
+            {
+                string checks = session.Checks == 1 ? "one presence check" : string.Create(CultureInfo.InvariantCulture, $"{session.Checks} presence checks");
+                string made = session.Failed || tally.Asked > tally.Signed
+                    ? string.Create(CultureInfo.InvariantCulture, $"Stopped after {tally.Signed} {(tally.Signed == 1 ? "signature" : "signatures")}, made with {checks}.")
+                    : string.Create(CultureInfo.InvariantCulture, $"Signed {tally.Signed} of {tally.Signed} with {checks}.");
+                Notices.Publish("finished", tally.Action, Math.Max(count, tally.Signed), tally.Signed, [], made);
+                return;
+            }
+
             string text = tally.Signed == count
                 ? string.Create(CultureInfo.InvariantCulture, $"Signed {count} of {count}.")
                 : tally.Asked > tally.Signed
@@ -182,6 +236,7 @@ internal sealed class PresenceCounter
             if (disposed) return;
             disposed = true;
             if (ReferenceEquals(owner.current.Value, tally)) owner.current.Value = null;
+            owner.Closing?.Invoke(tally);
             owner.Finish(tally);
         }
     }
@@ -210,6 +265,9 @@ internal sealed class PresenceTally(string action)
     internal bool Announced { get; set; }
 
     internal bool Finished { get; set; }
+
+    /// <summary>From 0.9.4 (ID-16): the action's presence session state, when it is one of the action vocabulary's; null otherwise.</summary>
+    internal PresenceSessionAction? Session { get; init; }
 }
 
 /// <summary>The presence notices of one runtime, kept in memory, newest last, for the clients on its machine to read in order.</summary>

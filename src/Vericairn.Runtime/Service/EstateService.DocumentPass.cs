@@ -57,11 +57,12 @@ public sealed partial class EstateService
                 exitQuestion = "Has each selected document been reviewed against the publication, with findings and required changes recorded?",
                 inputs = sources, deliverables = PassDeliverables,
             }, ProtocolJson.Options);
-            // The work order and its assignment are announced before the first presence prompt (FIX-124).
-            using IDisposable counted = presence.Action("docs pass assign " + version, SignsWithPresence(model, request.By)
-                ? [new("work-order", request.Key, "records a new work-order"), new("assignment", request.Key, "records a new assignment")] : null);
-            (AuthoredRecord? order, string? refusal) = AuthorLocked(new("work-order", request.By, orderBody), model);
-            if (order is null) return new([], new("refused", refusal!, []));
+            // The work order is authored completely, unsigned, before the first signature, so the assignment that names it at its exact hash
+            // is too, and a presence session lists both by exact hash (ID-16).
+            DateTimeOffset at = SessionNow();
+            RecordDraft ordering = Fixed(new RecordDraft("work-order", request.By, orderBody), at);
+            (AuthoredRecord? unsignedOrder, string? refusal) = AuthorUnsignedLocked(ordering, model);
+            if (unsignedOrder is null) return new([], new("refused", refusal!, []));
             string[] context = [.. selected.SelectMany(d =>
                 d.CoveredPaths.Select(p => $"{d.Path}: covers {p}.")
                     .Concat(d.Changes.Select(c => $"{d.Path}: {c.Kind} {c.Path} between the publication commits."))
@@ -83,7 +84,15 @@ public sealed partial class EstateService
                 },
                 note = "Documentation pass for publication " + release.Id,
             }, ProtocolJson.Options);
-            (AuthoredRecord? assignment, refusal) = AuthorLocked(new("assignment", request.By, assignmentBody, order.Envelope.Reference), model);
+            RecordDraft assigning = Fixed(new RecordDraft("assignment", request.By, assignmentBody, unsignedOrder.Envelope.Reference), at);
+            // The work order and its assignment are announced before the first presence prompt (FIX-124).
+            using IDisposable counted = SessionAction("docs pass assign " + version, SignsWithPresence(model, request.By)
+                ? [new("work-order", request.Key, "records a new work-order"), new("assignment", request.Key, "records a new assignment")] : null,
+                ExactSession("docs pass assign", "docs pass assign:" + request.Release.Id + ":" + request.Key, [ordering, assigning], redatable: false));
+            (AuthoredRecord? order, refusal) = AuthorLocked(SessionDraft(ordering), model);
+            if (order is null) return new([], new("refused", refusal!, []));
+            if (order.Envelope.ComputedHash != unsignedOrder.Envelope.ComputedHash) return new([], new("refused", "The work order changed while it was signed; nothing was assigned.", []));
+            (AuthoredRecord? assignment, refusal) = AuthorLocked(SessionDraft(assigning), model);
             if (assignment is null) return new([], new("refused", refusal!, []));
             var stored = StoreTogetherLocked([order, assignment], "Assign publication documentation for review.", order.Envelope.Id, Check);
             return new(stored.Written, stored.Written.Count > 0 && stored.Problem is not null
