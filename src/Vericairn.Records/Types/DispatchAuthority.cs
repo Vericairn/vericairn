@@ -13,9 +13,10 @@ namespace Vericairn.Records.Types;
 /// bound of design/events-and-presence.md § 10): unattended dispatch is signed by a service principal that holds no other authority,
 /// under an expiring grant of <c>dispatch</c> alone whose typed bound names the goals and standing agents it carries and caps how many
 /// assignments it records a day. The grant expires within 30 days of being made. A dispatcher's assignment is in its authority only
-/// for a step of a goal the grant named when it was recorded, within the cap, outside a reserved role, and, for a step another
-/// assignment still holds, only where the bound allows reassignment after a lapse: to a principal the roster names for the step's role,
-/// never the holder it replaces, a person, a step a person holds or a role the roster gives a person. A dispatcher never assigns a step
+/// for a step of a goal the grant named when it was recorded, within the cap, outside a reserved role, to a principal the roster names
+/// for the step's role and never a person, and, for a step another assignment still holds, only where the bound allows reassignment
+/// after a lapse: never the holder it replaces, a step a person holds or a role the roster gives a person. A principal is a dispatcher
+/// for a record only from a valid dispatch grant dated at or before it (<see cref="DispatcherAt"/>). A dispatcher never assigns a step
 /// to itself and never works one: its attempts, progress claims and results count for nothing, and so does an assignment it records
 /// outside its grant. The roster, whether a principal is a person, the step's role and the dispatcher's own record are read as they
 /// stood at the assignment's time. No other record type takes this scope.
@@ -177,8 +178,8 @@ internal static class DispatchAuthority
     private static bool Settled(EstateModel model, RecordEnvelope held)
     {
         IReadOnlyList<string> chain = model.Chain(held);
-        HashSet<string> attempts = [.. Signed(model, "attempt").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !IsDispatcher(model, a.By)).Select(a => a.Id)];
-        return attempts.Count > 0 && Signed(model, "result").Any(r => r.Subject is not null && attempts.Contains(r.Subject.Id) && !IsDispatcher(model, r.By));
+        HashSet<string> attempts = [.. Signed(model, "attempt").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !DispatcherAt(model, a.By, a)).Select(a => a.Id)];
+        return attempts.Count > 0 && Signed(model, "result").Any(r => r.Subject is not null && attempts.Contains(r.Subject.Id) && !DispatcherAt(model, r.By, r));
     }
 
     /// <summary>Whether a principal was a person, a human principal, as its line stood at a time.</summary>
@@ -209,10 +210,8 @@ internal static class DispatchAuthority
     {
         ArgumentNullException.ThrowIfNull(model);
         var withheld = new HashSet<string>(StringComparer.Ordinal);
-        var dispatchers = new HashSet<string>(model.Authority.GrantLines.Select(model.Authority.Current).OfType<RecordEnvelope>()
-            .Where(g => IsDispatchGrant(model, g)).Select(g => EstateModel.BodyString(g, "grantee")).OfType<string>(), StringComparer.Ordinal);
-        if (dispatchers.Count == 0) return withheld;
-        foreach (RecordEnvelope record in model.CountingRecords.Where(r => dispatchers.Contains(r.By) && r.Format >= 3))
+        if (ValidGrants(model).Count == 0) return withheld;
+        foreach (RecordEnvelope record in model.CountingRecords.Where(r => r.Format >= 3 && r.Type is "attempt" or "result" or "work-progress" or "assignment" && DispatcherAt(model, r.By, r)))
         {
             if (record.Type is "attempt" or "result" or "work-progress") withheld.Add(record.Id);
             else if (record.Type == "assignment" && Refusal(model, record, model.ById.TryGetValue(record.Subject?.Id ?? string.Empty, out RecordEnvelope? order) && order.Type == "work-order" ? order : null) is not null)
@@ -222,24 +221,58 @@ internal static class DispatchAuthority
         return withheld;
     }
 
-    /// <summary>The error on an attempt, progress claim or result a dispatcher wrote: it never works a step.</summary>
+    /// <summary>The error on an attempt, progress claim or result a dispatcher wrote (<see cref="DispatcherAt"/>): it never works a step.</summary>
     internal static void RefuseWork(ValidationContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.Format >= 3 && IsDispatcher(context.Model, context.Record.By))
+        if (context.Format >= 3 && DispatcherAt(context.Model, context.Record.By, context.Record))
             context.Error("dispatch.work", $"Principal {context.Record.By} is a dispatcher, which records the assignments of unattended dispatch and never works a step: this {context.Record.Type} counts for nothing.");
     }
 
-    /// <summary>Whether a principal is a dispatcher: it holds, or held, a dispatch grant its author may write.</summary>
-    internal static bool IsDispatcher(EstateModel model, string? principal) =>
-        principal is not null && model.Authority.GrantLines.Any(line => model.Authority.Current(line) is { } grant && EstateModel.BodyString(grant, "grantee") == principal &&
-            IsDispatchGrant(model, grant));
+    /// <summary>
+    /// Whether a principal is a dispatcher for a record: a valid dispatch grant to it, one that counts, that its author may write and that
+    /// its own validation finds no error in, is dated at or before the record. Authority is read from the grants as they stood at the
+    /// record's time, so a later dispatch grant withdraws nothing the principal wrote before it, and an invalid one withdraws nothing at
+    /// all; once granted, the principal stays a dispatcher, holding no other authority, after the grant expires.
+    /// </summary>
+    internal static bool DispatcherAt(EstateModel model, string? principal, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(record);
+        return principal is not null && ValidGrants(model).Any(g => EstateModel.BodyString(g, "grantee") == principal && string.CompareOrdinal(g.At, record.At) <= 0);
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EstateModel, Tuple<IReadOnlyList<RecordEnvelope>, List<RecordEnvelope>>> validGrants = new();
+
+    /// <summary>
+    /// The valid dispatch grants of a model: authority records that count, that their authors may write, that give dispatch, and in which
+    /// their own validation finds no error. Judged once for each set of counting records.
+    /// </summary>
+    private static List<RecordEnvelope> ValidGrants(EstateModel model)
+    {
+        lock (validGrants)
+        {
+            if (validGrants.TryGetValue(model, out Tuple<IReadOnlyList<RecordEnvelope>, List<RecordEnvelope>>? known) && ReferenceEquals(known.Item1, model.CountingRecords)) return known.Item2;
+            List<RecordEnvelope> valid = [];
+            foreach (RecordEnvelope grant in model.OfType("authority").Where(g => PolicyRecords.Contains(PolicyRecords.Property(g.Body, "scope"), Scopes.Dispatch) &&
+                model.Authority.Accepted.Contains(g.Id)))
+            {
+                var findings = new FindingList();
+                new AuthorityType().Validate(new ValidationContext(model, grant, findings));
+                if (!findings.HasErrors) valid.Add(grant);
+            }
+
+            validGrants.AddOrUpdate(model, Tuple.Create(model.CountingRecords, valid));
+            return valid;
+        }
+    }
 
     /// <summary>
     /// Why an assignment a dispatcher records is outside its authority, or null when it is within it: no dispatch grant in force at its
     /// time; a dispatcher that holds another role or another grant then; a work order that is a step of no goal the grant names; an
     /// assignment to the dispatcher itself; a step whose role is reserved; the grant's daily cap reached, counting the dispatcher's assignments dated that UTC day up to this one; or,
-    /// for a step another assignment still holds, a reassignment the bound does not allow (<see cref="ReassignmentRefusal"/>).
+    /// a contributor the goal's roster did not name for the step's role then, a person, or for a step another assignment still holds, a
+    /// reassignment the bound does not allow (<see cref="StepRefusal"/>).
     /// </summary>
     internal static string? Refusal(EstateModel model, RecordEnvelope assignment, RecordEnvelope? order)
     {
@@ -270,37 +303,41 @@ internal static class DispatchAuthority
         int count = Signed(model, "assignment").Count(a => a.By == by && a.At.StartsWith(day, StringComparison.Ordinal) && (a.Id == assignment.Id || GoalRules.Before(a, assignment)));
         if (count > cap)
             return $"grant {grant.Id} caps dispatch at {cap.ToString(CultureInfo.InvariantCulture)} assignments a day, and this is assignment {count.ToString(CultureInfo.InvariantCulture)} on {day}";
-        return ReassignmentRefusal(model, assignment, order, goals.Where(g => named.Contains(model.Chain(g)[0], StringComparer.Ordinal)).ToList(), role, bound);
+        return StepRefusal(model, assignment, order, goals.Where(g => named.Contains(model.Chain(g)[0], StringComparer.Ordinal)).ToList(), role, bound);
     }
 
     /// <summary>
-    /// Why a dispatcher's assignment of a step another assignment still holds is outside the bound for reassignment after a lapse
-    /// (design/events-and-presence.md § 10; design/goals.md § 6, step 4), or null when the step is held by none or the reassignment is
-    /// within the bound. The step is held when the latest earlier assignment of the same work order and step, not stranded, has no result
-    /// on any of its attempts. A step a person holds is never reassigned. Reassigning another needs the bound's reassign, and goes to a
-    /// principal a goal's roster named for the step's role at the assignment's time, never the holder it replaces, a person, or a role the
-    /// roster gave a person; the dispatcher itself is refused before (<see cref="Refusal"/>).
+    /// Why a dispatcher's assignment is outside what dispatch may give the step, or null when it is within it (design/standing-agents.md
+    /// § 7, the runtime routes the step by the roster as goal step does; design/events-and-presence.md § 10 for a lapse). Every step goes
+    /// to a principal a goal's roster named for the step's role at the assignment's time, never to a person. The step is held when the
+    /// latest earlier assignment of the same work order and step, not stranded, has no result on any of its attempts: a step a person
+    /// holds is never reassigned; reassigning another needs the bound's reassign, and never goes to the holder it replaces or in a role the
+    /// roster gave a person. The dispatcher itself is refused before (<see cref="Refusal"/>).
     /// </summary>
-    private static string? ReassignmentRefusal(EstateModel model, RecordEnvelope assignment, RecordEnvelope order, IReadOnlyList<RecordEnvelope> goals, string role, JsonElement bound)
+    private static string? StepRefusal(EstateModel model, RecordEnvelope assignment, RecordEnvelope order, IReadOnlyList<RecordEnvelope> goals, string role, JsonElement bound)
     {
         IReadOnlyList<string> orders = model.Chain(model.Latest(order));
         RecordEnvelope? held = Signed(model, "assignment")
             .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && FlowRuns.StepOf(a) == FlowRuns.StepOf(assignment) &&
                 GoalRules.Before(a, assignment) && !Routing.Stranded(model, a, assignment))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
-        if (held is null || Settled(model, held)) return null;
         string? contributor = EstateModel.BodyString(assignment, "contributor");
-        string? holder = EstateModel.BodyString(held, "contributor");
-        if (PersonAt(model, holder, assignment.At))
-            return $"assignment {held.Id} is a person's, and a step a person holds is never reassigned by dispatch";
-        if (PolicyRecords.Property(bound, "reassign").ValueKind != JsonValueKind.True)
-            return $"assignment {held.Id} still holds the step, and the grant's bound does not cover reassignment after a lapse";
-        if (contributor == holder) return "a reassignment after a lapse goes to the roster's next principal, not the holder it replaces";
-        if (PersonAt(model, contributor, assignment.At)) return "a reassignment after a lapse never goes to a person: a person takes a step over by a hand-over they record";
         List<string> roster = [.. goals.SelectMany(g => RosterAt(model, g, role, assignment)).Distinct(StringComparer.Ordinal)];
-        if (roster.Any(p => PersonAt(model, p, assignment.At))) return $"the roster gives role {role} to a person, and a person's step is never reassigned by dispatch";
+        if (held is not null && !Settled(model, held))
+        {
+            string? holder = EstateModel.BodyString(held, "contributor");
+            if (PersonAt(model, holder, assignment.At))
+                return $"assignment {held.Id} is a person's, and a step a person holds is never reassigned by dispatch";
+            if (PolicyRecords.Property(bound, "reassign").ValueKind != JsonValueKind.True)
+                return $"assignment {held.Id} still holds the step, and the grant's bound does not cover reassignment after a lapse";
+            if (contributor == holder) return "a reassignment after a lapse goes to the roster's next principal, not the holder it replaces";
+            if (roster.Any(p => PersonAt(model, p, assignment.At))) return $"the roster gives role {role} to a person, and a person's step is never reassigned by dispatch";
+        }
+
+        if (PersonAt(model, contributor, assignment.At))
+            return "dispatch never gives a step to a person: a person's step is assigned and asked by one who decides for the goal, and a person takes a step over by a hand-over they record";
         if (contributor is null || !roster.Contains(contributor, StringComparer.Ordinal))
-            return $"a reassignment after a lapse goes to a principal the roster names for role {role}, and {contributor ?? "no contributor"} is not one";
+            return $"dispatch gives a step only to a principal the goal's roster names for role {role} at the assignment's time, as goal step routes it, and {contributor ?? "no contributor"} is not one";
         return null;
     }
 }

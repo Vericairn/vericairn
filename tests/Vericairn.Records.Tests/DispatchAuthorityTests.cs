@@ -159,7 +159,8 @@ public sealed class DispatchAuthorityTests
         model = e.F.Load();
         Assert.Empty(Errors(model, nextDay));
         Assert.Contains("no dispatch grant in force", Refused(model, expired).Message, StringComparison.Ordinal);
-        Assert.Contains("no dispatch grant in force", Refused(model, early).Message, StringComparison.Ordinal);
+        // Before its grant the service principal is no dispatcher, and holds no authority to assign at all.
+        Refused(model, early, "assignment.author");
         Assert.False(Routing.MayTakeStep(model, model.ById[e.Goal.Id], e.Dispatcher.Id, Start.AddDays(30)));
     }
 
@@ -244,6 +245,70 @@ public sealed class DispatchAuthorityTests
         EstateModel model = e.F.Load();
         Assert.Empty(Errors(model, toSpare));
         Assert.Contains("gives role builder to a person", Refused(model, later).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFreshStepGoesOnlyToAPrincipalTheRosterNamesForItsRole()
+    {
+        // A step no one holds follows the roster as goal step routes it: never an agent the roster does not name for the role, never a
+        // person, and the roster's agent takes it.
+        using var e = new Estate();
+        e.Grant(e.GrantBody(bounds: new JsonArray(Estate.Bound([e.Goal.Id], cap: 20))));
+        RecordEnvelope outsider = e.F.Estate.Add("principal", e.F.Estate.OperatorId, """{"kind":"agent","name":"Outside Agent","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""", signer: e.F.OperatorSigner);
+        RecordEnvelope toOutsider = e.Assign(e.Build, outsider.Id);
+        RecordEnvelope toPerson = e.Assign(e.Review, e.Person.Id);
+        RecordEnvelope toRoster = e.Assign(e.Build, e.Spare.Id);
+        EstateModel model = e.F.Load();
+        Assert.Contains("only to a principal the goal's roster names for role builder", Refused(model, toOutsider).Message, StringComparison.Ordinal);
+        Assert.Contains("never gives a step to a person", Refused(model, toPerson).Message, StringComparison.Ordinal);
+        Assert.False(model.Counts(toOutsider));
+        Assert.False(model.Counts(toPerson));
+        Assert.Empty(Errors(model, toRoster));
+    }
+
+    [Fact]
+    public void AServicePrincipalsEarlierAssignmentKeepsCountingAfterALaterDispatchGrant()
+    {
+        // The service principal assigns a step under local-engineering, which then expires; a later, valid dispatch grant withdraws
+        // nothing it wrote before, since authority is read from the grants as they stood at each record's time.
+        using var e = new Estate();
+        var engineering = new JsonObject
+        {
+            ["grantee"] = e.Dispatcher.Id, ["scope"] = new JsonArray(Scopes.LocalEngineering), ["reserved"] = new JsonArray(), ["conditions"] = new JsonArray(),
+            ["basis"] = e.Basis.Id, ["expires"] = RecordParser.FormatTimestamp(e.F.Estate.Clock.AddHours(1)),
+        };
+        e.Grant(engineering);
+        RecordEnvelope assigned = e.Assign(e.Build, e.F.Estate.BuilderId);
+        EstateModel model = e.F.Load();
+        Assert.Empty(Errors(model, assigned));
+
+        e.F.Estate.SetClock(e.F.Estate.Clock.AddHours(2));
+        RecordEnvelope dispatch = e.Grant();
+        model = e.F.Load();
+        Assert.Empty(Errors(model, dispatch));
+        Assert.Empty(Errors(model, assigned));
+        Assert.True(model.Counts(model.ById[assigned.Id]));
+    }
+
+    [Fact]
+    public void AnInvalidDispatchGrantToTheBuilderLeavesItsWorkCounting()
+    {
+        // A dispatch grant to an agent is itself refused (authority.dispatch), and makes no dispatcher of the builder: its attempt and
+        // result on a step the operator assigned it, before the grant and after it, keep counting.
+        using var e = new Estate();
+        RecordEnvelope assigned = e.Assign(e.Build, e.F.Estate.BuilderId, e.F.OperatorSigner, e.F.Estate.OperatorId);
+        RecordEnvelope attempt = e.F.Estate.Add("attempt", e.F.Estate.BuilderId, Attempt, assigned.Reference, signer: e.F.BuilderSigner);
+        RecordEnvelope result = e.F.Estate.Add("result", e.F.Estate.BuilderId, Result, attempt.Reference, signer: e.F.BuilderSigner);
+        RecordEnvelope grant = e.Grant(e.GrantBody(grantee: e.F.Estate.BuilderId));
+        RecordEnvelope review = e.Assign(e.Review, e.F.Estate.BuilderId, e.F.OperatorSigner, e.F.Estate.OperatorId);
+        RecordEnvelope later = e.F.Estate.Add("attempt", e.F.Estate.BuilderId, Attempt, review.Reference, signer: e.F.BuilderSigner);
+        EstateModel model = e.F.Load();
+        Assert.Contains(Errors(model, grant), f => f.Code == "authority.dispatch");
+        foreach (RecordEnvelope record in new[] { attempt, result, later })
+        {
+            Assert.DoesNotContain(model.Findings, f => f.Code == "dispatch.work" && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal));
+            Assert.True(model.Counts(model.ById[record.Id]), record.Type);
+        }
     }
 
     [Fact]

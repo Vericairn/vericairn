@@ -153,7 +153,7 @@ public sealed class AssignmentType : IRecordType
                 context.Error("assignment.handover", $"This assignment takes work order {EstateModel.BodyString(order!, "key") ?? order!.Id} over from the agent's assignment {handedOver.Id}: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent.");
             }
         }
-        else if (context.Format >= 3 && DispatchAuthority.IsDispatcher(context.Model, by))
+        else if (context.Format >= 3 && DispatchAuthority.DispatcherAt(context.Model, by, context.Record))
         {
             // From 0.9.4 (ID-07): a dispatcher assigns only within its dispatch grant, and nothing else gives it authority to assign.
             if (DispatchAuthority.Refusal(context.Model, context.Record, order) is { } outside)
