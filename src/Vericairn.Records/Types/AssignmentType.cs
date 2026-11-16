@@ -153,10 +153,16 @@ public sealed class AssignmentType : IRecordType
                 context.Error("assignment.handover", $"This assignment takes work order {EstateModel.BodyString(order!, "key") ?? order!.Id} over from the agent's assignment {handedOver.Id}: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent.");
             }
         }
+        else if (context.Format >= 3 && DispatchAuthority.DispatcherAt(context.Model, by, context.Record))
+        {
+            // From 0.9.4 (ID-07): a dispatcher assigns only within its dispatch grant, and nothing else gives it authority to assign.
+            if (DispatchAuthority.Refusal(context.Model, context.Record, order) is { } outside)
+                context.Error("assignment.dispatch", $"This assignment is by dispatcher {by} and outside its dispatch grant: {outside}.");
+        }
         else if (!context.HasRole(by, Roles.Operator) && !context.HasScope(by, Scopes.LocalEngineering)
             && !(context.Format >= 2 && order is not null && Routing.DecidesForStep(context.Model, by, order, context.Record)))
         {
-            context.Error("assignment.author", "Work is assigned by the operator, by a principal granted the 'local-engineering' scope, or, for a step of a goal, by the goal's sponsor when the sponsor is a person.");
+            context.Error("assignment.author", "Work is assigned by the operator, by a principal granted the 'local-engineering' scope, for a step of a goal by the goal's sponsor when the sponsor is a person, or from 0.9.4 by a dispatcher within its dispatch grant.");
         }
 
         if (context.Format >= 3 && order is not null)

@@ -95,6 +95,31 @@ explicitly bounded grant. Reserved actions remain reserved. Scope containment is
 selectors, `**`, and literal directory prefixes ending in `/**` prove containment; other unproved inclusion
 is refused. Generic engineering or administration authority does not substitute for these scopes.
 
+**The dispatch scope (0.9.4).** From 0.9.4 (ID-07), unattended dispatch is signed by a dispatcher: a `service` principal whose
+only role is `service` and that holds no other grant. Its `authority` record gives `dispatch` alone, is signed, states no
+`conditions`, expires no more than 30 days after it is made, and carries one bound, `{scope: "dispatch", goals, maxAssignmentsPerDay,
+reassign?}`: `goals` names the goals and standing agents it carries by the id of each goal's first revision,
+`maxAssignmentsPerDay` (1 to 10,000) caps the assignments it dates in one UTC day, and `reassign`, false when omitted, lets it
+reassign a step another assignment still holds, with no result on it, as after a lapse. A dispatch grant is made only to a principal
+with no history before it: no grant of any scope its author may write and no assignment to it by another principal who may assign,
+dated before the grant, unless an earlier dispatch grant to it is valid, as a renewal; the principal's own records, and records their
+authors had no authority to write, never count as such history. A grant of another
+scope to a principal holding a dispatch grant, or that held a valid one at or before it, during its term or after it expired, a
+dispatch grant to a principal holding another, and a dispatch grant with an earlier history are `authority.dispatch`. A dispatcher's
+assignment is `assignment.dispatch`, and counts for nothing, unless, at its time, a valid dispatch grant is in force, its work order
+is a step of a goal the bound names, its role is no reserved action, the day's cap is not passed, and it goes to a principal the
+goal's roster names for the step's role, as `goal step` routes it, never the dispatcher itself or a person; a reassignment also takes
+over no step a person holds, needs `reassign`, and goes neither to the holder it replaces nor in a role the roster gives a person.
+Nothing else gives a dispatcher authority to assign. The roster, whether a principal is a person, the step's role (from the work
+order's revision the assignment pins) and the dispatcher's own record are read as they stood at the assignment's time. A dispatcher
+never works a step: an attempt, progress claim or result it writes is `dispatch.work` and counts for nothing. Backdating fails
+closed: a principal holding a valid dispatch grant is a dispatcher for every record it writes, at any date, so an assignment or work
+it dates before its grant counts for nothing too; and a dispatch grant refused only for an earlier history, whether that history was
+written before the grant or dated before it afterwards by another principal, gives no authority to assign yet confines what the
+principal writes from the grant's date on. What a principal with such a history wrote dated before the grant keeps its reading, and
+a record it dates back into an earlier grant's term is read as any principal's record dated into an expired grant's term. No field or
+type is added; an older reader reports the bound as errors and a dispatcher's assignment as `assignment.author`.
+
 Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot
 authorize earlier work. Expiry or a later supersession prevents subsequent delegated actions while preserving
 historical attribution. A policy reconciliation requires format 3, a signature and the same bounded authority;
@@ -574,7 +599,7 @@ writes one. The design is the estate's signed history design, decision
 | `inventory` | Hashes of the objects listing the records this checkpoint first witnesses, each once. |
 | `records`, `recordSetHash` | The count and record set hash of everything it witnesses: its inventory and those of the checkpoints it follows, less the removals they acknowledge. The set hash is an estate observation's: SHA-256 of the canonical JSON array of `{hash, id}` sorted by id. |
 | `trigger` | `adoption` exactly when `previous` is empty; `closing` exactly when `closes` is present; otherwise `interval`, `upgrade`, `release`, `charter` or `manual`. |
-| `closes` | Optional `{kind, id}`, `kind` `device`, `key` or `grant`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). |
+| `closes` | Optional `{kind, id}`, `kind` `device`, `key`, `grant` or, from 0.9.4, `role`: what a closing closes ([below](#closings-and-authority-at-a-records-time-092)). An older reader refuses a `role` closing's `kind` (`body.enum`), so readers upgrade before an estate writes one. |
 | `anchored` | Optional, nonempty `{id, hash}`, sorted by id: unsigned records that count under required signatures, and signed records a closing refused, because this checkpoint lists them. |
 | `removed` | Optional, nonempty `{id, hash, reason}`, sorted by id: witnessed records whose removal this checkpoint acknowledges. |
 
@@ -705,7 +730,12 @@ naming none while there are several, is `manifest.first-authority`, whose messag
 there is then no first authority, so no signed admission counts until the manifest names the right one. Witnessed history only
 confirms it, as for the first charter: the one the manifest names, witnessed alone, stands; another witnessed, judged with it as
 the first authority, is `history.root-ambiguous`, with no record counting. Every other such self-admission is
-`signature.self-admission`.
+`signature.self-admission`. From 0.9.4 (FIX-134), a self-admission is the first authority only when, read as the first authority,
+its content has the hash its envelope declares and its signature verifies as every signature does: under its device's key at its
+stated time, by a device of its author. One the manifest names that does not, or the only one when it names none, is
+`manifest.first-authority` naming it, there is no first authority and nothing signed under it counts until the manifest names
+one that verifies; it is never witnessed first under any reading either. Before 0.9.4 such an admission was read as the first
+authority, flagged only by its own `signature.invalid`.
 
 ## Closings and authority at a record's time (0.9.2)
 
@@ -726,17 +756,41 @@ acts and no act follows yet:
 | `device` | Any device record of the device's line | Its revocation | An operator, a person holding `administer`, or an operator's recovery device |
 | `key` | The device revision whose public key is replaced | A rotation to another key | The device itself, for its own principal |
 | `grant` | The authority revision being narrowed; the closing closes it and every revision of its line dated at or before it | A revision naming another grantee, dropping a scope, reserving another action, adding a condition, adding or shortening an expiry, or changing a policy scope's bounds | An operator, who may revise the grant |
+| `role` (0.9.4) | The principal revision that gives a person the operator role; the closing closes it and every revision of its line dated at or before it | A revision of that person's record taking the operator role away, dropping it or describing another kind of principal; never for the root operator; removing any other role writes no closing | The root operator or another operator, the role still standing, never the person |
+
+**Role closings (0.9.4).** From 0.9.4 (ID-14), removing the operator role from a person writes a role
+closing; removing any other role writes none, and that role is read at each record's time, as
+before (decision `01M7JSJSHTTX86F10007GDQ238`). A `role` closing naming a revision that gives no
+operator role closes nothing (`history.closing-author`). A `role` closing closes a person: from it on,
+a record the person wrote, signed or unsigned, that the closing or a checkpoint it follows does
+not witness and no anchor lists counts for nothing (`history.after-closing`), whatever date it
+states and whatever device signed it, in every read: a decision, a grant, a revision of their own
+or another principal's line, an admission or a closing. Such a record never takes another
+person's role or voids another's closing: the role closings that act are read when every other
+closing is judged, those before them in checkpoint order included, though never against
+themselves. Until the removal follows, the check warns `history.closing-unfollowed`. What the
+person gave as operator before the closing, the principal and authority revisions and the
+closings it witnesses, keeps counting for anchoring, acknowledging a removal, rooting an
+adoption and the closings, as written, where the person held the role when writing it; so a
+closing keeps the force it had when it was signed when its author is later removed with their own
+role closing. A removal of the operator role in an adopted estate that no role closing names is the
+warning `history.closing-missing`, and the runtime refuses to write one without its closing; such a
+removal, and only such a one, still withdraws its author's closings from these acts. Since a role
+closing is signed by the root operator or another standing operator, and only an operator gives or
+takes the operator role, a person holding `administer` but not the operator role does not write
+one; removing another role from a person they admitted is written as before, with no closing.
 
 Closings are judged in checkpoint order: every checkpoint after those it follows, ids
 breaking ties. A closing acts when the checkpoints it follows, present with the hashes it
 names, reach an adoption checkpoint by one who may anchor; when its signatures verify
 against the closings before it in that order; and when its author may perform the act. For a
-device or a grant that power reads as before signed history: the signer's operator role or
-`administer` grant stood at the closing's time and still stands, no trusted revision having
+device, a grant or a role that power reads as before signed history: the signer's operator role
+or `administer` grant stood at the closing's time and still stands, no trusted revision having
 since narrowed, revoked or removed it and no closing before this one having closed that
-grant's line, and a recovery device signs only for an operator. That power is read against
-the closings before this one, never against this closing itself, since its author chooses
-what it witnesses. Whether a checkpoint following no other may anchor is read against the
+grant's line, and a recovery device signs only for an operator; from 0.9.4 an operator whose
+role was since removed still holds that power for a closing their own role closing witnesses
+(below). That power is read against the closings before this one, and the role closings that
+act, never against this closing itself, since its author chooses what it witnesses. Whether a checkpoint following no other may anchor is read against the
 closings that act, and those act only when reached from such a checkpoint, so the two are
 settled together: from every such checkpoint that verifies, the closings reached are judged,
 each such checkpoint whose author may not anchor with those closings acting is dropped, and
@@ -834,7 +888,9 @@ at its record stage is judged again when it resumes. The strongest acts read mor
 before signed history: anchoring, acknowledging a removal, rooting an adoption and signing a
 device's or a grant's closing need the signer's operator role or `administer` grant to stand
 at the checkpoint's time and still stand, so a later narrowing, revocation or closing
-withdraws those powers for every checkpoint. From 0.9.2 (FIX-108) those acts read grant and
+withdraws those powers for every checkpoint, except that from 0.9.4 a role closing keeps, for
+the checkpoints and the principal and authority revisions it witnesses, the operator role its
+person held when writing them. From 0.9.2 (FIX-108) those acts read grant and
 principal revisions as follows. The revisions considered are those authentic by their
 signatures against the closings in force for the act, so none such a closing refuses, and not
 refused for their date against the nearest revision below them considered (below), with the
@@ -877,8 +933,9 @@ operator's role again gives back the closings of those whose role or `administer
 operator's appointments or grants, and the operator's own earlier closings only when it is dated
 after the removal and before them. Either holds only until more such records are written, among
 them a removal on top of the role written again or forking the line below it. The root
-operator's own closings cannot be reopened this way, and role
-closings are planned. Removing an operator's role takes, for these acts, what that
+operator's own closings cannot be reopened this way, and from 0.9.4 a role closing ends it for
+everything the person writes after the closing ([above](#closings-and-authority-at-a-records-time-092)).
+Removing an operator's role without a role closing takes, for these acts, what that
 person appointed, granted and closed; those the person appointed keep the role in ordinary
 reads, and a removal they write still counts for these acts, until the root operator writes
 their appointments again or closes their devices, after which what they sign with a closed
@@ -909,10 +966,12 @@ for nothing, whoever signed it. It attaches to the nearest record below it in it
 counts, skipping any that does not: unsigned, refused this way or not counting otherwise. A
 revision on top of one that does not count is compared with, and follows, the line there, so
 its line has one current record in every read. The strongest acts, which consider only the
-revisions above, compare a revision with the nearest one below it that they consider. A role has no closing; role closings are planned. A former operator's records dated into
-the time the role stood read as it stood, apart from policy authority, which reads them only
-where signed history places them before the removal; close and revoke a person's devices when
-removing their role.
+revisions above, compare a revision with the nearest one below it that they consider. From 0.9.4 a removal of a person's operator role
+in an estate that has adopted is written after the person's role closing ([above](#closings-and-authority-at-a-records-time-092)), which
+refuses everything the person writes that it does not witness, whatever date it states. In an estate that has not adopted, and
+for a removal no role closing names, a former operator's records dated into the time the role stood read as it stood, apart from
+policy authority, which reads them only where signed history places them before the removal; close and revoke a person's devices
+when removing their role there.
 
 **What a claimed time decides.** Path month, order, release-notes windows, progress, ages
 and duty sequence still follow `at` for records that count, ids breaking ties. The
@@ -921,7 +980,8 @@ verifies against is the signer's claim of time, bounded by closings. Canonical s
 policy evaluation take their recorded time from the records that count.
 Roles and grants are read at the stated time as above, bounded by grant closings, while the
 strongest acts also need the role or grant to still stand, so a stated time carries none of those
-powers past a later removal or narrowing.
+powers past a later removal or narrowing; what a person's role closing witnesses keeps them, and
+what it does not witness counts for nothing.
 
 **Dates checkpoints question.** A signed record dated more than five minutes after the
 earliest-dated counting checkpoint that witnesses it, the checkpoint listing it or one that

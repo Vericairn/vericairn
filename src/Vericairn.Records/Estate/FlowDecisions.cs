@@ -613,7 +613,7 @@ public static partial class FlowDecisions
 
     /// <summary>Why a principal does not record a run's rule decision: it does not take the run's steps.</summary>
     private static string NotTaker(EstateModel model, RecordEnvelope goal, string by) =>
-        $"{Routing.NameOf(model, by)} does not take steps of goal {goal.Id}, so does not record its rule's decision: an operator, the goal's sponsor when a person, or a principal holding local-engineering does.";
+        $"{Routing.NameOf(model, by)} does not take steps of goal {goal.Id}, so does not record its rule's decision: an operator, the goal's sponsor when a person, a principal holding local-engineering, or from 0.9.4 a dispatcher whose dispatch grant names the goal, does.";
 
     /// <summary>
     /// Why a flow-decision observation never counts, whatever the run's position (from 0.9.4, PROC-19), as the records alone show; the

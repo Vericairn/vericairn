@@ -193,10 +193,13 @@ public static class EstateLoader
         // Policy records give no role, and the grants among the latter rest on a role already gone, so one pass settles it.
         IReadOnlySet<string> unauthorized = Types.PolicyAuthority.Unauthorized(model);
         IReadOnlyDictionary<string, IReadOnlyList<RecordEnvelope>> removedBeforeHistory = Types.PolicyAuthority.RemovedBeforeHistory(model);
-        if (unauthorized.Count > 0 || removedBeforeHistory.Count > 0)
+        // From 0.9.4 (ID-07) a dispatcher's assignment outside its dispatch grant counts for nothing, and so does any step's work it records.
+        IReadOnlySet<string> dispatched = Types.DispatchAuthority.Withheld(model);
+        if (unauthorized.Count > 0 || removedBeforeHistory.Count > 0 || dispatched.Count > 0)
         {
             var withheld = new HashSet<string>(excluded, StringComparer.Ordinal);
             withheld.UnionWith(unauthorized);
+            withheld.UnionWith(dispatched);
             withheld.UnionWith(removedBeforeHistory.Keys);
             model.ApplyCounting(trust, withheld, Successors(records.Where(r => !withheld.Contains(r.Id)).ToList(), byId, new FindingList(), r => trust.AttachedTo(r)?.Id));
         }

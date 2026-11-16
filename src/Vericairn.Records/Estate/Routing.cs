@@ -228,8 +228,10 @@ public static class Routing
 
     /// <summary>
     /// Whether a principal may take a step of a goal: an operator; the goal's sponsor when the sponsor is a person, under the goal's
-    /// activation; or a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
-    /// operator's authority. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for that goal.
+    /// activation; a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
+    /// operator's authority; or, from 0.9.4 (ID-07), a dispatcher whose dispatch grant in force names the goal, whose every assignment is
+    /// judged against that grant. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for
+    /// that goal.
     /// </summary>
     public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at) => MayTakeStep(model, goal, principal, at, null);
 
@@ -244,9 +246,10 @@ public static class Routing
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         return principal is not null && model.CurrentPrincipal(principal) is not null
-            && (record is null
+            && ((record is null
                 ? model.HasRole(principal, Roles.Operator) || GoalRules.AccepterOf(model, goal).Decides(model, principal) || model.HasScope(principal, Scopes.LocalEngineering, at)
-                : model.HasRoleAt(principal, Roles.Operator, record) || GoalRules.AccepterOf(model, goal).Decides(model, principal, record) || model.HasScopeAt(principal, Scopes.LocalEngineering, record));
+                : model.HasRoleAt(principal, Roles.Operator, record) || GoalRules.AccepterOf(model, goal).Decides(model, principal, record) || model.HasScopeAt(principal, Scopes.LocalEngineering, record))
+              || DispatchAuthority.CoversGoal(model, principal, goal, record?.At ?? Model.RecordParser.FormatTimestamp(at), record?.AtTime ?? at));
     }
 
     /// <summary>
