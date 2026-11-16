@@ -12,11 +12,17 @@ namespace Vericairn.Records.Tests;
 /// skips (FIX-142, decision 01M7FX7ZJGZ9QBA6P8WQWWVQKN): an optional reserved step whose request the operator dismissed settles as
 /// skipped without a revision of the goal; a revision that only turns optional steps off keeps the operator's closes already recorded;
 /// the documentation steps after publication count only once the publication is observed; and nothing required becomes skippable. The
-/// first-party extension's X post is made optional as its revision in the estate makes it, beside the other posts.
+/// first-party extension's X post is made optional as its revision in the estate makes it, beside the other posts. A close of a later
+/// step's request counts only when made after that step was asked in the run's current shape (FIX-144, decision
+/// 01M7GSDXATT5GM3X8G4W1CKHJR): skipping an optional step, by a dismissal or by a revision that only turns it off, asks the steps after
+/// it from then, so a close made while they waited on it never counts.
 /// </summary>
 public class ReleaseFlowCompletionTests
 {
     private static readonly string[] Required = ["mcp-registry", "announce-discussions"];
+
+    /// <summary>The listing's command for the fixture's repository, as the first-party extension gives it.</summary>
+    private const string Listing = "gh run list -R " + ReleaseFlowFixture.Repository + " --workflow mcp-registry.yml --event release --limit 1";
 
     [Fact]
     public void ADismissedPostSettlesAsSkippedAndTheRunCompletesWithoutARevision()
@@ -161,6 +167,113 @@ public class ReleaseFlowCompletionTests
         Assert.Equal("closed", Assert.Single(run.Position().Stops, s => s.Step?.Key == "announce-x").Delivery);
     }
 
+    [Fact]
+    public void AnEarlyCloseOfAStepAfterADismissedPostDoesNotCount()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX);
+        ToPublication(run);
+        FlowPosition.StepInstance waiting = run.Step("mcp-registry");
+        Assert.Equal("blocked", waiting.State);
+        Assert.Contains("it waits on announce-x, which is stopped", waiting.Reasons);
+        Assert.Null(waiting.Command);
+
+        // The operator closes the listing's exact command as done while it waits on the X post: the close does not count.
+        run.Done(run.Request("mcp-registry", command: Listing));
+        Assert.Equal("blocked", run.State("mcp-registry"));
+
+        // The X post is dismissed and skipped: the listing is asked from the dismissal, so the earlier close still does not count.
+        RecordEnvelope dismissal = run.Dismiss(run.Request("announce-x"), "No post on X for this release.");
+        Assert.Equal("off", run.State("announce-x"));
+        FlowPosition.StepInstance listing = run.Step("mcp-registry");
+        Assert.Equal(("stopped", "reserved", Listing), (listing.State, listing.Stop, listing.Command));
+        Assert.Equal(dismissal.AtTime, listing.AskedSince);
+        Assert.Equal("due", Assert.Single(run.Position().Stops, s => s.Step?.Key == "mcp-registry").Delivery);
+
+        // A close made after the listing is asked counts.
+        run.Done(run.Request("mcp-registry"));
+        Assert.Equal("done", run.State("mcp-registry"));
+        run.AssertValid();
+    }
+
+    [Fact]
+    public void AnEarlyCloseOfAStepAfterAPostTurnedOffByARevisionDoesNotCount()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX);
+        ToPublication(run);
+        run.Done(run.Request("mcp-registry", command: Listing));
+        Assert.Equal("blocked", run.State("mcp-registry"));
+
+        // A revision that only turns the X post off keeps the run's shape, yet the listing is asked from that revision, not before it.
+        RecordEnvelope revision = run.Revise(ReleaseFlowFixture.Version, new JsonObject { ["step.announce-x"] = "off" });
+        run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated again for the test." }, subject: run.Goal.Reference);
+        Assert.Equal(("off", "configured off by the goal's plan"), (run.State("announce-x"), run.Step("announce-x").Reasons[0]));
+        FlowPosition.StepInstance listing = run.Step("mcp-registry");
+        Assert.Equal(("stopped", "reserved", Listing), (listing.State, listing.Stop, listing.Command));
+        Assert.Equal(revision.AtTime, listing.AskedSince);
+
+        // A close made after the listing is asked counts, and the run completes without the X post.
+        run.Done(run.Request("mcp-registry"));
+        Assert.Equal("done", run.State("mcp-registry"));
+        run.Done(run.Request("announce-discussions"));
+        run.Clear(run.Guide());
+        run.Accept(run.Carrier);
+        FlowPosition.Position position = run.Position();
+        Assert.True(position.Complete, string.Join("; ", position.Steps.Where(s => s.State is not ("done" or "off")).Select(s => $"{s.Name} {s.State}: {s.Reasons[0]}")));
+        run.AssertValid();
+    }
+
+    [Fact]
+    public void AnOptionalStepSettledBeforeARevisionTurnsItOffKeepsTheCloseOfTheStepAfterIt()
+    {
+        // The X post is done and the listing closed after it: a revision turning the post off afterwards asks the listing nothing again.
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX))
+        {
+            ToPublication(run);
+            RecordEnvelope posted = run.Done(run.Request("announce-x"));
+            Assert.Equal("done", run.State("announce-x"));
+            run.Done(run.Request("mcp-registry"));
+            Assert.Equal("done", run.State("mcp-registry"));
+            run.Revise(ReleaseFlowFixture.Version, new JsonObject { ["step.announce-x"] = "off" });
+            run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated again for the test." }, subject: run.Goal.Reference);
+            Assert.Equal(("off", "done"), (run.State("announce-x"), run.State("mcp-registry")));
+            Assert.Equal(posted.AtTime, run.Step("mcp-registry").AskedSince);
+        }
+
+        // The X post is dismissed and the listing closed after it: a revision turning the post off afterwards keeps the listing asked
+        // from the dismissal.
+        using (var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterX))
+        {
+            ToPublication(run);
+            RecordEnvelope dismissal = run.Dismiss(run.Request("announce-x"));
+            run.Done(run.Request("mcp-registry"));
+            Assert.Equal("done", run.State("mcp-registry"));
+            run.Revise(ReleaseFlowFixture.Version, new JsonObject { ["step.announce-x"] = "off" });
+            run.Add("goal-status", new JsonObject { ["status"] = "active", ["note"] = "Activated again for the test." }, subject: run.Goal.Reference);
+            Assert.Equal(("off", "done"), (run.State("announce-x"), run.State("mcp-registry")));
+            Assert.Equal(dismissal.AtTime, run.Step("mcp-registry").AskedSince);
+        }
+    }
+
+    [Fact]
+    public void AStepLeftWithoutAnInputByADismissedPostIsSkippedWithItAndTheStepAfterItIsAskedFromThen()
+    {
+        using var run = new ReleaseFlowFixture(firstParty: true, extension: ListingAfterRepost);
+        run.AssertValid();
+        ToPublication(run);
+        Assert.Equal(("stopped", "blocked", "blocked"), (run.State("announce-x"), run.State("repost"), run.State("mcp-registry")));
+        run.Done(run.Request("mcp-registry", command: Listing));
+
+        // The X post is dismissed: the repost, which takes its input from it, is skipped with it, and the listing after the repost is
+        // asked from the dismissal, though nothing it waits on through the repost leads to the X post.
+        RecordEnvelope dismissal = run.Dismiss(run.Request("announce-x"));
+        Assert.Equal(("off", "off"), (run.State("announce-x"), run.State("repost")));
+        Assert.Equal("its input post comes from announce-x, which is off", run.Step("repost").Reasons[0]);
+        FlowPosition.StepInstance listing = run.Step("mcp-registry");
+        Assert.Equal(("stopped", Listing, dismissal.AtTime), (listing.State, listing.Command, listing.AskedSince));
+        run.Done(run.Request("mcp-registry"));
+        Assert.Equal("done", run.State("mcp-registry"));
+    }
+
     /// <summary>
     /// The first-party extension as its revision makes the X post optional, on by default like the other posts. The NuGet observation,
     /// which needs eight registry observations of its own, is left out so the run is the release's posts and documents.
@@ -174,6 +287,46 @@ public class ReleaseFlowCompletionTests
         x.Remove("required");
         x["optional"] = true;
         x["default"] = "on";
+    }
+
+    /// <summary>
+    /// The first-party extension with the X post optional, as <see cref="OptionalX"/> makes it, and the MCP Registry listing placed
+    /// after the X post: a reserved step after an optional one.
+    /// </summary>
+    private static void ListingAfterX(JsonObject extension)
+    {
+        OptionalX(extension);
+        extension["version"] = "1.0.2";
+        var steps = (JsonArray)extension["steps"]!;
+        JsonObject listing = steps.First(s => s!["key"]!.GetValue<string>() == "mcp-registry")!.AsObject();
+        steps.Remove(listing);
+        listing["after"] = new JsonArray("announce-x");
+        steps.Add(listing);
+    }
+
+    /// <summary>
+    /// The first-party extension with the X post optional, its close of the request handed on as an item, an optional repost after
+    /// publication that takes that item as its input, and the MCP Registry listing placed after the repost.
+    /// </summary>
+    private static void ListingAfterRepost(JsonObject extension)
+    {
+        OptionalX(extension);
+        extension["version"] = "1.0.3";
+        var steps = (JsonArray)extension["steps"]!;
+        JsonObject x = steps.First(s => s!["key"]!.GetValue<string>() == "announce-x")!.AsObject();
+        x["outputs"] = new JsonArray(new JsonObject { ["name"] = "post", ["kind"] = "record", ["recordType"] = "operator-request-close", ["required"] = true });
+        JsonObject listing = steps.First(s => s!["key"]!.GetValue<string>() == "mcp-registry")!.AsObject();
+        steps.Remove(listing);
+        steps.Add(new JsonObject
+        {
+            ["key"] = "repost", ["title"] = "Post shared", ["kind"] = "operation", ["role"] = "release-manager", ["optional"] = true, ["default"] = "on",
+            ["after"] = new JsonArray("publish"), ["action"] = "Share the post.",
+            ["inputs"] = new JsonArray(new JsonObject { ["name"] = "post", ["from"] = "step", ["step"] = "announce-x", ["output"] = "post" }),
+            ["done"] = new JsonArray(new JsonObject { ["type"] = "observation", ["fields"] = new JsonObject { ["kind"] = "repost" }, ["min"] = 1 }),
+            ["recovery"] = "Share it again.",
+        });
+        listing["after"] = new JsonArray("repost");
+        steps.Add(listing);
     }
 
     private static JsonObject RequiresX(ReleaseFlowFixture run)

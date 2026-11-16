@@ -1823,10 +1823,14 @@ agent's close citing the operator's words; the step's reasons name each record t
 is recorded, the request is `settled` and no longer delivered. A request the addressed operator closed with their own signed
 close, while its command still holds, is not made again (route `closed`), and the step waits for the act's record. Any other
 close, an agent's among them, leaves the step's request due again. From 0.9.4 (FIX-142) the operator's own dismissal
-(`operator dismiss <request> --by <operator> --reason <text>`) of an optional reserved step's request, carrying the command the
-records give now, settles the step as skipped: it reads `off`, its reason naming the request, when it was dismissed and the
-operator's reason, and the run goes on without it, with no revision of the goal. A required step, or an optional one an estate
-policy requires, is never skipped: its dismissed request stays `closed` and the step waits for the act's record. A request recorded by a principal who does not take the
+(`operator dismiss <request> --by <operator> --reason <text>`) of the request of an optional reserved step done by the operator's
+close of its request, carrying the command the records give now, settles the step as skipped: it reads `off`, its reason naming
+the request, when it was dismissed and the operator's reason, and the run goes on without it, with no revision of the goal. A
+required step, or an optional one an estate policy requires, is never skipped: its dismissed request stays `closed` and the step
+waits for the act's record. The dismissal of the request of a step done by any other record skips nothing. From 0.9.4 (FIX-144)
+a step after a skipped one, whether the operator dismissed its request or a goal revision turned it off, is asked only from
+then: a close of the later step's request made while it waited never counts, and one made after does. An optional step done or
+dismissed before a revision turns it off was settled then, so the steps after it keep the closes made since. A request recorded by a principal who does not take the
 run's steps is never delivered. A reserved step whose input changed after it was done waits on the operator again, with the
 command the records give now. A step request's recommendation and other prose are the requester's own: `operator list`,
 status and attention show the checked command first and label that prose as not checked.

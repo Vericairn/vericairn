@@ -191,9 +191,17 @@ public static partial class FlowPosition
 
         /// <summary>
         /// For a reserved step, when it was asked: the current goal revision, or the latest time a step it waits on was done, whichever is
-        /// later; a close of its request made earlier never answers this ask. Null for every other step.
+        /// later, and from 0.9.4 (FIX-144) no earlier than any optional step it waits on was skipped; a close of its request made earlier
+        /// never answers this ask. Null for every other step.
         /// </summary>
         public DateTimeOffset? AskedSince { get; init; }
+
+        /// <summary>
+        /// For an optional step that is off, when it was skipped in the run's current shape (from 0.9.4, FIX-144): the operator's dismissal
+        /// of its request, or the goal revision that turned it off, unless it was done or dismissed before that revision; null when it was
+        /// off since the run took its shape, and for every other step. The steps after it are asked no earlier.
+        /// </summary>
+        internal DateTimeOffset? SkippedAt { get; init; }
     }
 
     /// <summary>A run's position.</summary>
@@ -393,7 +401,8 @@ public static partial class FlowPosition
         private readonly FlowDefinition flow;
         private readonly FlowRuns.Configuration configuration;
         private readonly DateTimeOffset at;
-        private DateTimeOffset? shapedAt;
+        private IReadOnlyList<RecordEnvelope>? shape;
+        private readonly Dictionary<string, FlowRuns.Configuration> configured = new(StringComparer.Ordinal);
         private readonly Dictionary<FlowRuns.StepRef, StepInstance> derived = [];
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> held;
         private readonly Dictionary<FlowRuns.StepRef, List<RecordEnvelope>> reviewing;
@@ -563,9 +572,15 @@ public static partial class FlowPosition
         {
             if (configuration.Off.TryGetValue(step.Key, out string? off))
             {
-                return Off(step, item, off);
+                return Off(step, item, off) with { SkippedAt = TurnedOff(step, item) };
             }
 
+            return Running(step, item);
+        }
+
+        /// <summary>A step instance the run's configuration leaves in it, derived from the records.</summary>
+        private StepInstance Running(FlowStep step, string? item)
+        {
             IReadOnlyDictionary<string, string> bindings = FlowRuns.Bindings(model, goal, flow, step, item, input => Carrier(input, item));
             DateTimeOffset? asked = step.Reserved is null ? null : AskedSince(step, item);
             string? asking = asked is not null && FlowStops.ClosesByRequest(step) ? CommandOf(step, bindings, EarlyInputs(step, item)).Command : null;
@@ -581,9 +596,11 @@ public static partial class FlowPosition
                 return Off(step, item, $"its branch {branch.Name} is not entered: {entering[0]}");
             }
 
+            // From 0.9.4 (FIX-144) an optional step left without an input by a step that was skipped was skipped when the last such was.
             if (!step.Required && step.Inputs.Select(i => (Input: i, Producer: Producer(i, item))).FirstOrDefault(p => p.Producer is { State: "off" }) is { Producer: not null } fed)
             {
-                return Off(step, item, $"its input {fed.Input.Name} comes from {fed.Producer.Name}, which is off");
+                return Off(step, item, $"its input {fed.Input.Name} comes from {fed.Producer.Name}, which is off")
+                    with { SkippedAt = step.Inputs.Select(i => Producer(i, item)).Where(p => p is { State: "off" }).Max(p => p!.SkippedAt) };
             }
 
             var reference = new FlowRuns.StepRef(step.Key, item);
@@ -623,10 +640,11 @@ public static partial class FlowPosition
 
             // From 0.9.4 (FIX-142): an optional reserved step whose request for this ask the operator dismissed settles as skipped, with no
             // revision of the goal; a required step, or one an estate policy requires, never does, and stays asked as its stop says.
+            // From 0.9.4 (FIX-144) the steps after it are asked from the dismissal, never before it.
             if (asked is DateTimeOffset askedFrom && asking is not null && !step.Required && !PolicyRequires(step)
                 && FlowStops.Dismissal(model, goal, reference, asking, askedFrom, at) is RecordEnvelope dismissal)
             {
-                return Off(step, item, Skipped(dismissal));
+                return Off(step, item, Skipped(dismissal)) with { SkippedAt = dismissal.AtTime };
             }
 
             // Retries by outcome (design/flow.md § 7): an uncertain effect is reconciled by reading before any retry, so it stops the step
@@ -1649,11 +1667,14 @@ public static partial class FlowPosition
                 : (first, $"routed by the {step.Role} role to {Routing.NameOf(model, first)}, from {source.Description}");
         }
 
-        /// <summary>The steps an instance waits on: those it names or the step before it, through any that are off, and the producers of its inputs.</summary>
-        private IEnumerable<StepInstance> Dependencies(FlowStep step, string? item)
+        /// <summary>
+        /// The steps an instance waits on: those it names or the step before it, through any that are off, and the producers of its inputs;
+        /// each step that is off and passed through on the way is added to <paramref name="passed"/> when it is given.
+        /// </summary>
+        private IEnumerable<StepInstance> Dependencies(FlowStep step, string? item, List<StepInstance>? passed = null)
         {
             var seen = new HashSet<FlowRuns.StepRef>();
-            foreach (StepInstance wait in step.After.SelectMany(key => Through(key, step.Each, item, seen)))
+            foreach (StepInstance wait in step.After.SelectMany(key => Through(key, step.Each, item, seen, passed)))
             {
                 yield return wait;
             }
@@ -1668,14 +1689,14 @@ public static partial class FlowPosition
 
             if (TJson.Text(TJson.Object(step.When, "due"), "from") is string from)
             {
-                foreach (StepInstance wait in Through(from, step.Each, item, seen))
+                foreach (StepInstance wait in Through(from, step.Each, item, seen, passed))
                 {
                     yield return wait;
                 }
             }
         }
 
-        private IEnumerable<StepInstance> Through(string key, string? each, string? item, HashSet<FlowRuns.StepRef> seen)
+        private IEnumerable<StepInstance> Through(string key, string? each, string? item, HashSet<FlowRuns.StepRef> seen, List<StepInstance>? passed)
         {
             FlowStep? waited = flow.Step(key);
             if (waited is null)
@@ -1690,7 +1711,8 @@ public static partial class FlowPosition
             {
                 if (instance.State == "off")
                 {
-                    foreach (StepInstance earlier in waited.After.SelectMany(k => Through(k, waited.Each, instance.Instance, seen)))
+                    passed?.Add(instance);
+                    foreach (StepInstance earlier in waited.After.SelectMany(k => Through(k, waited.Each, instance.Instance, seen, passed)))
                     {
                         yield return earlier;
                     }
@@ -1708,15 +1730,19 @@ public static partial class FlowPosition
         /// <summary>
         /// When a reserved step was asked: the time the run took its current shape (<see cref="ShapedAt"/>), or the latest time a step it
         /// waits on was done, whichever is later; the latest time there is when one of them is not done or off, or is done at no time the
-        /// records give, so that no close answers an ask not yet made.
+        /// records give, so that no close answers an ask not yet made. From 0.9.4 (FIX-144) it is no earlier than any optional step it
+        /// waits on, directly or through steps that are off, was skipped (<see cref="StepInstance.SkippedAt"/>): until then the step
+        /// waited on that one, so a close made while it waited answers nothing.
         /// </summary>
         private DateTimeOffset AskedSince(FlowStep step, string? item)
         {
-            DateTimeOffset since = shapedAt ??= ShapedAt();
-            foreach (StepInstance wait in Dependencies(step, item))
+            DateTimeOffset since = ShapedAt();
+            var passed = new List<StepInstance>();
+            foreach (StepInstance wait in Dependencies(step, item, passed))
             {
                 if (wait.State == "off")
                 {
+                    passed.Add(wait);
                     continue;
                 }
 
@@ -1731,6 +1757,14 @@ public static partial class FlowPosition
                 }
             }
 
+            foreach (StepInstance skipped in passed)
+            {
+                if (skipped.SkippedAt is DateTimeOffset when && when > since)
+                {
+                    since = when;
+                }
+            }
+
             return since;
         }
 
@@ -1738,18 +1772,77 @@ public static partial class FlowPosition
         /// The time of the oldest goal revision since which the run's flow pin, subject and options are unchanged: a revision that only
         /// grants more budget or changes the objective asks no reserved step again, while one that changes the version asks each anew.
         /// From 0.9.4 (FIX-142) a revision that only turns optional steps or optional items off asks nothing again either: what it leaves
-        /// in the run keeps its command, so the operator's closes already recorded keep answering the same asks.
+        /// in the run keeps its command, so the operator's closes already recorded keep answering the same asks. A step that waited on a
+        /// step such a revision turns off is asked only from that revision (FIX-144, <see cref="TurnedOff"/>).
         /// </summary>
-        private DateTimeOffset ShapedAt()
+        private DateTimeOffset ShapedAt() => Shape()[0].AtTime;
+
+        /// <summary>The goal revisions since the run took its current shape (<see cref="ShapedAt"/>), oldest first, the current revision last.</summary>
+        private IReadOnlyList<RecordEnvelope> Shape()
         {
-            RecordEnvelope since = goal;
+            if (shape is not null)
+            {
+                return shape;
+            }
+
+            var since = new List<RecordEnvelope> { goal };
             IReadOnlyList<string> chain = model.Chain(goal);
             for (int i = chain.Count - 2; i >= 0 && model.ById.TryGetValue(chain[i], out RecordEnvelope? earlier) && earlier.Type == goal.Type && SameAsks(earlier); i--)
             {
-                since = earlier;
+                since.Insert(0, earlier);
             }
 
-            return since.AtTime;
+            return shape = since;
+        }
+
+        /// <summary>
+        /// When an optional step the run's configuration turns off was skipped in the run's current shape (from 0.9.4, FIX-144): the time
+        /// of the goal revision since which every revision turns it off, or, when it was done or skipped by the operator's dismissal before
+        /// that revision, that earlier time, since the steps after it were asked from then; null when every revision since the run took its
+        /// shape turns it off, so that it never held the steps after it in this shape.
+        /// </summary>
+        private DateTimeOffset? TurnedOff(FlowStep step, string? item)
+        {
+            IReadOnlyList<RecordEnvelope> revisions = Shape();
+            int first = revisions.Count - 1;
+            while (first > 0 && ConfigurationOf(revisions[first - 1]).Off.ContainsKey(step.Key))
+            {
+                first--;
+            }
+
+            if (first == 0)
+            {
+                return null;
+            }
+
+            // Before that revision the step was part of the run: derived as it would be in it, it was done, or skipped, at a time the
+            // records give, or it held the steps after it until the revision.
+            DateTimeOffset turned = revisions[first].AtTime;
+            StepInstance running = Running(step, item);
+            DateTimeOffset? settled = running.State switch
+            {
+                "done" => running.DoneAt,
+                "off" => running.SkippedAt,
+                _ => null,
+            };
+            return settled is DateTimeOffset earlier && earlier < turned ? earlier : turned;
+        }
+
+        /// <summary>The run's configuration under a goal revision of its current shape: the current one's, or the earlier revision's own.</summary>
+        private FlowRuns.Configuration ConfigurationOf(RecordEnvelope revision)
+        {
+            if (revision.Id == goal.Id)
+            {
+                return configuration;
+            }
+
+            if (!configured.TryGetValue(revision.Id, out FlowRuns.Configuration? earlier))
+            {
+                earlier = FlowRuns.Configure(model, revision, flow);
+                configured[revision.Id] = earlier;
+            }
+
+            return earlier;
         }
 
         /// <summary>
@@ -1770,7 +1863,7 @@ public static partial class FlowPosition
                 return true;
             }
 
-            FlowRuns.Configuration before = FlowRuns.Configure(model, earlier, flow);
+            FlowRuns.Configuration before = ConfigurationOf(earlier);
             return configuration.Values.Values.All(setting => before.Value(setting.Option) == setting.Value
                 || (setting.Value == "off" && (setting.Option.StartsWith(FlowContract.StepOption, StringComparison.Ordinal) || setting.Option.StartsWith(FlowContract.ItemOption, StringComparison.Ordinal))));
         }
