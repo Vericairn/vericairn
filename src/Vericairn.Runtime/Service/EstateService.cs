@@ -96,8 +96,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             if (workerOptions is not null) service.WorkerOptions = workerOptions;
             service.JudgeInterruptedBatches();
-            service.runDispatch.RecoverSettlements();
-            service.ReconcileRunAttention();
+            // One judgment of the estate serves both startup passes unless the first stores a settlement (FIX-136).
+            EstateModel? judged = service.runDispatch.RecoverSettlements();
+            long loads = service.session.Loads;
+            service.runDispatch.ReconcileSettledAttention(judged);
+            service.StartupJudgments = 1 + service.session.Loads - loads;
             return service;
         }
         // A failed opening, such as an unusable live store, releases the store and the writer lock before its diagnostic leaves.
@@ -106,6 +109,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     // Kept separate from retained-observation recovery: existing settlements need only their records.
     internal void ReconcileRunAttention() => runDispatch.ReconcileSettledAttention();
+
+    /// <summary>
+    /// How many times the opening's two run passes judged the estate themselves, apart from a settlement's own reads: one when the
+    /// settlement recovery stored nothing and the attention reconciliation read its judgment, two when it stored a settlement.
+    /// </summary>
+    internal long StartupJudgments { get; private set; }
 
     /// <summary>Opens canonical records for a check without cache updates, batch recovery or creating durable state.</summary>
     internal static EstateService OpenReadOnly(string root) => new(EstateSession.Open(root, readOnly: true));

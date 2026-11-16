@@ -124,6 +124,10 @@ describes their separate decisions and the retained-page retirement bridge.
 From 0.8.4, an operator command replaces per-release closing scripts.
 Without options it lists exactly the latest completed, reviewed and unaccepted results with their
 exit questions, result summaries, passing-review summaries and independence, and exact hashes.
+From 0.9.4 (FIX-141), a result an acceptance of its work order's current revision was recorded
+after, before the estate's first acceptance of a result by an operator, counts as accepted and is
+not listed, so `--all` never signs that work again; a result recorded after such an acceptance is
+listed ([details](operator-actions.md#close-finished-steps-in-one-action)).
 
 | Option | Meaning |
 |---|---|

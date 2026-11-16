@@ -128,8 +128,10 @@ public sealed partial class EstateService
         List<OperatorCloseItem> items = [];
         foreach (RecordEnvelope order in model.Current("work-order").OrderBy(o => EstateModel.BodyString(o, "key"), StringComparer.Ordinal))
         {
+            // From 0.9.4 (FIX-141) an acceptance of the work order's current revision recorded after its current result accepts that result
+            // too, as acceptances were given before they named a result's exact hash, so it is not offered for signing again.
             if (!results.TryGetValue(order.Id, out RecordEnvelope? result) || EstateModel.BodyString(result, "outcome") != "completed"
-                || model.OfType("acceptance").Any(a => a.Subject == result.Reference)) continue;
+                || model.OfType("acceptance").Any(a => a.Subject == result.Reference) || EstateStatus.RevisionAcceptance(model, result) is not null) continue;
             OperatorCloseReview[] reviews = [.. model.About(result.Id, "review").Where(r => model.IsCurrent(r)
                     && r.Subject == result.Reference && EstateModel.BodyString(r, "outcome") == "pass")
                 .OrderBy(r => r.Id, StringComparer.Ordinal).Select(r => new OperatorCloseReview(r.Id, r.ComputedHash,

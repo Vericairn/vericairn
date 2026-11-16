@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Vericairn.Records.Model;
 
@@ -12,13 +13,17 @@ public sealed class EstateModel
     private ILookup<string, RecordEnvelope> recordsByType;
     private Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>> recordsBySubject;
     private Lazy<ILookup<string, (int Position, RecordEnvelope Record)>> decisionsByAnswer;
+    private Lazy<ILookup<string, (int Position, RecordEnvelope Record)>> workOrdersByInput;
     private readonly object trustGate = new();
     private EstateTrust? applied;
     private EstateTrust? judged;
     private bool judging;
     private IReadOnlySet<string> notCounting = new HashSet<string>(StringComparer.Ordinal);
     private AuthorityReplay? authority;
-    private Dictionary<string, WorkOrderKey>? currentWorkOrderKeys;
+    private Dictionary<string, CurrentUse>? currentWorkOrderKeys;
+    private Dictionary<string, CurrentUse>? currentOperationIdentities;
+    private IReadOnlyList<LivingDocuments.State>? livingDocuments;
+    private Lazy<RecordEnvelope?>? resultAcceptancesBegan;
 
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
@@ -27,20 +32,24 @@ public sealed class EstateModel
         Records = records;
         // Projections ask for a few types repeatedly. Index once while loading so a Home report does not walk unrelated
         // history for every empty section. Lookup preserves each type's original path order and all historical revisions.
-        (recordsByType, recordsBySubject, decisionsByAnswer) = Index(records);
+        (recordsByType, recordsBySubject, decisionsByAnswer, workOrdersByInput) = Index(records);
         ById = byId;
         SupersededBy = supersededBy;
         Findings = findings;
         CountingRecords = records;
     }
 
-    private static (ILookup<string, RecordEnvelope>, Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>>, Lazy<ILookup<string, (int Position, RecordEnvelope Record)>>) Index(IReadOnlyList<RecordEnvelope> records)
+    private static (ILookup<string, RecordEnvelope>, Lazy<ILookup<(string Type, string? Subject), RecordEnvelope>>, Lazy<ILookup<string, (int Position, RecordEnvelope Record)>>,
+        Lazy<ILookup<string, (int Position, RecordEnvelope Record)>>) Index(IReadOnlyList<RecordEnvelope> records)
     {
         ILookup<string, RecordEnvelope> byType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
         return (byType,
             new(() => byType.SelectMany(group => group).ToLookup(r => (r.Type, r.Subject?.Id))),
             new(() => byType["decision"].Select((record, position) => (Position: position, Record: record))
                 .SelectMany(item => AnswerIds(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
+                .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal)),
+            new(() => byType["work-order"].Select((record, position) => (Position: position, Record: record))
+                .SelectMany(item => GoalRules.Inputs(item.Record).Distinct(StringComparer.Ordinal).Select(id => (Id: id, Item: item)))
                 .ToLookup(x => x.Id, x => x.Item, StringComparer.Ordinal)));
     }
 
@@ -120,10 +129,13 @@ public sealed class EstateModel
         applied = trust;
         authority = null;
         currentWorkOrderKeys = null;
+        currentOperationIdentities = null;
+        livingDocuments = null;
+        resultAcceptancesBegan = null;
         if (excluded.Count == 0) return;
         notCounting = excluded;
         CountingRecords = Records.Where(r => !excluded.Contains(r.Id)).ToList();
-        (recordsByType, recordsBySubject, decisionsByAnswer) = Index(CountingRecords);
+        (recordsByType, recordsBySubject, decisionsByAnswer, workOrdersByInput) = Index(CountingRecords);
         SupersededBy = countingSupersededBy;
     }
 
@@ -137,6 +149,8 @@ public sealed class EstateModel
         set
         {
             manifest = value;
+            livingDocuments = null;
+            resultAcceptancesBegan = null;
             // The record format the manifest states decides which admissions, and so which records, count.
             lock (trustGate)
             {
@@ -151,7 +165,19 @@ public sealed class EstateModel
     public bool IsCurrent(RecordEnvelope record) => record is not null && !notCounting.Contains(record.Id) && !SupersededBy.ContainsKey(record.Id);
 
     /// <summary>All records of a type.</summary>
-    public IEnumerable<RecordEnvelope> OfType(string type) => recordsByType[type];
+    public IEnumerable<RecordEnvelope> OfType(string type)
+    {
+        Interlocked.Increment(ref typeReads.GetOrAdd(type, static _ => new StrongBox<long>()).Value);
+        return recordsByType[type];
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, StrongBox<long>> typeReads = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How many times each record type has been read whole from this model (<see cref="OfType"/>, <see cref="Current"/>): a
+    /// deterministic count of the whole-estate passes a judgment and the views derived from it make, for cost tests (FIX-136).
+    /// </summary>
+    internal IReadOnlyDictionary<string, long> TypeReads => typeReads.ToDictionary(t => t.Key, t => Interlocked.Read(ref t.Value.Value), StringComparer.Ordinal);
 
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);
@@ -161,28 +187,60 @@ public sealed class EstateModel
     /// map of the current work orders' keys, built in one pass the first time it is asked, so judging every work order's key costs time
     /// in proportion to their number.
     /// </summary>
-    internal bool AnotherCurrentWorkOrderUses(string key, RecordEnvelope record)
+    internal bool AnotherCurrentWorkOrderUses(string key, RecordEnvelope record) => AnotherCurrentUses(ref currentWorkOrderKeys, "work-order", "key", key, record);
+
+    /// <summary>
+    /// Whether a current operation with another id than <paramref name="record"/>'s has <paramref name="identity"/> (FIX-136): read from a
+    /// map of the current operations' identities built in one pass, as <see cref="AnotherCurrentWorkOrderUses"/> reads keys.
+    /// </summary>
+    internal bool AnotherCurrentOperationUses(string identity, RecordEnvelope record) => AnotherCurrentUses(ref currentOperationIdentities, "operation", "identity", identity, record);
+
+    private bool AnotherCurrentUses(ref Dictionary<string, CurrentUse>? map, string type, string field, string value, RecordEnvelope record)
     {
-        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(record);
-        Dictionary<string, WorkOrderKey> keys = LazyInitializer.EnsureInitialized(ref currentWorkOrderKeys, () =>
+        Dictionary<string, CurrentUse> uses = LazyInitializer.EnsureInitialized(ref map, () =>
         {
-            var built = new Dictionary<string, WorkOrderKey>(StringComparer.Ordinal);
-            foreach (RecordEnvelope order in Current("work-order"))
+            var built = new Dictionary<string, CurrentUse>(StringComparer.Ordinal);
+            foreach (RecordEnvelope current in Current(type))
             {
-                if (!order.Body.TryGetProperty("key", out JsonElement named) || named.ValueKind != JsonValueKind.String) continue;
+                if (!current.Body.TryGetProperty(field, out JsonElement named) || named.ValueKind != JsonValueKind.String) continue;
                 string text = named.GetString()!;
-                if (!built.TryGetValue(text, out WorkOrderKey seen)) built[text] = new(order.Id, false);
-                else if (!seen.Shared && seen.First != order.Id) built[text] = seen with { Shared = true };
+                if (!built.TryGetValue(text, out CurrentUse seen)) built[text] = new(current.Id, false);
+                else if (!seen.Shared && seen.First != current.Id) built[text] = seen with { Shared = true };
             }
 
             return built;
         });
-        return keys.TryGetValue(key, out WorkOrderKey found) && (found.Shared || found.First != record.Id);
+        return uses.TryGetValue(value, out CurrentUse found) && (found.Shared || found.First != record.Id);
     }
 
-    /// <summary>The first current work order using a key, and whether one with another id uses it too.</summary>
-    private readonly record struct WorkOrderKey(string First, bool Shared);
+    /// <summary>
+    /// Every living document's state (<see cref="LivingDocuments.Derive"/>), derived the first time it is asked once the model is loaded
+    /// and kept with it (FIX-136): status, its checks and each flow predicate that reads a document's state read the same states instead
+    /// of deriving every document again.
+    /// </summary>
+    internal IReadOnlyList<LivingDocuments.State> LivingDocumentStates(Func<EstateModel, IReadOnlyList<LivingDocuments.State>> derive) =>
+        LazyInitializer.EnsureInitialized(ref livingDocuments, () =>
+        {
+            Interlocked.Increment(ref livingDocumentDerivations);
+            return derive(this);
+        });
+
+    private long livingDocumentDerivations;
+
+    /// <summary>How many times every living document's state has been derived for this model: a deterministic count for cost tests.</summary>
+    internal long LivingDocumentDerivations => Interlocked.Read(ref livingDocumentDerivations);
+
+    /// <summary>
+    /// The acceptance that marks when acceptances began to name a result's exact hash (<see cref="EstateStatus.ResultAcceptancesBegan"/>),
+    /// found the first time it is asked once the model is loaded and kept with it, as the living documents' states are.
+    /// </summary>
+    internal RecordEnvelope? ResultAcceptancesBegan(Func<EstateModel, RecordEnvelope?> find) =>
+        LazyInitializer.EnsureInitialized(ref resultAcceptancesBegan, () => new Lazy<RecordEnvelope?>(() => find(this))).Value;
+
+    /// <summary>The first current record using a value, and whether one with another id uses it too.</summary>
+    private readonly record struct CurrentUse(string First, bool Shared);
 
     /// <summary>
     /// The estate's first charter, the one every later revision supersedes: the charter the manifest names, never displaced by another that
@@ -379,6 +437,15 @@ public sealed class EstateModel
     internal IEnumerable<RecordEnvelope> DecisionsAnswering(IEnumerable<string> asks) => asks
         .SelectMany(id => decisionsByAnswer.Value[id]).DistinctBy(item => item.Position).OrderBy(item => item.Position)
         .Select(item => item.Record).Where(IsCurrent);
+
+    /// <summary>
+    /// The work orders that count of which a revision names one of <paramref name="ids"/> among its inputs, each revision once, in path
+    /// order (FIX-136): read from an index of every work order's inputs built once per model, so finding a goal's work does not read every
+    /// work order again for each goal and each assignment judged.
+    /// </summary>
+    internal IEnumerable<RecordEnvelope> WorkOrdersNaming(IEnumerable<string> ids) => ids
+        .SelectMany(id => workOrdersByInput.Value[id]).DistinctBy(item => item.Position).OrderBy(item => item.Position)
+        .Select(item => item.Record);
 
     private static IEnumerable<string> AnswerIds(RecordEnvelope decision) =>
         decision.Body.TryGetProperty("answers", out JsonElement answers) && answers.ValueKind == JsonValueKind.Array

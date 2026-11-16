@@ -607,7 +607,9 @@ public sealed class OperationType : IRecordType
             }
         }
 
-        if (context.Model.IsCurrent(context.Record) && context.Model.Current(Name).Any(other => other.Id != context.Record.Id && EstateModel.BodyString(other, "identity") == identity))
+        if (context.Model.IsCurrent(context.Record) && (identity is null
+                ? context.Model.Current(Name).Any(other => other.Id != context.Record.Id && EstateModel.BodyString(other, "identity") is null)
+                : context.Model.AnotherCurrentOperationUses(identity, context.Record)))
         {
             context.Error("operation.duplicate-identity", $"Another current operation already has identity {identity}; reconcile it under that identity instead of starting a second one.");
         }
