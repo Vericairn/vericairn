@@ -762,10 +762,14 @@ is followed by a decision step that decides from its outputs.
   (`observation.flow-decision-read`), and its rules hold with each derived state
   they name, a work order's status, an ask's answer or a living document's
   clearance, read as it is then, the round's start or later
-  (`observation.flow-decision-state`). Once recorded, validation evaluates its
-  rules without those states, so a later change of a state never invalidates a
-  recorded decision or blocks an unrelated write; such a record already in the
-  estate is reported only as information. A rule naming an input that an
+  (`observation.flow-decision-state`). Both are read as the records stood when
+  the decision was recorded, and validation otherwise evaluates its rules
+  without those states, so a later record or a later change of a state never
+  invalidates a recorded decision or blocks an unrelated write. One already in
+  the estate that fails either, written around the runtime by a sync, an older
+  runtime or by hand, is reported as information, and the run's position
+  ignores it: the round stays pending, the step names the record and why, and
+  a decision that relied on it counts for nothing. A rule naming an input that an
   earlier step's output carries is not evaluated again: only the run's position
   binds it.
 - A role's principal decides from the step's assignment, which goal step routes

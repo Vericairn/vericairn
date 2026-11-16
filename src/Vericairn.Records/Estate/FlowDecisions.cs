@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -437,11 +439,23 @@ public static partial class FlowDecisions
         // decision and the rule's state.
         if (decider == "rule-then-role")
         {
-            // Its round's kind is on record first: that no rule held when it began, recorded by goal step, or by goal decide with it.
-            if (!RuleDecisions(context.Model, run, step.Key).Any(r => r.Rule == "none" && r.At <= context.Record.AtTime && AsOf(r.Record) is DateTimeOffset kindAt && kindAt <= context.Record.AtTime
-                && Refusals(context.Model, run, flow, step, decider, r).Count == 0))
+            // Its round's kind is on record first, read as the position reads it: the first kind recorded for the latest round start any
+            // records name, no later than this decision, counting only one the write boundary would have accepted, is that no rule held;
+            // and no hold or path back of the step taken since that round began opened another round whose kind is not recorded.
+            List<Recorded> kinds = RuleDecisions(context.Model, run, step.Key)
+                .Where(r => r.Rule is not ("default" or "deadline") && r.Record.Id != context.Record.Id && r.At <= context.Record.AtTime && AsOf(r.Record) is DateTimeOffset kindAt && kindAt <= context.Record.AtTime
+                    && Refusals(context.Model, run, flow, step, decider, r).Count == 0 && WrittenRefusal(context.Model, flow, step, r) is null).ToList();
+            DateTimeOffset? latest = kinds.Select(k => AsOf(k.Record)).Max();
+            Recorded? kind = kinds.Where(k => AsOf(k.Record) == latest).OrderBy(k => k.Record.At, StringComparer.Ordinal).ThenBy(k => k.Record.Id, StringComparer.Ordinal).FirstOrDefault();
+            Recorded? reopened = kind is null ? null : PrincipalDecisions(context.Model, flow, step, assignments)
+                .FirstOrDefault(d => d.Record.Id != context.Record.Id && d.At > latest && GoalRules.Before(d.Record, context.Record)
+                    && (IsHold(step, d) || d.Paths.Select(step.Transition!.Path).OfType<FlowPath>().Any(p => FlowTransition.IsBack(p, flow.IndexOf, step.Key)))
+                    && TookEffect(context.Model, run, flow, step, d, context.Record));
+            if (kind is not { Rule: "none" } || reopened is not null)
             {
-                context.Error("result.decision", $"Step {step.Key} is decided by a rule then its role in this run, and no record says that no rule held when this decision's round began: goal step records that first, or goal decide with the decision, and until then no principal decides the round.");
+                context.Error("result.decision", reopened is not null
+                    ? $"Step {step.Key} is decided by a rule then its role in this run, and result {reopened.Record.Id} took path {string.Join(", ", reopened.Paths)}, opening another round after observation {kind!.Record.Id} recorded that no rule held: no record says whether a rule held when this decision's round began, and until goal step, or goal decide with the decision, records that none did, no principal decides it."
+                    : $"Step {step.Key} is decided by a rule then its role in this run, and no record says that no rule held when this decision's round began: goal step records that first, or goal decide with the decision, and until then no principal decides the round.");
             }
 
             RecordEnvelope root = context.Model.ById.GetValueOrDefault(context.Model.Chain(assignment!)[0]) ?? assignment!;
@@ -547,14 +561,15 @@ public static partial class FlowDecisions
         // read every record they count as of then, since one left out could make a rule hold or keep an earlier one from holding; and its
         // rules hold with the derived states they name read as they are now, the round's start or later. A later record, or a later
         // change of a state, never invalidates a recorded decision or blocks an unrelated write.
-        foreach (RecordEnvelope omitted in Omitted(context.Model, flow, step, decision))
+        Written written = WrittenOf(context.Model, flow, step, decision);
+        foreach (RecordEnvelope omitted in written.Omitted)
         {
-            context.Findings.Info(ReadCode, context.Location + "#body.facts.read", $"Its rules count {omitted.Type} {omitted.Id}, recorded at {omitted.At}, among the records as they stood at {asOf}, and it does not name it among the records it read. From 0.9.4 a new flow decision names every record its rules read; one already in the estate keeps its reading.");
+            context.Findings.Info(ReadCode, context.Location + "#body.facts.read", $"Its rules count {omitted.Type} {omitted.Id}, recorded at {omitted.At}, among the records as they stood at {asOf}, and it does not name it among the records it read. From 0.9.4 the write boundary refuses such a flow decision, and the run's position ignores one already in the estate.");
         }
 
-        if (Refusals(context.Model, goal, flow, step, decider, decision).Count == 0 && Unsound(context.Model, flow, step, decision, states: true) is string stated)
+        if (Refusals(context.Model, goal, flow, step, decider, decision).Count == 0 && written.State is string stated)
         {
-            context.Findings.Info(StateCode, context.Location + "#body.facts.rule", $"Step {key}'s {(rule is "default" or "none" ? "rule" : "rule " + rule)} does not hold with the states its rules name read as they are now: {stated}. From 0.9.4 a new flow decision's rules hold when it is written, its states read then; one already in the estate keeps its reading.");
+            context.Findings.Info(StateCode, context.Location + "#body.facts.rule", $"Step {key}'s {(rule is "default" or "none" ? "rule" : "rule " + rule)} does not hold with the states its rules name read as the records stood when it was recorded: {stated}. From 0.9.4 the write boundary refuses such a flow decision, and the run's position ignores one already in the estate.");
         }
 
         // A round's rule decision is final: a later one is for a round that began after the earlier decision was recorded.
@@ -743,20 +758,64 @@ public static partial class FlowDecisions
     }
 
     /// <summary>
-    /// The records a recorded rule decision's rules count among as of its time that it does not name (from 0.9.4, PROC-19): current, made
-    /// by then and recorded before it, each a record one of its rules up to the one it names reads.
+    /// What the write boundary checks of a flow decision when it is written (from 0.9.4, PROC-19), read as the records stood when it was
+    /// recorded, so that neither a later record nor a later change of a state changes it: each record its rules count among as of its time,
+    /// up to the rule it names, that it does not name; and why its rules do not hold with the derived states they name read then.
     /// </summary>
-    private static List<RecordEnvelope> Omitted(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision)
-    {
-        if (Evaluated(model, flow, step, decision) is not { } evaluated)
-        {
-            return [];
-        }
+    private sealed record Written(IReadOnlyList<RecordEnvelope> Omitted, string? State);
 
-        var named = decision.Evidence.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
-        return evaluated.Rules.SelectMany(r => r.Predicates).SelectMany(p => GoalPredicates.Candidates(model, p, evaluated.AsOf))
-            .Where(r => !named.Contains(r.Id) && GoalRules.Before(r, decision.Record)).DistinctBy(r => r.Id)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+    private static readonly ConditionalWeakTable<EstateModel, ConcurrentDictionary<string, Written>> WrittenChecks = new();
+
+    /// <summary>What the write boundary checks of a flow decision, as the records stood when it was recorded; computed once for an estate.</summary>
+    private static Written WrittenOf(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision) =>
+        WrittenChecks.GetOrCreateValue(model).GetOrAdd(decision.Record.Id + " " + flow.Pin.Hash + " " + step.Key, _ =>
+        {
+            if (Evaluated(model, flow, step, decision) is null)
+            {
+                return new Written([], null);
+            }
+
+            EstateModel then = AsRecorded(model, decision.Record);
+            if (Evaluated(then, flow, step, decision) is not { } evaluated)
+            {
+                return new Written([], null);
+            }
+
+            var named = decision.Evidence.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+            List<RecordEnvelope> omitted = evaluated.Rules.SelectMany(r => r.Predicates).SelectMany(p => GoalPredicates.Candidates(then, p, evaluated.AsOf))
+                .Where(r => !named.Contains(r.Id)).DistinctBy(r => r.Id)
+                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+            return new Written(omitted, Unsound(then, flow, step, decision, states: true));
+        });
+
+    /// <summary>
+    /// Why a flow decision already in the estate counts for nothing although validation only notes it (from 0.9.4, PROC-19): the write
+    /// boundary would have refused it, read as the records stood when it was recorded, since it leaves out a record its rules count
+    /// (observation.flow-decision-read) or its rules do not hold with the derived states they name (observation.flow-decision-state); a
+    /// record written around the runtime, such as by a sync, an older runtime or by hand. The position ignores it. Null when neither.
+    /// </summary>
+    internal static string? WrittenRefusal(EstateModel model, FlowDefinition flow, FlowStep step, Recorded decision)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(flow);
+        ArgumentNullException.ThrowIfNull(step);
+        ArgumentNullException.ThrowIfNull(decision);
+        Written written = WrittenOf(model, flow, step, decision);
+        return written.Omitted.Count > 0
+            ? $"it does not name {written.Omitted[0].Type} {written.Omitted[0].Id}, which its rules count among the records as they stood at {EstateModel.BodyString(decision.Record, "asOf")} ({ReadCode})"
+            : written.State is string state ? $"its rules do not hold with the states they name read as the records stood when it was recorded: {state} ({StateCode})" : null;
+    }
+
+    /// <summary>
+    /// The estate as it stood when a record was recorded: the counting records before it in record order, each superseded only by one of
+    /// them. A record made later, or a later change of a state, is not in it.
+    /// </summary>
+    private static EstateModel AsRecorded(EstateModel model, RecordEnvelope record)
+    {
+        List<RecordEnvelope> kept = model.CountingRecords.Where(r => r.Id != record.Id && GoalRules.Before(r, record)).ToList();
+        Dictionary<string, RecordEnvelope> byId = kept.GroupBy(r => r.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        Dictionary<string, string> superseded = model.SupersededBy.Where(p => byId.ContainsKey(p.Key) && byId.ContainsKey(p.Value)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        return new EstateModel(model.Root, kept, byId, superseded, new FindingList()) { Manifest = model.Manifest, ObjectReader = model.ObjectReader, FilePaths = model.FilePaths };
     }
 
     /// <summary>

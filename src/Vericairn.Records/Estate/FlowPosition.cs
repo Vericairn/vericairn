@@ -594,6 +594,7 @@ public static partial class FlowPosition
         private IReadOnlyList<LivingDocuments.State>? documents;
         private IReadOnlyDictionary<string, RecordEnvelope>? required;
         private readonly Dictionary<string, List<FlowDecisions.Recorded>> decisions = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<(FlowDecisions.Recorded Decision, string Why)>> ignored = new(StringComparer.Ordinal);
 
         public Deriving(EstateModel model, RecordEnvelope goal, FlowDefinition flow, FlowRuns.Configuration configuration, RecordEnvelope? work, DateTimeOffset at, IReadOnlyList<Return> branchReturns,
             IReadOnlySet<string>? discounted)
@@ -648,6 +649,10 @@ public static partial class FlowPosition
                 string decider = configuration.Decider(step);
                 List<FlowDecisions.Recorded> principals = decider == "rule" ? [] : FlowDecisions.PrincipalDecisions(model, flow, step, held.GetValueOrDefault(new FlowRuns.StepRef(step.Key, null)) ?? []);
                 List<FlowDecisions.Recorded> rules = FlowDecisions.RuleDecisions(model, goal, step.Key).Where(r => FlowDecisions.Refusals(model, goal, flow, step, decider, r).Count == 0).ToList();
+                // One the write boundary would have refused, written around the runtime, counts for nothing, and the step says why.
+                List<(FlowDecisions.Recorded Decision, string Why)> refused = rules.Select(r => (Decision: r, Why: FlowDecisions.WrittenRefusal(model, flow, step, r))).Where(r => r.Why is not null).Select(r => (r.Decision, r.Why!)).ToList();
+                ignored[step.Key] = refused;
+                rules.RemoveAll(r => refused.Any(i => i.Decision.Record.Id == r.Record.Id));
                 List<FlowDecisions.Recorded> standing = FlowDecisions.Standing(model, goal, flow, step, principals, rules);
                 decisions[step.Key] = standing;
                 List<FlowDecisions.Recorded> effective = standing.Where(d => !(discounted?.Contains(d.Record.Id) ?? false) && FlowDecisions.TookEffect(model, goal, flow, step, d)).ToList();
@@ -1561,6 +1566,12 @@ public static partial class FlowPosition
                 this.Discounted.UnionWith(standing.Skip(standing.IndexOf(current) + 1).Where(d => d.At >= start).Select(d => d.Record.Id));
             }
 
+            // A rule's decision or round's kind for this round that the write boundary would have refused counts for nothing: the step says
+            // why, naming the record, and the round stays pending.
+            List<string> refused = (ignored.GetValueOrDefault(step.Key) ?? [])
+                .Where(i => i.Decision.Rule == "deadline" || EstateModel.BodyString(i.Decision.Record, "asOf") == RecordParser.FormatTimestamp(start))
+                .Select(i => $"observation {i.Decision.Record.Id}, {(i.Decision.Rule == "none" ? "the round's kind" : "a rule's decision")} by {Routing.NameOf(model, i.Decision.By)}, counts for nothing: {i.Why}; the runtime refuses such a record when it is written").ToList();
+            notes.AddRange(refused);
             StepDecision Waiting(string waiting) => new(waiting, decider, [], null, null, null, string.Empty, [], null) { Since = start };
             if (current is null)
             {
@@ -1590,7 +1601,8 @@ public static partial class FlowPosition
                 // Under a rule then the role, so does the round's kind until it is on record: the rule's path, or that no rule held.
                 if ((decider == "rule" || (decider == "rule-then-role" && Kind() is null) ? Matched() : null) is StepDecision ruling)
                 {
-                    return Ruled(basis with { Rerun = ruling.Rule == "none" && holder is not null && holder.AtTime < round }, ruling with { Since = start }, transition, notes);
+                    return Ruled(basis with { Rerun = ruling.Rule == "none" && holder is not null && holder.AtTime < round },
+                        ruling with { Since = start, Reasons = refused.Count == 0 ? ruling.Reasons : $"{ruling.Reasons}; {string.Join("; ", refused)}" }, transition, notes);
                 }
 
                 return Pending(step, transition, basis, holder, round, notes, Waiting(held ? "held" : "pending"));

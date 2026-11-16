@@ -514,9 +514,14 @@ any rule holds. A predicate over a derived state is left out of that
 evaluation, which stays fixed; the write boundary refuses a new one whose rules
 do not hold with the states they name read when it is written
 (`observation.flow-decision-state`), or whose `read` leaves out a record its
-rules count as of `asOf` (`observation.flow-decision-read`), and reports either
-on one already in the estate only as information, so a later record or state
-change never invalidates it or blocks an unrelated write. It reports a
+rules count as of `asOf` (`observation.flow-decision-read`), both read as the
+records stood when it was recorded, so a later record or state change never
+invalidates it or blocks an unrelated write. On one already in the estate,
+written around the runtime, either is information, and the run's position
+ignores that record. A result under `rule-then-role` is refused unless the
+first kind recorded for the latest round start named at or before it, one the
+position counts, records that no rule held, and no hold or path back of the step
+taken since opened another round. It reports a
 deadline's default naming a deadline by which a decision of the step's current
 assignment stood, and a rule's decision or deadline's default whose path would
 turn off a step an estate policy requires (`observation.flow-decision-protected`);
