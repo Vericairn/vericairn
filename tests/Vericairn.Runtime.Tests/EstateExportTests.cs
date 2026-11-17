@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -365,6 +367,31 @@ public sealed class EstateExportTests : IDisposable
     }
 
     [Fact]
+    public async Task AFifoInPlaceOfAnOwnerInstructionFileRefusesTheExportWithoutOpeningIt()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A FIFO is not a file in a Windows directory.");
+        using var estate = new TestEstate();
+        string fifo = Path.Combine(estate.Root, "AGENTS.md");
+        Assert.SkipUnless(MakeFifo(fifo), "This system cannot make a FIFO.");
+        string archive = Path.Combine(scratch, "estate-export.zip");
+        using EstateSession session = EstateSession.Open(estate.Root);
+
+        // Opening the FIFO would wait for a writer; the ceiling only detects that hang, and a writer then releases it.
+        Task<Exception?> export = Task.Run(() => Record.Exception(() => EstateExport.Write(session, archive)), TestContext.Current.CancellationToken);
+        bool finished = await TestTiming.CompletesAsync(export, TestContext.Current.CancellationToken);
+        if (!finished)
+        {
+            await using var writer = new FileStream(fifo, FileMode.Open, FileAccess.Write);
+        }
+
+        Assert.True(finished, "The export opened the FIFO and waited for a writer.");
+        InvalidOperationException refused = Assert.IsType<InvalidOperationException>(await export);
+        Assert.Contains("AGENTS.md at the estate root is not a regular file", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was written", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(archive));
+    }
+
+    [Fact]
     public void AnOwnerInstructionFileListedAsALinkRestoresNothing()
     {
         string archive = WriteExport([("AGENTS.md", "elsewhere.md")], new JsonArray(Item("AGENTS.md", "elsewhere.md", "120000")));
@@ -412,6 +439,21 @@ public sealed class EstateExportTests : IDisposable
         };
         WriteEntry(zip, EstateExport.SummaryEntry, Encoding.UTF8.GetBytes(summary.ToJsonString()));
         return path;
+    }
+
+    private static bool MakeFifo(string path)
+    {
+        try
+        {
+            using Process? made = Process.Start(new ProcessStartInfo("mkfifo") { ArgumentList = { path }, RedirectStandardError = true, UseShellExecute = false });
+            if (made is null) return false;
+            made.WaitForExit();
+            return made.ExitCode == 0;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
     }
 
     private static Dictionary<string, JsonObject> Inventory(string archive)

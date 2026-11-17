@@ -344,8 +344,9 @@ It excludes keys, sessions, credentials and authority, the machine's live store 
 the housekeeping native operations write under `.vericairn/`, and git history. It also excludes every
 payload held outside the estate repository: an external store's artifacts and a release's files.
 Today its summary doesn't list the external references it leaves out. From 0.9.4 `estate export`
-refuses an estate where a link stands in place of an instruction file, and writes nothing: the export
-carries each one only as a file, and a restore never makes a link.
+refuses an estate where a link, a FIFO or anything else that is not a regular file stands in place of
+an instruction file, and writes nothing: the export carries each one only as a regular file, judged
+without opening it, and a restore never makes a link.
 
 So recovery needs a supplemental capture: the store's own backup, made after the intake, that holds
 every reference the records name. A snapshot, a versioned bucket or a second store all work. Encrypt

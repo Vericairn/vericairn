@@ -168,7 +168,8 @@ link, a directory or a special file. An entry without `mode`, as every release b
 
 From 0.9.4, an export also carries the owner's agent instruction files at the estate's root, each one present as a file of
 exactly the name the estate check allows there, with its bytes and mode, and the restore writes it back like any other
-member. The export refuses an estate where a link stands in place of one of them, before it writes anything. An export
+member. The export refuses an estate where a link, a FIFO or anything else that is not a regular file stands in place of
+one of them, judged from its status without opening it, before it writes anything. An export
 written before 0.9.4 lacks them and restores as before.
 
 ## Software: resources, observations, verifications and operations

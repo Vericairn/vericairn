@@ -363,8 +363,9 @@ public static class EstateExport
     // From 0.9.4 (FIX-135), the owner's agent instruction files at the root travel with the export, each named exactly as
     // EstateLayout.OwnerInstructionFiles names it: the root is listed rather than probed by name, so a differently cased file on a
     // case-insensitive volume is never exported under the owner's name. An entry of that name that is a directory is no instruction
-    // file, and estate check reports it. A link in place of one is refused: following it would export bytes from outside the estate
-    // under the owner's name, and a restore never makes a link.
+    // file, and estate check reports it. Anything else that is not a regular file is refused, judged from its status without opening
+    // it: following a link would export bytes from outside the estate under the owner's name, a restore never makes a link, and opening
+    // a FIFO, a device or a socket would wait or read without end.
     private static IReadOnlyList<string> OwnerInstructionFiles(string root)
     {
         var files = new List<string>();
@@ -376,15 +377,23 @@ public static class EstateExport
                 continue;
             }
 
-            if (new FileInfo(entry).LinkTarget is not null)
+            var info = new FileInfo(entry);
+            if (info.LinkTarget is not null)
             {
                 throw new InvalidOperationException($"{name} at the estate root is a link, not a file. The owner's agent instruction files travel in an export only as files, and a restore never makes a link; replace the link with the file's own content and export again. Nothing was written.");
             }
 
-            if (File.Exists(entry))
+            if (Directory.Exists(entry))
             {
-                files.Add(name);
+                continue;
             }
+
+            if (Records.Signing.OwnerOnlyState.IsRegularFile(entry) == false || (info.Attributes & FileAttributes.Device) != 0)
+            {
+                throw new InvalidOperationException($"{name} at the estate root is not a regular file. The owner's agent instruction files travel in an export only as regular files; replace it with a file holding its content and export again. Nothing was written.");
+            }
+
+            files.Add(name);
         }
 
         return [.. files.Order(StringComparer.Ordinal)];

@@ -519,8 +519,8 @@ directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from t
 still works.
 
 From 0.9.4, `estate export` carries each of the owner's files present at the root, with its bytes and mode, and lists it
-in the export's inventory; `estate restore` writes it back exactly. An export refuses an estate where a link stands in
-place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so a cold recovery from one restores
+in the export's inventory; `estate restore` writes it back exactly. An export refuses an estate where a link, a FIFO or
+anything else that is not a regular file stands in place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so a cold recovery from one restores
 them from the supplemental capture and checks them against its list, as
 [the three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) describe.
 
