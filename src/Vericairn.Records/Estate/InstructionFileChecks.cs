@@ -240,7 +240,7 @@ internal static class InstructionFileChecks
         int line = Line(starts, index);
         if (!forbidding.TryGetValue(line, out int until))
         {
-            until = ForbiddenUntil(text, starts[line - 1], LineEnd(text, starts, line));
+            until = ForbiddenUntil(text, starts, line);
             forbidding[line] = until;
         }
 
@@ -371,33 +371,39 @@ internal static class InstructionFileChecks
         return dots >= 1 && digits >= 2 && (at == value.Length || value[at] is '-' or '+');
     }
 
-    // Where the clause that a line opens by forbidding ends, or the line's start when it opens with none. A line opens with one when, past
-    // its indentation and its quote and list markers, it starts with a capitalized forbidding word and a space, as "Never pass ...". The
-    // clause runs to its first sentence or clause end, a period, exclamation or question mark, semicolon or colon before a space or the
-    // line's end, or to the first word that turns it around, such as "without" or "forget".
-    private static int ForbiddenUntil(string text, int start, int end)
+    // Where the clause that a line opens by forbidding ends, or the line's start when it opens with none. A line opens with one when it
+    // starts a sentence, after a blank line, a heading, a line that ends a sentence, or a list marker, and when, past its indentation,
+    // its quote and list markers and any emphasis, it starts with a capitalized forbidding word and a space, as "Never pass ...". A line
+    // that continues a wrapped sentence opens none. The clause runs to its first sentence or clause end, or to the first word that turns
+    // it around, such as "without" or "forget".
+    private static int ForbiddenUntil(string text, int[] starts, int line)
     {
-        int at = start;
-        while (at < end)
+        int start = starts[line - 1], end = LineEnd(text, starts, line), at = start;
+        while (at < end && text[at] is ' ' or '\t' or '>') at++;
+        bool item = false;
+        if (at + 1 < end && text[at] is '-' or '+' or '*' && text[at + 1] is ' ' or '\t')
         {
-            char c = text[at];
-            if (c is ' ' or '\t' or '>' or '*' or '_' or '-' or '+') { at++; continue; }
-            if (char.IsAsciiDigit(c))
+            item = true;
+            at += 2;
+        }
+        else
+        {
+            int digits = at;
+            while (digits < end && char.IsAsciiDigit(text[digits])) digits++;
+            if (digits > at && digits + 1 < end && text[digits] is '.' or ')' && text[digits + 1] is ' ' or '\t')
             {
-                int digits = at;
-                while (digits < end && char.IsAsciiDigit(text[digits])) digits++;
-                if (digits < end && text[digits] is '.' or ')') { at = digits + 1; continue; }
+                item = true;
+                at = digits + 2;
             }
-
-            break;
         }
 
+        while (at < end && text[at] is ' ' or '\t' or '*' or '_') at++;
         string? opening = Prohibitions.FirstOrDefault(word => at + word.Length <= end && string.CompareOrdinal(text, at, word, 0, word.Length) == 0);
-        if (opening is null) return start;
+        if (opening is null || (!item && line > 1 && !EndsSentence(text, starts[line - 2], LineEnd(text, starts, line - 1)))) return start;
         for (int i = at + opening.Length; i < end;)
         {
             char c = text[i];
-            if (c is '.' or '!' or '?' or ';' or ':' && (i + 1 == end || char.IsWhiteSpace(text[i + 1]))) return i;
+            if (c is '.' or '!' or '?' or ';' or ':' && SentenceEnd(text, i, end)) return i;
             if (char.IsAsciiLetter(c))
             {
                 int word = i;
@@ -411,6 +417,32 @@ internal static class InstructionFileChecks
         }
 
         return end;
+    }
+
+    // Characters that close what a sentence mark ends: emphasis, a quote, a parenthesis, a bracket or a code span.
+    private static bool IsClosing(char c) => c is '*' or '_' or '"' or '\'' or '\u201D' or '\u2019' or ')' or ']' or '`';
+
+    // A sentence or clause mark ends the clause when, past any closing characters, a space or the line's end follows it, or a capital
+    // letter starts the next sentence at once; a colon or semicolon also ends it before any letter.
+    private static bool SentenceEnd(string text, int mark, int end)
+    {
+        int after = mark + 1;
+        while (after < end && IsClosing(text[after])) after++;
+        if (after == end || char.IsWhiteSpace(text[after])) return true;
+        return char.IsAsciiLetterUpper(text[after]) || (text[mark] is ':' or ';' && char.IsAsciiLetter(text[after]));
+    }
+
+    // Whether the line before ends a sentence, so that the next line may open one: it is blank, it is a heading, or it ends, past any
+    // closing characters, with a sentence or clause mark.
+    private static bool EndsSentence(string text, int start, int end)
+    {
+        int first = start;
+        while (first < end && (char.IsWhiteSpace(text[first]) || text[first] == '>')) first++;
+        if (first >= end || text[first] == '#') return true;
+        int last = end - 1;
+        while (last > first && char.IsWhiteSpace(text[last])) last--;
+        while (last > first && IsClosing(text[last])) last--;
+        return text[last] is '.' or '!' or '?' or ':' or ';' || IsClosing(text[last]);
     }
 
     private static int[] LineStarts(string text)

@@ -490,18 +490,23 @@ at the size limit in time proportional to its length.
 
 A key is read as configuration only at the start of a line or in quotes, so prose that names one, such as "the
 `allowed-tools:` key is forbidden", is not reported, and keys are matched in their case, so "Hooks: none" is not a
-hooks key. A sentence that opens by forbidding, with "Never", "Do not", "Don't", "Must not", "Avoid", "Not" or "No"
-and a space, is not reported for a flag, mode or Git setting it names before its clause ends, at a period, colon,
-semicolon, question or exclamation mark, or at a word that turns it around, such as "without", "forget", "by",
-"unless", "but" or "always". So "Never pass `--dangerously-skip-permissions`." is not reported, while "Never run
-without `--dangerously-skip-permissions`.", "Never stop to ask. Always launch with ...", a wrapped line that begins
-with a lower-case "never", and a launch prefix such as `NO_COLOR=1` are. An author could still open a clause that way
-to hide a mention. The check is a heuristic that warns: it does not understand any agent tool's configuration as a
-whole, so a hook, an approval or a secret written in a form it does not know goes unreported, and an ordinary line can
-match. The warnings ask for a person's review and refuse nothing; the check reads the files and runs nothing. If the
-check itself fails on a file, it warns `instructions.unreadable` about that file, naming the kind of failure and never
-the file's content, and the rest of `estate check` goes on. Anywhere else in the estate, such as `docs/`, the same lines
-are ordinary text.
+hooks key. A sentence that opens by forbidding is not reported for a flag, mode, policy or Git setting it names before
+its clause ends; a configuration key is always reported. A line opens such a sentence when it starts one, after a
+blank line, a heading, a list marker or a line that ends with a sentence mark, and when, past its quote and list
+markers and any emphasis, it begins with "Never", "Do not", "Don't", "Must not", "Should not", "Shall not", "Avoid",
+"Not" or "No" and a space. The clause ends at a period, colon, semicolon, question or exclamation mark, also when
+closing emphasis, a quote or a parenthesis follows it, or at one of a fixed list of words that turn it around:
+"without", "forget", "by", "unless", "except", "instead", "but", "always" and "only". So "Never pass
+`--dangerously-skip-permissions`." is not reported, while "Never run without `--dangerously-skip-permissions`.",
+"**Never ask.** Launch with ...", a wrapped line that continues a sentence with a capital "No", and a launch prefix
+such as `NO_COLOR=1` are. A comma, a dash or "and" does not end the clause, and a double negative outside that list,
+such as "Never omit ...", is not recognized, so an author could still open a clause that way to hide a mention. The
+check is a heuristic that warns: it does not understand any agent tool's configuration as a whole, so a hook, an
+approval or a secret written in a form it does not know goes unreported, and an ordinary line can match. The warnings
+ask for a person's review and refuse nothing; the check reads the files and runs nothing. If the check itself fails on
+a file, it warns `instructions.unreadable` about that file, naming the kind of failure and never the file's content,
+and the rest of `estate check` goes on. Anywhere else in the estate, such as `docs/`, the same lines are ordinary
+text.
 
 A repository's own agent instruction files are untrusted input. From 0.9.4, for each of the estate's repositories whose
 clone is registered on this machine (`vericairn sources clone`), `estate check` warns `instructions.repository` about
