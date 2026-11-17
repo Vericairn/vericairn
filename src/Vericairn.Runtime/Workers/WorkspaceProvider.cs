@@ -71,6 +71,18 @@ public interface IWorkspaceProvider
     /// <summary>Compares changes since launch with the assignment's permitted repository-relative paths.</summary>
     RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => new(0, 0, [], "This workspace provider cannot verify assignment scope.");
 
+    /// <summary>
+    /// From 0.9.4 (CODE-73): compares changes since launch with the assignment's permitted paths less its exclusions, counting a changed
+    /// path that matches an exclusion as outside. An implementation that cannot apply exclusions reports its audit incomplete whenever the
+    /// brief names one.
+    /// </summary>
+    RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, IReadOnlyList<string> excluded)
+    {
+        ArgumentNullException.ThrowIfNull(excluded);
+        RunScope scope = CheckScope(workspace, baseline, permitted);
+        return excluded.Count == 0 ? scope : scope with { Problem = scope.Problem ?? "This workspace provider cannot apply the brief's exclusions; assignment scope is unverified." };
+    }
+
     /// <summary>After settlement, retains the audited branch in the registered clone for review. Returns a path-free refusal, or null.</summary>
     string? RetainForReview(PreparedWorkspace workspace) => null;
 }

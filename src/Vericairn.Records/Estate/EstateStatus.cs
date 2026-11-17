@@ -48,6 +48,9 @@ public static class EstateStatus
         return Reading(model, order).Basis;
     }
 
+    /// <summary>A work order's derived status, as <see cref="WorkItems"/> gives it, for one work order's current revision.</summary>
+    internal static string StatusOf(EstateModel model, RecordEnvelope order) => Reading(model, order).Status;
+
     /// <summary>
     /// A work order's derived status and the record it rests on. It is accepted when the latest acceptance of its revisions names its
     /// current revision, or one that differs from it only in placement, or, for ordinary work, when an acceptance names its current
@@ -267,6 +270,8 @@ public static class EstateStatus
             }
         }
 
+        // From 0.9.4 (CODE-73), the open overlaps of active assignments' effective permitted paths, from the records alone.
+        text.Append(AssignmentOverlaps.StatusText(model, AssignmentOverlaps.Overlaps(model)));
         IReadOnlyList<OperationItem> operations = OperationItems(model);
         if (operations.Count > 0)
         {
@@ -468,6 +473,13 @@ public static class EstateStatus
         if (runs.Count > 0)
         {
             status["runs"] = FlowStops.RunsJson(model, runs);
+        }
+
+        // From 0.9.4 (CODE-73), the open overlaps of active assignments, from the records alone; absent when there is none.
+        IReadOnlyList<AssignmentOverlaps.Overlap> overlaps = AssignmentOverlaps.Overlaps(model);
+        if (overlaps.Any(o => o.Open))
+        {
+            status["overlaps"] = AssignmentOverlaps.StatusJson(model, overlaps);
         }
 
         // Work proposed for goals whose plan says sponsor-approves, waiting for the sponsor's approval (FIX-117); absent when there is none.

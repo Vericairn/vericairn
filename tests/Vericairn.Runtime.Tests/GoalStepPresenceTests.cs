@@ -108,11 +108,11 @@ public class GoalStepPresenceTests
         using var run = new RunEstate(recordFormat: 3, keepOperatorKey: true);
         string op = run.Estate.OperatorId;
         string goal = FlowStepRoutingTests.Run(run, FlowDecisionRoutingTests.RuleThenRole(), body => FlowDecisionRoutingTests.Configured(body, op));
-        FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
+        FlowStepRoutingTests.Done(run, run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource)).Assignment!.Id, ("lyrics", FlowFixture.Hash('a'), null), op);
         (List<PresenceHelperStandIn> helpers, RecordingCustody custody) = Presence(run);
 
         // The rule route: goal step records that no rule held, a flow-decision observation outside § 10's allow-list, a single write.
-        GoalStepResponse kind = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse kind = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(kind.Ok, kind.Message);
         Assert.Equal(("decided", "gate"), (kind.Outcome, kind.Step));
         Assert.Empty(helpers);
@@ -120,7 +120,7 @@ public class GoalStepPresenceTests
         Assert.Equal(run.OperatorDevice, Assert.Single(run.Estate.Load().ById[kind.Decision!.Id].Signatures).Device);
 
         // The person route of the decision step (PROC-19): its assignment and its ask, listed by exact hash, share one check.
-        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op));
+        GoalStepResponse asked = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
         Assert.True(asked.Ok, asked.Message);
         Assert.Equal(("ask", "gate", "person"), (asked.Outcome, asked.Step, asked.Route));
         PresenceHelperStandIn helper = Assert.Single(helpers);
@@ -150,7 +150,7 @@ public class GoalStepPresenceTests
             string goal = FlowStepRoutingTests.Run(run, FlowTimingRoutingTests.Song(new JsonObject { ["at"] = new JsonObject { ["time"] = "2026-01-01T09:00:00Z" }, ["deadline"] = "PT1H" }));
             (List<PresenceHelperStandIn> helpers, RecordingCustody custody) = Presence(run);
 
-            GoalStepResponse attention = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            GoalStepResponse attention = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
 
             Assert.True(attention.Ok, attention.Message);
             Assert.Equal(("ask", "attention"), (attention.Outcome, attention.Route));
@@ -166,7 +166,7 @@ public class GoalStepPresenceTests
             FlowStepRoutingTests.Review(run, master);
             (List<PresenceHelperStandIn> helpers, RecordingCustody custody) = Presence(run);
 
-            GoalStepResponse request = run.Service.GoalStep(goal, new GoalStepRequest(op));
+            GoalStepResponse request = run.Service.GoalStep(goal, new GoalStepRequest(op, run.Resource));
 
             Assert.True(request.Ok, request.Message);
             Assert.Equal(("request", "request"), (request.Outcome, request.Route));

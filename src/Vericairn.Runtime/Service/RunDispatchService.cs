@@ -124,7 +124,7 @@ internal sealed partial class RunDispatchService(
         var abandon = new CancellationTokenSource();
         supervisions[run] = (Task.Run(() =>
         {
-            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency); }
+            try { Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token, admitted.Efficiency, Excluded(plan.Assignment)); }
             finally { admitted.Efficiency?.Dispose(); }
         }), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
@@ -134,7 +134,10 @@ internal sealed partial class RunDispatchService(
         }
 
         string recorded = dispatched.Ok ? string.Empty : $" Its dispatch could not be recorded ({dispatched.Problem?.Message}); the worker records what it observes when the run ends.";
-        return new RunResponse(run, dispatched.Ok ? "dispatched" : "not-started", $"Run {run}: the intent was recorded with its cap before {launcher.Launcher} started as {plan.AgentName} in {where}; the worker observes it until it exits and records its usage. Its result is a claim another principal reviews; nothing is accepted.{generic}{recorded}", true, dispatched.Written ?? intent, Element(plan.Cap), where);
+        return new RunResponse(run, dispatched.Ok ? "dispatched" : "not-started", $"Run {run}: the intent was recorded with its cap before {launcher.Launcher} started as {plan.AgentName} in {where}; the worker observes it until it exits and records its usage. Its result is a claim another principal reviews; nothing is accepted.{generic}{recorded}", true, dispatched.Written ?? intent, Element(plan.Cap), where)
+        {
+            Notices = plan.Notices,
+        };
     }
 
     /// <summary>Returns the current runs and their budget ledgers.</summary>
@@ -536,7 +539,11 @@ internal sealed partial class RunDispatchService(
     };
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null)
+    // From 0.9.4 (CODE-73), the brief's exclusions, which the settlement's scope audit counts as outside.
+    private static List<string> Excluded(RecordEnvelope assignment) =>
+        assignment.Body.TryGetProperty("brief", out JsonElement brief) && brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty("excludedChanges", out _) ? Strings(brief, "excludedChanges") : [];
+
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon, EfficiencyRun? efficiency = null, IReadOnlyList<string>? excluded = null)
     {
         RunOutcome? outcome;
         try
@@ -558,7 +565,7 @@ internal sealed partial class RunDispatchService(
         RunScope scope;
         try
         {
-            scope = workspaces.CheckScope(workspace, baseline, permitted);
+            scope = excluded is { Count: > 0 } ? workspaces.CheckScope(workspace, baseline, permitted, excluded) : workspaces.CheckScope(workspace, baseline, permitted);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or RegexMatchTimeoutException)
         {

@@ -290,13 +290,21 @@ internal static class WorkspaceScopeAudit
 #pragma warning restore SYSLIB1054
     [StructLayout(LayoutKind.Sequential)] private struct FileTag { public uint Attributes, Tag; }
 
-    public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted, TimeSpan? deadline = null)
+    public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted, TimeSpan? deadline = null) =>
+        Compare(before, after, permitted, [], deadline);
+
+    /// <summary>
+    /// Compares the workspace before and after with the permitted patterns less the brief's exclusions (from 0.9.4, CODE-73): a changed path
+    /// that matches an exclusion is outside, whatever pattern also matches it.
+    /// </summary>
+    public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted, IReadOnlyList<string> excluded, TimeSpan? deadline = null)
     {
         var watch = Stopwatch.StartNew();
         string[] changes = before.Files.Keys.Union(after.Files.Keys, StringComparer.Ordinal)
             .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path))
             .Union(after.CommittedPaths ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string[] patterns = permitted.Select(PermittedPaths.Pattern).OfType<string>().ToArray();
+        string[] exclusions = excluded.Select(PermittedPaths.Pattern).OfType<string>().ToArray();
         // A change to the rules that decide what settlement skips is never authorized by the brief's patterns.
         var outside = new List<string>(after.IgnoreChanges ?? []);
         changes = changes.Union(after.IgnoreChanges ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -322,6 +330,16 @@ internal static class WorkspaceScopeAudit
                     if (Matches(path, pattern))
                     {
                         allowed = true;
+                        break;
+                    }
+                }
+
+                foreach (string exclusion in allowed ? exclusions : [])
+                {
+                    CheckDeadline();
+                    if (Matches(path, exclusion))
+                    {
+                        allowed = false;
                         break;
                     }
                 }

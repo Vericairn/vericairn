@@ -290,12 +290,12 @@ public sealed class FlowFixture : IDisposable
         Add("assignment", AssignmentBody(step, contributor, instance, inputs), subject: Work.Reference);
 
     /// <summary>The body of an assignment of a step to a contributor, pinning the inputs given.</summary>
-    public static JsonObject AssignmentBody(string step, string contributor, string? instance = null, JsonArray? inputs = null)
+    public static JsonObject AssignmentBody(string step, string contributor, string? instance = null, JsonArray? inputs = null, string? repository = null)
     {
         var named = new JsonObject { ["key"] = step };
         if (instance is not null) named["instance"] = instance;
         if (inputs is not null) named["inputs"] = inputs;
-        return new JsonObject
+        var body = new JsonObject
         {
             ["contributor"] = contributor, ["step"] = named,
             ["brief"] = new JsonObject
@@ -305,6 +305,8 @@ public sealed class FlowFixture : IDisposable
                 ["reviewCriteria"] = new JsonArray("the outputs exist"), ["recovery"] = "Carry it again.",
             },
         };
+        if (repository is not null) body["brief"]!["repository"] = repository;
+        return body;
     }
 
     /// <summary>The contributor's attempt and completed result on an assignment, naming outputs by name and hash.</summary>

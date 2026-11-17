@@ -429,6 +429,18 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.GoalNextAsync(goal, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public OverlapResponse WorkOverlap(string? repository = null) => inner.WorkOverlapAsync(repository, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkOverlapAsync(repository, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public OverlapResponse WorkOverlapPreview(OverlapPreviewRequest request) => inner.WorkOverlapPreviewAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkOverlapPreviewAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => inner.GoalStepAsync(goal, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

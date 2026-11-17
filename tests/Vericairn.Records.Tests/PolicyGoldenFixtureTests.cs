@@ -86,7 +86,11 @@ public class PolicyGoldenFixtureTests
         context["record"] = completion.Id;
         JsonObject progressResult = PolicyFixture.ResultBody();
         progressResult["progressClaim"] = context;
-        progress.Estate.Add("result", progress.Estate.BuilderId, progressResult.ToJsonString(), progress.Attempt.Reference);
+        RecordEnvelope progressed = progress.Estate.Add("result", progress.Estate.BuilderId, progressResult.ToJsonString(), progress.Attempt.Reference);
+        // From 0.9.4 (CODE-73) a corrected result names the change it made, so that its assignment is released once the change is integrated.
+        JsonObject changed = PolicyFixture.ResultBody();
+        changed["change"] = new JsonObject { ["repository"] = progress.Estate.Load().FirstEstate!.Id, ["base"] = new string('a', 40), ["head"] = new string('b', 40), ["target"] = "main" };
+        progress.Estate.Add("result", progress.Estate.BuilderId, changed.ToJsonString(), progress.Attempt.Reference, supersedes: progressed.Id);
         EstateModel progressModel = progress.Estate.Load();
         Assert.False(progressModel.Findings.HasErrors, string.Join('\n', progressModel.Findings));
         // History checkpoints have their own golden estate.

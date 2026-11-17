@@ -64,8 +64,6 @@ internal sealed class RunEstate : IDisposable
         Goal = Ok(Service.GoalPropose(new GoalProposeRequest(Estate.OperatorId, Json($$$"""{"title":"Build the widget","objective":"Ship the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}}],"constraints":["no change outside the widget"],"kind":"finite","sponsor":"{{{Estate.OperatorId}}}","budget":{{{budget}}},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""")))).Id;
         Ok(Service.GoalActivate(Goal, new GoalActionRequest(Estate.OperatorId)));
         Ok(Service.NewRecord(new NewRecordRequest("work-order", Estate.OperatorId, Json($$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build the widget.","scope":["widget"],"exitQuestion":"Does the widget build and pass its tests?","inputs":[{"type":"goal","id":"{{Goal}}"}],"deliverables":["widget"]}"""))));
-        Assignment = Ok(Service.Assign(new AssignRequest("W-1", Estate.BuilderId, Estate.OperatorId, Json(brief ?? Brief)))).Id;
-
         Clone = Path.Combine(Scratch, "widget");
         Directory.CreateDirectory(Clone);
         Git(Clone, "init", "-q", "-b", "main");
@@ -76,6 +74,8 @@ internal sealed class RunEstate : IDisposable
         string root = Git(Clone, "rev-parse", "HEAD");
         Resource = Ok(Service.NewRecord(new NewRecordRequest("resource", Estate.OperatorId, Json($$"""{"kind":"repository","name":"widget","role":"The widget's source.","location":{"rootCommit":"{{root}}"},"visibility":"private"}""")))).Id;
         RepositoryClones.Register(Service.Session.Manifest.Estate, Resource, Clone);
+        // From 0.9.4 (CODE-73) a format-3 brief with a path pattern names the repository its runs work in.
+        Assignment = Ok(Service.Assign(new AssignRequest("W-1", Estate.BuilderId, Estate.OperatorId, Json(brief ?? Brief)) { Repository = Resource })).Id;
     }
 
     public TestEstate Estate { get; }

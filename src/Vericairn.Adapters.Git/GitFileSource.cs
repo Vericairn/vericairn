@@ -153,9 +153,11 @@ public sealed partial class GitFileSource : IDocumentSource
 
     internal static int RunIsolated(string clone, out byte[] output, params string[] arguments) => Run(clone, out output, true, arguments);
 
-    private static int Run(string clone, out byte[] output, bool isolated, string[] arguments)
+    private static int Run(string clone, out byte[] output, bool isolated, string[] arguments) => Run(StartInfo(clone, isolated, arguments), out output);
+
+    /// <summary>Runs git as <see cref="StartInfo"/> prepared it, with the caller's additions, and reads its bounded output.</summary>
+    internal static int Run(ProcessStartInfo info, out byte[] output)
     {
-        ProcessStartInfo info = StartInfo(clone, isolated, arguments);
         try
         {
             using Process process = Start(info);

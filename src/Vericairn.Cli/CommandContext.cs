@@ -240,6 +240,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
             if (!json) ReportCheckpoint(outcome.Checkpoint);
             else if (outcome.Checkpoint?.Skipped is { } skipped) Error.WriteLine("warning: " + skipped);
+            // From 0.9.4 (CODE-73): the overlaps a recorded assignment has and the write boundary's warnings, beside the record, never in its output.
+            foreach (string notice in outcome.Notices ?? []) Error.WriteLine(notice);
             if (outcome.Problem is { } interrupted) return runtimeProblem ? Runtime(interrupted.Message) : Fail(interrupted.Message);
             return Clean;
         }

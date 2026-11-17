@@ -347,8 +347,6 @@ public sealed class WorkerJourneyTests : IDisposable
         string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "Ship the widget.", "--done", """{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}""", "--budget", "wallMinutes=120", "--budget", "attemptsPerStep=2").Id;
         CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
         CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", $$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does the widget build and pass its tests?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}"""));
-        string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":["no publication"],"workspace":["widget, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""")).Id;
-
         string clone = Path.Combine(scratch, "widget");
         Directory.CreateDirectory(clone);
         Git(clone, "init", "-q", "-b", "main");
@@ -358,6 +356,8 @@ public sealed class WorkerJourneyTests : IDisposable
         Git(clone, "commit", "-q", "-m", "The first commit");
         string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", clone, "--by", op, "--name", "widget", "--role", "The widget's source.").Json.GetProperty("resource").GetProperty("id").GetString()!;
         CliHarness.Ok("--estate", root, "--json", "sources", "clone", clone, "--resource", resource);
+        // From 0.9.4 (CODE-73) a brief with a path pattern names the repository its runs work in.
+        string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--repository", resource, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":["no publication"],"workspace":["widget, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""")).Id;
         return (op, builder, goal, assignment, resource);
     }
 

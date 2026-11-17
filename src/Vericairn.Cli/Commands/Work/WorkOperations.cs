@@ -26,8 +26,8 @@ internal sealed partial class WorkOperations(CommandContext context)
         return brief.Problem is null ? Clean : Failed;
     });
 
-    public int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json) =>
-        context.WithBody(briefPath, brief => context.WithApi(root, api => context.ReportOutcome(api.Assign(new AssignRequest(key, contributor, by, brief, note)), json)));
+    public int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json, string? repository = null) =>
+        context.WithBody(briefPath, brief => context.WithApi(root, api => context.ReportOutcome(api.Assign(new AssignRequest(key, contributor, by, brief, note) { Repository = repository }), json)));
 
     public int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json) =>
         context.WithApi(root, api => context.ReportOutcome(api.Attempt(new AttemptRequest(assignmentId, by, workspace, note, at)), json));
@@ -60,6 +60,22 @@ internal sealed partial class WorkOperations(CommandContext context)
         context.Output.WriteLine("  " + taken.Message);
         return Clean;
     });
+
+    /// <summary>From 0.9.4 (CODE-73): the overlap view, or a draft brief's preview; a named repository that is none fails.</summary>
+    public int WorkOverlap(string root, string? briefPath, string? repository, bool json) => briefPath is null
+        ? context.WithApi(root, api => ReportOverlap(api.WorkOverlap(repository), json), readOnly: true)
+        : context.WithBody(briefPath, brief => context.WithApi(root, api => ReportOverlap(api.WorkOverlapPreview(new OverlapPreviewRequest(brief, repository)), json), readOnly: true));
+
+    private int ReportOverlap(OverlapResponse response, bool json)
+    {
+        if (response.Json.ValueKind == JsonValueKind.Object && response.Json.TryGetProperty("problem", out JsonElement problem) && problem.ValueKind == JsonValueKind.String)
+        {
+            return context.Fail(problem.GetString()!);
+        }
+
+        context.Output.Write(json ? CanonicalJson.SerializePretty(response.Json) : response.Text);
+        return Clean;
+    }
 
     public int WorkObserve(string root, string key, bool json, CommunicationSelection? presentation = null) => context.WithApi(root, api =>
     {

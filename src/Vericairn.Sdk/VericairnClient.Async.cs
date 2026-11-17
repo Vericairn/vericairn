@@ -338,6 +338,14 @@ public sealed partial class VericairnClient
     public Task<GoalResponse?> GoalAsync(string id, CancellationToken cancellationToken = default) =>
         RunOperationAsync<GoalResponse?>(nameof(Goal), async token => (await GetAsync<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Goal)), cancellationToken);
 
+    /// <summary>The cancellable WorkOverlap operation, with a deadline covering the complete response.</summary>
+    public Task<OverlapResponse> WorkOverlapAsync(string? repository = null, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OverlapResponse>(nameof(WorkOverlap), async token => (await GetAsync<OverlapResponse>(repository is null ? "/v1/overlaps" : "/v1/overlaps?repository=" + Uri.EscapeDataString(repository), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WorkOverlap)), cancellationToken);
+
+    /// <summary>The cancellable WorkOverlapPreview operation, with a deadline covering the complete response.</summary>
+    public Task<OverlapResponse> WorkOverlapPreviewAsync(OverlapPreviewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<OverlapResponse>(nameof(WorkOverlapPreview), async token => (await PostAsync<OverlapPreviewRequest, OverlapResponse>("/v1/overlaps/preview", request, cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WorkOverlapPreview)), cancellationToken);
+
     /// <summary>The cancellable GoalNext operation, with a deadline covering the complete response.</summary>
     public Task<NextResponse?> GoalNextAsync(string goal, CancellationToken cancellationToken = default) =>
         RunOperationAsync<NextResponse?>(nameof(GoalNext), async token => (await GetAsync<NextResponse>(GoalPath(goal, "next"), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(GoalNext)), cancellationToken);
