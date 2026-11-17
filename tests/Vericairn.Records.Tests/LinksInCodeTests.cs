@@ -128,6 +128,98 @@ public sealed class LinksInCodeTests
         Assert.False(MarkdownCode.Mask(text)[index], "The link is read as code.");
     }
 
+    // The second round of the review: a fence after a list took the list item's column from before the line left the item, so its
+    // closing fence opened a new one and the prose after it read as code. The fence's code is code, and the link after it is prose.
+    [Theory]
+    [InlineData("- Step one.\n- Step two.\n\n```sh\nvericairn estate check\n```\n\nSee [the gone guide](gone.md).\n")]
+    [InlineData("1. Run it:\n\n```sh\nvericairn estate check\n```\n\nSee [the gone guide](gone.md).\n")]
+    [InlineData("- Step two.\n```sh\nvericairn estate check\n```\nSee [the gone guide](gone.md).\n")]
+    [InlineData("- Step one.\n\n~~~\nvericairn estate check\n~~~\n\nSee [the gone guide](gone.md).\n")]
+    [InlineData("> - Step one.\n>\n> ```sh\n> vericairn estate check\n> ```\n>\n> See [the gone guide](gone.md).\n")]
+    [InlineData("- Step one.\n  - Step two.\n\n```sh\nvericairn estate check\n```\n\nSee [the gone guide](gone.md).\n")]
+    public void AFenceAfterAListClosesAndTheProseAfterItIsRead(string text)
+    {
+        bool[] mask = MarkdownCode.Mask(text);
+        Assert.True(mask[text.IndexOf("estate check", StringComparison.Ordinal)], "The fence's code is read as prose.");
+        Assert.False(mask[text.IndexOf("](gone.md)", StringComparison.Ordinal)], "The link after the fence is read as code.");
+    }
+
+    [Fact]
+    public void ABrokenLinkAfterAFenceAfterAListIsRefused()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        (EstateModel model, RecordEnvelope declaration) = Declare(estate);
+        const string Text = "# Guide\n\n- Step one.\n- Step two.\n\n```sh\nvericairn estate check\n```\n\nSee [the gone guide](gone.md).\n";
+        DocumentChecks.Outcome outcome = Assert.Single(DocumentChecks.Run(model, declaration, Text, "docs/guide.md", estate.Root, []), o => o.Name == "links-resolve");
+        Assert.Equal("failed", outcome.Result);
+        Assert.Equal(["docs/guide.md:10:22"], outcome.Details.Select(d => d.Location));
+    }
+
+    /// <summary>
+    /// A whole-documentation guard: across the repository's guides, a line at the start of its row that no fence encloses, read by a
+    /// plain pairing of fence lines, is never masked as a code block. A fence read wrongly, such as a closing fence taken for an
+    /// opening one, masks the prose after it, which this finds in any guide.
+    /// </summary>
+    [Fact]
+    public void NoGuideLineOutsideEveryFenceIsReadAsACodeBlock()
+    {
+        string docs = Path.Combine(RepositoryRoot(), "docs");
+        var wrong = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(docs, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            string text = File.ReadAllText(file);
+            bool[] mask = MarkdownCode.Mask(text);
+            char fence = '\0';
+            int fenceLength = 0, start = 0, number = 0;
+            while (start <= text.Length)
+            {
+                int end = text.IndexOf('\n', start);
+                if (end < 0) end = text.Length;
+                number++;
+                string line = text[start..end].TrimEnd('\r');
+                string stripped = Stripped(line);
+                int run = stripped.Length - stripped.TrimStart(stripped.Length > 0 ? stripped[0] : ' ').Length;
+                if (fenceLength > 0)
+                {
+                    if (run >= fenceLength && stripped[0] == fence && stripped[run..].Trim().Length == 0) fenceLength = 0;
+                }
+                else if (run >= 3 && stripped[0] is '`' or '~' && (stripped[0] == '~' || !stripped[run..].Contains('`', StringComparison.Ordinal)))
+                {
+                    fence = stripped[0];
+                    fenceLength = run;
+                }
+                else if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && line[0] != '`' && mask[start] && (start == 0 || !mask[start - 1]))
+                {
+                    wrong.Add($"{Path.GetRelativePath(docs, file).Replace('\\', '/')}:{number}");
+                }
+
+                start = end + 1;
+            }
+        }
+
+        Assert.True(wrong.Count == 0, "Lines outside every fence read as code blocks: " + string.Join(", ", wrong.Take(20)));
+    }
+
+    // A line past its indentation, block-quote markers and one list marker, as the plain fence pairing reads it.
+    private static string Stripped(string line)
+    {
+        string rest = line.TrimStart(' ', '\t');
+        while (rest.StartsWith('>')) rest = rest[1..].TrimStart(' ', '\t');
+        int digits = 0;
+        while (digits < rest.Length && char.IsAsciiDigit(rest[digits])) digits++;
+        if (rest.Length > 1 && rest[0] is '-' or '*' or '+' && rest[1] is ' ' or '\t') rest = rest[2..].TrimStart(' ', '\t');
+        else if (digits > 0 && digits + 1 < rest.Length && rest[digits] is '.' or ')' && rest[digits + 1] is ' ' or '\t') rest = rest[(digits + 2)..].TrimStart(' ', '\t');
+        return rest;
+    }
+
+    private static string RepositoryRoot()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
+        Assert.NotNull(root);
+        return root;
+    }
+
     private static (EstateModel Model, RecordEnvelope Declaration) Declare(TestEstate estate)
     {
         RecordEnvelope product = estate.Add("product", estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");

@@ -30,7 +30,7 @@ internal static class MarkdownCode
     private static void MarkBlocks(string text, bool[] code, bool[] barrier)
     {
         // The content column of each open list item, innermost last.
-        var lists = new Stack<int>();
+        var lists = new List<int>();
         // An open fence: its marker, its length, and the quote depth and content column of the container it opened in.
         char fence = '\0';
         int fenceLength = 0, fenceDepth = 0, fenceBase = 0;
@@ -66,8 +66,15 @@ internal static class MarkdownCode
 
             Line line = Read(text, start, to, int.MaxValue);
             bool block = line.Depth != previousDepth, single = false;
-            int listColumn = lists.Count == 0 ? 0 : lists.Peek();
-            int baseColumn = Math.Max(listColumn, line.ContentColumn);
+
+            // The list items whose content this line stands left of. It leaves them, unless it only continues their paragraph lazily:
+            // after a blank line or another block it leaves them at once, and a line that opens a block of its own leaves them too.
+            int keep = lists.Count;
+            while (keep > 0 && line.FirstColumn < lists[keep - 1]) keep--;
+            int outerColumn = Math.Max(keep == 0 ? 0 : lists[keep - 1], line.ContentColumn);
+            int outerIndent = line.FirstColumn - outerColumn;
+            if (!line.Blank && (blank || !paragraph)) lists.RemoveRange(keep, lists.Count - keep);
+            int baseColumn = Math.Max(lists.Count == 0 ? 0 : lists[^1], line.ContentColumn);
             int indent = line.FirstColumn - baseColumn;
             if (line.Blank)
             {
@@ -75,14 +82,16 @@ internal static class MarkdownCode
                 blank = true;
                 block = true;
             }
-            else if (indent <= 3 && text[line.First] is '`' or '~' && Run(text, line.First, to, text[line.First]) is >= 3 and int opening
+            else if (outerIndent <= 3 && text[line.First] is '`' or '~' && Run(text, line.First, to, text[line.First]) is >= 3 and int opening
                 && (text[line.First] == '~' || text.AsSpan(line.First + opening, to - line.First - opening).IndexOf('`') < 0))
             {
-                // A fence opens, even where it interrupts a paragraph; one never closed runs to the end of its container.
+                // A fence opens, even where it interrupts a paragraph, in the container the line stands in; one never closed runs to the
+                // end of that container.
+                lists.RemoveRange(keep, lists.Count - keep);
                 fence = text[line.First];
                 fenceLength = opening;
                 fenceDepth = line.Depth;
-                fenceBase = baseColumn;
+                fenceBase = outerColumn;
                 Mark(code, start, end);
                 paragraph = false;
                 blank = false;
@@ -97,23 +106,16 @@ internal static class MarkdownCode
             }
             else
             {
-                if (blank || !paragraph)
-                {
-                    while (lists.Count > 0 && line.FirstColumn < lists.Peek()) lists.Pop();
-                }
-
                 if (indent <= 3 && paragraph && IsSetextUnderline(text, line.First, to))
                 {
                     paragraph = false;
                     single = true;
                 }
-                else if (indent <= 3 && IsThematicBreak(text, line.First, to))
+                else if (outerIndent <= 3 && (IsThematicBreak(text, line.First, to) || IsHeading(text, line.First, to)))
                 {
-                    paragraph = false;
-                    single = true;
-                }
-                else if (indent <= 3 && IsHeading(text, line.First, to))
-                {
+                    // A thematic break or a heading is a block of its own, never a lazy continuation, so it leaves the items it stands
+                    // left of.
+                    lists.RemoveRange(keep, lists.Count - keep);
                     paragraph = false;
                     single = true;
                 }
@@ -122,8 +124,8 @@ internal static class MarkdownCode
                     paragraph = true;
                     if (indent <= 3 && ListItem(text, line.First, line.FirstColumn, to) is (int content, int item))
                     {
-                        while (lists.Count > 0 && line.FirstColumn < lists.Peek()) lists.Pop();
-                        lists.Push(content);
+                        lists.RemoveRange(keep, lists.Count - keep);
+                        lists.Add(content);
                         block = true;
 
                         // An item whose content opens with a fence, such as "1. ```sh", holds that fence.
