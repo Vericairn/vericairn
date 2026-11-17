@@ -279,6 +279,9 @@ public sealed class InstructionFileChecksTests
             [("**Never pass --dangerously-skip-permissions.**", null)],
             [("Rules for every session:", null), ("Never pass --yolo.", null)],
             [("## Launching", null), ("Never pass --yolo.", null)],
+            [("   ### Launching", null), ("Never pass --yolo.", null)],
+            [("#ops runs every agent session unattended, and", null), ("No approval prompts, since every session starts with --dangerously-skip-permissions.", Approval)],
+            [("#400 changed how agents start, so there are", null), ("No prompts, as every session starts with --yolo.", Approval)],
             [("> Launch with the defaults.", null), (">", null), ("> Never pass --yolo.", null)],
         ];
 

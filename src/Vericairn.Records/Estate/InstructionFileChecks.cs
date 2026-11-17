@@ -432,17 +432,29 @@ internal static class InstructionFileChecks
         return char.IsAsciiLetterUpper(text[after]) || (text[mark] is ':' or ';' && char.IsAsciiLetter(text[after]));
     }
 
-    // Whether the line before ends a sentence, so that the next line may open one: it is blank, it is a heading, or it ends, past any
-    // closing characters, with a sentence or clause mark.
+    // Whether the line before ends a sentence, so that the next line may open one: it is blank, it is an ATX heading, or it ends, past
+    // any closing characters, with a sentence or clause mark.
     private static bool EndsSentence(string text, int start, int end)
     {
         int first = start;
         while (first < end && (char.IsWhiteSpace(text[first]) || text[first] == '>')) first++;
-        if (first >= end || text[first] == '#') return true;
+        if (first >= end || IsHeading(text, start, first, end)) return true;
         int last = end - 1;
         while (last > first && char.IsWhiteSpace(text[last])) last--;
         while (last > first && IsClosing(text[last])) last--;
         return text[last] is '.' or '!' or '?' or ':' or ';' || IsClosing(text[last]);
+    }
+
+    // An ATX heading: at most three spaces after the line's start or its quote markers, then one to six # and a space, a tab or the
+    // line's end. "#ops" or "#400" opening a wrapped line is no heading.
+    private static bool IsHeading(string text, int start, int first, int end)
+    {
+        int indent = first;
+        while (indent > start && text[indent - 1] == ' ') indent--;
+        if (first - indent > 3 || (indent > start && text[indent - 1] != '>')) return false;
+        int hashes = 0;
+        while (first + hashes < end && text[first + hashes] == '#') hashes++;
+        return hashes is >= 1 and <= 6 && (first + hashes == end || text[first + hashes] is ' ' or '\t' or '\r');
     }
 
     private static int[] LineStarts(string text)
