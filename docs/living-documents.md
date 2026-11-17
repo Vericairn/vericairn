@@ -92,8 +92,10 @@ From 0.9.4 (FIX-138), `links-resolve` passes over a link written inside code: a
 fenced code block, an indented code block or an inline code span, as Markdown reads
 them at the top level, in list items and in block quotes. Such a link is an example
 of Markdown, such as an owner's `AGENTS.md` shown for an estate's root, and is never
-followed. A broken relative link outside code is still refused, and each finding
-keeps the line and column it had before 0.9.4. Before 0.9.4 every link in the text
+followed. A fence ends with the quote or list item it opened in, and an inline span
+ends with its paragraph, heading or list item. Where the reading is uncertain, the
+link is checked. A broken relative link outside code is still refused, and each
+finding keeps the line and column it had before 0.9.4. Before 0.9.4 every link in the text
 was checked, so an example's link that resolved to nothing refused the clearance.
 
 ```text

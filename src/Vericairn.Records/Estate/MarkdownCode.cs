@@ -7,7 +7,7 @@ namespace Vericairn.Records.Estate;
 /// From 0.9.4 (FIX-138), which characters of a Markdown text are code, as CommonMark reads them: fenced code blocks, indented code
 /// blocks and inline code spans, at the top level, in list items and in block quotes. A link written inside code is shown, never
 /// followed, so the links-resolve check passes over it. The text itself is never changed, so every position outside code keeps its
-/// line and column.
+/// line and column. Where the reading is uncertain it errs toward prose, so a link is checked rather than hidden.
 /// </summary>
 internal static class MarkdownCode
 {
@@ -16,99 +16,174 @@ internal static class MarkdownCode
     {
         ArgumentNullException.ThrowIfNull(text);
         var code = new bool[text.Length];
-        MarkBlocks(text, code);
-        MarkSpans(text, code);
+        // A line feed after which an inline span cannot continue, because a new block starts on the next line.
+        var barrier = new bool[text.Length];
+        MarkBlocks(text, code, barrier);
+        MarkSpans(text, code, barrier);
         return code;
     }
 
-    private static void MarkBlocks(string text, bool[] code)
+    // One line as its containers leave it: how many block-quote markers it opens with, the column where their content starts, and its
+    // first character that is not a space or tab, with that character's column. Columns count a tab to the next multiple of four.
+    private readonly record struct Line(int Depth, int ContentColumn, int First, int FirstColumn, bool Blank);
+
+    private static void MarkBlocks(string text, bool[] code, bool[] barrier)
     {
         // The content column of each open list item, innermost last.
         var lists = new Stack<int>();
+        // An open fence: its marker, its length, and the quote depth and content column of the container it opened in.
         char fence = '\0';
-        int fenceLength = 0, fenceIndent = 0;
+        int fenceLength = 0, fenceDepth = 0, fenceBase = 0;
         bool paragraph = false, blank = true;
+        int previousDepth = 0;
         int start = 0;
         while (start <= text.Length)
         {
             int end = text.IndexOf('\n', start);
             if (end < 0) end = text.Length;
-            int length = end - start;
-            if (length > 0 && text[end - 1] == '\r') length--;
+            int to = end > start && text[end - 1] == '\r' ? end - 1 : end;
 
-            // A block quote's markers are a container, as a list item's indentation is; what follows them is read as a line.
-            int content = start;
-            while (true)
+            if (fenceLength > 0)
             {
-                int spaces = 0;
-                while (spaces < 3 && content + spaces < start + length && text[content + spaces] == ' ') spaces++;
-                if (content + spaces < start + length && text[content + spaces] == '>')
+                // Inside a fence only the markers of the fence's own containers are read, so an example's own "> ```" stays code. The
+                // fence ends with its container: a quote with fewer markers, or a line left of the list item's content.
+                Line inside = Read(text, start, to, fenceDepth);
+                if (inside.Depth == fenceDepth && (inside.Blank || inside.FirstColumn >= fenceBase))
                 {
-                    content += spaces + 1;
-                    if (content < start + length && text[content] == ' ') content++;
+                    Mark(code, start, end);
+                    int run = Run(text, inside.First, to, fence);
+                    if (inside.FirstColumn - fenceBase <= 3 && run >= fenceLength && IsBlank(text, inside.First + run, to)) fenceLength = 0;
+                    paragraph = false;
+                    blank = false;
+                    previousDepth = inside.Depth;
+                    start = end + 1;
                     continue;
                 }
 
-                break;
+                fenceLength = 0;
+                Barrier(barrier, start);
             }
 
-            (int indent, int first) = Indentation(text, content, start + length);
-            bool isBlank = first >= start + length;
+            Line line = Read(text, start, to, int.MaxValue);
+            bool block = line.Depth != previousDepth, single = false;
             int listColumn = lists.Count == 0 ? 0 : lists.Peek();
-            if (fenceLength > 0)
-            {
-                Mark(code, start, end);
-                int run = Run(text, first, start + length, fence);
-                if (indent - fenceIndent <= 3 && run >= fenceLength && IsBlank(text, first + run, start + length)) fenceLength = 0;
-                paragraph = false;
-                blank = false;
-            }
-            else if (isBlank)
+            int baseColumn = Math.Max(listColumn, line.ContentColumn);
+            int indent = line.FirstColumn - baseColumn;
+            if (line.Blank)
             {
                 paragraph = false;
                 blank = true;
+                block = true;
             }
-            else if (indent - listColumn <= 3 && first < start + length && text[first] is '`' or '~' && Run(text, first, start + length, text[first]) is >= 3 and int opening
-                && (text[first] == '~' || text.AsSpan(first + opening, start + length - first - opening).IndexOf('`') < 0))
+            else if (indent <= 3 && text[line.First] is '`' or '~' && Run(text, line.First, to, text[line.First]) is >= 3 and int opening
+                && (text[line.First] == '~' || text.AsSpan(line.First + opening, to - line.First - opening).IndexOf('`') < 0))
             {
-                // A fence opens, even where it interrupts a paragraph; an unclosed one runs to the end of the text.
-                fence = text[first];
+                // A fence opens, even where it interrupts a paragraph; one never closed runs to the end of its container.
+                fence = text[line.First];
                 fenceLength = opening;
-                fenceIndent = indent;
+                fenceDepth = line.Depth;
+                fenceBase = baseColumn;
                 Mark(code, start, end);
                 paragraph = false;
                 blank = false;
+                block = true;
             }
-            else if (indent - listColumn >= 4 && !paragraph)
+            else if (indent >= 4 && !paragraph)
             {
                 // An indented code block never interrupts a paragraph, and inside a list item it is indented past the item's content.
                 Mark(code, start, end);
                 blank = false;
+                block = true;
             }
             else
             {
                 if (blank || !paragraph)
                 {
-                    while (lists.Count > 0 && indent < lists.Peek()) lists.Pop();
+                    while (lists.Count > 0 && line.FirstColumn < lists.Peek()) lists.Pop();
                 }
 
-                if (ListItem(text, first, start + length) is int marker)
+                if (indent <= 3 && paragraph && IsSetextUnderline(text, line.First, to))
                 {
-                    while (lists.Count > 0 && indent < lists.Peek()) lists.Pop();
-                    lists.Push(indent + marker);
+                    paragraph = false;
+                    single = true;
+                }
+                else if (indent <= 3 && IsThematicBreak(text, line.First, to))
+                {
+                    paragraph = false;
+                    single = true;
+                }
+                else if (indent <= 3 && IsHeading(text, line.First, to))
+                {
+                    paragraph = false;
+                    single = true;
+                }
+                else
+                {
+                    paragraph = true;
+                    if (indent <= 3 && ListItem(text, line.First, line.FirstColumn, to) is (int content, int item))
+                    {
+                        while (lists.Count > 0 && line.FirstColumn < lists.Peek()) lists.Pop();
+                        lists.Push(content);
+                        block = true;
+
+                        // An item whose content opens with a fence, such as "1. ```sh", holds that fence.
+                        if (item < to && text[item] is '`' or '~' && Run(text, item, to, text[item]) is >= 3 and int run
+                            && (text[item] == '~' || text.AsSpan(item + run, to - item - run).IndexOf('`') < 0))
+                        {
+                            fence = text[item];
+                            fenceLength = run;
+                            fenceDepth = line.Depth;
+                            fenceBase = content;
+                            Mark(code, start, end);
+                            paragraph = false;
+                        }
+                    }
                 }
 
-                paragraph = !IsHeading(text, first, start + length);
                 blank = false;
             }
 
+            if (block || single) Barrier(barrier, start);
+            if (single && end < text.Length) barrier[end] = true;
+            previousDepth = line.Depth;
             start = end + 1;
         }
     }
 
-    // Inline code: a run of backticks opens a span that the next run of exactly as many closes, within one paragraph and outside code
-    // blocks. A backslash before a backtick outside a span makes it literal. A run with no closing run is literal text.
-    private static void MarkSpans(string text, bool[] code)
+    // Reads a line's block-quote markers, at most the given number, then its first other character. A tab after a marker counts one
+    // column as the marker's space; the rest of the tab is indentation of the quote's content.
+    private static Line Read(string text, int start, int to, int markers)
+    {
+        int at = start, column = 0, depth = 0, contentColumn = 0;
+        while (depth < markers)
+        {
+            int probe = at, probeColumn = column, spaces = 0;
+            while (spaces < 3 && probe < to && text[probe] == ' ') { probe++; probeColumn++; spaces++; }
+            if (probe >= to || text[probe] != '>') break;
+            probe++;
+            probeColumn++;
+            depth++;
+            if (probe < to && text[probe] == ' ') { probe++; probeColumn++; contentColumn = probeColumn; }
+            else if (probe < to && text[probe] == '\t') contentColumn = probeColumn + 1;
+            else contentColumn = probeColumn;
+            at = probe;
+            column = probeColumn;
+        }
+
+        int first = at, firstColumn = column;
+        while (first < to && text[first] is ' ' or '\t')
+        {
+            firstColumn = text[first] == '\t' ? firstColumn + 4 - (firstColumn % 4) : firstColumn + 1;
+            first++;
+        }
+
+        return new Line(depth, contentColumn, first, Math.Max(firstColumn, contentColumn), first >= to);
+    }
+
+    // Inline code: a run of backticks opens a span that the next run of exactly as many closes, within one block and outside code
+    // blocks. A backslash before punctuation makes that character literal, an escaped backslash included, and an autolink is read
+    // whole, so neither a backtick it holds nor an escaped one opens a span. A run with no closing run is literal text.
+    private static void MarkSpans(string text, bool[] code, bool[] barrier)
     {
         int i = 0;
         while (i < text.Length)
@@ -119,9 +194,15 @@ internal static class MarkdownCode
                 continue;
             }
 
-            if (text[i] == '\\' && i + 1 < text.Length && text[i + 1] == '`' && !code[i + 1])
+            if (text[i] == '\\' && i + 1 < text.Length && !code[i + 1] && IsAsciiPunctuation(text[i + 1]))
             {
                 i += 2;
+                continue;
+            }
+
+            if (text[i] == '<' && Autolink(text, code, i) is int after)
+            {
+                i = after;
                 continue;
             }
 
@@ -136,7 +217,7 @@ internal static class MarkdownCode
             int j = i + open;
             while (j < text.Length && !code[j])
             {
-                if (text[j] == '\n' && IsBlankLine(text, j + 1))
+                if (text[j] == '\n' && (barrier[j] || IsBlankLine(text, j + 1)))
                 {
                     break;
                 }
@@ -168,6 +249,24 @@ internal static class MarkdownCode
         }
     }
 
+    // An autolink, <scheme:target> or <name@domain>, with no space, line break or angle bracket inside; the position after it, or null.
+    private static int? Autolink(string text, bool[] code, int at)
+    {
+        int end = at + 1;
+        while (end < text.Length && !code[end] && text[end] is not ('>' or '<' or ' ' or '\t' or '\r' or '\n')) end++;
+        if (end >= text.Length || code[end] || text[end] != '>' || end == at + 1) return null;
+        ReadOnlySpan<char> inside = text.AsSpan(at + 1, end - at - 1);
+        int colon = inside.IndexOf(':');
+        bool uri = colon is >= 2 and <= 32 && char.IsAsciiLetter(inside[0]) && !inside[..colon].ContainsAnyExcept(Scheme);
+        int sign = inside.IndexOf('@');
+        bool email = sign > 0 && sign < inside.Length - 1 && inside[(sign + 1)..].IndexOf('.') > 0;
+        return uri || email ? end + 1 : null;
+    }
+
+    private static readonly System.Buffers.SearchValues<char> Scheme = System.Buffers.SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+.-");
+
+    private static bool IsAsciiPunctuation(char c) => c is (>= '!' and <= '/') or (>= ':' and <= '@') or (>= '[' and <= '`') or (>= '{' and <= '~');
+
     private static int SpanRun(string text, bool[] code, int at)
     {
         int run = 0;
@@ -175,17 +274,9 @@ internal static class MarkdownCode
         return run;
     }
 
-    // The width of a line's leading whitespace, a tab advancing to the next multiple of four, and where its first other character is.
-    private static (int Indent, int First) Indentation(string text, int from, int to)
+    private static void Barrier(bool[] barrier, int lineStart)
     {
-        int width = 0, at = from;
-        while (at < to && text[at] is ' ' or '\t')
-        {
-            width = text[at] == '\t' ? width + 4 - (width % 4) : width + 1;
-            at++;
-        }
-
-        return (width, at);
+        if (lineStart > 0) barrier[lineStart - 1] = true;
     }
 
     private static int Run(string text, int from, int to, char marker)
@@ -215,9 +306,10 @@ internal static class MarkdownCode
         return true;
     }
 
-    // A list item's marker and the spaces after it, whose width is where the item's content starts past its indentation: a bullet or
-    // up to nine digits with a period or parenthesis, then one to four spaces, or one when more follow or the line ends there.
-    private static int? ListItem(string text, int first, int to)
+    // A list item's marker and the whitespace after it, giving the column where the item's content starts, and where its first character
+    // is: a bullet or up to nine digits with a period or parenthesis, then one to four columns of spaces or tabs, or one column when there
+    // are more or the line ends.
+    private static (int Column, int First)? ListItem(string text, int first, int firstColumn, int to)
     {
         int at = first;
         if (at < to && text[at] is '-' or '*' or '+')
@@ -232,16 +324,48 @@ internal static class MarkdownCode
             at++;
         }
 
-        if (at == to) return at - first + 1;
-        int spaces = Run(text, at, to, ' ');
-        if (spaces == 0) return null;
-        return at - first + (spaces > 4 || at + spaces == to ? 1 : spaces);
+        int markerEnd = firstColumn + (at - first);
+        if (at == to) return (markerEnd + 1, to);
+        if (text[at] is not (' ' or '\t')) return null;
+        int column = markerEnd;
+        while (at < to && text[at] is ' ' or '\t')
+        {
+            column = text[at] == '\t' ? column + 4 - (column % 4) : column + 1;
+            at++;
+        }
+
+        int width = column - markerEnd;
+        return at == to || width > 4 ? (markerEnd + 1, to) : (column, at);
     }
 
     private static bool IsHeading(string text, int first, int to)
     {
         int hashes = Run(text, first, to, '#');
         return hashes is >= 1 and <= 6 && (first + hashes == to || text[first + hashes] is ' ' or '\t');
+    }
+
+    // Three or more of one of *, - or _, with only spaces or tabs between them.
+    private static bool IsThematicBreak(string text, int first, int to)
+    {
+        char marker = text[first];
+        if (marker is not ('*' or '-' or '_')) return false;
+        int count = 0;
+        for (int at = first; at < to; at++)
+        {
+            if (text[at] == marker) count++;
+            else if (text[at] is not (' ' or '\t')) return false;
+        }
+
+        return count >= 3;
+    }
+
+    // A run of = or of - with only trailing spaces, under a paragraph line.
+    private static bool IsSetextUnderline(string text, int first, int to)
+    {
+        char marker = text[first];
+        if (marker is not ('=' or '-')) return false;
+        int run = Run(text, first, to, marker);
+        return IsBlank(text, first + run, to);
     }
 
     private static void Mark(bool[] code, int from, int to)

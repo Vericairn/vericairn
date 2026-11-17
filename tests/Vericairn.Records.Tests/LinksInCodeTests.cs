@@ -95,10 +95,37 @@ public sealed class LinksInCodeTests
     [InlineData("1. Item\n\n   [a](x)\n", false)]
     [InlineData("A `span\nacross lines [a](x)` here.\n", true)]
     [InlineData("A `span\n\nbroken by a blank line [a](x)` here.\n", false)]
+    [InlineData("> ```\n> [a](x)\n> ```\n", true)]
+    [InlineData("- item\n\n  ```\n  [a](x)\n  ```\n", true)]
+    [InlineData("1. ```sh\n   [a](x)\n   ```\n", true)]
+    [InlineData(">\t\t[a](x)\n", true)]
+    [InlineData("- a `b\n  [a](x)` c\n", true)]
     public void TheCodeMaskFollowsTheMarkdownBlocksAndSpans(string text, bool coded)
     {
         int index = text.LastIndexOf("](", StringComparison.Ordinal);
         Assert.Equal(coded, MarkdownCode.Mask(text)[index]);
+    }
+
+    // The shapes the Reviewer's review of pull request 400 found the mask hiding a real link in, each checked against CommonMark: a span
+    // across list items, a heading, a setext underline or a thematic break; a tab after a list marker or a quote marker; a fence left
+    // open when its quote or list item ends; a quote marker read inside a top-level fence; an escaped backslash before a backtick; and a
+    // backtick inside an autolink. In each the link is prose.
+    [Theory]
+    [InlineData("- a `b\n- [real](missing.md) `c\n")]
+    [InlineData("# Title `a\n[real](missing.md) `b\n")]
+    [InlineData("Title `a\n===\n[real](missing.md) `b\n")]
+    [InlineData("Text `a\n***\n[real](missing.md) `b\n")]
+    [InlineData("-\tItem\n\n    [real](missing.md)\n")]
+    [InlineData(">\t[real](missing.md)\n")]
+    [InlineData("> ```\n> code\n\n[real](missing.md)\n")]
+    [InlineData("- item\n\n  ```\n  code\n\n[real](missing.md)\n")]
+    [InlineData("```\n> ```\n[example](example.md)\n```\n[real](missing.md)\n")]
+    [InlineData("\\\\`code` and [real](missing.md) and `x`\n")]
+    [InlineData("<https://example.invalid/a`b> and [real](missing.md) and `x`\n")]
+    public void ALinkTheReviewFoundHiddenIsProse(string text)
+    {
+        int index = text.IndexOf("](missing.md)", StringComparison.Ordinal);
+        Assert.False(MarkdownCode.Mask(text)[index], "The link is read as code.");
     }
 
     private static (EstateModel Model, RecordEnvelope Declaration) Declare(TestEstate estate)
