@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
@@ -103,6 +105,120 @@ public sealed class InstructionFileChecksTests
     }
 
     [Fact]
+    public void TheFormsTheReviewFoundAreReportedAndProseThatForbidsIsNot()
+    {
+        string next = Value(), dbPass = Value(), pwd = Value(), suffixed = Value(), spaced = Value(), letters = Letters(), basic = Convert.ToBase64String(Encoding.UTF8.GetBytes("deploy:" + Value()));
+        string dollar = Mixed(), percent = Value(), angle = Value(), square = Value(), round = Value(), block = Value();
+        (string Line, string? Code)[][] groups =
+        [
+            // Hooks: the generic Stop and Notification events in a one-line block, a hooks key after a quote or list marker, a key and its
+            // colon on separate lines, a TOML dotted key and another event's name.
+            [("""{"Notification": [{"command": "./notify.sh"}]}""", Hook)],
+            [("""{"Stop": [{"command": "./after.sh"}]}""", Hook)],
+            [("> hooks:", Hook)],
+            [("1. hooks:", Hook)],
+            [("\"hooks\"", Hook), (": {}", null)],
+            [("hooks.PreToolUse = []", Hook)],
+            [("BeforeToolSelection: ./select.sh", Hook)],
+
+            // Approvals: a default mode that accepts edits, allow lists whose items follow on the next lines, flags with their values
+            // after a space, a launch flag that never asks, and keys that accept or trust on their own.
+            [("""{"permissions": {"defaultMode": "acceptEdits"}}""", Approval)],
+            [("\"allow\":", Approval), ("[", null), ("  \"Bash(*)\"", null), ("]", null)],
+            [("allow:", Approval), ("  - Bash(*)", null)],
+            [("Launch it with --allowedTools Bash.", Approval)],
+            [("Launch it with --allowed-tools \"Bash Edit\".", Approval)],
+            [("Launch it with --ask-for-approval never.", Approval)],
+            [("Launch it with -a never.", Approval)],
+            [("""{"autoAccept": true}""", Approval)],
+            [("""{"trust": true}""", Approval)],
+            [("Launch it with --allow-tool shell.", Approval)],
+
+            // Secrets: a value on the next line, after a block indicator or as a continuation, keys that only contain a secret's name or
+            // write it with a space, a password of letters alone, a basic credential, and real values that start as a placeholder might.
+            [("password: |", null), ("  " + block, Secret)],
+            [("api_key:", null), ("  " + next, Secret)],
+            [("DB_PASS=" + dbPass, Secret)],
+            [("pwd: " + pwd, Secret)],
+            [("GITHUB_TOKEN_VALUE=" + suffixed, Secret)],
+            [("API key: " + spaced, Secret)],
+            [("password: " + letters, Secret)],
+            [("Authorization: Basic " + basic, Secret)],
+            [("password: $" + dollar, Secret)],
+            [("password: %" + percent, Secret)],
+            [("password: <" + angle, Secret)],
+            [("password: [" + square + "]", Secret)],
+            [("password: (" + round + ")", Secret)],
+            [("credentials:", null), ("  token: " + Value(), Secret)],
+
+            // Not reported: prose that forbids or describes, a version, a word-built identifier, references and placeholders.
+            [("Never pass --dangerously-skip-permissions.", null)],
+            [("- Do not set core.hooksPath in this estate.", null)],
+            [("Hooks: none are used in this estate.", null)],
+            [("The allowed-tools: key is forbidden here.", null)],
+            [("The SessionStart: event is not used.", null)],
+            [("token: v1.2.3-beta4", null)],
+            [("See VericairnRecordsEstateInstructionFileChecks2026Tests for the rules.", null)],
+            [("password: $DEPLOY_PASSWORD", null)],
+            [("password: %DEPLOY_PASSWORD%", null)],
+            [("password: [your password]", null)],
+            [("password: required", null)],
+            [("password: stored in the deployment vault", null)],
+        ];
+
+        var lines = new List<string>();
+        var expected = new List<string>();
+        foreach ((string Line, string? Code)[] group in groups)
+        {
+            foreach ((string line, string? code) in group)
+            {
+                lines.Add(line);
+                if (code is not null) expected.Add($"{code} AGENTS.md:{lines.Count}");
+            }
+
+            lines.Add(string.Empty);
+        }
+
+        var findings = new FindingList();
+        InstructionFileChecks.Scan(string.Join("\n", lines), "AGENTS.md", findings);
+        Assert.Equal(expected.Order(StringComparer.Ordinal), findings.Select(f => $"{f.Code} {f.Location}").Order(StringComparer.Ordinal));
+        Assert.False(Echoes(findings, next, dbPass, pwd, suffixed, spaced, letters, basic, dollar, percent, angle, square, round, block), "A finding echoes a value it found.");
+    }
+
+    [Theory]
+    [InlineData("a-")]
+    [InlineData("a.")]
+    [InlineData("1_")]
+    [InlineData("pwd:")]
+    [InlineData("password:<")]
+    [InlineData("\"")]
+    [InlineData("> ")]
+    [InlineData("- ")]
+    [InlineData("1. ")]
+    [InlineData("- --yolo ")]
+    [InlineData("Basic ")]
+    [InlineData("https://a:")]
+    public void ALineAtTheSizeLimitIsReadInLinearTime(string unit)
+    {
+        // The ceiling only detects a stall: a pattern that backtracks takes hours on such a line.
+        string text = string.Concat(Enumerable.Repeat(unit, (int)((EstateLayout.MaxFileBytes - 1) / unit.Length))) + "\n";
+        var watch = Stopwatch.StartNew();
+        InstructionFileChecks.Scan(text, "AGENTS.md", new FindingList());
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"Reading a one-line file of {text.Length:N0} characters took {watch.Elapsed}.");
+    }
+
+    [Fact]
+    public void AnInstructionFileAtTheSizeLimitDoesNotStallTheEstateCheck()
+    {
+        using var estate = new TestEstate();
+        File.WriteAllText(Path.Combine(estate.Root, "AGENTS.md"), string.Concat(Enumerable.Repeat("a-", (int)((EstateLayout.MaxFileBytes - 1) / 2))) + "\n");
+        var watch = Stopwatch.StartNew();
+        FindingList findings = EstateChecks.Run(estate.Load());
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"The estate check took {watch.Elapsed}.");
+        Assert.DoesNotContain(findings, f => f.Code is "layout.size" or "layout.unexpected");
+    }
+
+    [Fact]
     public void ACredentialInAKnownFormatStaysAnErrorWithoutASecondFinding()
     {
         using var estate = new TestEstate();
@@ -126,7 +242,8 @@ public sealed class InstructionFileChecksTests
         {
             // The repository's own file carries a hook; a directory of a pointer file's name is no instruction file.
             File.WriteAllText(Path.Combine(clone, "AGENTS.md"), "# Widget\n\nhooks:\n");
-            Directory.CreateDirectory(Path.Combine(clone, EstateLayout.OwnerInstructionFiles.First(name => name != "AGENTS.md")));
+            string pointer = EstateLayout.OwnerInstructionFiles.First(name => name != "AGENTS.md");
+            Directory.CreateDirectory(Path.Combine(clone, pointer));
             Assert.DoesNotContain(EstateChecks.Run(estate.Load()), f => f.Code == "instructions.repository");
 
             RepositoryClones.Register(estate.Estate.Id, repository.Id, clone);
@@ -144,6 +261,28 @@ public sealed class InstructionFileChecksTests
             RecordEnvelope revised = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Widget","role":"The widget's source.","location":{"github":"Example/widget"},"visibility":"private"}""", supersedes: repository.Id);
             Assert.NotEqual(repository.Id, revised.Id);
             Assert.Equal($"resource:{repository.Id}/AGENTS.md", Assert.Single(EstateChecks.Run(estate.Load()), f => f.Code == "instructions.repository").Location);
+
+            // A file of an instruction file's name in another case is the one a case-insensitive volume opens under that name, and a link
+            // of that name is reported wherever it leads, a directory outside the clone included.
+            File.Delete(Path.Combine(clone, "AGENTS.md"));
+            File.WriteAllText(Path.Combine(clone, "agents.md"), "# Widget\n");
+            Directory.Delete(Path.Combine(clone, pointer));
+            string outside = Path.Combine(clone + "-outside");
+            Directory.CreateDirectory(outside);
+            bool linked;
+            try
+            {
+                Directory.CreateSymbolicLink(Path.Combine(clone, pointer), outside);
+                linked = true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                linked = false;
+            }
+
+            string[] expected = linked ? [$"resource:{repository.Id}/agents.md", $"resource:{repository.Id}/{pointer}"] : [$"resource:{repository.Id}/agents.md"];
+            Assert.Equal(expected.Order(StringComparer.Ordinal), EstateChecks.Run(estate.Load()).Where(f => f.Code == "instructions.repository").Select(f => f.Location).Order(StringComparer.Ordinal));
+            Directory.Delete(outside);
         }
         finally
         {
@@ -154,8 +293,25 @@ public sealed class InstructionFileChecksTests
     // Twenty-four letters and digits, at least one of each.
     private static string Value() => "Q7" + Convert.ToHexString(RandomNumberGenerator.GetBytes(11));
 
-    // Forty-odd token characters mixing upper and lower case and digits, with no slash.
-    private static string LongToken() => "Aa1" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(30)).Replace('/', '_').TrimEnd('=');
+    // Forty-two random token characters that cycle through upper case, lower case and digits, as a random token does.
+    private static string LongToken()
+    {
+        const string Upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ", Lower = "abcdefghijklmnopqrstuvwxyz", Digits = "0123456789";
+        var token = new StringBuilder();
+        for (int i = 0; i < 42; i++)
+        {
+            string from = (i % 3) switch { 0 => Upper, 1 => Lower, _ => Digits };
+            token.Append(from[RandomNumberGenerator.GetInt32(from.Length)]);
+        }
+
+        return token.ToString();
+    }
+
+    // Twenty random lower-case letters, a password with no digit.
+    private static string Letters() => string.Concat(Enumerable.Range(0, 20).Select(_ => (char)('a' + RandomNumberGenerator.GetInt32(26))));
+
+    // A value mixing lower case and digits, which no variable reference is.
+    private static string Mixed() => "x9" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(11));
 
     private static bool Echoes(FindingList findings, params string[] values) =>
         findings.Any(f => values.Any(v => f.ToString().Contains(v, StringComparison.Ordinal)));
