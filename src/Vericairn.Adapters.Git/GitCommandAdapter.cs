@@ -136,7 +136,9 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         if (Git(hardening, path, out string layout, [.. GitHardening.LayoutScan]) != 0) return null;
         int carried = Git(hardening, path, out string settings, [.. GitHardening.CarriedScan]);
         if (carried is not (0 or 1) || hardening.WorkingTree(path, layout, head, carried == 0 ? settings : string.Empty) is not { } tree) return null;
-        return Git(hardening, path, tree, out string status, out _, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty") == 0 ? status : null;
+        // Git skips a directory it cannot open with a warning and still succeeds; its contents were not read, so neither is the tree.
+        return Git(hardening, path, tree, out string status, out string warnings, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty") == 0
+            && !warnings.Contains("could not open directory", StringComparison.Ordinal) ? status : null;
     }
 
     private int Git(GitHardening hardening, string path, out string output, params string[] arguments) => Git(hardening, path, null, out output, out _, arguments);

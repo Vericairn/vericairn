@@ -54,6 +54,7 @@ public sealed class RepositoryProgramIsolationTests
         using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
         probe.Git("config", "core.filemode", "false");
         probe.Git("config", "core.eol", "crlf x");
+        probe.Git("config", "core.sparseCheckout", "false");
         // The repository's own exclude file still applies, from the copy in the git directory Vericairn writes.
         File.WriteAllText(Path.Combine(probe.Repository, ".git", "info", "exclude"), "ignored.txt\n");
         File.WriteAllText(Path.Combine(probe.Repository, "ignored.txt"), "ignored\n");
@@ -82,6 +83,7 @@ public sealed class RepositoryProgramIsolationTests
         Assert.EndsWith(Path.Combine("repository", ".git", "index"), index, StringComparison.Ordinal);
         Assert.Contains("core.filemode=false", arguments);
         Assert.DoesNotContain(arguments, a => a.StartsWith("core.eol", StringComparison.Ordinal));
+        Assert.Contains("core.sparsecheckout=false", arguments);
     }
 
     [Fact]
@@ -141,6 +143,83 @@ public sealed class RepositoryProgramIsolationTests
         Assert.DoesNotContain(probe.Root, refused.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("sparse-cone", "inside")]
+    [InlineData("sparse-cone", "outside")]
+    [InlineData("sparse-no-cone", "inside")]
+    [InlineData("sparse-no-cone", "outside")]
+    [InlineData("sparse-index", "inside")]
+    [InlineData("sparse-index", "outside")]
+    [InlineData("linked-worktree", "inside")]
+    [InlineData("split-index", "inside")]
+    [InlineData("sha256", "inside")]
+    public void TheWorkingTreeReadSeesWhatGitSeesOnEveryLayout(string layout, string change)
+    {
+        using var scratch = new ScratchRepository(layout == "sha256");
+        string repository = scratch.Repository;
+        switch (layout)
+        {
+            case "sparse-cone":
+                ScratchRepository.Git(repository, "sparse-checkout", "set", "--cone", "inside");
+                break;
+            case "sparse-no-cone":
+                ScratchRepository.Git(repository, "sparse-checkout", "set", "--no-cone", "/inside/");
+                break;
+            case "sparse-index":
+                ScratchRepository.Git(repository, "sparse-checkout", "set", "--cone", "--sparse-index", "inside");
+                break;
+            case "linked-worktree":
+                repository = Path.Combine(scratch.Root, "linked");
+                ScratchRepository.Git(scratch.Repository, "worktree", "add", "-q", repository);
+                break;
+            case "split-index":
+                ScratchRepository.Git(repository, "update-index", "--split-index");
+                break;
+        }
+
+        // A changed file inside the patterns, or one present again outside them, where git's sparse checkout compares it.
+        string changed = Path.Combine(repository, change, change + ".txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(changed)!);
+        File.WriteAllText(changed, "changed\n");
+        File.WriteAllText(Path.Combine(repository, "untracked.txt"), "untracked\n");
+
+        RepositoryObservation observation = new GitCommandAdapter().Inspect(repository);
+        (int modified, int untracked) = ScratchRepository.Status(repository);
+        Assert.Equal((1, 1), (modified, untracked));
+        Assert.Equal((modified, untracked), (observation.Modified, observation.Untracked));
+        Assert.False(new GitCommandAdapter().InspectRelease(repository)?.Clean ?? true);
+    }
+
+    [Fact]
+    public void AWorkingTreeDirectoryGitCannotOpenIsRefusedNotObservedAsClean()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Directory permission bits are a Unix test of git's unreadable-directory warning.");
+            return;
+        }
+
+        using var scratch = new ScratchRepository(false);
+        string closed = Path.Combine(scratch.Repository, "closed");
+        Directory.CreateDirectory(closed);
+        File.WriteAllText(Path.Combine(closed, "inside.txt"), "untracked\n");
+        File.SetUnixFileMode(closed, UnixFileMode.None);
+        try
+        {
+            bool readable;
+            try { readable = Directory.EnumerateFileSystemEntries(closed).Any(); }
+            catch (UnauthorizedAccessException) { readable = false; }
+            Assert.SkipWhen(readable, "This account reads directories regardless of their permission bits.");
+            ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => new GitCommandAdapter().Inspect(scratch.Repository));
+            Assert.Contains("could not read the working tree", refused.Message, StringComparison.Ordinal);
+            Assert.Null(new GitCommandAdapter().InspectRelease(scratch.Repository));
+        }
+        finally
+        {
+            File.SetUnixFileMode(closed, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
     [Fact]
     public void TheSecretScannerAndItsReadabilityCheckRunHardened()
     {
@@ -167,6 +246,64 @@ public sealed class RepositoryProgramIsolationTests
         Assert.Contains("log.showSignature=false", gitArguments);
         Assert.Contains("protocol.allow=never", gitArguments);
         Assert.Equal("1", gitEnvironment["GIT_CONFIG_NOSYSTEM"]);
+    }
+
+    // A committed repository with an inside/ and an outside/ directory and a file at its root, for the layout tests.
+    private sealed class ScratchRepository : IDisposable
+    {
+        private static readonly string[] Identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"];
+        private static readonly string[] Sha256 = ["--object-format=sha256"];
+
+        internal ScratchRepository(bool sha256)
+        {
+            Root = Path.Combine(Path.GetTempPath(), "vericairn-layout-" + Guid.NewGuid().ToString("N"));
+            Repository = Path.Combine(Root, "repository");
+            Directory.CreateDirectory(Repository);
+            Git(Repository, ["init", "-q", "-b", "main", .. sha256 ? Sha256 : []]);
+            foreach (string name in new[] { "inside", "outside" })
+            {
+                Directory.CreateDirectory(Path.Combine(Repository, name));
+                File.WriteAllText(Path.Combine(Repository, name, name + ".txt"), name + "\n");
+            }
+
+            File.WriteAllText(Path.Combine(Repository, "root.txt"), "root\n");
+            Git(Repository, "add", ".");
+            Git(Repository, "commit", "-q", "-m", "First commit");
+        }
+
+        internal string Root { get; }
+
+        internal string Repository { get; }
+
+        // Plain git's own count, without writing the index, so the observation and git read the same index.
+        internal static (int Modified, int Untracked) Status(string directory)
+        {
+            string[] lines = Git(directory, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            return (lines.Count(l => !l.StartsWith("??", StringComparison.Ordinal)), lines.Count(l => l.StartsWith("??", StringComparison.Ordinal)));
+        }
+
+        internal static string Git(string directory, params string[] arguments)
+        {
+            var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = directory };
+            foreach (string argument in Identity.Concat(arguments)) info.ArgumentList.Add(argument);
+            info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+            ProcessResult result = BoundedProcess.Run(info, TestTiming.HangTimeout);
+            Assert.True(result is { Outcome: ProcessOutcome.Exited, ExitCode: 0 }, "git " + string.Join(' ', arguments) + ": " + result.StandardError);
+            return result.StandardOutput;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                foreach (string file in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(Root, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Best effort.
+            }
+        }
     }
 
     private static Dictionary<string, string> Configuration(Dictionary<string, string?> environment)

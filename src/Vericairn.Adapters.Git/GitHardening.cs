@@ -37,19 +37,27 @@ internal sealed class GitHardening : IDisposable
     internal static readonly ImmutableArray<string> LayoutScan = ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"];
 
     /// <summary>
-    /// Lists the settings of the repository's own configuration that a working-tree read carries: how files and names compare, none
-    /// naming a program. Git answers 1 when the repository sets none.
+    /// Lists the settings of the repository's own configuration that a working-tree read carries: how files and names compare and
+    /// whether the checkout is sparse, none naming a program. Git answers 1 when the repository sets none.
     /// </summary>
     internal static readonly ImmutableArray<string> CarriedScan =
-        ["config", "-z", "--get-regexp", @"^core\.(ignorecase|precomposeunicode|filemode|symlinks|autocrlf|eol|checkstat|trustctime)$"];
+        ["config", "-z", "--get-regexp", @"^core\.(ignorecase|precomposeunicode|filemode|symlinks|autocrlf|eol|checkstat|trustctime|sparsecheckout|sparsecheckoutcone)$"];
 
     private static readonly FrozenSet<string> CarriedNames = new[]
     {
         "core.ignorecase", "core.precomposeunicode", "core.filemode", "core.symlinks", "core.autocrlf", "core.eol", "core.checkstat", "core.trustctime",
+        "core.sparsecheckout", "core.sparsecheckoutcone",
     }.ToFrozenSet(StringComparer.Ordinal);
 
-    // The repository's exclude and attribute files are data copied into the working-tree read's git directory, within this bound.
+    // The sparse-checkout settings are carried only as plain booleans.
+    private static readonly FrozenSet<string> BooleanNames = new[] { "core.sparsecheckout", "core.sparsecheckoutcone" }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> Booleans = new[] { "true", "false", "yes", "no", "on", "off", "1", "0" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    // The repository's exclude, attribute and sparse-checkout files are data copied into the working-tree read's git directory,
+    // each read once within this bound and deadline.
     private const int MaximumInformationFile = 1024 * 1024;
+    private static readonly TimeSpan InformationDeadline = TimeSpan.FromSeconds(10);
 
     // Ambient variables that could route a process to another repository, object store, index or configuration.
     private static readonly string[] Routing =
@@ -88,12 +96,12 @@ internal sealed class GitHardening : IDisposable
 
     /// <summary>
     /// Writes a git directory inside this instance's directory for reading the repository's working tree: <paramref name="head"/> as
-    /// a detached HEAD (an unborn branch when null), the repository's objects through an alternate, copies of its exclude and
-    /// attribute files, and a configuration holding only the object format. The process that reads the working tree through it
+    /// a detached HEAD (an unborn branch when null), the repository's objects through an alternate, copies of its exclude, attribute
+    /// and sparse-checkout files, and a configuration holding only the object format. The process that reads the working tree through it
     /// never opens the repository's own configuration, so no setting read by an earlier process, or changed since, decides what it
     /// runs; it reads the repository's index where it is and carries only the plain values <paramref name="carried"/> (the output of
     /// <see cref="CarriedScan"/>) names. Null when the layout (the output of <see cref="LayoutScan"/> run in
-    /// <paramref name="start"/>) or an exclude or attribute file cannot be read safely.
+    /// <paramref name="start"/>) or one of those files cannot be read safely.
     /// </summary>
     internal GitWorkingTree? WorkingTree(string start, string layout, string? head, string carried)
     {
@@ -109,9 +117,11 @@ internal sealed class GitHardening : IDisposable
             Directory.CreateDirectory(Path.Combine(view, "objects", "info"));
             Directory.CreateDirectory(Path.Combine(view, "refs"));
             Directory.CreateDirectory(Path.Combine(view, "info"));
-            foreach (string name in new[] { "exclude", "attributes" })
+            // Where git itself reads them: exclude and attributes from the common directory, the sparse-checkout patterns from the
+            // working tree's own git directory.
+            foreach ((string directory, string name) in new[] { (common, "exclude"), (common, "attributes"), (Path.GetFullPath(lines[1]), "sparse-checkout") })
             {
-                if (!CopyInformation(Path.Combine(common, "info", name), Path.Combine(view, "info", name))) return null;
+                if (!CopyInformation(Path.Combine(directory, "info", name), Path.Combine(view, "info", name))) return null;
             }
 
             File.WriteAllText(Path.Combine(view, "HEAD"), head is null ? "ref: refs/heads/unborn\n" : head + "\n");
@@ -186,15 +196,37 @@ internal sealed class GitHardening : IDisposable
     // The hooks directory and the shared settings, each as key=value.
     private IEnumerable<string> Configuration() => Settings.Prepend("core.hooksPath=" + Hooks);
 
-    // An exclude or attribute file is data: copied only when it is a regular file within the bound. An absent or empty file is no
-    // file; a pipe or device also reports no length and is never opened.
+    // An exclude, attribute or sparse-checkout file is data, copied only from a regular file within the bound. An absent or empty
+    // file is no file; a pipe or device also reports no length and is not opened. The file is opened once and what was opened is
+    // checked again, within a deadline, since the path may have changed after it was examined.
     private static bool CopyInformation(string source, string destination)
     {
         var file = new FileInfo(source);
         if (!file.Exists) return true;
         if (file.LinkTarget is not null || (file.Attributes & FileAttributes.ReparsePoint) != 0 || file.Length > MaximumInformationFile) return false;
-        if (file.Length > 0) File.WriteAllBytes(destination, File.ReadAllBytes(source));
-        return true;
+        if (file.Length == 0) return true;
+        Task<byte[]?> reading = Task.Run(() => ReadInformation(source));
+        try
+        {
+            if (!reading.Wait(InformationDeadline) || reading.Result is not { } bytes) return false;
+            File.WriteAllBytes(destination, bytes);
+            return true;
+        }
+        catch (AggregateException)
+        {
+            return false;
+        }
+    }
+
+    // The opened file's bytes, or null when it is not a regular file (one that cannot seek) or holds more than the bound.
+    private static byte[]? ReadInformation(string source)
+    {
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.None);
+        if (!stream.CanSeek || stream.Length > MaximumInformationFile) return null;
+        byte[] buffer = new byte[MaximumInformationFile + 1];
+        int total = 0;
+        for (int read; total < buffer.Length && (read = stream.Read(buffer, total, buffer.Length - total)) > 0;) total += read;
+        return total > MaximumInformationFile ? null : buffer[..total];
     }
 
     // The carried settings whose value is a plain word; a name without a value is git's true.
@@ -205,7 +237,8 @@ internal sealed class GitHardening : IDisposable
             int split = entry.IndexOf('\n', StringComparison.Ordinal);
             string name = split < 0 ? entry : entry[..split];
             string value = split < 0 ? "true" : entry[(split + 1)..];
-            if (CarriedNames.Contains(name) && value.Length is > 0 and <= 16 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+            if (CarriedNames.Contains(name) && value.Length is > 0 and <= 16 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')
+                && (!BooleanNames.Contains(name) || Booleans.Contains(value)))
                 yield return name + "=" + value;
         }
     }
