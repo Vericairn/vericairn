@@ -11,7 +11,7 @@ namespace Vericairn.Cli.Tests;
 /// DOCS-41 (decision 01M7F2C6GB9GX7KYTK5Q30S6P7, issue 385): the living documents guide's recipe for following up every stale review
 /// after several pins, run word for word against a synthetic estate. Every command is matched against the recipe's text before it
 /// runs, and the review bodies are the recipe's named JSON blocks, so the guide and this check cannot drift apart. The test adds only
-/// the estate's directory, and --json where the recipe reads a receipt.
+/// the estate's directory, and --json to the pins and the successor reviews, whose receipts the recipe says are read with it.
 /// </summary>
 [Collection("cli")]
 public sealed partial class ReviewFollowThroughGuideTests
@@ -36,6 +36,8 @@ public sealed partial class ReviewFollowThroughGuideTests
         string section = Section();
         Dictionary<string, string> blocks = JsonBlocks(section);
         Assert.Equal(Blocks.Order(StringComparer.Ordinal), blocks.Keys.Order(StringComparer.Ordinal));
+        Assert.Contains("With `--json`, each pin prints the new pin's `id` and `hash`", section, StringComparison.Ordinal);
+        Assert.Contains("With `--json`, each review prints its receipt too, the new review's `id` and `hash`", section, StringComparison.Ordinal);
         string root = CliHarness.TempDirectory("docs41-estate");
         string scratch = CliHarness.TempDirectory("docs41-scratch");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);

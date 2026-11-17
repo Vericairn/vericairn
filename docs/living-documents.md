@@ -294,6 +294,9 @@ vericairn records new review --by <reviewer-id> --subject document-revision:<new
 vericairn records new review --by <reviewer-id> --subject document-revision:<new-setup-pin-id>:<new-setup-pin-hash> --supersedes <setup-review-id> --body setup-review.json
 ```
 
+With `--json`, each review prints its receipt too, the new review's `id` and `hash`:
+`<new-guide-review-id>` is the first one's `id`. Keep these receipts with the pins'.
+
 The outcome is the reviewer's verdict on the bytes it read, never a pass written to
 clear a warning: a review recorded without reading the revision, or with an outcome
 the reviewer did not reach, hides exactly the judgment the warning asks for. Leave a
