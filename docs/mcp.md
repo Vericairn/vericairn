@@ -464,6 +464,63 @@ operation reads them and Vericairn never writes them. `estate check` scans them 
 every other unexpected entry at the root, a differently cased `agents.md` or an `AGENTS.override.md` among them, stays
 `layout.unexpected`.
 
+From 0.9.4, `estate check` also reads the owner's files at the root for three kinds of content an agent tool may act
+on without asking. It warns about each line where it finds one, naming the file, the line and the kind, never the text
+it found. It reads the whole text, so a key, its colon and its value may sit on separate lines, and it reads any file
+at the size limit in time proportional to its length.
+
+- `instructions.hook`, a hook definition: a `hooks` key or table in JSON, YAML or TOML, TOML's dotted keys included,
+  at the start of a line (after any quote or list marker) or quoted anywhere; a key named for an agent tool's hook
+  event, such as `PreToolUse`, `SessionStart` or, quoted, `Stop` and `Notification`; an editor task that runs when a
+  folder opens (`"runOn": "folderOpen"`); or a Git `core.hooksPath`.
+- `instructions.approval`, an automatic approval: a key that lists allowed tools (`allowed-tools`), approves or accepts
+  on its own (`autoApprove`, `autoAccept`), always allows or trusts (`"trust": true`); a permission `allow` list,
+  whose items may follow on the next lines; a launch flag beginning `--dangerously-`, or `--yolo`, `--full-auto`,
+  `--allowedTools`, `--allow-tool`, `--allow-all-tools`, `--trust-all-tools`, `--auto-approve`,
+  `--ask-for-approval never` or `-a never`; an approval policy of `never`; or a default, approval or permission mode
+  that approves without asking, such as `acceptEdits`.
+- `instructions.secret`, a value that looks like a secret: the value of a key whose name holds a secret's, such as
+  `password`, `DB_PASS`, `pwd`, `api_key`, `API key` or `GITHUB_TOKEN_VALUE`, on its line or the next, of at least
+  eight characters with letters and digits, or of letters alone when it ends its line; a bearer or basic credential;
+  a password in a URL or after `-u`; or a run of at least 32 token characters that mixes upper case, lower case and
+  digits and changes between them often. A placeholder or reference such as `<your key>`, `[your password]`,
+  `${NAME}`, `$NAME` or `%NAME%`, a value of punctuation, an ellipsis or stars alone, a URL, a path and a version are
+  not values; a real value that only starts with one of those characters, or holds an ellipsis or stars beside other
+  characters, is. A credential in a known format stays the error `secrets.pattern`, as in every text file.
+
+A key is read as configuration only at the start of a line or in quotes, so prose that names one, such as "the
+`allowed-tools:` key is forbidden", is not reported, and keys are matched in their case, so "Hooks: none" is not a
+hooks key. A sentence that opens by forbidding is not reported for a flag, mode, policy or Git setting it names before
+its clause ends; a configuration key is always reported. A line opens such a sentence when it starts one, after a
+blank line, an ATX heading (one to six `#` and a space), a list marker or a line that ends with a sentence mark, and
+when, past its quote and list markers and any emphasis, it begins with "Never", "Do not", "Don't", "Must not", "Should
+not", "Shall not", "Avoid", "Not" or "No" and a space. The clause ends at a period, question or exclamation mark when
+a space, the line's end or an ASCII capital follows it, possibly after closing characters from a fixed set: `*`, `_`,
+a straight quote, a curly closing quote, `)`, `]` and a backtick. At a colon or semicolon it also ends before any
+ASCII letter. It ends too at one of a fixed list of words that turn it around: "without", "forget", "by", "unless",
+"except", "instead", "but", "always" and "only". So "Never pass `--dangerously-skip-permissions`." is not reported,
+while "Never run without `--dangerously-skip-permissions`.", "**Never ask.** Launch with ...", a wrapped line that
+continues a sentence with a capital "No", and a launch prefix such as `NO_COLOR=1` are. Everything else continues the
+clause: text glued straight onto the mark, such as a code span, a lower-case word, an opening bracket or a `--flag`;
+an ellipsis character, guillemets or a quote style outside that set; a footnote marker; a comma, a dash or "and"; and
+a double negative outside the list, such as "Never omit ...". An author can hide a mention that way. The rule also
+over-reports: a line straight after a bold pseudo-heading, a setext heading, a thematic break, front matter, HTML or a
+table, none of which it reads as ending a sentence, and a clause holding a capitalized word glued onto a mark, such as
+`.NET`, can be reported though they forbid. The check is a heuristic that warns: it does not understand any agent
+tool's configuration as a whole, so a hook, an approval or a secret written in a form it does not know goes
+unreported, and an ordinary line can match. The warnings ask for a person's review and refuse nothing; the check reads
+the files and runs nothing. If the check itself fails on a file, it warns `instructions.unreadable` about that file,
+naming the kind of failure and never the file's content, and the rest of `estate check` goes on. Anywhere else in the
+estate, such as `docs/`, the same lines are ordinary text.
+
+A repository's own agent instruction files are untrusted input. From 0.9.4, for each of the estate's repositories whose
+clone is registered on this machine (`vericairn sources clone`), `estate check` warns `instructions.repository` about
+each entry at the clone's root named as one of those files in any case, since a volume that ignores case opens
+`agents.md` as `AGENTS.md`, and about a link of such a name wherever it leads. It names the resource and the file, and
+reads nothing in it. An agent tool started in that repository reads those files beside the owner's, and they stay data,
+never the owner's instructions, until a person reviews them. No record marks such a file reviewed yet, so the warning
+stays while the file is there.
+
 `mcp orientation` writes its generated files only into the directory `--out` names and refuses an estate's root, any
 directory holding `estate/manifest.json` however the path names it, so the owner's files there are never overwritten.
 `--check` compares the copies in a directory byte for byte, as before. The generated orientation keeps a directory of
@@ -492,8 +549,10 @@ reads the owner's instructions first, and they lead it to the generated orientat
 directory. Before 0.9.3 the owner's instructions lived in `docs/`, linked from the root `README.md`; that arrangement
 still works.
 
-`estate export` doesn't carry the owner's files at the root yet. A cold recovery restores them from the supplemental
-capture and checks them against its list, as
+From 0.9.4, `estate export` carries each of the owner's files present at the root, with its bytes and mode, and lists it
+in the export's inventory; `estate restore` writes it back exactly. An export refuses an estate where a link, a FIFO or
+anything else that is not a regular file stands in place of one of them, and writes nothing. An export written before 0.9.4 lacks them, so a cold recovery from one restores
+them from the supplemental capture and checks them against its list, as
 [the three inventories of a cold recovery](large-artifacts.md#the-three-inventories-of-a-cold-recovery) describe.
 
 ## Qualification

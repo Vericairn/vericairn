@@ -309,7 +309,9 @@ Top-level `checks` apply to the whole document; `quality.checks` applies to the
 section payload. Built-in check objects use `name`: `length` with `min` and/or
 `max` bounds, `required-terms` with `terms`, `references-exist`, `links-resolve`,
 `names-version`, or `matches-generator`. Length measures text characters;
-required terms compare case-sensitive text. Version checks use selected release
+required terms compare case-sensitive text. From 0.9.4, `links-resolve` passes over
+a link inside a fenced or indented code block or an inline code span, as the
+[living documents guide](living-documents.md#when-a-declared-check-fails) describes. Version checks use selected release
 records. Other installed namespaced checks receive the payload and resolved
 sources. Unavailable checks cannot pass.
 

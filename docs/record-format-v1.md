@@ -166,6 +166,12 @@ any other; the archive entry's attributes carry the same mode for other tools. R
 inventory alone, applies it on Linux and macOS, and refuses any other value (`export.entry-mode`), so it never creates a
 link, a directory or a special file. An entry without `mode`, as every release before 0.9.3 wrote it, restores as before.
 
+From 0.9.4, an export also carries the owner's agent instruction files at the estate's root, each one present as a file of
+exactly the name the estate check allows there, with its bytes and mode, and the restore writes it back like any other
+member. The export refuses an estate where a link, a FIFO or anything else that is not a regular file stands in place of
+one of them, judged from its status without opening it, before it writes anything. An export
+written before 0.9.4 lacks them and restores as before.
+
 ## Software: resources, observations, verifications and operations
 
 A repository the estate uses is a `resource` of kind `repository`, identified by its `rootCommit`, which adoption always
@@ -218,6 +224,8 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   itself superseded, its `record.subject-stale` and `acceptance.unresolved` findings stop; a replacement that still pins
   an earlier subject revision remains flagged. Historical records still undergo structural, hash, signature and
   authority validation, so supersession never repairs an invalid pinned hash. This applies to both record formats.
+  From 0.9.4, [the living documents guide](living-documents.md#following-up-reviews-after-several-pins-094) shows how
+  each stale review of a document revision is followed up after several pins.
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
 - Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
@@ -241,3 +249,7 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   git's and GitHub's metadata: `.git`, `.gitignore`, `.gitattributes`, `.github` and, from 0.6.0, a `.mailmap`, which
   shows the history's names and addresses as one author in git's own views; it is scanned as text and travels in an
   export like `.gitattributes`.
+- From 0.9.4, `vericairn estate check` warns about a hook definition, an automatic approval or a value that looks like a
+  secret in the owner's agent instruction files at the root, naming the file, the line and the kind and never the value,
+  and about a repository's own instruction files at the root of its clone registered on this machine, as untrusted input
+  ([the MCP guide](mcp.md#owner-instructions-at-the-estate-root-093) lists what it reads).

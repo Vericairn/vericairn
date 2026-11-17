@@ -65,6 +65,11 @@ on such a document, the `document.cleared-by` refusal names the `revised` outcom
 its cause and points to `current`. The independence rule is unchanged: nothing
 relabels a self review or clears a document for it.
 
+A pin also leaves every current generic `review` of the earlier revision reading
+`record.subject-stale`. [Following up reviews after several
+pins](#following-up-reviews-after-several-pins-094) shows how a reviewer answers
+each one.
+
 ## When a declared check fails
 
 A failed declared check refuses a clearing review with `document.check-failed`,
@@ -82,6 +87,16 @@ holds nothing. Columns count characters from 1. The check's summary, which a rev
 records, names the first links that fit in it and counts the rest; the refusal's
 child findings name every one. Neither names an absolute path or quotes the
 document beyond its links.
+
+From 0.9.4 (FIX-138), `links-resolve` passes over a link written inside code: a
+fenced code block, an indented code block or an inline code span, as Markdown reads
+them at the top level, in list items and in block quotes. Such a link is an example
+of Markdown, such as an owner's `AGENTS.md` shown for an estate's root, and is never
+followed. A fence ends with the quote or list item it opened in, and an inline span
+ends with its paragraph, heading or list item. Where the reading is uncertain, the
+link is checked. A broken relative link outside code is still refused, and each
+finding keeps the line and column it had before 0.9.4. Before 0.9.4 every link in the text
+was checked, so an example's link that resolved to nothing refused the clearance.
 
 ```text
 ERROR document.check-failed records/document-review/...: A failed check refuses the clearance (links-resolve: Links in docs/guide.md that do not resolve within the repository (1): ../../other-repo/example.md at line 3, column 17, which leads outside the repository.); record needs-change, or fix the document and review it again.
@@ -211,6 +226,120 @@ Every occurrence stays reported, and history is scanned in full. A finding on th
 current record is reported as before, so a new mistake in the correction is never
 hidden by the historical one. A writing exception is for an intentional token, not
 for an accidental spelling since corrected.
+
+## Following up reviews after several pins (0.9.4)
+
+A generic `review` judges one exact revision of its subject. When a builder pins
+new revisions of documents that reviewers judged that way, each of those reviews
+still pins the earlier revision, and from then on reads `record.subject-stale`: the
+subject has moved on, and the judgment needs reconsidering. This recipe follows up
+every such review after several pins. It is synthetic, adds no record type or
+authority, and runs as a check in the product's tests, word for word.
+
+In the example, `docs/guide.md` and `docs/setup.md` each have a pin by the builder,
+`<guide-pin-id>` and `<setup-pin-id>`, and a current generic review of that pin by a
+separate reviewer, `<guide-review-id>` and `<setup-review-id>`. `docs/guide.md` is
+also declared living, cleared by anyone the declaration admits. The builder revises
+both files and pins each against its current pin:
+
+```sh
+vericairn docs pin docs/guide.md --by <builder-id> --expected <guide-pin-id> --summary "Describe the new setup step."
+vericairn docs pin docs/setup.md --by <builder-id> --expected <setup-pin-id> --summary "Add the new setup step."
+```
+
+With `--json`, each pin prints the new pin's `id` and `hash`: `<new-guide-pin-id>`
+and `<new-guide-pin-hash>`, then `<new-setup-pin-id>` and `<new-setup-pin-hash>`.
+Keep these receipts. Before anything else writes, read what the pins did:
+
+```sh
+vericairn --json records show <new-guide-pin-id>
+vericairn --json records validate
+vericairn docs living
+```
+
+`records show` gives each new pin's `path`, `hash` and `revision`. `records
+validate` reports one `record.subject-stale` warning for each review of an earlier
+revision, located at that review's record and naming the pin that superseded its
+subject: here the warning at `<guide-review-id>` names `<new-guide-pin-id>`, and the
+one at `<setup-review-id>` names `<new-setup-pin-id>`. `docs living` still shows
+`docs/guide.md` current, cleared by `<new-guide-pin-id>`.
+
+These are two different questions. Living-document due status, which `docs living`
+shows and `estate check` reports as `document.due`, asks whether a declared
+document still holds against its triggers; a `docs review`, or a pin by an author
+its `clearedBy` admits, answers it. `record.subject-stale` asks whether a judgment
+of an earlier revision, a generic review or an acceptance, still stands for the
+current one; only that judgment's successor answers it. A clearance never answers a
+stale review, and a generic review never clears a living document.
+
+A qualified reviewer, here an agent other than the builder, so that its reviews
+record `independent-agent`, then reads each exact new revision and records a
+successor review of it, one for each prior review: `--subject` names the new revision by its
+id and hash, and `--supersedes` names the one review it replaces. The body says what
+the reviewer found. Save as `guide-review.json`:
+
+```json guide-review.json
+{"independence": "independent-agent", "outcome": "pass", "summary": "Read revision 2 of docs/guide.md: the new setup step is accurate and complete.", "findings": []}
+```
+
+The setup guide's new step holds, but one example lacks its output, so its review
+says so. Save as `setup-review.json`:
+
+```json setup-review.json
+{"independence": "independent-agent", "outcome": "findings", "summary": "Read revision 2 of docs/setup.md: the new step holds, and one example lacks its output.", "findings": [{"severity": "warning", "summary": "The example after the new step does not show its output."}]}
+```
+
+```sh
+vericairn records new review --by <reviewer-id> --subject document-revision:<new-guide-pin-id>:<new-guide-pin-hash> --supersedes <guide-review-id> --body guide-review.json
+vericairn records new review --by <reviewer-id> --subject document-revision:<new-setup-pin-id>:<new-setup-pin-hash> --supersedes <setup-review-id> --body setup-review.json
+```
+
+With `--json`, each review prints its receipt too, the new review's `id` and `hash`:
+`<new-guide-review-id>` is the first one's `id`. Keep these receipts with the pins'.
+
+The outcome is the reviewer's verdict on the bytes it read, never a pass written to
+clear a warning: a review recorded without reading the revision, or with an outcome
+the reviewer did not reach, hides exactly the judgment the warning asks for. Leave a
+warning standing until a reviewer has read the revision. The earlier reviews stay
+as they are, superseded and kept; nothing deletes them.
+
+`supersedes` names one record, so each stale review needs its own successor. One
+narrative that describes both documents, such as a review of a whole package or of
+a result, can supersede at most one of the earlier reviews and pins neither new
+revision, so it disposes of neither judgment: the other review stays stale, and the
+replaced one loses its exact subject. Then read the outcome again:
+
+```sh
+vericairn --json records show <new-guide-review-id>
+vericairn --json records validate
+```
+
+Check that the new review's `subject` is the exact new revision, its `by` the
+reviewer and its `supersedes` the review it replaces, and, where the estate requires
+signatures, that its `signatures` are those of the reviewer's admitted device. No
+`record.subject-stale` remains for these reviews; any other finding, historical ones
+included, is still reported as before.
+
+### When a run stops part way
+
+A script that pins and reviews in one run can stop after some of its writes
+succeeded, for instance because it expected no warnings after the pins. Don't run
+it again from the start. Keep the receipts it printed, and continue with only what
+remains:
+
+- The pins are recorded. Running a pin again is refused and writes nothing: its
+  `--expected` names a pin that is no longer current, and its bytes are unchanged.
+- A successor review that was written has answered its review. Running it again is
+  refused with `reconcile.successors`, because that review already has a successor.
+- `records validate` lists the reviews that are still stale, each naming the pin
+  that superseded its subject. `records show` on that pin gives its hash, so the
+  remaining successor reviews can be written even when a receipt was lost.
+
+If the run above stopped after the first successor review, `records validate`
+reports only the warning at `<setup-review-id>`, and the second successor review is
+the one command left. Never delete an earlier review, and never add a living
+clearance, such as a `docs review`, to quiet a stale generic review: neither
+answers it.
 
 ## Template sections (0.8.4)
 
