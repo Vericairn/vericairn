@@ -223,6 +223,8 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   itself superseded, its `record.subject-stale` and `acceptance.unresolved` findings stop; a replacement that still pins
   an earlier subject revision remains flagged. Historical records still undergo structural, hash, signature and
   authority validation, so supersession never repairs an invalid pinned hash. This applies to both record formats.
+  From 0.9.4, [the living documents guide](living-documents.md#following-up-reviews-after-several-pins-094) shows how
+  each stale review of a document revision is followed up after several pins.
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
 - Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
