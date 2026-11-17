@@ -49,6 +49,29 @@ public class SourceProgramIsolationTests
         }
     }
 
+    [Fact]
+    public void AWorkingTreeGitCannotReadIsRefusedAndNothingIsAdopted()
+    {
+        string root = CliHarness.TempDirectory("unreadable");
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Isolation.",
+                "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            File.WriteAllBytes(Path.Combine(probe.Repository, ".git", "index"), "DIRC"u8.ToArray());
+
+            Assert.NotEqual(0, CliHarness.Run("--json", "sources", "inspect", probe.Repository).Code);
+            CliHarness.Outcome adopt = CliHarness.Run("--estate", root, "--json", "sources", "adopt", probe.Repository, "--by", op, "--name", "Probe repository", "--role", "source of the probe");
+            Assert.NotEqual(0, adopt.Code);
+            Assert.Contains("could not read the working tree", adopt.Out + adopt.Err, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(root, "records", "resource")) && Directory.EnumerateFiles(Path.Combine(root, "records", "resource"), "*.json", SearchOption.AllDirectories).Any());
+        }
+        finally
+        {
+            CliHarness.Delete(root);
+        }
+    }
+
     // The observation without the time it was taken.
     private static JsonObject Observation(string json)
     {

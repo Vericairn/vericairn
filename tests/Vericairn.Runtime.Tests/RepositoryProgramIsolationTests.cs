@@ -49,29 +49,96 @@ public sealed class RepositoryProgramIsolationTests
     }
 
     [Fact]
-    public void EveryFilterDriverTheConfigurationNamesIsEmptied()
+    public void TheWorkingTreeIsReadThroughAGitDirectoryVericairnWrites()
     {
-        using GitHardening hardening = GitHardening.Create();
-        Assert.True(hardening.NeutralizeFilters("filter.lfs.clean\0filter.lfs.required\0filter.a b.C.process\0filter..smudge\0filter.clean\0"));
-        var info = new ProcessStartInfo("git");
-        hardening.Apply(info, ["status"]);
-        string[] filters = [.. info.ArgumentList.Where(a => a.StartsWith("filter.", StringComparison.Ordinal))];
-        foreach (string driver in new[] { "lfs", "a b.C", "" })
-            Assert.Equal(["filter." + driver + ".clean=", "filter." + driver + ".smudge=", "filter." + driver + ".process=", "filter." + driver + ".required=false"],
-                filters.Where(f => f.StartsWith("filter." + driver + ".", StringComparison.Ordinal)));
-        Assert.Equal(12, filters.Length);
-        Assert.Equal("status", info.ArgumentList[^1]);
-        Assert.Contains("core.fsmonitor=false", info.ArgumentList);
-        Assert.Contains("core.hooksPath=" + Path.Combine(hardening.Control, "hooks"), info.ArgumentList);
-        Assert.Equal(Path.Combine(hardening.Control, "config"), info.Environment["GIT_CONFIG_GLOBAL"]);
-        Assert.Equal("1", info.Environment["GIT_CONFIG_NOSYSTEM"]);
-        Assert.Equal("0", info.Environment["GIT_CONFIG_COUNT"]);
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
+        probe.Git("config", "core.filemode", "false");
+        probe.Git("config", "core.eol", "crlf x");
+        // The repository's own exclude file still applies, from the copy in the git directory Vericairn writes.
+        File.WriteAllText(Path.Combine(probe.Repository, ".git", "info", "exclude"), "ignored.txt\n");
+        File.WriteAllText(Path.Combine(probe.Repository, "ignored.txt"), "ignored\n");
+        string[]? arguments = null;
+        string? view = null, configuration = null, index = null;
+        var adapter = new GitCommandAdapter(info =>
+        {
+            if (info.ArgumentList.Contains("status"))
+            {
+                arguments = [.. info.ArgumentList];
+                view = arguments.Single(a => a.StartsWith("--git-dir=", StringComparison.Ordinal))["--git-dir=".Length..];
+                configuration = File.ReadAllText(Path.Combine(view, "config"));
+                index = info.Environment["GIT_INDEX_FILE"];
+            }
 
-        // A driver no option can name, or more drivers than an observation carries, are refused rather than partly emptied.
-        using GitHardening unnamed = GitHardening.Create();
-        Assert.False(unnamed.NeutralizeFilters("filter.a=b.clean\0"));
-        using GitHardening crowded = GitHardening.Create();
-        Assert.False(crowded.NeutralizeFilters(string.Concat(Enumerable.Range(0, 33).Select(i => $"filter.d{i}.clean\0"))));
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+        RepositoryObservation observation = adapter.Inspect(probe.Repository);
+
+        Assert.Equal((1, 1), (observation.Modified, observation.Untracked));
+        Assert.NotNull(arguments);
+        Assert.StartsWith(Path.Combine(Path.GetTempPath(), "vericairn-git-"), view, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(view), "The working-tree read's git directory outlived the observation.");
+        // The status process reads Vericairn's configuration, the repository's own index and only plain comparison settings.
+        Assert.Equal("[core]\n\trepositoryformatversion = 0\n\tbare = false\n", configuration);
+        Assert.EndsWith(Path.Combine("repository", ".git", "index"), index, StringComparison.Ordinal);
+        Assert.Contains("core.filemode=false", arguments);
+        Assert.DoesNotContain(arguments, a => a.StartsWith("core.eol", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AConfigurationChangedDuringObservationIsNotReadByTheWorkingTreeRead()
+    {
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Filter);
+        RepositoryObservation before = new GitCommandAdapter().Inspect(probe.Repository);
+        ReleaseSourceObservation? releaseBefore = new GitCommandAdapter().InspectRelease(probe.Repository);
+        string configuration = Path.Combine(probe.Repository, ".git", "config");
+        int changes = 0;
+        // Just before each status process starts, after every earlier process of the observation has read the configuration, the
+        // repository gains a filter driver for the file its attributes route through it.
+        var adapter = new GitCommandAdapter(info =>
+        {
+            if (info.ArgumentList.Contains("status"))
+            {
+                changes++;
+                File.AppendAllText(configuration, "[filter \"probe\"]\n\tclean = \"" + probe.Command + "\"\n\trequired = true\n");
+                File.SetLastWriteTimeUtc(Path.Combine(probe.Repository, "widget.dat"), new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            }
+
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+        RepositoryObservation after = adapter.Inspect(probe.Repository);
+        ReleaseSourceObservation? releaseAfter = adapter.InspectRelease(probe.Repository);
+
+        Assert.False(probe.Ran, "The working-tree read ran a filter driver configured after the earlier reads.");
+        Assert.Equal(2, changes);
+        Assert.Equal((before.Clean, before.Modified, before.Untracked), (after.Clean, after.Modified, after.Untracked));
+        Assert.Equal(releaseBefore, releaseAfter);
+        Assert.True(probe.Control() == true, "Plain git did not run the late filter driver; the probe proves nothing.");
+    }
+
+    [Fact]
+    public void AWorkingTreeGitCannotReadIsRefusedNotObservedAsClean()
+    {
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
+        // An index git cannot read: status fails, and an observation must not count that as no changes.
+        File.WriteAllBytes(Path.Combine(probe.Repository, ".git", "index"), "DIRC"u8.ToArray());
+        var adapter = new GitCommandAdapter();
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(probe.Repository));
+        Assert.Contains("could not read the working tree", refused.Message, StringComparison.Ordinal);
+        Assert.Null(adapter.InspectRelease(probe.Repository));
+    }
+
+    [Fact]
+    public void ARepositoryAnotherAccountOwnsIsRefusedWithThatCause()
+    {
+        using var probe = new RepositoryProgramProbe(RepositoryProgramProbe.Fsmonitor);
+        var adapter = new GitCommandAdapter(info =>
+        {
+            info.Environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1";
+            return BoundedProcess.Run(info, TestTiming.HangTimeout);
+        });
+        ProviderRefusedException refused = Assert.Throws<ProviderRefusedException>(() => adapter.Inspect(probe.Repository));
+        Assert.Contains("owned by another account", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(probe.Root, refused.Message, StringComparison.Ordinal);
     }
 
     [Fact]

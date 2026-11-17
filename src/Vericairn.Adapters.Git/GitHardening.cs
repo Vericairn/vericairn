@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
@@ -12,8 +13,9 @@ namespace Vericairn.Adapters.Git;
 /// The configuration isolation of every git process the adapter starts on a repository Vericairn did not create, shared with the
 /// worker's own git calls. The system and global configuration are ignored; a fresh directory Vericairn owns supplies the empty
 /// global configuration and the hooks directory; and the settings below override any entry of the repository's own configuration
-/// that names a program, a pager, a hooks directory or a transport. An instance serves the git processes of one operation on one
-/// repository and removes its directory when disposed.
+/// that names a program, a pager, a hooks directory or a transport. A process that reads the working tree goes further and reads it
+/// through a git directory Vericairn writes (<see cref="WorkingTree"/>), so it never opens the repository's configuration at all. An
+/// instance serves the git processes of one operation on one repository and removes its directory when disposed.
 /// </summary>
 internal sealed class GitHardening : IDisposable
 {
@@ -29,16 +31,25 @@ internal sealed class GitHardening : IDisposable
     ];
 
     /// <summary>
-    /// Lists the filter drivers the repository's own configuration defines; git answers 1 when it defines none. Run it with this
-    /// instance before a command that reads working-tree files through the index, and pass the output to
-    /// <see cref="NeutralizeFilters"/>.
+    /// Lists the working tree's top level, the repository's own git directory and its common directory, one per line: the input of
+    /// <see cref="WorkingTree"/>.
     /// </summary>
-    internal static readonly ImmutableArray<string> FilterScan = ["config", "--name-only", "-z", "--get-regexp", @"^filter\."];
+    internal static readonly ImmutableArray<string> LayoutScan = ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"];
 
-    // A repository needs very few filter drivers; a configuration naming more, longer names or a name that no -c option can state
-    // (one holding '=') is refused rather than partly carried.
-    private const int MaximumFilters = 32;
-    private const int MaximumFilterName = 200;
+    /// <summary>
+    /// Lists the settings of the repository's own configuration that a working-tree read carries: how files and names compare, none
+    /// naming a program. Git answers 1 when the repository sets none.
+    /// </summary>
+    internal static readonly ImmutableArray<string> CarriedScan =
+        ["config", "-z", "--get-regexp", @"^core\.(ignorecase|precomposeunicode|filemode|symlinks|autocrlf|eol|checkstat|trustctime)$"];
+
+    private static readonly FrozenSet<string> CarriedNames = new[]
+    {
+        "core.ignorecase", "core.precomposeunicode", "core.filemode", "core.symlinks", "core.autocrlf", "core.eol", "core.checkstat", "core.trustctime",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    // The repository's exclude and attribute files are data copied into the working-tree read's git directory, within this bound.
+    private const int MaximumInformationFile = 1024 * 1024;
 
     // Ambient variables that could route a process to another repository, object store, index or configuration.
     private static readonly string[] Routing =
@@ -47,8 +58,6 @@ internal sealed class GitHardening : IDisposable
         "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS",
         "GIT_CONFIG_COUNT", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS",
     ];
-
-    private readonly List<string> filters = [];
 
     private GitHardening(string control) => Control = control;
 
@@ -78,35 +87,51 @@ internal sealed class GitHardening : IDisposable
     }
 
     /// <summary>
-    /// Empties every filter driver named in <paramref name="names"/> (the output of <see cref="FilterScan"/>) for the later processes
-    /// of this instance, so reading the working tree runs no clean or long-running filter. False when the configuration names more
-    /// drivers, longer names, or a name holding '=', than can be carried; the caller then starts no command that reads working-tree
-    /// files.
+    /// Writes a git directory inside this instance's directory for reading the repository's working tree: <paramref name="head"/> as
+    /// a detached HEAD (an unborn branch when null), the repository's objects through an alternate, copies of its exclude and
+    /// attribute files, and a configuration holding only the object format. The process that reads the working tree through it
+    /// never opens the repository's own configuration, so no setting read by an earlier process, or changed since, decides what it
+    /// runs; it reads the repository's index where it is and carries only the plain values <paramref name="carried"/> (the output of
+    /// <see cref="CarriedScan"/>) names. Null when the layout (the output of <see cref="LayoutScan"/> run in
+    /// <paramref name="start"/>) or an exclude or attribute file cannot be read safely.
     /// </summary>
-    internal bool NeutralizeFilters(string names)
+    internal GitWorkingTree? WorkingTree(string start, string layout, string? head, string carried)
     {
-        ArgumentNullException.ThrowIfNull(names);
-        const string section = "filter.";
-        var drivers = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (string name in names.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(carried);
+        string[] lines = [.. layout.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Length > 0)];
+        if (lines.Length != 3 || !Path.IsPathFullyQualified(lines[0]) || !Path.IsPathFullyQualified(lines[1])
+            || head is not null && !(head.Length is 40 or 64 && head.All(c => char.IsAsciiDigit(c) || c is >= 'a' and <= 'f'))) return null;
+        try
         {
-            // filter.<driver>.<key>: the driver's name may hold dots, or be empty; a two-level filter.<key> names no driver.
-            int key = name.LastIndexOf('.');
-            if (!name.StartsWith(section, StringComparison.Ordinal) || key < section.Length) continue;
-            drivers.Add(name[section.Length..key]);
-        }
+            string common = Path.GetFullPath(Path.Combine(start, lines[2]));
+            string view = Path.Combine(Control, "view");
+            Directory.CreateDirectory(Path.Combine(view, "objects", "info"));
+            Directory.CreateDirectory(Path.Combine(view, "refs"));
+            Directory.CreateDirectory(Path.Combine(view, "info"));
+            foreach (string name in new[] { "exclude", "attributes" })
+            {
+                if (!CopyInformation(Path.Combine(common, "info", name), Path.Combine(view, "info", name))) return null;
+            }
 
-        if (drivers.Count > MaximumFilters || drivers.Any(d => d.Length > MaximumFilterName || d.Contains('=', StringComparison.Ordinal))) return false;
-        foreach (string driver in drivers.Where(d => !filters.Contains(section + d + ".required=false")))
+            File.WriteAllText(Path.Combine(view, "HEAD"), head is null ? "ref: refs/heads/unborn\n" : head + "\n");
+            File.WriteAllText(Path.Combine(view, "objects", "info", "alternates"), Path.Combine(common, "objects").Replace('\\', '/') + "\n");
+            File.WriteAllText(Path.Combine(view, "config"), head?.Length == 64
+                ? "[core]\n\trepositoryformatversion = 1\n\tbare = false\n[extensions]\n\tobjectformat = sha256\n"
+                : "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
+            List<string> options = ["--git-dir=" + view, "--work-tree=" + Path.GetFullPath(lines[0])];
+            foreach (string setting in Carried(carried))
+            {
+                options.Add("-c");
+                options.Add(setting);
+            }
+
+            return new(Path.GetFullPath(lines[0]), Path.Combine(Path.GetFullPath(lines[1]), "index"), options);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            // An empty command is no command, and a driver that is not required may be absent.
-            filters.Add(section + driver + ".clean=");
-            filters.Add(section + driver + ".smudge=");
-            filters.Add(section + driver + ".process=");
-            filters.Add(section + driver + ".required=false");
+            return null;
         }
-
-        return true;
     }
 
     /// <summary>Adds the hardened options, then <paramref name="arguments"/>, and sets the hardened environment.</summary>
@@ -123,6 +148,16 @@ internal sealed class GitHardening : IDisposable
 
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
         SetEnvironment(info, []);
+    }
+
+    /// <summary>Adds the hardened options and <paramref name="arguments"/> for a process that reads <paramref name="tree"/>'s working tree.</summary>
+    internal void Apply(ProcessStartInfo info, GitWorkingTree tree, IEnumerable<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        ArgumentNullException.ThrowIfNull(tree);
+        info.WorkingDirectory = tree.TopLevel;
+        Apply(info, [.. tree.Options, .. arguments]);
+        info.Environment["GIT_INDEX_FILE"] = tree.Index;
     }
 
     /// <summary>
@@ -144,12 +179,36 @@ internal sealed class GitHardening : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            // Best effort: the directory holds only an empty configuration file; its hooks path never existed.
+            // Best effort: the directory holds only files Vericairn wrote; its hooks path never existed.
         }
     }
 
-    // The hooks directory, the shared settings and any emptied filter drivers, each as key=value.
-    private IEnumerable<string> Configuration() => [.. Settings.Prepend("core.hooksPath=" + Hooks), .. filters];
+    // The hooks directory and the shared settings, each as key=value.
+    private IEnumerable<string> Configuration() => Settings.Prepend("core.hooksPath=" + Hooks);
+
+    // An exclude or attribute file is data: copied only when it is a regular file within the bound. An absent or empty file is no
+    // file; a pipe or device also reports no length and is never opened.
+    private static bool CopyInformation(string source, string destination)
+    {
+        var file = new FileInfo(source);
+        if (!file.Exists) return true;
+        if (file.LinkTarget is not null || (file.Attributes & FileAttributes.ReparsePoint) != 0 || file.Length > MaximumInformationFile) return false;
+        if (file.Length > 0) File.WriteAllBytes(destination, File.ReadAllBytes(source));
+        return true;
+    }
+
+    // The carried settings whose value is a plain word; a name without a value is git's true.
+    private static IEnumerable<string> Carried(string entries)
+    {
+        foreach (string entry in entries.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int split = entry.IndexOf('\n', StringComparison.Ordinal);
+            string name = split < 0 ? entry : entry[..split];
+            string value = split < 0 ? "true" : entry[(split + 1)..];
+            if (CarriedNames.Contains(name) && value.Length is > 0 and <= 16 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+                yield return name + "=" + value;
+        }
+    }
 
     private void SetEnvironment(ProcessStartInfo info, List<string> configuration)
     {
@@ -175,3 +234,6 @@ internal sealed class GitHardening : IDisposable
     private static bool Indexed(string name) =>
         name.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase);
 }
+
+/// <summary>A working tree read through a git directory Vericairn writes (<see cref="GitHardening.WorkingTree"/>).</summary>
+internal sealed record GitWorkingTree(string TopLevel, string Index, IReadOnlyList<string> Options);

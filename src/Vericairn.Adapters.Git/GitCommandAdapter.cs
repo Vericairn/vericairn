@@ -62,9 +62,13 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
 
         // The repository is not one Vericairn created: every process runs hardened, so its own configuration starts no program.
         using GitHardening hardening = Harden();
-        if (Git(hardening, path, out string inside, "rev-parse", "--is-inside-work-tree") != 0 || inside.Trim() != "true")
+        string name = Path.GetFileName(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar));
+        if (Git(hardening, path, null, out string inside, out string refusal, "rev-parse", "--is-inside-work-tree") != 0 || inside.Trim() != "true")
         {
-            throw new ProviderRefusedException($"{Path.GetFileName(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar))} is not inside a git working tree.");
+            // Git's ownership check refuses a repository another account owns; the user's own safe.directory list is not read here.
+            throw new ProviderRefusedException(refusal.Contains("dubious ownership", StringComparison.Ordinal) || refusal.Contains("owned by someone else", StringComparison.Ordinal)
+                ? $"{name} is owned by another account, and git refuses to read it; inspect it as its owner or from a clone you own."
+                : $"{name} is not inside a git working tree.");
         }
 
         if (Git(hardening, path, out string head, "rev-parse", "--verify", "HEAD") != 0)
@@ -77,15 +81,8 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         string? remote = Git(hardening, path, out string remoteText, "remote", "get-url", "origin") == 0 ? remoteText.Trim() : null;
         Git(hardening, path, out string roots, "rev-list", "--max-parents=0", "HEAD");
         string rootCommit = roots.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim()).Order(StringComparer.Ordinal).FirstOrDefault() ?? commit;
-        // Reading the working tree can run the repository's filter drivers, so each is emptied first. A submodule's state is read
-        // from its checked-out commit alone: git starts no process inside it, which would load the submodule's own configuration.
-        int filters = Git(hardening, path, out string drivers, [.. GitHardening.FilterScan]);
-        if (filters is not (0 or 1) || !hardening.NeutralizeFilters(drivers))
-        {
-            throw new ProviderRefusedException("The repository's filter configuration could not be read, or names more drivers than an observation carries; repository observation is incomplete.");
-        }
-
-        Git(hardening, path, out string status, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty");
+        string status = Status(hardening, path, commit)
+            ?? throw new ProviderRefusedException("git could not read the working tree completely; repository observation is incomplete.");
         int modified = 0;
         int untracked = 0;
         foreach (string line in status.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -128,10 +125,27 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         }
     }
 
-    private int Git(GitHardening hardening, string path, out string output, params string[] arguments)
+    /// <summary>
+    /// The porcelain status of the working tree at <paramref name="path"/>, or null when git cannot read it completely. The status
+    /// process reads the working tree through a git directory Vericairn writes (<see cref="GitHardening.WorkingTree"/>), never the
+    /// repository's own configuration, so no filter driver, fsmonitor hook or other program it names can run, whatever an earlier
+    /// process read. A submodule's state is read from its checked-out commit alone: git starts no process inside it.
+    /// </summary>
+    private string? Status(GitHardening hardening, string path, string? head)
+    {
+        if (Git(hardening, path, out string layout, [.. GitHardening.LayoutScan]) != 0) return null;
+        int carried = Git(hardening, path, out string settings, [.. GitHardening.CarriedScan]);
+        if (carried is not (0 or 1) || hardening.WorkingTree(path, layout, head, carried == 0 ? settings : string.Empty) is not { } tree) return null;
+        return Git(hardening, path, tree, out string status, out _, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=dirty") == 0 ? status : null;
+    }
+
+    private int Git(GitHardening hardening, string path, out string output, params string[] arguments) => Git(hardening, path, null, out output, out _, arguments);
+
+    private int Git(GitHardening hardening, string path, GitWorkingTree? tree, out string output, out string error, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = path };
-        hardening.Apply(info, ["-c", "core.quotepath=off", .. arguments]);
+        if (tree is null) hardening.Apply(info, ["-c", "core.quotepath=off", .. arguments]);
+        else hardening.Apply(info, tree, ["-c", "core.quotepath=off", .. arguments]);
         ProcessResult result = run(info);
         if (result.Outcome != ProcessOutcome.Exited)
         {
@@ -141,6 +155,7 @@ public sealed partial class GitCommandAdapter : ISourceAdapter
         }
 
         output = result.StandardOutput;
+        error = result.StandardError;
         return result.ExitCode!.Value;
     }
 }

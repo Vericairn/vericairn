@@ -61,10 +61,13 @@ internal sealed class RepositoryProgramProbe : IDisposable
     /// <summary>True when a configured program ran.</summary>
     internal bool Ran => File.Exists(Marker);
 
+    /// <summary>The shell command every configured program runs: it writes the marker.</summary>
+    internal string Command => "printf ran > '" + Marker.Replace('\\', '/').Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
     /// <summary>Configures the program, then makes tracked files look changed so that git reads them again.</summary>
     internal void Arm()
     {
-        string command = "printf ran > '" + Marker.Replace('\\', '/').Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+        string command = Command;
         switch (Kind)
         {
             case Fsmonitor:
@@ -138,7 +141,8 @@ internal sealed class RepositoryProgramProbe : IDisposable
 
     private void Write(string name, string content) => File.WriteAllText(Path.Combine(Repository, name), content);
 
-    private string Git(params string[] arguments)
+    /// <summary>Runs the fixture's git in the repository; it must succeed.</summary>
+    internal string Git(params string[] arguments)
     {
         Assert.True(Run(arguments, out string output, out string error) == 0, "git " + string.Join(' ', arguments) + " failed: " + error);
         return output.Trim();
